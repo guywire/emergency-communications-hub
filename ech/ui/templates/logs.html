@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPgogIDxyZWN0IHg9IjE1IiB5PSI4IiB3aWR0aD0iMiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzNmYjk1MCIvPgogIDxyZWN0IHg9IjEwIiB5PSIxMiIgd2lkdGg9IjEyIiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cG9seWdvbiBwb2ludHM9IjE2LDYgMTIsMTIgMjAsMTIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cmVjdCB4PSIxMyIgeT0iMjQiIHdpZHRoPSI2IiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iMTAiIHI9IjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM4OGJmZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8Y2lyY2xlIGN4PSIyNCIgY3k9IjEwIiByPSIyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzODhiZmQiIHN0cm9rZS13aWR0aD0iMS41Ii8+Cjwvc3ZnPg==">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECH — Logs</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--dim:#484f58;--green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;--mono:'IBM Plex Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px}
+#header{display:flex;align-items:center;gap:12px;padding:0 16px;height:44px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.logo{font-size:13px;color:var(--green);letter-spacing:.08em}
+.back{font-size:11px;color:var(--blue);text-decoration:none}.back:hover{text-decoration:underline}
+.spacer{flex:1}
+#toolbar{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--bg2)}
+.filter-btn{font-size:10px;padding:3px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer}.filter-btn.on{border-color:var(--blue);color:var(--blue)}
+#search{background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:3px;outline:none;width:220px}.#search:focus{border-color:var(--blue)}
+#log-container{height:calc(100vh - 88px);overflow-y:auto;padding:8px 0;font-size:11px;line-height:1.6}
+#log-container::-webkit-scrollbar{width:4px}
+#log-container::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.log-line{padding:1px 14px;border-left:2px solid transparent;white-space:pre-wrap;word-break:break-all}
+.log-line:hover{background:var(--bg2)}
+.log-line.DEBUG{color:var(--dim);border-left-color:var(--dim)}
+.log-line.INFO{color:var(--muted)}
+.log-line.WARNING{color:var(--yellow);border-left-color:var(--yellow)}
+.log-line.ERROR{color:var(--red);border-left-color:var(--red)}
+.log-line.CRITICAL{color:var(--red);background:rgba(248,81,73,.08);border-left-color:var(--red)}
+.log-ts{color:var(--dim);margin-right:8px}
+.log-level{margin-right:8px;min-width:7ch;display:inline-block}
+.log-logger{color:var(--blue);margin-right:8px}
+</style>
+</head>
+<body>
+<div id="header">
+  <a class="back" href="/">← ECH</a>
+  <div class="logo">▣ ECH / Logs</div>
+  <div class="spacer"></div>
+  <button onclick="clearDisplay()" style="font-size:10px;padding:3px 8px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer">Clear display</button>
+  <button onclick="downloadLogs()" style="font-size:10px;padding:3px 8px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer">↓ Download</button>
+</div>
+<div id="toolbar">
+  <span style="color:var(--dim);font-size:10px">Level:</span>
+  <button class="filter-btn on" data-level="" onclick="setLevel('',this)">ALL</button>
+  <button class="filter-btn" data-level="DEBUG" onclick="setLevel('DEBUG',this)">DEBUG</button>
+  <button class="filter-btn" data-level="INFO" onclick="setLevel('INFO',this)">INFO</button>
+  <button class="filter-btn" data-level="WARNING" onclick="setLevel('WARNING',this)">WARN</button>
+  <button class="filter-btn" data-level="ERROR" onclick="setLevel('ERROR',this)">ERROR</button>
+  <div class="spacer"></div>
+  <input type="text" id="search" placeholder="Filter…" oninput="applyFilter()">
+  <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;cursor:pointer">
+    <input type="checkbox" id="autoscroll" checked> Auto-scroll
+  </label>
+</div>
+<div id="log-container"></div>
+
+<script>
+let allLogs = [];
+let currentLevel = '';
+let searchText = '';
+
+async function loadLogs() {
+  const url = currentLevel ? `/api/logs?limit=1000&level=${currentLevel}` : '/api/logs?limit=1000';
+  const data = await fetch(url).then(r=>r.json());
+  allLogs = (data.logs || []).reverse();   // DB returns newest first, we want oldest first
+  renderLogs();
+}
+
+function renderLogs() {
+  const container = document.getElementById('log-container');
+  const filtered = allLogs.filter(l => {
+    if (searchText && !(l.logger+' '+l.message).toLowerCase().includes(searchText)) return false;
+    return true;
+  });
+  container.innerHTML = filtered.map(l => {
+    const ts = l.timestamp ? l.timestamp.slice(11,23) : '';
+    return `<div class="log-line ${l.level}"><span class="log-ts">${ts}</span><span class="log-level">${l.level}</span><span class="log-logger">${esc(l.logger)}</span>${esc(l.message)}</div>`;
+  }).join('');
+  if (document.getElementById('autoscroll').checked) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+function setLevel(level, btn) {
+  currentLevel = level;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  loadLogs();
+}
+
+function applyFilter() {
+  searchText = document.getElementById('search').value.toLowerCase();
+  renderLogs();
+}
+
+function clearDisplay() {
+  allLogs = [];
+  document.getElementById('log-container').innerHTML = '';
+}
+
+function downloadLogs() {
+  const text = allLogs.map(l => `${l.timestamp} ${l.level} ${l.logger} ${l.message}`).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(text);
+  a.download = `ech-logs-${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// WebSocket for live log streaming
+function connectWS() {
+  const proto = location.protocol==='https:'?'wss:':'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onmessage = e => {
+    const pkt = JSON.parse(e.data);
+    if (pkt.type === 'log') {
+      const l = pkt.data;
+      if (currentLevel && l.level !== currentLevel) return;
+      if (searchText && !(l.logger+' '+l.message).toLowerCase().includes(searchText)) return;
+      allLogs.push(l);
+      const container = document.getElementById('log-container');
+      const div = document.createElement('div');
+      div.className = `log-line ${l.level}`;
+      const ts = l.timestamp ? l.timestamp.slice(11,23) : '';
+      div.innerHTML = `<span class="log-ts">${ts}</span><span class="log-level">${l.level}</span><span class="log-logger">${esc(l.logger)}</span>${esc(l.message)}`;
+      container.appendChild(div);
+      if (document.getElementById('autoscroll').checked) container.scrollTop = container.scrollHeight;
+    }
+  };
+  ws.onclose = () => setTimeout(connectWS, 3000);
+}
+
+loadLogs();
+setInterval(loadLogs, 30000);
+connectWS();
+</script>
+</body>
+</html>

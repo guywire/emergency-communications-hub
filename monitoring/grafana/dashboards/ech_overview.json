@@ -1,0 +1,54 @@
+{
+  "title": "ECH Overview",
+  "uid": "ech-overview",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "15s",
+  "time": {"from": "now-3h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Total Messages (24h)", "gridPos": {"x":0,"y":0,"w":4,"h":4},
+      "targets": [{"expr": "sum(increase(ech_messages_received_total[24h]))", "datasource": "Prometheus"}],
+      "options": {"colorMode": "value", "graphMode": "area"}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Active Adapters", "gridPos": {"x":4,"y":0,"w":4,"h":4},
+      "targets": [{"expr": "sum(ech_adapter_connected)", "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color":"red","value":0},{"color":"yellow","value":1},{"color":"green","value":3}]}}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Active Anomalies", "gridPos": {"x":8,"y":0,"w":4,"h":4},
+      "targets": [{"expr": "sum(ech_anomaly_active)", "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color":"green","value":0},{"color":"yellow","value":1},{"color":"red","value":5}]}}}
+    },
+    {
+      "id": 4, "type": "stat", "title": "NWS Active Alerts", "gridPos": {"x":12,"y":0,"w":4,"h":4},
+      "targets": [{"expr": "sum(ech_wx_alerts_active)", "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color":"green","value":0},{"color":"yellow","value":1},{"color":"red","value":3}]}}}
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Message Rate by Adapter", "gridPos": {"x":0,"y":4,"w":24,"h":8},
+      "targets": [{"expr": "rate(ech_messages_received_total[5m])", "legendFormat": "{{adapter}}", "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Adapter Connection State", "gridPos": {"x":0,"y":12,"w":12,"h":6},
+      "targets": [{"expr": "ech_adapter_connected", "legendFormat": "{{adapter}}", "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"min":0,"max":1}}
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Anomaly Findings Rate", "gridPos": {"x":12,"y":12,"w":12,"h":6},
+      "targets": [{"expr": "rate(ech_anomaly_findings_total[5m])", "legendFormat": "{{rule}} ({{severity}})", "datasource": "Prometheus"}]
+    },
+    {
+      "id": 8, "type": "stat", "title": "Uptime", "gridPos": {"x":16,"y":0,"w":4,"h":4},
+      "targets": [{"expr": "ech_uptime_seconds", "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 9, "type": "stat", "title": "DB Size", "gridPos": {"x":20,"y":0,"w":4,"h":4},
+      "targets": [{"expr": "ech_db_size_bytes", "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    }
+  ]
+}

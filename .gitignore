@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+*.egg
+
+# ECH runtime data — never commit
+ech.db
+*.db
+/var/
+
+# Config with real credentials — operators must create from template
+# /etc/ech/config.yaml is NOT tracked; copy config.yaml and edit locally
+# Do NOT commit files containing real callsigns, passcodes, or passwords
+
+# Logs
+*.log
+/var/log/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Test caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tarballs
+*.tar.gz
+*.zip

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPgogIDxyZWN0IHg9IjE1IiB5PSI4IiB3aWR0aD0iMiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzNmYjk1MCIvPgogIDxyZWN0IHg9IjEwIiB5PSIxMiIgd2lkdGg9IjEyIiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cG9seWdvbiBwb2ludHM9IjE2LDYgMTIsMTIgMjAsMTIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cmVjdCB4PSIxMyIgeT0iMjQiIHdpZHRoPSI2IiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iMTAiIHI9IjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM4OGJmZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8Y2lyY2xlIGN4PSIyNCIgY3k9IjEwIiByPSIyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzODhiZmQiIHN0cm9rZS13aWR0aD0iMS41Ii8+Cjwvc3ZnPg==">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECH — Node Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--green:#3fb950;--blue:#388bfd;--yellow:#d29922;--red:#f85149;--mono:'IBM Plex Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--mono)}
+#header{display:flex;align-items:center;gap:16px;padding:0 16px;height:44px;background:var(--bg2);border-bottom:1px solid var(--border);z-index:1000;position:relative}
+.logo{font-size:13px;color:var(--green);letter-spacing:.08em}
+.back{font-size:11px;color:var(--blue);text-decoration:none}.back:hover{text-decoration:underline}
+.spacer{flex:1}
+#controls{display:flex;gap:8px;align-items:center}
+.ctrl-btn{font-size:10px;padding:3px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer}.ctrl-btn:hover{border-color:var(--blue);color:var(--blue)}
+#map{height:calc(100vh - 44px);width:100%}
+/* Override Leaflet for dark theme */
+.leaflet-tile{filter:brightness(0.7) invert(1) hue-rotate(180deg) saturate(0.5)}
+.node-popup{font-family:var(--mono);font-size:11px;color:#111;min-width:160px}
+.node-popup .node-name{font-weight:500;font-size:12px;margin-bottom:4px}
+.node-popup .node-stat{color:#444;line-height:1.8}
+#legend{position:absolute;bottom:30px;right:10px;z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:10px;min-width:140px}
+.legend-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+#node-count{font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="header">
+  <a class="back" href="/">← ECH</a>
+  <div class="logo">▣ ECH / Node Map</div>
+  <span id="node-count">Loading…</span>
+  <div class="spacer"></div>
+  <div id="controls">
+    <button class="ctrl-btn" onclick="loadNodes()">↻ Refresh</button>
+    <button class="ctrl-btn" id="follow-btn" onclick="toggleFollow()">📍 Follow</button>
+    <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show PSKReporter callsign spots">PSK</button>
+    <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">GRID</button>
+  </div>
+</div>
+<div id="map"></div>
+<div id="legend">
+  <div style="font-weight:500;margin-bottom:6px;font-size:11px">Node Types</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>Meshtastic</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f78c6c"></div>MeshCore</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#79c0ff"></div>APRS</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#c792ea"></div>Reticulum</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#e2a44f"></div>MQTT</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Alert / WL</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', {zoomControl:true}).setView([44.1, -69.1], 10);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors',
+  maxZoom: 18,
+}).addTo(map);
+
+const markers = {};
+let followMode = false;
+
+function adapterColor(adapter) {
+  const a = adapter.toLowerCase();
+  if (a.includes('meshtastic')) return '#3fb950';   // green
+  if (a.includes('meshcore'))   return '#f78c6c';   // orange - distinct from meshtastic
+  if (a.includes('aprs'))       return '#79c0ff';   // light blue
+  if (a.includes('reticulum') || a.includes('rns')) return '#c792ea';  // purple
+  if (a.includes('mqtt'))       return '#e2a44f';   // amber
+  if (a.includes('winlink') || a.includes('pat'))   return '#f85149';  // red
+  if (a.includes('js8') || a.includes('hf'))        return '#ffcb6b';  // yellow
+  return '#8b949e';
+}
+
+function makeIcon(color, size=12) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:${size}px;height:${size}px;background:${color};border:2px solid rgba(255,255,255,.4);border-radius:50%;box-shadow:0 0 6px ${color}80"></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size/2, size/2],
+  });
+}
+
+async function loadNodes() {
+  try {
+    const r = await fetch('/api/channels');
+    const data = await r.json();
+    const allNodes = [];
+
+    for (const ch of data.channels) {
+      if (ch.state !== 'connected') continue;
+      try {
+        const nr = await fetch(`/api/nodes/${ch.adapter}`);
+        const nd = await nr.json();
+        nd.nodes.forEach(n => allNodes.push({...n, _adapter: ch.adapter}));
+      } catch(e) {}
+    }
+
+    // Also load anomaly positions
+    const anoms = await fetch('/api/anomalies?acknowledged=false').then(r=>r.json()).catch(()=>({findings:[]}));
+    const alertNodes = new Set(anoms.findings.filter(f=>f.severity==='alert').map(f=>f.node_id));
+
+    // Update/add markers
+    const seen = new Set();
+    allNodes.forEach(node => {
+      if (node.lat == null || node.lon == null) return;
+      if (node.lat === 0 && node.lon === 0) return;   // skip 0,0 (null sentinel)
+      const id = node.node_id;
+      seen.add(id);
+      const color = alertNodes.has(id) ? '#f85149' : adapterColor(node._adapter);
+      const size = alertNodes.has(id) ? 16 : 12;
+
+      const heard = node.last_heard ? new Date(node.last_heard) : null;
+      const heardStr = heard ? heard.toUTCString().slice(5,22) : '--';
+      const popup = `<div class="node-popup">
+        <div class="node-name">${node.display_name}</div>
+        <div class="node-stat">ID: ${node.node_id.slice(0,16)}</div>
+        <div class="node-stat">Adapter: ${node._adapter}</div>
+        ${node.snr!=null ? `<div class="node-stat">SNR: ${node.snr}dB</div>` : ''}
+        ${node.rssi!=null ? `<div class="node-stat">RSSI: ${node.rssi}dBm</div>` : ''}
+        ${node.battery_level!=null ? `<div class="node-stat">Battery: ${node.battery_level}%</div>` : ''}
+        <div class="node-stat">Last heard: ${heardStr}</div>
+        ${alertNodes.has(id) ? '<div style="color:#f85149;font-weight:500;margin-top:4px">⚠ ANOMALY ACTIVE</div>' : ''}
+      </div>`;
+
+      if (markers[id]) {
+        markers[id].setLatLng([node.lat, node.lon]);
+        markers[id].setIcon(makeIcon(color, size));
+        markers[id].getPopup().setContent(popup);
+      } else {
+        markers[id] = L.marker([node.lat, node.lon], {icon: makeIcon(color, size)})
+          .bindPopup(popup)
+          .addTo(map);
+      }
+    });
+
+    // Remove stale markers
+    Object.keys(markers).forEach(id => {
+      if (!seen.has(id)) { markers[id].remove(); delete markers[id]; }
+    });
+
+    const total = Object.keys(markers).length;
+    document.getElementById('node-count').textContent = `${total} node${total!==1?'s':''} with position`;
+
+    // Auto-fit if first load and nodes exist
+    if (total > 0 && followMode) {
+      const lats = allNodes.filter(n=>n.lat!=null).map(n=>n.lat);
+      const lons = allNodes.filter(n=>n.lon!=null).map(n=>n.lon);
+      if (lats.length) map.fitBounds([[Math.min(...lats)-0.01, Math.min(...lons)-0.01],[Math.max(...lats)+0.01, Math.max(...lons)+0.01]]);
+    }
+  } catch(e) {
+    console.error('loadNodes error:', e);
+  }
+}
+
+function toggleFollow() {
+  followMode = !followMode;
+  document.getElementById('follow-btn').style.color = followMode ? 'var(--green)' : '';
+  if (followMode) loadNodes();
+}
+
+// WebSocket for live position updates
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onmessage = (e) => {
+    const pkt = JSON.parse(e.data);
+    if (pkt.type === 'message' && pkt.data.lat != null) {
+      // Partial update for this node
+      const d = pkt.data;
+      const color = adapterColor(d.source_adapter);
+      const id = d.from_id;
+      if (markers[id]) {
+        markers[id].setLatLng([d.lat, d.lon]);
+      } else {
+        markers[id] = L.marker([d.lat, d.lon], {icon: makeIcon(color)})
+          .bindPopup(`<div class="node-popup"><div class="node-name">${d.from_display||d.from_id}</div></div>`)
+          .addTo(map);
+      }
+    }
+  };
+  ws.onclose = () => setTimeout(connectWS, 3000);
+}
+
+
+// ── PSKReporter overlay ───────────────────────────────────────────────────
+let _pskEnabled = false;
+let _pskMarkers = [];
+let _gridEnabled = false;
+let _gridLayers = [];
+
+function togglePSKReporter() {
+  _pskEnabled = !_pskEnabled;
+  const btn = document.getElementById('psk-btn');
+  btn.style.color = _pskEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _pskEnabled ? 'var(--green)' : '';
+  if (_pskEnabled) {
+    loadPSKReporter();
+    toast('PSKReporter: fetching recent spots…');
+  } else {
+    _pskMarkers.forEach(m => m.remove());
+    _pskMarkers = [];
+    toast('PSKReporter overlay off');
+  }
+}
+
+async function loadPSKReporter() {
+  if (!_pskEnabled) return;
+  // PSKReporter public JSON API — recent spots, no API key needed
+  // Limited to last 15 minutes, filtered by callsign if operator set
+  try {
+    // Use a CORS proxy since PSKReporter doesn't allow direct browser fetch
+    // For production: proxy through ECH backend
+    const r = await fetch('/api/pskreporter/spots').catch(() => null);
+    if (!r || !r.ok) {
+      toast('PSKReporter: enable via /api/pskreporter — needs backend proxy');
+      return;
+    }
+    const data = await r.json();
+    _pskMarkers.forEach(m => m.remove());
+    _pskMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (!spot.rxLat || !spot.rxLon) return;
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#ffcb6b;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #ffcb6b;white-space:nowrap">${spot.senderCallsign||'?'}</div>`,
+        iconSize: [60, 16],
+        iconAnchor: [30, 8],
+      });
+      const m = L.marker([spot.rxLat, spot.rxLon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.senderCallsign}</div><div class="node-stat">Heard by: ${spot.receiverCallsign}</div><div class="node-stat">Mode: ${spot.mode} | Band: ${spot.band}</div><div class="node-stat">SNR: ${spot.sNR}dB</div><div class="node-stat">${new Date(spot.flowStartSeconds*1000).toUTCString().slice(5,22)}</div></div>`)
+        .addTo(map);
+      _pskMarkers.push(m);
+    });
+    toast(`PSKReporter: ${_pskMarkers.length} spots`);
+  } catch(e) {
+    toast('PSKReporter fetch failed: ' + e.message);
+  }
+  // Refresh every 5 minutes
+  if (_pskEnabled) setTimeout(loadPSKReporter, 300000);
+}
+
+function toggleGridSquares() {
+  _gridEnabled = !_gridEnabled;
+  const btn = document.getElementById('grid-btn');
+  btn.style.color = _gridEnabled ? 'var(--blue)' : '';
+  btn.style.borderColor = _gridEnabled ? 'var(--blue)' : '';
+  if (_gridEnabled) {
+    drawGridSquares();
+  } else {
+    _gridLayers.forEach(l => map.removeLayer(l));
+    _gridLayers = [];
+  }
+}
+
+function drawGridSquares() {
+  // Draw Maidenhead grid square overlays for the visible map area
+  const bounds = map.getBounds();
+  const minLon = Math.floor(bounds.getWest());
+  const maxLon = Math.ceil(bounds.getEast());
+  const minLat = Math.floor(bounds.getSouth());
+  const maxLat = Math.ceil(bounds.getNorth());
+
+  _gridLayers.forEach(l => map.removeLayer(l));
+  _gridLayers = [];
+
+  // Draw 2-degree x 1-degree cells (Maidenhead field + square)
+  for (let lon = minLon; lon < maxLon; lon += 2) {
+    for (let lat = minLat; lat < maxLat; lat += 1) {
+      const grid = lonLatToMaidenhead(lon + 1, lat + 0.5);
+      const rect = L.rectangle([[lat, lon],[lat+1, lon+2]], {
+        color: '#388bfd', weight: 1, fillOpacity: 0.03, opacity: 0.3
+      }).addTo(map);
+      const label = L.marker([lat + 0.5, lon + 1], {
+        icon: L.divIcon({
+          className: '',
+          html: `<div style="font-family:monospace;font-size:10px;color:#388bfd;opacity:.6">${grid}</div>`,
+          iconSize: [40, 14], iconAnchor: [20, 7],
+        })
+      }).addTo(map);
+      _gridLayers.push(rect, label);
+    }
+  }
+}
+
+function lonLatToMaidenhead(lon, lat) {
+  lon += 180; lat += 90;
+  const field = String.fromCharCode(65 + Math.floor(lon/20)) +
+                String.fromCharCode(65 + Math.floor(lat/10));
+  const sq    = String(Math.floor((lon%20)/2)) +
+                String(Math.floor(lat%10));
+  return field + sq;
+}
+
+map.on('zoomend moveend', () => { if (_gridEnabled) drawGridSquares(); });
+
+function toast(msg) {
+  // Simple map toast
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;bottom:50px;left:50%;transform:translateX(-50%);background:rgba(22,27,34,.95);border:1px solid #30363d;color:#e6edf3;font-family:monospace;font-size:11px;padding:6px 14px;border-radius:4px;z-index:2000';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+loadNodes();
+setInterval(loadNodes, 30000);
+connectWS();
+</script>
+</body>
+</html>

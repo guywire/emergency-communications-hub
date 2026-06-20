@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPgogIDxyZWN0IHg9IjE1IiB5PSI4IiB3aWR0aD0iMiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzNmYjk1MCIvPgogIDxyZWN0IHg9IjEwIiB5PSIxMiIgd2lkdGg9IjEyIiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cG9seWdvbiBwb2ludHM9IjE2LDYgMTIsMTIgMjAsMTIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cmVjdCB4PSIxMyIgeT0iMjQiIHdpZHRoPSI2IiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iMTAiIHI9IjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM4OGJmZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8Y2lyY2xlIGN4PSIyNCIgY3k9IjEwIiByPSIyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzODhiZmQiIHN0cm9rZS13aWR0aD0iMS41Ii8+Cjwvc3ZnPg==">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECH — Simulation</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--bg3:#1c2230;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--dim:#484f58;--green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+#header{display:flex;align-items:center;gap:14px;padding:0 20px;height:48px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.logo{font-family:var(--mono);font-size:13px;color:var(--green);letter-spacing:.08em}
+.back{font-family:var(--mono);font-size:11px;color:var(--blue);text-decoration:none}.back:hover{text-decoration:underline}
+.spacer{flex:1}
+#content{max-width:1000px;margin:0 auto;padding:20px}
+.section{background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:16px}
+.section-hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)}
+.section-title{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.08em;color:var(--muted)}
+.section-body{padding:14px 16px}
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}
+th{text-align:left;padding:5px 8px;color:var(--dim);border-bottom:1px solid var(--border);font-weight:400;font-size:10px;letter-spacing:.05em;text-transform:uppercase}
+td{padding:5px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+input,select{background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:3px;outline:none}
+input:focus,select:focus{border-color:var(--blue)}
+.btn{font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:3px;border:1px solid;cursor:pointer;white-space:nowrap}
+.btn-green{background:rgba(63,185,80,.1);border-color:var(--green);color:var(--green)}
+.btn-red{background:rgba(248,81,73,.1);border-color:var(--red);color:var(--red)}
+.btn-blue{background:rgba(56,139,253,.1);border-color:var(--blue);color:var(--blue)}
+.toggle{position:relative;width:40px;height:22px;cursor:pointer;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.slider{position:absolute;top:0;left:0;right:0;bottom:0;background:var(--border2);border-radius:11px;transition:.2s}
+.slider:before{content:"";position:absolute;height:16px;width:16px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s}
+.toggle input:checked+.slider{background:var(--green)}
+.toggle input:checked+.slider:before{transform:translateX(18px)}
+.sim-badge{font-family:var(--mono);font-size:11px;padding:3px 10px;border-radius:10px}
+.sim-on{background:#122a1a;color:var(--green)}.sim-off{background:rgba(248,81,73,.12);color:var(--red)}
+.prio-0{color:var(--muted)}.prio-1{color:var(--yellow)}.prio-2{color:var(--red)}
+.edit-tr td{padding:4px 6px!important;background:var(--bg3)!important}
+#toast{position:fixed;bottom:16px;right:20px;font-family:var(--mono);font-size:11px;padding:8px 14px;border-radius:4px;background:var(--bg3);border:1px solid var(--border2);display:none}
+#toast.ok{border-left:3px solid var(--green)}#toast.err{border-left:3px solid var(--red)}
+</style>
+</head>
+<body>
+<div id="header">
+  <a class="back" href="/">← ECH</a>
+  <div class="logo">&#9633; ECH / Simulation</div>
+  <div class="spacer"></div>
+  <span id="sim-badge" class="sim-badge sim-on">SIM ACTIVE</span>
+  <label class="toggle" title="Enable/disable mock adapter traffic" style="margin-left:8px">
+    <input type="checkbox" id="sim-toggle" checked onchange="toggleSim(this.checked)">
+    <span class="slider"></span>
+  </label>
+</div>
+<div id="content">
+
+  <div class="section">
+    <div class="section-hdr"><span class="section-title">INJECT TEST MESSAGE NOW</span></div>
+    <div class="section-body" style="display:grid;grid-template-columns:160px 1fr 110px 110px 80px;gap:8px;align-items:end">
+      <div><div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:3px">ADAPTER</div>
+        <select id="inj-adapter" style="width:100%"></select></div>
+      <div><div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:3px">MESSAGE</div>
+        <input type="text" id="inj-body" style="width:100%" placeholder="Text to inject"></div>
+      <div><div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:3px">FROM ID</div>
+        <input type="text" id="inj-from" placeholder="!a1b2c3d4"></div>
+      <div><div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:3px">PRIORITY</div>
+        <select id="inj-prio"><option value="0">Normal</option><option value="1">Elevated</option><option value="2">Emergency</option></select></div>
+      <div><button class="btn btn-blue" onclick="injectNow()" style="width:100%;padding:5px">Inject</button></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-hdr">
+      <span class="section-title">MOCK NODES</span>
+      <button class="btn btn-green" onclick="showNodeForm()">+ Add</button>
+    </div>
+    <div class="section-body">
+      <table>
+        <thead><tr><th>Adapter</th><th>Node ID</th><th>Display Name</th><th>Lat</th><th>Lon</th><th>Enabled</th><th></th></tr></thead>
+        <tbody id="node-tbody"></tbody>
+        <tbody id="node-form-row" style="display:none">
+          <tr class="edit-tr">
+            <td><input id="nf-adapter" placeholder="meshtastic-mock" style="width:120px"></td>
+            <td><input id="nf-id" placeholder="!a1b2c3d4" style="width:90px"></td>
+            <td><input id="nf-name" placeholder="W1ABC Node" style="width:120px"></td>
+            <td><input type="number" id="nf-lat" placeholder="44.1" step="0.001" style="width:70px"></td>
+            <td><input type="number" id="nf-lon" placeholder="-69.1" step="0.001" style="width:75px"></td>
+            <td><select id="nf-enabled"><option value="1">Yes</option><option value="0">No</option></select></td>
+            <td><button class="btn btn-green" onclick="saveNode()">Save</button>
+                <button class="btn btn-red" onclick="hideNodeForm()" style="margin-left:3px">X</button></td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--dim)">
+        Leave lat/lon blank for no position. Use decimal degrees (e.g. 44.1, -69.1 for northeastern US).
+        Nodes without positions won't appear on the map. Mock adapters use generic names by default.
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-hdr">
+      <span class="section-title">MOCK MESSAGES &nbsp;<span style="font-weight:400;color:var(--dim)">periodic auto-messages</span></span>
+      <button class="btn btn-green" onclick="showMsgForm()">+ Add</button>
+    </div>
+    <div class="section-body">
+      <table>
+        <thead><tr><th>Adapter</th><th>From</th><th>Body</th><th>Priority</th><th>Interval</th><th>Enabled</th><th></th></tr></thead>
+        <tbody id="msg-tbody"></tbody>
+        <tbody id="msg-form-row" style="display:none">
+          <tr class="edit-tr">
+            <td><input id="mf-adapter" placeholder="meshtastic-mock" style="width:120px"></td>
+            <td><input id="mf-from" placeholder="!a1b2c3d4" style="width:90px"></td>
+            <td><input id="mf-body" placeholder="Message text" style="width:200px"></td>
+            <td><select id="mf-prio"><option value="0">Normal</option><option value="1">Elevated</option><option value="2">Emergency</option></select></td>
+            <td><input type="number" id="mf-interval" value="30" min="5" style="width:55px">s</td>
+            <td><select id="mf-enabled"><option value="1">Yes</option><option value="0">No</option></select></td>
+            <td><button class="btn btn-green" onclick="saveMsg()">Save</button>
+                <button class="btn btn-red" onclick="hideMsgForm()" style="margin-left:3px">X</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-hdr"><span class="section-title">MAIN PAGE CONTROLS</span></div>
+    <div class="section-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-red" onclick="clearDisplay()">Clear message display</button>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">Clears inbox display only — database is preserved</span>
+    </div>
+  </div>
+
+</div>
+<div id="toast"></div>
+<script>
+
+// Store nodes/msgs in memory so edit buttons don't need inline JSON
+let _nodeStore = {};
+let _msgStore = {};
+
+const PL = ['Normal','Elevated','Emergency'];
+const PC = ['prio-0','prio-1','prio-2'];
+let nodeEditId = '', msgEditId = '';
+
+async function init() {
+  const st = await fetch('/api/state').then(r=>r.json()).catch(()=>({}));
+  const on = st.simulation_enabled !== false;
+  document.getElementById('sim-toggle').checked = on;
+  badge(on);
+  const ch = await fetch('/api/channels').then(r=>r.json()).catch(()=>({channels:[]}));
+  document.getElementById('inj-adapter').innerHTML = ch.channels.map(c=>
+    `<option value="${e(c.adapter)}">${e(c.adapter)}</option>`).join('');
+  await loadNodes(); await loadMsgs();
+}
+
+async function toggleSim(en) {
+  await fetch('/api/state/simulation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:en})});
+  badge(en); toast(en?'Simulation enabled':'Simulation paused',en?'ok':'');
+}
+function badge(on){const b=document.getElementById('sim-badge');b.textContent=on?'SIM ACTIVE':'SIM PAUSED';b.className='sim-badge '+(on?'sim-on':'sim-off');}
+
+async function loadNodes(){
+  const d=await fetch('/api/simulation/nodes').then(r=>r.json()).catch(()=>({nodes:[]}));
+  const tb=document.getElementById('node-tbody');
+  if(!d.nodes.length){tb.innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:12px">No custom nodes — adapters use built-in Maine-area positions</td></tr>`;return;}
+  tb.innerHTML=d.nodes.map(n=>`<tr>
+    <td>${e(n.adapter)}</td><td>${e(n.node_id)}</td><td>${e(n.display_name)}</td>
+    <td>${n.lat??'--'}</td><td>${n.lon??'--'}</td>
+    <td><span style="color:${n.enabled?'var(--green)':'var(--red)'}">${n.enabled?'yes':'no'}</span></td>
+    <td><button class="btn btn-blue" onclick='editNode(${JSON.stringify(n)})'>Edit</button>
+        <button class="btn btn-red" onclick="delNode('${e(n.id)}')" style="margin-left:3px">Del</button></td>
+  </tr>`).join('');
+}
+
+function showNodeForm(){document.getElementById('node-form-row').style.display='';}
+function hideNodeForm(){document.getElementById('node-form-row').style.display='none';nodeEditId='';clearN();}
+function clearN(){['nf-adapter','nf-id','nf-name','nf-lat','nf-lon'].forEach(i=>document.getElementById(i).value='');document.getElementById('nf-enabled').value='1';}
+
+function editNodeById(id) { const n = _nodeStore[id]; if(n) editNode(n); }
+function editMsgById(id) { const m = _msgStore[id]; if(m) editMsg(m); }
+function editNode(n){
+  document.getElementById('nf-adapter').value=n.adapter||'';
+  document.getElementById('nf-id').value=n.node_id||'';
+  document.getElementById('nf-name').value=n.display_name||'';
+  document.getElementById('nf-lat').value=n.lat??'';
+  document.getElementById('nf-lon').value=n.lon??'';
+  document.getElementById('nf-enabled').value=n.enabled?'1':'0';
+  nodeEditId=n.id||'';
+  showNodeForm();
+}
+
+async function saveNode(){
+  const adapter=document.getElementById('nf-adapter').value.trim();
+  const node_id=document.getElementById('nf-id').value.trim();
+  const display_name=document.getElementById('nf-name').value.trim();
+  const lat=parseFloat(document.getElementById('nf-lat').value)||null;
+  const lon=parseFloat(document.getElementById('nf-lon').value)||null;
+  const enabled=parseInt(document.getElementById('nf-enabled').value);
+  if(!adapter||!node_id||!display_name){toast('Adapter, Node ID, Name required','err');return;}
+  if(lat!=null&&Math.abs(lat)<1&&lon!=null&&Math.abs(lon)<1){toast('Warning: positions near 0,0 will appear in the ocean off Africa. Check your coordinates.','err');return;}
+  const p={adapter,node_id,display_name,lat,lon,enabled};
+  if(nodeEditId)p.id=nodeEditId;
+  await fetch('/api/simulation/nodes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
+  hideNodeForm();await loadNodes();toast('Node saved');
+}
+
+async function delNode(id){
+  if(!confirm('Delete node?'))return;
+  await fetch(`/api/simulation/nodes/${id}`,{method:'DELETE'});
+  await loadNodes();toast('Node deleted');
+}
+
+async function loadMsgs(){
+  const d=await fetch('/api/simulation/messages').then(r=>r.json()).catch(()=>({messages:[]}));
+  const tb=document.getElementById('msg-tbody');
+  if(!d.messages.length){tb.innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:12px">No custom messages — adapters use built-in message pools</td></tr>`;return;}
+  tb.innerHTML=d.messages.map(m=>`<tr>
+    <td>${e(m.adapter)}</td><td>${e(m.from_id)}</td>
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(m.body)}">${e(m.body)}</td>
+    <td class="${PC[m.priority]||'prio-0'}">${PL[m.priority]||'Normal'}</td>
+    <td>${m.interval_sec}s</td>
+    <td><span style="color:${m.enabled?'var(--green)':'var(--red)'}">${m.enabled?'yes':'no'}</span></td>
+    <td><button class="btn btn-blue" onclick='editMsg(${JSON.stringify(m)})'>Edit</button>
+        <button class="btn btn-red" onclick="delMsg('${e(m.id)}')" style="margin-left:3px">Del</button></td>
+  </tr>`).join('');
+}
+
+function showMsgForm(){document.getElementById('msg-form-row').style.display='';}
+function hideMsgForm(){document.getElementById('msg-form-row').style.display='none';msgEditId='';clearM();}
+function clearM(){['mf-adapter','mf-from','mf-body'].forEach(i=>document.getElementById(i).value='');document.getElementById('mf-prio').value='0';document.getElementById('mf-interval').value='30';document.getElementById('mf-enabled').value='1';}
+
+function editMsg(m){
+  document.getElementById('mf-adapter').value=m.adapter||'';
+  document.getElementById('mf-from').value=m.from_id||'';
+  document.getElementById('mf-body').value=m.body||'';
+  document.getElementById('mf-prio').value=String(m.priority||0);
+  document.getElementById('mf-interval').value=String(m.interval_sec||30);
+  document.getElementById('mf-enabled').value=m.enabled?'1':'0';
+  msgEditId=m.id||'';
+  showMsgForm();
+}
+
+async function saveMsg(){
+  const adapter=document.getElementById('mf-adapter').value.trim();
+  const from_id=document.getElementById('mf-from').value.trim();
+  const body=document.getElementById('mf-body').value.trim();
+  const priority=parseInt(document.getElementById('mf-prio').value);
+  const interval_sec=parseFloat(document.getElementById('mf-interval').value)||30;
+  const enabled=parseInt(document.getElementById('mf-enabled').value);
+  if(!adapter||!from_id||!body){toast('Adapter, From, Body required','err');return;}
+  const p={adapter,from_id,body,priority,interval_sec,enabled};
+  if(msgEditId)p.id=msgEditId;
+  await fetch('/api/simulation/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
+  hideMsgForm();await loadMsgs();toast('Message saved');
+}
+
+async function delMsg(id){
+  if(!confirm('Delete message?'))return;
+  await fetch(`/api/simulation/messages/${id}`,{method:'DELETE'});
+  await loadMsgs();toast('Message deleted');
+}
+
+async function injectNow(){
+  const body=document.getElementById('inj-body').value.trim();
+  const adapter=document.getElementById('inj-adapter').value;
+  const priority=parseInt(document.getElementById('inj-prio').value);
+  if(!body){toast('Enter message body','err');return;}
+  const r=await fetch('/api/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body,adapters:[adapter],priority})});
+  const d=await r.json();
+  const ok=Object.values(d.results||{}).some(Boolean);
+  toast(ok?`Injected into ${adapter}`:'Failed — check adapter status',ok?'ok':'err');
+  if(ok)document.getElementById('inj-body').value='';
+}
+
+function clearDisplay(){
+  if(!confirm('Clear message display on main page?'))return;
+  localStorage.setItem('ech_clear_messages',Date.now().toString());
+  toast('Display will clear when you return to main page','ok');
+}
+
+function toast(msg,type='ok'){const el=document.getElementById('toast');el.textContent=msg;el.className=type;el.style.display='block';setTimeout(()=>el.style.display='none',3500);}
+function e(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+init();
+</script>
+</body>
+</html>

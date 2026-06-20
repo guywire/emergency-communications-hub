@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECH — Settings</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--bg3:#1c2230;--border:#30363d;--border2:#444c56;--text:#e6edf3;--muted:#8b949e;--dim:#484f58;--green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+#header{display:flex;align-items:center;gap:16px;padding:0 20px;height:48px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.logo{font-family:var(--mono);font-size:13px;color:var(--green);letter-spacing:.08em}
+.back{font-family:var(--mono);font-size:11px;color:var(--blue);text-decoration:none}.back:hover{text-decoration:underline}
+.spacer{flex:1}
+#content{max-width:900px;margin:0 auto;padding:24px 20px}
+.section{background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:20px;overflow:hidden}
+.section-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);cursor:pointer}
+.section-title{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--text);letter-spacing:.05em}
+.section-body{padding:16px 18px}
+label{display:block;font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:4px;margin-top:12px}
+label:first-child{margin-top:0}
+input,select,textarea{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:4px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--blue)}
+textarea{resize:vertical;min-height:120px;font-size:11px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.btn{font-family:var(--mono);font-size:11px;padding:6px 14px;border-radius:4px;border:1px solid;cursor:pointer;transition:all .1s}
+.btn-green{background:rgba(63,185,80,.1);border-color:var(--green);color:var(--green)}.btn-green:hover{background:rgba(63,185,80,.2)}
+.btn-red{background:rgba(248,81,73,.1);border-color:var(--red);color:var(--red)}.btn-red:hover{background:rgba(248,81,73,.2)}
+.btn-blue{background:rgba(56,139,253,.1);border-color:var(--blue);color:var(--blue)}.btn-blue:hover{background:rgba(56,139,253,.2)}
+.btn-yellow{background:rgba(210,153,34,.1);border-color:var(--yellow);color:var(--yellow)}
+.mode-bar{display:flex;align-items:center;gap:12px;padding:12px}
+.mode-pill{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:12px;font-weight:500}
+.mode-standard{background:#122a1a;color:var(--green)}
+.mode-emergency{background:rgba(248,81,73,.15);color:var(--red);animation:pulse 1s ease-in-out infinite alternate}
+@keyframes pulse{from{opacity:.7}to{opacity:1}}
+.toggle{position:relative;width:44px;height:24px;cursor:pointer;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;top:0;left:0;right:0;bottom:0;background:var(--border2);border-radius:12px;transition:.2s}
+.toggle-slider:before{content:"";position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s}
+.toggle input:checked+.toggle-slider{background:var(--green)}
+.toggle input:checked+.toggle-slider:before{transform:translateX(20px)}
+.user-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+.user-row:last-child{border-bottom:none}
+.user-name{font-family:var(--mono);font-size:12px;flex:1}
+.user-role{font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;background:var(--bg3);color:var(--muted)}
+.adapter-row{padding:8px 0;border-bottom:1px solid var(--border)}
+.adapter-row:last-child{border-bottom:none}
+.adapter-name{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--text)}
+.adapter-type{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.severity-checks{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+.severity-checks label{display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text)}
+.severity-checks input[type=checkbox]{width:auto;margin:0}
+#save-toast{font-family:var(--mono);font-size:11px;color:var(--green);display:none;margin-left:8px}
+
+.svc-row { display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border) }
+.svc-row:last-child { border-bottom:none }
+.svc-indicator { width:8px;height:8px;border-radius:50%;flex-shrink:0 }
+.svc-ok   { background:var(--green);box-shadow:0 0 5px var(--green) }
+.svc-warn { background:var(--yellow) }
+.svc-err  { background:var(--red) }
+.svc-info { flex:1;min-width:0 }
+.svc-lbl  { font-family:var(--mono);font-size:12px;font-weight:500;color:var(--text) }
+.svc-meta { font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px }
+.svc-actions { display:flex;gap:6px }
+</style>
+</head>
+<body>
+<div id="header">
+  <a class="back" href="/">← ECH</a>
+  <div class="logo">▣ ECH / Settings</div>
+  <div class="spacer"></div>
+  <span id="user-display" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></span>
+</div>
+
+<div id="content">
+  <!-- ── Service status ────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">SERVICE STATUS</span>
+      <button class="btn btn-blue" onclick="loadServices()" style="padding:3px 10px">↻ Refresh</button>
+    </div>
+    <div class="section-body" id="services-body">
+      <div style="font-family:var(--mono);font-size:11px;color:var(--dim)">Loading…</div>
+    </div>
+  </div>
+
+
+
+  <!-- ── Base Location ────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('loc-body')">
+      <span class="section-title">BASE LOCATION</span>
+      <span id="loc-status" style="font-family:var(--mono);font-size:10px;color:var(--muted)">Used for map centering and mock node positions</span>
+    </div>
+    <div id="loc-body" class="section-body">
+      <div class="row">
+        <div>
+          <label>Latitude (decimal degrees)</label>
+          <input type="number" id="base-lat" step="0.0001" placeholder="e.g. 44.105">
+        </div>
+        <div>
+          <label>Longitude (decimal degrees)</label>
+          <input type="number" id="base-lon" step="0.0001" placeholder="e.g. -69.112">
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-green" onclick="saveBaseLocation()">Save location</button>
+        <button class="btn btn-blue" onclick="detectLocation()">Use my GPS</button>
+        <span id="loc-save-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none">Saved — restart ECH to apply to mock adapters</span>
+      </div>
+      <div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--muted)">
+        Affects: map default center, mock node positions. Requires ECH restart to reposition mock nodes.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Mode & Incident ─────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('mode-body')">
+      <span class="section-title">OPERATIONAL MODE</span>
+      <span id="mode-label" class="mode-pill mode-standard">STANDARD</span>
+    </div>
+    <div id="mode-body" class="section-body">
+      <div class="row">
+        <div>
+          <label>Operational mode</label>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="btn btn-green" onclick="setMode('standard')">Standard</button>
+            <button class="btn btn-red" onclick="setMode('emergency')">🚨 Emergency</button>
+          </div>
+        </div>
+        <div>
+          <label>Incident name</label>
+          <input type="text" id="incident-name" placeholder="e.g. EXERCISE or INC-2024-001">
+          <button class="btn btn-blue" style="margin-top:8px" onclick="saveIncident()">Save incident name</button>
+        </div>
+      </div>
+      <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
+        <label style="margin:0">Simulation mode</label>
+        <label class="toggle">
+          <input type="checkbox" id="sim-toggle" onchange="setSimulation(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">Enable/disable mock adapter traffic</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Weather alerts ─────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('wx-body')">
+      <span class="section-title">WEATHER ALERTS (NWS)</span>
+    </div>
+    <div id="wx-body" class="section-body">
+      <div class="row3">
+        <div>
+          <label>NWS area (state code)</label>
+          <input type="text" id="wx-area" placeholder="ME" maxlength="2" style="text-transform:uppercase">
+        </div>
+        <div>
+          <label>Latitude (optional)</label>
+          <input type="number" id="wx-lat" placeholder="44.1" step="0.01">
+        </div>
+        <div>
+          <label>Longitude (optional)</label>
+          <input type="number" id="wx-lon" placeholder="-69.1" step="0.01">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>Poll interval (seconds)</label>
+          <input type="number" id="wx-poll" value="300" min="60">
+        </div>
+        <div>
+          <label>Severity filter</label>
+          <div class="severity-checks">
+            <label><input type="checkbox" id="sev-extreme" checked> Extreme</label>
+            <label><input type="checkbox" id="sev-severe" checked> Severe</label>
+            <label><input type="checkbox" id="sev-moderate" checked> Moderate</label>
+            <label><input type="checkbox" id="sev-minor"> Minor</label>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
+        <label style="margin:0">Auto-broadcast Extreme alerts to mesh</label>
+        <label class="toggle">
+          <input type="checkbox" id="wx-auto-broadcast">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <button class="btn btn-green" style="margin-top:16px" onclick="saveWxConfig()">Save weather config</button>
+      <span id="save-toast">✓ Saved</span>
+    </div>
+  </div>
+
+  <!-- ── Adapter config ─────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('adapter-body')">
+      <span class="section-title">ADAPTER CONFIGURATION</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Edit config.yaml directly for full control</span>
+    </div>
+    <div id="adapter-body" class="section-body">
+      <div id="adapter-list"></div>
+      <div style="margin-top:16px">
+        <label>Raw config.yaml adapters (YAML)</label>
+        <textarea id="adapter-yaml" spellcheck="false"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-green" onclick="saveAdapters()">Save (requires ECH restart)</button>
+          <button class="btn btn-yellow" onclick="restartECH()">Restart ECH</button>
+        </div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px">
+          Changes take effect after restart. Syntax errors will prevent ECH from starting.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Users ─────────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('users-body')">
+      <span class="section-title">USERS</span>
+    </div>
+    <div id="users-body" class="section-body">
+      <div id="user-list"></div>
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px">Add user</div>
+        <div class="row3">
+          <div><label>Username</label><input type="text" id="new-username"></div>
+          <div><label>Password</label><input type="password" id="new-password"></div>
+          <div><label>Role</label>
+            <select id="new-role">
+              <option value="operator">Operator</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-green" style="margin-top:8px" onclick="addUser()">Add user</button>
+      </div>
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px">Change my password</div>
+        <div class="row">
+          <div><label>New password</label><input type="password" id="new-pw"></div>
+          <div><label>Confirm</label><input type="password" id="confirm-pw"></div>
+        </div>
+        <button class="btn btn-blue" style="margin-top:8px" onclick="changeMyPassword()">Change password</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Bridge rules ───────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('bridge-body')">
+      <span class="section-title">BRIDGE RULES</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Forward messages between adapters</span>
+    </div>
+    <div id="bridge-body" class="section-body">
+      <div id="bridge-list" style="margin-bottom:12px"></div>
+      <div class="row">
+        <div><label>From adapter</label><input type="text" id="bridge-from" placeholder="meshtastic-usb"></div>
+        <div><label>To adapter</label><input type="text" id="bridge-to" placeholder="aprs-internet"></div>
+      </div>
+      <button class="btn btn-green" style="margin-top:8px" onclick="addBridgeRule()">Add rule</button>
+    </div>
+  </div>
+
+
+
+  <!-- ── MQTT Brokers ───────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('mqtt-body')">
+      <span class="section-title">MQTT BROKERS &amp; MESHMAPPER BRIDGE</span>
+    </div>
+    <div id="mqtt-body" class="section-body">
+      <div id="mqtt-status" style="margin-bottom:12px;font-family:var(--mono);font-size:11px;color:var(--muted)">Loading…</div>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px">
+        MQTT adapters and the MeshCore→MeshMapper bridge are configured in
+        <code style="background:var(--bg3);padding:2px 5px;border-radius:3px">/etc/ech/config.yaml</code>.
+        Edit the adapter list below or SSH to the host to edit directly.
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn btn-green" onclick="testMeshMapper()">Test MeshMapper bridge</button>
+        <button class="btn btn-blue" onclick="loadMQTTStatus()" style="margin-left:8px">↻ Refresh</button>
+      </div>
+      <div id="mqtt-bridge-status" style="margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--dim)"></div>
+    </div>
+  </div>
+
+  <!-- ── System stats bar ─────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('sysbar-body')">
+      <span class="section-title">SYSTEM STATS BAR</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">CPU · Memory · Network shown on main page</span>
+    </div>
+    <div id="sysbar-body" class="section-body">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <label style="margin:0">Show system stats bar on main dashboard</label>
+        <label class="toggle">
+          <input type="checkbox" id="sysbar-toggle" onchange="setSysbarPref(this.checked)" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div id="live-stats" style="font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:10px 14px;line-height:2">
+        Loading…
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let currentUser = null;
+let bridgeRules = [];
+
+
+
+async function loadServices() {
+  const body = document.getElementById('services-body');
+  if (!body) return;
+  try {
+    const data = await fetch('/api/system/services').then(r=>r.json());
+    body.innerHTML = data.services.map(sv => {
+      const cls = sv.ok ? 'svc-ok' : (sv.active === 'inactive' ? 'svc-warn' : 'svc-err');
+      const stateLabel = sv.ok
+        ? `<span style="color:var(--green)">● active</span>`
+        : sv.active === 'inactive'
+          ? `<span style="color:var(--yellow)">● inactive</span>`
+          : `<span style="color:var(--red)">● ${esc(sv.active)}</span>`;
+      return `<div class="svc-row">
+        <div class="svc-indicator ${cls}"></div>
+        <div class="svc-info">
+          <div class="svc-lbl">${esc(sv.label)}</div>
+          <div class="svc-meta">${stateLabel} &nbsp;·&nbsp; ${esc(sv.enabled)} &nbsp;·&nbsp; port ${esc(sv.port)}</div>
+        </div>
+        <div class="svc-actions">
+          ${!sv.ok ? `<button class="btn btn-green" onclick="doRestart('${esc(sv.name)}')">Start</button>` : ''}
+          <button class="btn" style="border-color:var(--border);color:var(--muted)" onclick="doRestart('${esc(sv.name)}')">Restart</button>
+          ${!sv.ok && sv.name !== 'ech' ? `<button class="btn btn-blue" onclick="installService('${esc(sv.name)}')">Install</button>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    body.innerHTML = '<div style="color:var(--red);font-family:var(--mono);font-size:11px">Failed to load service status</div>';
+  }
+}
+
+async function doRestart(name) {
+  if (!confirm(`Restart ${name}?`)) return;
+  const r = await fetch(`/api/system/services/${name}/restart`, {method:'POST'});
+  const d = await r.json();
+  toast(d.status === 'ok' ? `${name} restarted` : `Error: ${d.stderr||d.detail||'failed'}`);
+  setTimeout(loadServices, 2500);
+}
+
+function installService(name) {
+  const cmds = {
+    mosquitto: 'sudo apt install mosquitto mosquitto-clients -y && sudo systemctl enable mosquitto && sudo systemctl start mosquitto',
+    asterisk:  'sudo bash /opt/ech/scripts/install_asterisk.sh',
+  };
+  const cmd = cmds[name] || `sudo apt install ${name} -y`;
+  alert(`Run this command to install ${name}:\n\n${cmd}\n\nThen click Refresh.`);
+}
+
+
+async function loadMQTTStatus() {
+  // Load all adapter health and filter for MQTT/bridge
+  try {
+    const ch = await fetch('/api/channels').then(r=>r.json());
+    const mqttAdapters = ch.channels.filter(c =>
+      c.adapter.includes('mqtt') || c.adapter.includes('reticulum')
+    );
+    const el = document.getElementById('mqtt-status');
+    if (!mqttAdapters.length) {
+      el.innerHTML = '<span style="color:var(--dim)">No MQTT adapters configured</span>';
+    } else {
+      el.innerHTML = mqttAdapters.map(a => {
+        const dot = a.state === 'connected'
+          ? '<span style="color:var(--green)">●</span>'
+          : '<span style="color:var(--red)">●</span>';
+        return `${dot} <b>${esc(a.adapter)}</b> — ${esc(a.state)}`;
+      }).join('<br>');
+    }
+
+    // MeshCore bridge status
+    const bridge = await fetch('/api/meshcore-bridge').then(r=>r.json());
+    const bel = document.getElementById('mqtt-bridge-status');
+    if (bridge.enabled) {
+      bel.innerHTML = `MeshMapper bridge: <span style="color:${bridge.connected?'var(--green)':'var(--red)'}">${bridge.connected?'connected':'disconnected'}</span>`
+        + ` → ${esc(bridge.broker)} prefix <code>${esc(bridge.topic_prefix)}</code>`
+        + ` | ${bridge.published} packets published | queue: ${bridge.queue_depth}`;
+    } else {
+      bel.innerHTML = 'MeshMapper bridge: <span style="color:var(--dim)">disabled</span>'
+        + ' — enable in config.yaml under <code>meshcore_bridge: enabled: true</code>';
+    }
+  } catch(e) {
+    document.getElementById('mqtt-status').textContent = 'Error loading MQTT status';
+  }
+}
+
+async function testMeshMapper() {
+  const r = await fetch('/api/meshcore-bridge').then(r=>r.json());
+  if (!r.enabled) {
+    alert('MeshMapper bridge is disabled.\n\nEnable in /etc/ech/config.yaml:\n\nmeshcore_bridge:\n  enabled: true\n  mqtt_host: localhost\n  topic_prefix: meshcore');
+    return;
+  }
+  alert(`Bridge status: ${r.connected ? 'CONNECTED' : 'DISCONNECTED'}\nBroker: ${r.broker}\nTopic: ${r.topic_prefix}/#\nPublished: ${r.published} packets\n\nCheck Mosquitto: sudo systemctl status mosquitto`);
+}
+
+function setSysbarPref(enabled) {
+  localStorage.setItem('sysbar_enabled', enabled ? 'true' : 'false');
+}
+
+async function loadLiveStats() {
+  const r = await fetch('/api/system/stats').catch(()=>null);
+  if (!r || !r.ok) return;
+  const s = await r.json();
+  if (s.error) { document.getElementById('live-stats').textContent = 'psutil not available: ' + s.error; return; }
+  const prevEnabled = localStorage.getItem('sysbar_enabled') !== 'false';
+  document.getElementById('sysbar-toggle').checked = prevEnabled;
+  document.getElementById('live-stats').innerHTML =
+    `<div>CPU: <b style="color:var(--text)">${s.cpu_pct}%</b></div>` +
+    `<div>Memory: <b style="color:var(--text)">${s.mem_used_mb} MB used / ${s.mem_total_mb} MB total (${s.mem_pct}%)</b></div>` +
+    `<div>Disk: <b style="color:var(--text)">${s.disk_used_gb} GB used / ${s.disk_total_gb} GB total (${s.disk_pct}%)</b></div>` +
+    `<div>Net TX: <b style="color:var(--text)">${(s.net_bytes_sent/1024**3).toFixed(2)} GB</b> &nbsp; RX: <b style="color:var(--text)">${(s.net_bytes_recv/1024**3).toFixed(2)} GB</b> (since boot)</div>` +
+    (Object.keys(s.temps||{}).length ? `<div>Temp: <b style="color:var(--text)">${Object.entries(s.temps).map(([k,v])=>k+': '+v+'°C').join(' | ')}</b></div>` : '');
+}
+
+async function saveBaseLocation() {
+  const lat = parseFloat(document.getElementById('base-lat').value);
+  const lon = parseFloat(document.getElementById('base-lon').value);
+  if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    alert('Enter valid decimal coordinates (lat -90..90, lon -180..180)');
+    return;
+  }
+  // Read current adapter config and patch base_lat/base_lon for all mock adapters
+  const ac = await fetch('/api/adapter-config').then(r => r.json());
+  const adapters = (ac.adapters || []).map(a => {
+    if (a.type && a.type.startsWith('mock_')) {
+      return { ...a, base_lat: lat, base_lon: lon };
+    }
+    return a;
+  });
+  await fetch('/api/adapter-config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adapters, bridge_rules: ac.bridge_rules }),
+  });
+  const msg = document.getElementById('loc-save-msg');
+  msg.style.display = 'inline';
+  setTimeout(() => { msg.style.display = 'none'; }, 6000);
+}
+
+function detectLocation() {
+  if (!navigator.geolocation) { alert('Geolocation not available in this browser'); return; }
+  navigator.geolocation.getCurrentPosition(pos => {
+    document.getElementById('base-lat').value = pos.coords.latitude.toFixed(5);
+    document.getElementById('base-lon').value = pos.coords.longitude.toFixed(5);
+  }, () => alert('Could not get location — enter coordinates manually'));
+}
+
+async function init() {
+  // Load current user
+  const me = await fetch('/api/auth/me').then(r=>r.json());
+  currentUser = me;
+  document.getElementById('user-display').textContent = me.username ? `${me.username} (${me.role})` : '';
+
+  loadServices();
+  setInterval(loadServices, 15000);
+  loadMQTTStatus();
+  loadLiveStats();
+  setInterval(loadLiveStats, 5000);
+
+  // Load state
+  const state = await fetch('/api/state').then(r=>r.json());
+  document.getElementById('incident-name').value = state.incident_name || '';
+  document.getElementById('sim-toggle').checked = state.simulation_enabled !== false;
+  setModeDisplay(state.mode || 'standard');
+
+  // Load weather config
+  const wx = await fetch('/api/weather/config').then(r=>r.json());
+  if (wx.nws_area) document.getElementById('wx-area').value = wx.nws_area;
+  if (wx.nws_lat) document.getElementById('wx-lat').value = wx.nws_lat;
+  if (wx.nws_lon) document.getElementById('wx-lon').value = wx.nws_lon;
+  document.getElementById('wx-poll').value = wx.poll_interval_sec || 300;
+  const sev = wx.severity_filter || ['Extreme','Severe','Moderate'];
+  document.getElementById('sev-extreme').checked = sev.includes('Extreme');
+  document.getElementById('sev-severe').checked = sev.includes('Severe');
+  document.getElementById('sev-moderate').checked = sev.includes('Moderate');
+  document.getElementById('sev-minor').checked = sev.includes('Minor');
+  document.getElementById('wx-auto-broadcast').checked = wx.auto_broadcast_extreme || false;
+
+  // Load adapter config
+  const ac = await fetch('/api/adapter-config').then(r=>r.json());
+  if (ac.adapters) {
+    document.getElementById('adapter-yaml').value = JSON.stringify(ac.adapters, null, 2);
+    renderAdapterList(ac.adapters);
+    // Pre-fill base location from first mock adapter that has it set
+    const mockWithLoc = ac.adapters.find(a => a.type && a.type.startsWith('mock_') && a.base_lat);
+    if (mockWithLoc) {
+      document.getElementById('base-lat').value = mockWithLoc.base_lat;
+      document.getElementById('base-lon').value = mockWithLoc.base_lon;
+    }
+  }
+  bridgeRules = ac.bridge_rules || [];
+  renderBridgeRules();
+
+  // Load users
+  const users = await fetch('/api/users').then(r=>r.json());
+  renderUsers(users.users || []);
+}
+
+function toggle(id) {
+  const el = document.getElementById(id);
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+function setModeDisplay(mode) {
+  const label = document.getElementById('mode-label');
+  label.textContent = mode.toUpperCase();
+  label.className = `mode-pill mode-${mode}`;
+  document.body.style.borderTop = mode === 'emergency' ? '3px solid #f85149' : '';
+}
+
+async function setMode(mode) {
+  await fetch('/api/state/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode})});
+  setModeDisplay(mode);
+  toast(`Mode set to ${mode.toUpperCase()}`);
+}
+
+async function saveIncident() {
+  const name = document.getElementById('incident-name').value;
+  await fetch('/api/state/incident', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({incident_name: name})});
+  toast('Incident name saved');
+}
+
+async function setSimulation(enabled) {
+  await fetch('/api/state/simulation', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({enabled})});
+  toast(`Simulation ${enabled ? 'enabled' : 'disabled'}`);
+}
+
+async function saveWxConfig() {
+  const sev = [];
+  if (document.getElementById('sev-extreme').checked) sev.push('Extreme');
+  if (document.getElementById('sev-severe').checked) sev.push('Severe');
+  if (document.getElementById('sev-moderate').checked) sev.push('Moderate');
+  if (document.getElementById('sev-minor').checked) sev.push('Minor');
+  const cfg = {
+    nws_area: document.getElementById('wx-area').value.toUpperCase(),
+    nws_lat: parseFloat(document.getElementById('wx-lat').value) || null,
+    nws_lon: parseFloat(document.getElementById('wx-lon').value) || null,
+    poll_interval_sec: parseInt(document.getElementById('wx-poll').value) || 300,
+    severity_filter: sev,
+    auto_broadcast_extreme: document.getElementById('wx-auto-broadcast').checked,
+  };
+  await fetch('/api/weather/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
+  toast('Weather config saved — takes effect immediately');
+}
+
+function renderAdapterList(adapters) {
+  document.getElementById('adapter-list').innerHTML = adapters.map(a =>
+    `<div class="adapter-row">
+      <span class="adapter-name">${esc(a.name)}</span>
+      <span class="adapter-type"> — ${esc(a.type)}</span>
+      ${a.type.startsWith('mock') ? '<span style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-left:6px">[mock]</span>' : ''}
+    </div>`
+  ).join('');
+}
+
+async function saveAdapters() {
+  try {
+    const adapters = JSON.parse(document.getElementById('adapter-yaml').value);
+    const r = await fetch('/api/adapter-config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({adapters, bridge_rules: bridgeRules})});
+    const data = await r.json();
+    toast(data.note || 'Saved');
+  } catch(e) {
+    alert('JSON parse error: ' + e.message);
+  }
+}
+
+async function restartECH() {
+  if (!confirm('Restart ECH service? All connections will be dropped briefly.')) return;
+  try {
+    await fetch('/api/system/restart', {method:'POST'});
+    toast('Restart requested — page will reload in 5s');
+    setTimeout(() => location.reload(), 5000);
+  } catch(e) {
+    toast('Restart requested (check systemctl status ech)');
+  }
+}
+
+function renderUsers(users) {
+  document.getElementById('user-list').innerHTML = users.map(u =>
+    `<div class="user-row">
+      <span class="user-name">${esc(u.username)}</span>
+      <span class="user-role">${esc(u.role)}</span>
+      <button class="btn btn-red" onclick="deleteUser('${esc(u.username)}')" style="padding:3px 8px;font-size:10px">Delete</button>
+    </div>`
+  ).join('') || '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No users</div>';
+}
+
+async function addUser() {
+  const username = document.getElementById('new-username').value;
+  const password = document.getElementById('new-password').value;
+  const role = document.getElementById('new-role').value;
+  if (!username || !password) { alert('Username and password required'); return; }
+  await fetch('/api/users', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, password, role})});
+  const users = await fetch('/api/users').then(r=>r.json());
+  renderUsers(users.users || []);
+  document.getElementById('new-username').value = '';
+  document.getElementById('new-password').value = '';
+  toast(`User ${username} created`);
+}
+
+async function deleteUser(username) {
+  if (!confirm(`Delete user ${username}?`)) return;
+  await fetch(`/api/users/${username}`, {method:'DELETE'});
+  const users = await fetch('/api/users').then(r=>r.json());
+  renderUsers(users.users || []);
+}
+
+async function changeMyPassword() {
+  const pw = document.getElementById('new-pw').value;
+  const confirm = document.getElementById('confirm-pw').value;
+  if (!pw) { alert('Enter a password'); return; }
+  if (pw !== confirm) { alert('Passwords do not match'); return; }
+  await fetch(`/api/users/${currentUser.username}/password`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: pw})});
+  toast('Password changed');
+}
+
+function renderBridgeRules() {
+  document.getElementById('bridge-list').innerHTML = bridgeRules.length ? bridgeRules.map((r,i) =>
+    `<div class="user-row">
+      <span class="user-name" style="font-family:var(--mono);font-size:11px">${esc(r.from_adapter)} → ${esc(r.to_adapter)}</span>
+      <button class="btn btn-red" onclick="deleteBridge(${i})" style="padding:3px 8px;font-size:10px">Remove</button>
+    </div>`
+  ).join('') : '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No bridge rules</div>';
+}
+
+function addBridgeRule() {
+  const from_adapter = document.getElementById('bridge-from').value.trim();
+  const to_adapter   = document.getElementById('bridge-to').value.trim();
+  if (!from_adapter || !to_adapter) { alert('Both adapter names required'); return; }
+  bridgeRules.push({from_adapter, to_adapter});
+  renderBridgeRules();
+  document.getElementById('bridge-from').value = '';
+  document.getElementById('bridge-to').value = '';
+}
+
+function deleteBridge(i) {
+  bridgeRules.splice(i, 1);
+  renderBridgeRules();
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function toast(msg) {
+  const t = document.getElementById('save-toast');
+  t.textContent = '✓ ' + msg;
+  t.style.display = 'inline';
+  setTimeout(() => t.style.display = 'none', 3000);
+}
+
+init();
+</script>
+</body>
+</html>

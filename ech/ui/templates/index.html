@@ -1,0 +1,1515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECH — Emergency Communications Hub</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPgogIDxyZWN0IHg9IjE1IiB5PSI4IiB3aWR0aD0iMiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzNmYjk1MCIvPgogIDxyZWN0IHg9IjEwIiB5PSIxMiIgd2lkdGg9IjEyIiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cG9seWdvbiBwb2ludHM9IjE2LDYgMTIsMTIgMjAsMTIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cmVjdCB4PSIxMyIgeT0iMjQiIHdpZHRoPSI2IiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iMTAiIHI9IjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM4OGJmZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8Y2lyY2xlIGN4PSIyNCIgY3k9IjEwIiByPSIyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzODhiZmQiIHN0cm9rZS13aWR0aD0iMS41Ii8+Cjwvc3ZnPg==">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #0d1117;
+  --bg2:      #161b22;
+  --bg3:      #1c2230;
+  --border:   #30363d;
+  --border2:  #444c56;
+  --text:     #e6edf3;
+  --muted:    #8b949e;
+  --dim:      #484f58;
+  --green:    #3fb950;
+  --green-bg: #122a1a;
+  --yellow:   #d29922;
+  --yellow-bg:#2a1f00;
+  --red:      #f85149;
+  --red-bg:   #2d0f0f;
+  --blue:     #388bfd;
+  --blue-bg:  #051d4d;
+  --mesh:     #58a6ff;
+  --aprs:     #79c0ff;
+  --meshcore: #56d364;
+  --hf:       #e2a44f;
+  --sms:      #c792ea;
+  --wl:       #f78c6c;
+  --mono:     'IBM Plex Mono', monospace;
+  --sans:     'IBM Plex Sans', sans-serif;
+  --header-h: 48px;
+  --sidebar-w: 220px;
+  --compose-h: 180px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; }
+
+/* ── Layout ─────────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-rows: var(--header-h) 26px 1fr;
+  grid-template-columns: var(--sidebar-w) 1fr 280px;
+  height: 100vh;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+#header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+#header .logo {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--green);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+#header .incident-badge {
+  background: var(--yellow-bg);
+  border: 1px solid var(--yellow);
+  color: var(--yellow);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+}
+#header .spacer { flex: 1; }
+#header .operator {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+#clock {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  min-width: 80px;
+  text-align: right;
+}
+.conn-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  display: inline-block;
+  margin-right: 4px;
+}
+.conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+/* ── Sidebar — channels ──────────────────────────────── */
+#sidebar {
+  grid-row: 3;
+  grid-column: 1;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-section {
+  padding: 10px 12px 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--dim);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.channel-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.1s, border-color 0.1s;
+  user-select: none;
+}
+.channel-item:hover { background: var(--bg3); }
+.channel-item.active {
+  background: var(--bg3);
+  border-left-color: var(--blue);
+}
+.ch-icon {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 5px;
+  border-radius: 3px;
+  min-width: 36px;
+  text-align: center;
+}
+.ch-icon.mesh    { background: #0e2a4a; color: var(--mesh); }
+.ch-icon.aprs    { background: #0e2038; color: var(--aprs); }
+.ch-icon.meshc   { background: #122a1a; color: var(--meshcore); }
+.ch-icon.hf      { background: #2a1e08; color: var(--hf); }
+.ch-icon.sms     { background: #1e0e2a; color: var(--sms); }
+.ch-icon.wl      { background: #2a1500; color: var(--wl); }
+.ch-label { font-size: 12px; flex: 1; color: var(--text); }
+.ch-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  background: var(--blue);
+  color: #fff;
+  border-radius: 8px;
+  padding: 1px 6px;
+  min-width: 20px;
+  text-align: center;
+  display: none;
+}
+.ch-badge.has-msgs { display: block; }
+.ch-status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+  flex-shrink: 0;
+}
+.ch-status-dot.ok { background: var(--green); }
+.ch-status-dot.warn { background: var(--yellow); }
+.ch-status-dot.err { background: var(--red); }
+
+.sidebar-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.sidebar-footer button {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.sidebar-footer button:hover { border-color: var(--blue); color: var(--blue); }
+
+/* ── Main inbox ──────────────────────────────────────── */
+#main {
+  grid-row: 3;
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+#filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
+#filter-bar input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  outline: none;
+}
+#filter-bar input:focus { border-color: var(--blue); }
+#filter-bar select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+}
+.msg-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+  scroll-behavior: smooth;
+}
+#messages::-webkit-scrollbar { width: 4px; }
+#messages::-webkit-scrollbar-track { background: transparent; }
+#messages::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.msg {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 0 10px;
+  padding: 6px 14px;
+  border-left: 2px solid transparent;
+  animation: fadeIn 0.2s ease;
+  position: relative;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.msg:hover { background: var(--bg2); }
+.msg.priority-1 { border-left-color: var(--yellow); background: rgba(210,153,34,0.04); }
+.msg.priority-2 { border-left-color: var(--red); background: rgba(248,81,73,0.08); animation: alertPulse 0.4s ease; }
+@keyframes alertPulse { 0%,100%{background:rgba(248,81,73,0.08)} 50%{background:rgba(248,81,73,0.22)} }
+
+.msg-ts {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  padding-top: 2px;
+  text-align: right;
+  line-height: 1.3;
+  grid-row: 1 / 3;
+}
+.msg-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.msg-from {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.msg-from:hover { text-decoration: underline; }
+.msg-adapter-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  letter-spacing: 0.05em;
+}
+.tag-mesh    { background: #0e2a4a; color: var(--mesh); }
+.tag-aprs    { background: #0e2038; color: var(--aprs); }
+.tag-meshc   { background: #122a1a; color: var(--meshcore); }
+.tag-hf      { background: #2a1e08; color: var(--hf); }
+.tag-sms     { background: #1e0e2a; color: var(--sms); }
+.tag-wl      { background: #2a1500; color: var(--wl); }
+.tag-default { background: var(--bg3); color: var(--muted); }
+.msg-priority-flag {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  letter-spacing: 0.05em;
+}
+.flag-1 { background: var(--yellow-bg); color: var(--yellow); }
+.flag-2 { background: var(--red-bg); color: var(--red); }
+.msg-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  margin-top: 2px;
+  word-break: break-word;
+}
+.msg-body.priority-2 { color: #ffb3b0; font-weight: 500; }
+.msg-pos {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--blue);
+  margin-top: 2px;
+}
+
+/* ── Compose ──────────────────────────────────────────── */
+#compose {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#compose-top {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+#compose-adapters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.adapter-toggle {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.1s;
+}
+.adapter-toggle.on.mesh    { background: #0e2a4a; border-color: var(--mesh); color: var(--mesh); }
+.adapter-toggle.on.aprs    { background: #0e2038; border-color: var(--aprs); color: var(--aprs); }
+.adapter-toggle.on.meshc   { background: #122a1a; border-color: var(--meshcore); color: var(--meshcore); }
+.adapter-toggle.on.hf      { background: #2a1e08; border-color: var(--hf); color: var(--hf); }
+.adapter-toggle.on.sms     { background: #1e0e2a; border-color: var(--sms); color: var(--sms); }
+.adapter-toggle.on.wl      { background: #2a1500; border-color: var(--wl); color: var(--wl); }
+#compose-to {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  width: 140px;
+  outline: none;
+}
+#compose-to:focus { border-color: var(--blue); }
+#compose-to::placeholder { color: var(--dim); }
+#priority-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+}
+#compose textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-radius: 4px;
+  resize: none;
+  height: 64px;
+  outline: none;
+  width: 100%;
+}
+#compose textarea:focus { border-color: var(--blue); }
+#compose textarea::placeholder { color: var(--dim); }
+#compose-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#char-counter {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  margin-left: auto;
+}
+#char-counter.warn { color: var(--yellow); }
+#char-counter.over { color: var(--red); }
+#send-btn {
+  background: var(--blue);
+  border: none;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: background 0.1s;
+}
+#send-btn:hover { background: #1f6feb; }
+#send-btn:disabled { background: var(--border2); cursor: not-allowed; }
+#send-btn.emergency { background: var(--red); }
+#send-btn.emergency:hover { background: #da3633; }
+#broadcast-btn {
+  background: var(--yellow-bg);
+  border: 1px solid var(--yellow);
+  color: var(--yellow);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#broadcast-btn:hover { background: rgba(210,153,34,0.2); }
+
+/* ── Right panel — nodes / status ─────────────────────── */
+#right-panel {
+  grid-row: 3;
+  grid-column: 3;
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.panel-tab {
+  flex: 1;
+  padding: 8px 0;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  user-select: none;
+  transition: color 0.1s;
+}
+.panel-tab:hover { color: var(--text); }
+.panel-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+.panel-content { flex: 1; overflow-y: auto; padding: 8px; }
+.panel-content::-webkit-scrollbar { width: 3px; }
+.panel-content::-webkit-scrollbar-thumb { background: var(--border); }
+
+/* Node cards */
+.node-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.node-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.node-id {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+.node-stats {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.stat {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+}
+.stat span { color: var(--muted); }
+.battery-bar {
+  display: inline-block;
+  width: 28px; height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+.battery-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--green);
+  transition: width 0.3s;
+}
+.battery-fill.low { background: var(--yellow); }
+.battery-fill.critical { background: var(--red); }
+
+/* Channel health cards */
+.health-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.health-card.ok    { border-left: 3px solid var(--green); }
+.health-card.warn  { border-left: 3px solid var(--yellow); }
+.health-card.err   { border-left: 3px solid var(--red); }
+.health-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+.health-state {
+  font-family: var(--mono);
+  font-size: 10px;
+  margin-top: 2px;
+}
+.health-state.ok   { color: var(--green); }
+.health-state.warn { color: var(--yellow); }
+.health-state.err  { color: var(--red); }
+.health-detail {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  margin-top: 4px;
+  line-height: 1.6;
+}
+
+/* ── Toast notifications ──────────────────────────────── */
+#toasts {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+.toast {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 8px 14px;
+  border-radius: 4px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  animation: slideIn 0.2s ease;
+  pointer-events: all;
+}
+.toast.ok  { border-left: 3px solid var(--green); }
+.toast.err { border-left: 3px solid var(--red); }
+@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ── System stats bar ───────────────────────────────────────────────────── */
+#sysbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 12px;
+  height: 26px;
+  background: #0a0e14;
+  border-bottom: 1px solid #1c2230;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.sbar-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border-right: 1px solid #1c2230;
+  height: 100%;
+  white-space: nowrap;
+}
+.sbar-item:first-child { padding-left: 0; }
+.sbar-label { color: #2d3540; }
+.sbar-val   { color: var(--muted); }
+.sbar-bar {
+  display: inline-block;
+  width: 36px; height: 4px;
+  background: #1c2230;
+  border-radius: 2px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.sbar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+.fill-cpu  { background: #388bfd; }
+.fill-mem  { background: #3fb950; }
+.fill-disk { background: #d29922; }
+.fill-ok   { background: #3fb950; }
+.fill-warn { background: #d29922; }
+.fill-hot  { background: #f85149; }
+.sbar-sep  { flex: 1; }
+
+.svc-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.svc-card.ok   { border-left: 3px solid var(--green); }
+.svc-card.warn { border-left: 3px solid var(--yellow); }
+.svc-card.err  { border-left: 3px solid var(--red); }
+.svc-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.svc-dot.ok   { background: var(--green); box-shadow: 0 0 4px var(--green); }
+.svc-dot.warn { background: var(--yellow); }
+.svc-dot.err  { background: var(--red); }
+.svc-name  { font-family: var(--mono); font-size: 12px; font-weight: 500; flex: 1; color: var(--text); }
+.svc-state { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.svc-port  { font-family: var(--mono); font-size: 9px; color: var(--dim); }
+.svc-restart { font-family: var(--mono); font-size: 10px; padding: 2px 6px;
+  border-radius: 3px; border: 1px solid var(--border); background: var(--bg);
+  color: var(--muted); cursor: pointer; }
+.svc-restart:hover { border-color: var(--yellow); color: var(--yellow); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Header ───────────────────────────────────────── -->
+  <header id="header">
+    <div class="logo">▣ ECH</div>
+    <div class="incident-badge" id="incident-name">EXERCISE MODE</div>
+    <span class="conn-dot" id="ws-dot"></span>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)" id="ws-status">connecting…</span>
+    <div class="spacer"></div>
+    <span id="mode-indicator" style="font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:3px;background:#122a1a;color:var(--green);margin-right:4px">STANDARD</span>
+    <nav style="display:flex;gap:0;align-items:center">
+      <a href="/map"        style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Node Map">🗺</a>
+      <a href="/anomalies"  style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Anomaly Monitor">⚠</a>
+      <a href="/logs"       style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Log Viewer">📋</a>
+      <a href="/simulation" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Simulation">🎭</a>
+      <a href="/settings"   style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Settings">⚙</a>
+    </nav>
+    <span class="operator" id="operator-display" style="margin-left:8px;cursor:pointer" title="Click to set operator callsign" onclick="promptOperator()">OP: —</span>
+    <button id="tz-btn" onclick="toggleTimezone()" style="font-family:var(--mono);font-size:10px;padding:2px 6px;border:1px solid var(--border);background:var(--bg);color:var(--dim);border-radius:3px;cursor:pointer;margin-left:4px">UTC</button>
+    <div id="clock"></div>
+  </header>
+
+  <!-- ── System stats bar ─────────────────────────────── -->
+  <div id="sysbar">
+    <div class="sbar-item">
+      <span class="sbar-label">CPU</span>
+      <span class="sbar-bar"><span class="sbar-fill fill-cpu" id="cpu-bar" style="width:0%"></span></span>
+      <span class="sbar-val" id="cpu-val">--</span>
+    </div>
+    <div class="sbar-item">
+      <span class="sbar-label">MEM</span>
+      <span class="sbar-bar"><span class="sbar-fill fill-mem" id="mem-bar" style="width:0%"></span></span>
+      <span class="sbar-val" id="mem-val">--</span>
+    </div>
+    <div class="sbar-item">
+      <span class="sbar-label">DISK</span>
+      <span class="sbar-bar"><span class="sbar-fill fill-disk" id="disk-bar" style="width:0%"></span></span>
+      <span class="sbar-val" id="disk-val">--</span>
+    </div>
+    <div class="sbar-item" id="net-item">
+      <span class="sbar-label">NET↑</span>
+      <span class="sbar-val" id="net-tx">--</span>
+      <span class="sbar-label" style="margin-left:6px">↓</span>
+      <span class="sbar-val" id="net-rx">--</span>
+    </div>
+    <div class="sbar-item" id="temp-item" style="display:none">
+      <span class="sbar-label">TEMP</span>
+      <span class="sbar-val" id="temp-val">--</span>
+    </div>
+    <div class="sbar-sep"></div>
+    <div class="sbar-item" style="border-right:none">
+      <span class="sbar-val" id="sysbar-ts" style="color:#2d3540">--</span>
+    </div>
+  </div>
+
+  <!-- ── Sidebar ───────────────────────────────────────── -->
+  <nav id="sidebar">
+    <div class="sidebar-section">Channels</div>
+    <div class="channel-item active" data-adapter="all" onclick="filterAdapter('all', this)">
+      <span class="ch-icon" style="background:var(--bg3);color:var(--muted)">ALL</span>
+      <span class="ch-label">All traffic</span>
+      <span class="ch-badge" id="badge-all"></span>
+      <span class="ch-status-dot ok" id="dot-all"></span>
+    </div>
+    <div id="dynamic-channels"></div>
+
+    <div class="sidebar-section" style="margin-top:8px">Quick send</div>
+    <div class="channel-item" onclick="sendTemplate('Net check-in, all units please respond')">
+      <span class="ch-icon" style="background:var(--bg3);color:var(--muted)">NET</span>
+      <span class="ch-label" style="font-size:11px">Net check-in</span>
+    </div>
+    <div class="channel-item" onclick="sendTemplate('ALL CLEAR — incident concluded, stand down')">
+      <span class="ch-icon" style="background:var(--green-bg);color:var(--green)">CLR</span>
+      <span class="ch-label" style="font-size:11px">All clear</span>
+    </div>
+    <div class="channel-item" onclick="sendEmergencyTemplate()">
+      <span class="ch-icon" style="background:var(--red-bg);color:var(--red)">EMG</span>
+      <span class="ch-label" style="font-size:11px;color:var(--red)">Emergency</span>
+    </div>
+
+    <div class="sidebar-footer">
+      <button onclick="showNodes()">Node list</button>
+      <button onclick="showHealth()">Adapter status</button>
+      <button onclick="showServicePanel()">Service status</button>
+      <button onclick="window.open('/anomalies','_blank')">⚠ Anomaly monitor</button>
+      <button onclick="timeSyncBroadcast()">🕐 Time sync</button>
+      <button onclick="wxBroadcast()">🌩 WX alerts</button>
+      <label style="display:block;margin-top:4px">
+        <input type="file" id="vcf-import" accept=".vcf,.csv" style="display:none" onchange="importContacts(this)">
+        <span style="display:block;width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:11px;padding:6px;border-radius:4px;cursor:pointer;text-align:center" onclick="document.getElementById('vcf-import').click()">Import contacts</span>
+      </label>
+    </div>
+  </nav>
+
+  <!-- ── Main inbox + compose ─────────────────────────── -->
+  <main id="main">
+    <div id="filter-bar">
+      <input type="text" id="search" placeholder="Filter messages…" oninput="applyFilter()">
+      <select id="priority-filter" onchange="applyFilter()">
+        <option value="">All priority</option>
+        <option value="1">Elevated+</option>
+        <option value="2">Emergency</option>
+      </select>
+      <button onclick="clearMessageDisplay()" style="font-family:var(--mono);font-size:10px;padding:4px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--dim);cursor:pointer" title="Clear message display">🗑 Clear</button>
+      <span class="msg-count" id="msg-count">0 messages</span>
+    </div>
+
+    <div id="messages"></div>
+
+    <div id="compose">
+      <div id="compose-top">
+        <div id="compose-adapters"></div>
+        <input type="text" id="compose-to" placeholder="To: callsign (required for WL)">
+        <select id="priority-select" onchange="updateSendBtn()">
+          <option value="0">Normal</option>
+          <option value="1">Elevated</option>
+          <option value="2">Emergency</option>
+        </select>
+      </div>
+      <textarea id="compose-body" placeholder="Compose message…" oninput="updateCharCount()" onkeydown="handleComposKey(event)"></textarea>
+      <div id="compose-bottom">
+        <button id="broadcast-btn" onclick="broadcastAll()">⚡ Broadcast all</button>
+        <span id="char-counter">0 / 255</span>
+        <button id="send-btn" onclick="sendMessage()">Send ↵</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── Right panel ───────────────────────────────────── -->
+  <aside id="right-panel">
+    <div class="panel-tabs">
+      <div class="panel-tab active" onclick="switchTab('nodes', this)">Nodes</div>
+      <div class="panel-tab" onclick="switchTab('health', this)">Adapters</div>
+      <div class="panel-tab" onclick="switchTab('services', this)">Services</div>
+    </div>
+    <div class="panel-content" id="panel-nodes"></div>
+    <div class="panel-content" id="panel-health" style="display:none"></div>
+    <div class="panel-content" id="panel-services" style="display:none"></div>
+  </aside>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────
+const state = {
+  messages: [],          // all received, newest first
+  filter: { adapter: 'all', search: '', priority: '' },
+  unread: {},            // {adapter: count}
+  activeTab: 'nodes',
+  ws: null,
+  wsRetries: 0,
+};
+
+// ── Clock ────────────────────────────────────────────────────────────────
+function tick() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toUTCString().slice(17, 25) + ' UTC';
+}
+setInterval(tick, 1000); tick();
+
+// ── WebSocket ────────────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  state.ws = ws;
+
+  ws.onopen = () => {
+    setWsState(true);
+    state.wsRetries = 0;
+    toast('Connected to ECH bridge', 'ok');
+    loadHistory();
+    pollHealth();
+    setInterval(pollHealth, 15000);
+  };
+
+  ws.onmessage = (e) => {
+    const pkt = JSON.parse(e.data);
+    if (pkt.type === 'message') handleInbound(pkt.data);
+  };
+
+  ws.onclose = () => {
+    setWsState(false);
+    const delay = Math.min(2000 * Math.pow(1.5, state.wsRetries++), 30000);
+    setTimeout(connectWS, delay);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function setWsState(live) {
+  document.getElementById('ws-dot').className = `conn-dot${live ? ' live' : ''}`;
+  document.getElementById('ws-status').textContent = live ? 'live' : 'reconnecting…';
+}
+
+// ── Message handling ─────────────────────────────────────────────────────
+function handleInbound(msg) {
+  state.messages.unshift(msg);
+  if (state.messages.length > 2000) state.messages.length = 2000;
+
+  // Unread badge
+  const a = msg.source_adapter;
+  state.unread[a] = (state.unread[a] || 0) + 1;
+  const badge = document.getElementById(`badge-${a}`);
+  if (badge) {
+    badge.textContent = state.unread[a];
+    badge.classList.add('has-msgs');
+  }
+
+  // Insert into DOM if passes filter
+  if (msgPassesFilter(msg)) {
+    prependMsgDOM(msg);
+    updateCount();
+  }
+
+  // Priority alert
+  if (msg.priority >= 2) {
+    toast(`🚨 EMERGENCY from ${msg.from_display || msg.from_id}: ${msg.body.slice(0, 60)}`, 'err');
+  }
+}
+
+function msgPassesFilter(msg) {
+  const f = state.filter;
+  if (f.adapter !== 'all' && msg.source_adapter !== f.adapter) return false;
+  if (f.priority && msg.priority < parseInt(f.priority)) return false;
+  if (f.search && !`${msg.from_display} ${msg.from_id} ${msg.body}`.toLowerCase().includes(f.search.toLowerCase())) return false;
+  return true;
+}
+
+function prependMsgDOM(msg) {
+  const el = buildMsgEl(msg);
+  const container = document.getElementById('messages');
+  if (container.firstChild) {
+    container.insertBefore(el, container.firstChild);
+  } else {
+    container.appendChild(el);
+  }
+  // Keep newest visible
+  if (container.scrollTop < 80) container.scrollTop = 0;
+}
+
+function buildMsgEl(msg) {
+  const div = document.createElement('div');
+  div.className = `msg priority-${msg.priority}`;
+  div.dataset.id = msg.id;
+  div.dataset.adapter = msg.source_adapter;
+  div.dataset.priority = msg.priority;
+  div.dataset.text = `${msg.from_display||msg.from_id} ${msg.body}`.toLowerCase();
+
+  const ts = new Date(msg.timestamp);
+  const timeStr = ts.toUTCString().slice(17, 22);
+
+  const adapterTag = adapterTagHTML(msg.source_adapter);
+  const priorityFlag = msg.priority > 0 ?
+    `<span class="msg-priority-flag flag-${msg.priority}">${msg.priority === 2 ? 'EMRG' : 'ELVT'}</span>` : '';
+
+  const _lat = (msg.lat != null && msg.lat !== '' && !isNaN(msg.lat)) ? parseFloat(msg.lat) : null;
+  const _lon = (msg.lon != null && msg.lon !== '' && !isNaN(msg.lon)) ? parseFloat(msg.lon) : null;
+  const posStr = (_lat != null && _lon != null) ?
+    `<div class="msg-pos">⌖ ${_lat.toFixed(4)}, ${_lon.toFixed(4)}</div>` : '';
+
+  const bodyClass = msg.priority === 2 ? 'msg-body priority-2' : 'msg-body';
+
+  div.innerHTML = `
+    <div class="msg-ts">${timeStr}<br><span style="font-size:9px;color:var(--dim)">${msg.source_channel||''}</span></div>
+    <div>
+      <div class="msg-header">
+        <span class="msg-from" onclick="fillTo('${escHtml(msg.from_id)}')">${escHtml(msg.from_display||msg.from_id)}</span>
+        ${adapterTag}
+        ${priorityFlag}
+      </div>
+      <div class="${bodyClass}">${escHtml(msg.body)}</div>
+      ${posStr}
+    </div>
+  `;
+  return div;
+}
+
+function adapterTagHTML(adapter) {
+  if (adapter.includes('wx-service') || adapter.includes('nws'))
+    return `<span class="msg-adapter-tag" style="background:#0a1a2a;color:#79c0ff">WX</span>`;
+  const m = adapterMeta(adapter);
+  const styleMap = {
+    mesh:  'background:#0e2a4a;color:var(--mesh)',
+    aprs:  'background:#0e2038;color:var(--aprs)',
+    meshc: 'background:#122a1a;color:var(--meshcore)',
+    hf:    'background:#2a1e08;color:var(--hf)',
+    sms:   'background:#1e0e2a;color:var(--sms)',
+    wl:    'background:#2a1500;color:var(--wl)',
+    rns:   'background:#0e1e2a;color:#56a0d3',
+  };
+  const style = styleMap[m.cls] || 'background:var(--bg3);color:var(--muted)';
+  return `<span class="msg-adapter-tag" style="${style}">${m.icon}</span>`;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── History load ─────────────────────────────────────────────────────────
+async function loadHistory() {
+  const r = await fetch('/api/messages?limit=200');
+  const data = await r.json();
+  // Messages come newest-first from DB already
+  data.messages.forEach(m => { m.timestamp = m.timestamp; state.messages.push(m); });
+  renderAll();
+}
+
+function renderAll() {
+  const container = document.getElementById('messages');
+  container.innerHTML = '';
+  const filtered = state.messages.filter(msgPassesFilter);
+  filtered.forEach(m => {
+    container.appendChild(buildMsgEl(m));
+  });
+  updateCount();
+}
+
+function updateCount() {
+  const visible = document.querySelectorAll('#messages .msg').length;
+  document.getElementById('msg-count').textContent = `${visible} message${visible !== 1 ? 's' : ''}`;
+}
+
+// ── Filters ──────────────────────────────────────────────────────────────
+function filterAdapter(adapter, el) {
+  state.filter.adapter = adapter;
+  document.querySelectorAll('.channel-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  // Clear unread for this adapter
+  if (adapter !== 'all') {
+    state.unread[adapter] = 0;
+    const badge = document.getElementById(`badge-${adapter}`);
+    if (badge) { badge.textContent = ''; badge.classList.remove('has-msgs'); }
+  }
+  renderAll();
+}
+
+function applyFilter() {
+  state.filter.search = document.getElementById('search').value;
+  state.filter.priority = document.getElementById('priority-filter').value;
+  renderAll();
+}
+
+// ── Compose ──────────────────────────────────────────────────────────────
+function updateCharCount() {
+  const body = document.getElementById('compose-body').value;
+  const counter = document.getElementById('char-counter');
+  counter.textContent = `${body.length} / 255`;
+  counter.className = body.length > 255 ? 'over' : body.length > 200 ? 'warn' : '';
+}
+
+function updateSendBtn() {
+  const p = parseInt(document.getElementById('priority-select').value);
+  const btn = document.getElementById('send-btn');
+  btn.className = p === 2 ? 'emergency' : '';
+  btn.textContent = p === 2 ? '🚨 SEND EMERGENCY' : 'Send ↵';
+}
+
+function toggleAdapter(el) {
+  el.classList.toggle('on');
+}
+
+function getSelectedAdapters() {
+  return [...document.querySelectorAll('.adapter-toggle.on')]
+    .map(el => el.dataset.adapter);
+}
+
+function handleComposKey(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendMessage();
+}
+
+async function sendMessage() {
+  const body = document.getElementById('compose-body').value.trim();
+  if (!body) return;
+  const adapters = getSelectedAdapters();
+  if (!adapters.length) { toast('No adapters selected', 'err'); return; }
+
+  const priority = parseInt(document.getElementById('priority-select').value);
+  const toId = document.getElementById('compose-to').value.trim() || null;
+
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+
+  const r = await fetch('/api/messages', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ body, adapters, to_id: toId, priority }),
+  });
+  const data = await r.json();
+  btn.disabled = false;
+
+  const results = data.results || {};
+  const succeeded = Object.entries(results).filter(([k,v]) => v).map(([k]) => k);
+  const failed    = Object.entries(results).filter(([k,v]) => !v).map(([k]) => k);
+
+  if (succeeded.length > 0) {
+    toast(`Sent via: ${succeeded.join(', ')}`, 'ok');
+    document.getElementById('compose-body').value = '';
+    updateCharCount();
+  }
+  if (failed.length > 0) {
+    // Show helpful reason for each failed adapter
+    const reasons = failed.map(name => {
+      if (name.includes('winlink') || name.includes('pat')) {
+        const toId = document.getElementById('compose-to').value.trim();
+        return toId ? `${name} (check Pat is running: sudo systemctl status pat)` : `${name} (Winlink requires a To: callsign or email)`;
+      }
+      return name;
+    });
+    toast(`Could not send via: ${reasons.join('; ')}`, 'err');
+  }
+  if (succeeded.length === 0 && failed.length === 0) {
+    toast('No adapters responded', 'err');
+  }
+}
+
+function sendTemplate(text) {
+  document.getElementById('compose-body').value = text;
+  updateCharCount();
+  document.getElementById('compose-body').focus();
+}
+
+function sendEmergencyTemplate() {
+  document.getElementById('priority-select').value = '2';
+  updateSendBtn();
+  document.getElementById('compose-body').value = 'EMERGENCY — all units report status immediately';
+  updateCharCount();
+  document.getElementById('compose-body').focus();
+}
+
+async function broadcastAll() {
+  const body = document.getElementById('compose-body').value.trim();
+  if (!body) { toast('Enter message before broadcast', 'err'); return; }
+  document.querySelectorAll('.adapter-toggle').forEach(el => el.classList.add('on'));
+  await sendMessage();
+}
+
+function fillTo(callsign) {
+  document.getElementById('compose-to').value = callsign;
+  document.getElementById('compose-body').focus();
+}
+
+// ── Right panel ──────────────────────────────────────────────────────────
+function switchTab(tab, el) {
+  state.activeTab = tab;
+  document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('panel-nodes').style.display    = tab === 'nodes'    ? '' : 'none';
+  document.getElementById('panel-health').style.display   = tab === 'health'   ? '' : 'none';
+  document.getElementById('panel-services').style.display = tab === 'services' ? '' : 'none';
+  if (tab === 'services') loadServiceStatus();
+}
+
+function showNodes() {
+  switchTab('nodes', document.querySelector('.panel-tab'));
+}
+function showHealth() {
+  switchTab('health', document.querySelectorAll('.panel-tab')[1]);
+}
+
+async function pollHealth() {
+  try {
+    const r = await fetch('/api/channels');
+    const data = await r.json();
+    renderHealth(data.channels);
+    updateHealthDots(data.channels);
+    await loadAllNodes(data.channels);
+  } catch(e) {
+    console.error('Health poll failed', e);
+  }
+}
+
+async function loadAllNodes(channels) {
+  const meshAdapters = channels
+    .filter(c => c.adapter.includes('meshtastic') || c.adapter.includes('meshcore'))
+    .map(c => c.adapter);
+
+  let allNodes = [];
+  for (const a of meshAdapters) {
+    const r = await fetch(`/api/nodes/${a}`);
+    const data = await r.json();
+    allNodes = allNodes.concat(data.nodes.map(n => ({...n, _adapter: a})));
+  }
+  renderNodes(allNodes);
+}
+
+function renderNodes(nodes) {
+  const el = document.getElementById('panel-nodes');
+  if (!nodes.length) { el.innerHTML = '<div style="padding:12px;font-family:var(--mono);font-size:11px;color:var(--dim)">No mesh nodes</div>'; return; }
+  el.innerHTML = nodes.map(n => {
+    const batt = (n.battery_level != null && !isNaN(n.battery_level)) ? parseInt(n.battery_level) : null;
+    const battClass = batt != null ? (batt < 20 ? 'critical' : batt < 40 ? 'low' : '') : '';
+    const adapterLabel = n._adapter?.includes('meshcore') ? 'MCC' : 'MESH';
+    const adapterColor = n._adapter?.includes('meshcore') ? 'var(--meshcore)' : 'var(--mesh)';
+    const heard = n.last_heard ? new Date(n.last_heard).toUTCString().slice(17,22) : '--';
+    return `<div class="node-card">
+      <div class="node-name">${escHtml(n.display_name)} <span style="font-size:9px;color:${adapterColor}">${adapterLabel}</span></div>
+      <div class="node-id">${escHtml(n.node_id)}</div>
+      <div class="node-stats">
+        <span class="stat">heard <span>${heard}</span></span>
+        ${(n.snr != null && !isNaN(n.snr)) ? `<span class="stat">SNR <span>${parseFloat(n.snr).toFixed(1)}dB</span></span>` : ''}
+        ${n.rssi != null ? `<span class="stat">RSSI <span>${n.rssi}</span></span>` : ''}
+        ${n.battery_level != null ? `<span class="stat">bat <span><span class="battery-bar"><span class="battery-fill ${battClass}" style="width:${batt}%"></span></span>${batt}%</span></span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderHealth(channels) {
+  const el = document.getElementById('panel-health');
+  el.innerHTML = channels.map(ch => {
+    const stateClass = ch.state === 'connected' ? 'ok' : ch.state === 'error' ? 'err' : 'warn';
+    const detail = ch.detail ? Object.entries(ch.detail)
+      .map(([k,v]) => `${k}: ${v}`).join('<br>') : '';
+    const lastRx = ch.last_rx ? new Date(ch.last_rx).toUTCString().slice(17,22) : 'never';
+    return `<div class="health-card ${stateClass}">
+      <div class="health-name">${escHtml(ch.adapter)}</div>
+      <div class="health-state ${stateClass}">${ch.state}</div>
+      <div class="health-detail">last rx: ${lastRx}<br>${detail}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Toasts ───────────────────────────────────────────────────────────────
+function toast(msg, type = '') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ── Contact import ───────────────────────────────────────────────────────
+async function importContacts(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  const r = await fetch('/api/contacts/import', { method: 'POST', body: form });
+  const data = await r.json();
+  if (data.status === 'ok') {
+    toast(`Imported ${data.imported} contact${data.imported !== 1 ? 's' : ''}`, 'ok');
+  } else {
+    toast(`Import error: ${data.detail}`, 'err');
+  }
+  input.value = '';
+}
+
+// ── Dynamic adapter detection ──────────────────────────────────────────
+// Maps adapter name patterns to display config
+function adapterMeta(name) {
+  const n = name.toLowerCase();
+  if (n.includes('meshtastic')) return {icon:'MESH', label:'Meshtastic', cls:'mesh', toggle:'MESH'};
+  if (n.includes('meshcore'))   return {icon:'MCC',  label:'MeshCore',   cls:'meshc',toggle:'MCC'};
+  if (n.includes('aprs'))       return {icon:'APRS', label:'APRS',       cls:'aprs', toggle:'APRS'};
+  if (n.includes('js8') || n.includes('hf')) return {icon:'HF', label:'JS8Call HF', cls:'hf', toggle:'HF'};
+  if (n.includes('sms'))        return {icon:'SMS',  label:'SMS',        cls:'sms',  toggle:'SMS'};
+  if (n.includes('winlink') || n.includes('pat')) return {icon:'WL', label:'Winlink', cls:'wl', toggle:'WL'};
+  if (n.includes('reticulum') || n.includes('rns')) return {icon:'RNS', label:'Reticulum', cls:'rns', toggle:'RNS'};
+  return {icon:name.slice(0,4).toUpperCase(), label:name, cls:'', toggle:name.slice(0,4).toUpperCase()};
+}
+
+let knownAdapters = [];
+
+async function buildDynamicUI() {
+  try {
+    const r = await fetch('/api/channels');
+    const data = await r.json();
+    knownAdapters = data.channels.map(c => c.adapter);
+
+    // Build sidebar channel items
+    const sidebar = document.getElementById('dynamic-channels');
+    sidebar.innerHTML = knownAdapters.map(name => {
+      const m = adapterMeta(name);
+      const iconStyle = m.cls ? '' : 'background:var(--bg3);color:var(--muted)';
+      return `<div class="channel-item" data-adapter="${name}" onclick="filterAdapter('${name}', this)">
+        <span class="ch-icon ${m.cls}" style="${iconStyle}">${m.icon}</span>
+        <span class="ch-label">${m.label}${name.includes('mock') ? ' <span style="font-size:9px;color:var(--dim)">[mock]</span>' : ''}</span>
+        <span class="ch-badge" id="badge-${name}"></span>
+        <span class="ch-status-dot" id="dot-${name}"></span>
+      </div>`;
+    }).join('');
+
+    // Build compose adapter toggles
+    const compose = document.getElementById('compose-adapters');
+    compose.innerHTML = knownAdapters.map(name => {
+      const m = adapterMeta(name);
+      return `<div class="adapter-toggle on ${m.cls}" data-adapter="${name}" onclick="toggleAdapter(this)">${m.toggle}</div>`;
+    }).join('');
+
+    // Update health dots
+    updateHealthDots(data.channels);
+  } catch(e) {
+    console.error('buildDynamicUI failed:', e);
+  }
+}
+
+function updateHealthDots(channels) {
+  channels.forEach(ch => {
+    const dot = document.getElementById('dot-' + ch.adapter);
+    if (dot) {
+      dot.className = 'ch-status-dot ' +
+        (ch.state === 'connected' ? 'ok' : ch.state === 'error' ? 'err' : 'warn');
+    }
+  });
+}
+
+// ── Service status ───────────────────────────────────────────────────────
+async function loadServiceStatus() {
+  const el = document.getElementById('panel-services');
+  if (!el) return;
+  el.innerHTML = '<div style="padding:10px;font-family:var(--mono);font-size:11px;color:var(--dim)">Checking…</div>';
+  try {
+    const data = await fetch('/api/system/services').then(r => r.json());
+    el.innerHTML = data.services.map(s => {
+      const cls = s.ok ? 'ok' : (s.active === 'inactive' ? 'warn' : 'err');
+      return `<div class="svc-card ${cls}">
+        <div class="svc-dot ${cls}"></div>
+        <div style="flex:1;min-width:0">
+          <div class="svc-name">${esc(s.label)}</div>
+          <div class="svc-state">${esc(s.active)} · ${esc(s.enabled)}
+            ${s.port ? `<span class="svc-port"> :${esc(s.port)}</span>` : ''}
+          </div>
+        </div>
+        <button class="svc-restart" onclick="restartService('${esc(s.name)}')" title="Restart ${esc(s.label)}">↺</button>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div style="padding:10px;font-family:var(--mono);font-size:11px;color:var(--red)">Failed to load service status</div>';
+  }
+}
+
+async function restartService(name) {
+  if (!confirm(`Restart ${name}? Active connections will be dropped briefly.`)) return;
+  toast(`Restarting ${name}…`);
+  try {
+    const r = await fetch(`/api/system/services/${name}/restart`, {method:'POST'});
+    const d = await r.json();
+    if (d.status === 'ok') {
+      toast(`${name} restarted`, 'ok');
+    } else {
+      toast(`Restart failed: ${d.stderr || d.detail || 'unknown error'}`, 'err');
+    }
+    setTimeout(loadServiceStatus, 2000);
+  } catch(e) {
+    toast('Restart request failed', 'err');
+  }
+}
+
+function showServicePanel() {
+  const tab = document.querySelectorAll('.panel-tab')[2];
+  switchTab('services', tab);
+}
+
+
+// ── Operator callsign ─────────────────────────────────────────────────────
+async function promptOperator() {
+  const current = document.getElementById('operator-display').textContent.replace('OP: ','').trim();
+  const cs = prompt('Enter operator callsign:', current === '—' ? '' : current);
+  if (cs === null) return;   // cancelled
+  await fetch('/api/state/operator', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({callsign: cs.toUpperCase()})
+  });
+  document.getElementById('operator-display').textContent = 'OP: ' + (cs.toUpperCase() || '—');
+}
+
+// ── Timezone toggle ───────────────────────────────────────────────────────
+let _showLocal = localStorage.getItem('ech_show_local_time') === 'true';
+
+function toggleTimezone() {
+  _showLocal = !_showLocal;
+  localStorage.setItem('ech_show_local_time', _showLocal);
+  const btn = document.getElementById('tz-btn');
+  if (btn) btn.textContent = _showLocal ? 'LOCAL' : 'UTC';
+  renderAll();   // re-render messages with new timezone
+}
+
+function formatMsgTime(isoStr) {
+  if (!isoStr) return '--';
+  const d = new Date(isoStr);
+  if (_showLocal) {
+    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+  // UTC
+  return d.toUTCString().slice(17, 25) + ' UTC';
+}
+
+// ── Clear message display ─────────────────────────────────────────────────
+function clearMessageDisplay() {
+  // Clear in-memory message list
+  state.messages = [];
+  // Clear DOM
+  const container = document.getElementById('messages');
+  if (container) container.innerHTML = '';
+  updateCount();
+  // Reset all unread badges
+  if (state.unread) {
+    Object.keys(state.unread).forEach(k => {
+      state.unread[k] = 0;
+      const badge = document.getElementById('badge-' + k);
+      if (badge) { badge.textContent = ''; badge.classList.remove('has-msgs'); }
+    });
+  }
+  // Signal other tabs/windows
+  try { localStorage.setItem('ech_clear_messages', Date.now().toString()); } catch(e) {}
+}
+
+// Listen for clear signal from other tabs or simulation page
+window.addEventListener('storage', (e) => {
+  if (e.key === 'ech_clear_messages') {
+    state.messages = [];
+    const container = document.getElementById('messages');
+    if (container) container.innerHTML = '';
+    updateCount();
+  }
+});
+window.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'clear_messages') clearMessageDisplay();
+});
+
+// ── System stats ─────────────────────────────────────────────────────────
+let _prevNet = null;
+let _sysbarEnabled = localStorage.getItem('sysbar_enabled') !== 'false';
+
+function _fmtBytes(b) {
+  if (b == null) return '--';
+  if (b < 1024)       return b + 'B';
+  if (b < 1024**2)    return (b/1024).toFixed(1) + 'KB';
+  if (b < 1024**3)    return (b/1024**2).toFixed(1) + 'MB';
+  return (b/1024**3).toFixed(2) + 'GB';
+}
+
+function _fmtRate(bytes, secs) {
+  if (bytes == null || secs <= 0) return '--';
+  return _fmtBytes(Math.round(bytes / secs)) + '/s';
+}
+
+async function updateSysbar() {
+  const bar = document.getElementById('sysbar');
+  if (!bar) return;
+  if (!_sysbarEnabled) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+
+  try {
+    const s = await fetch('/api/system/stats').then(r => r.json());
+    if (s.error) return;
+
+    const now = Date.now() / 1000;
+
+    // CPU
+    const cpuPct = s.cpu_pct || 0;
+    const cpuFill = document.getElementById('cpu-bar');
+    const cpuVal  = document.getElementById('cpu-val');
+    if (cpuFill) cpuFill.style.width = cpuPct + '%';
+    if (cpuFill) cpuFill.className = 'sbar-fill ' + (cpuPct > 90 ? 'fill-hot' : cpuPct > 70 ? 'fill-warn' : 'fill-cpu');
+    if (cpuVal)  cpuVal.textContent = cpuPct.toFixed(0) + '%';
+
+    // Memory
+    const memPct  = s.mem_pct || 0;
+    const memFill = document.getElementById('mem-bar');
+    const memVal  = document.getElementById('mem-val');
+    if (memFill) memFill.style.width = memPct + '%';
+    if (memFill) memFill.className = 'sbar-fill ' + (memPct > 90 ? 'fill-hot' : memPct > 75 ? 'fill-warn' : 'fill-mem');
+    if (memVal)  memVal.textContent = s.mem_used_mb + '/' + s.mem_total_mb + 'MB';
+
+    // Disk
+    const diskPct  = s.disk_pct || 0;
+    const diskFill = document.getElementById('disk-bar');
+    const diskVal  = document.getElementById('disk-val');
+    if (diskFill) diskFill.style.width = diskPct + '%';
+    if (diskFill) diskFill.className = 'sbar-fill ' + (diskPct > 90 ? 'fill-hot' : diskPct > 75 ? 'fill-warn' : 'fill-disk');
+    if (diskVal)  diskVal.textContent = s.disk_used_gb + '/' + s.disk_total_gb + 'GB';
+
+    // Network rates (delta since last poll)
+    const netTxEl = document.getElementById('net-tx');
+    const netRxEl = document.getElementById('net-rx');
+    if (_prevNet && netTxEl && netRxEl) {
+      const dt = now - _prevNet.ts;
+      const txRate = _fmtRate(s.net_bytes_sent - _prevNet.tx, dt);
+      const rxRate = _fmtRate(s.net_bytes_recv - _prevNet.rx, dt);
+      netTxEl.textContent = txRate;
+      netRxEl.textContent = rxRate;
+    }
+    _prevNet = { ts: now, tx: s.net_bytes_sent, rx: s.net_bytes_recv };
+
+    // Temperature (if available)
+    const tempItem = document.getElementById('temp-item');
+    const tempVal  = document.getElementById('temp-val');
+    if (tempItem && tempVal && s.temps && Object.keys(s.temps).length > 0) {
+      const t = Object.values(s.temps)[0];
+      tempVal.textContent = t.toFixed(0) + '°C';
+      tempVal.style.color = t > 80 ? 'var(--red)' : t > 65 ? 'var(--yellow)' : 'var(--muted)';
+      tempItem.style.display = 'flex';
+    }
+
+    // Timestamp
+    const ts = document.getElementById('sysbar-ts');
+    if (ts) ts.textContent = new Date().toUTCString().slice(17, 25) + ' UTC';
+
+  } catch(e) { /* silent fail - don't break UI if psutil missing */ }
+}
+
+function setSysbarEnabled(enabled) {
+  _sysbarEnabled = enabled;
+  localStorage.setItem('sysbar_enabled', enabled ? 'true' : 'false');
+  updateSysbar();
+}
+
+// ── Weather & Time ────────────────────────────────────────────────────────
+async function wxBroadcast() {
+  const r = await fetch('/api/weather/broadcast', {method:'POST'});
+  toast(r.ok ? 'WX alert broadcast sent to all adapters' : 'WX broadcast failed', r.ok ? 'ok' : 'err');
+}
+async function timeSyncBroadcast() {
+  const r = await fetch('/api/time-sync', {method:'POST'});
+  toast(r.ok ? 'Time sync broadcast sent' : 'Failed', r.ok ? 'ok' : 'err');
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────
+buildDynamicUI();
+connectWS();
+updateSysbar();
+setInterval(updateSysbar, 5000);
+setInterval(() => { if (state.activeTab === 'services') loadServiceStatus(); }, 15000);
+// Poll ECH state for mode indicator
+async function updateModeIndicator() {
+  try {
+    const s = await fetch('/api/state').then(r=>r.json());
+    const el = document.getElementById('mode-indicator');
+    if (el) {
+      el.textContent = (s.mode||'standard').toUpperCase();
+      el.style.background = s.mode==='emergency' ? 'rgba(248,81,73,.15)' : '#122a1a';
+      el.style.color = s.mode==='emergency' ? 'var(--red)' : 'var(--green)';
+      if (s.incident_name) document.getElementById('incident-name') && (document.getElementById('incident-name').textContent = s.incident_name);
+    }
+    const inc = document.getElementById('incident-name');
+    if (inc) inc.textContent = s.incident_name || 'EXERCISE';
+    const op = document.getElementById('operator-display');
+    if (op) op.textContent = 'OP: ' + (s.operator_callsign || '—');
+  } catch(e) {}
+}
+updateModeIndicator();
+setInterval(updateModeIndicator, 30000);
+</script>
+</body>
+</html>

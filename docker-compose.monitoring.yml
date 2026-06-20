@@ -1,0 +1,79 @@
+version: "3.9"
+
+# ECH Observability Stack
+# Brings up Prometheus, Grafana, Loki, and Promtail alongside ECH.
+# ECH must already be running on the host at port 8765.
+#
+# Usage:
+#   docker compose -f docker-compose.monitoring.yml up -d
+#
+# Access:
+#   Grafana:    http://localhost:3000  (admin / admin)
+#   Prometheus: http://localhost:9090
+#
+# On ARM64 (Raspberry Pi 5): all images have arm64 variants, this file works as-is.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: ech-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # lets container reach ECH on host
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: ech-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/ech_overview.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: ech-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/loki.yml
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    container_name: ech-promtail
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/log/ech:/var/log/ech:ro        # ECH log directory
+    command: -config.file=/etc/promtail/promtail.yml
+    depends_on:
+      - loki
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:

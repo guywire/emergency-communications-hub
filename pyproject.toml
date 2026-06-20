@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ech"
+version = "0.1.0"
+description = "Emergency Communications Hub — unified messaging bridge"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "websockets>=12",
+    "pydantic>=2.7",
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.20",
+    "pyserial>=3.5",
+    "pyserial-asyncio>=0.6",
+    "aprslib>=0.7",
+    "meshtastic>=2.3",
+    "esptool>=4.7",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "aiofiles>=23.2",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "prometheus-client>=0.20",
+    "croniter>=2.0",
+    "aiomqtt>=2.3",
+    "bcrypt>=4.1",
+    "psutil>=5.9",
+    "smspdudecoder>=1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "prometheus-client>=0.20",
+    "croniter>=2.0",
+    "aiomqtt>=2.3",
+    "bcrypt>=4.1",
+    "psutil>=5.9",
+    "smspdudecoder>=1.1",
+]
+
+[project.scripts]
+ech = "ech.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ech*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

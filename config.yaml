@@ -1,0 +1,275 @@
+# ECH — Emergency Communications Hub
+# Configuration file
+# Copy this to /etc/ech/config.yaml for production deployment.
+
+server:
+  host: "0.0.0.0"
+  port: 8765
+
+database:
+  path: "ech.db"
+
+logging:
+  level: "INFO"
+
+operator:
+  callsign: "N0CALL"
+  name: "ECH Operator"
+
+incident:
+  name: "EXERCISE"
+
+# ── Adapters ──────────────────────────────────────────────────────────────
+# type options (mock):
+#   mock_meshtastic  — simulated Meshtastic mesh traffic
+#   mock_aprs        — simulated APRS-IS/TNC traffic
+#   mock_meshcore    — simulated MeshCore traffic
+#
+# type options (real hardware — uncomment when ready):
+#   meshtastic       — real Meshtastic node via USB serial/BLE/TCP
+#   aprs_kiss        — real TNC via KISS serial or Direwolf AGWPE TCP
+#   aprs_is          — real APRS-IS internet connection
+#   meshcore         — real MeshCore node via USB serial/BLE
+
+adapters:
+  - type: mock_meshtastic
+    name: meshtastic-mock
+    channel: 0
+    interval_sec: 8.0
+    node_count: 5
+
+  - type: mock_aprs
+    name: aprs-mock
+    source: aprsis          # aprsis | kiss | agwpe
+    filter_radius: 50       # km
+    interval_sec: 12.0
+
+  - type: mock_meshcore
+    name: meshcore-mock
+    channel: TAC-1
+    interval_sec: 15.0
+
+# ── Real hardware examples (commented out) ───────────────────────────────
+#
+# Meshtastic via USB serial:
+#   - type: meshtastic
+#     name: meshtastic-usb
+#     port: /dev/ttyUSB0      # or /dev/ttyACM0
+#     channel: 0
+#
+# Meshtastic via TCP (remote node on AREDN/LAN):
+#   - type: meshtastic
+#     name: meshtastic-net
+#     host: 192.168.1.50
+#     port: 4403
+#     channel: 0
+#
+# APRS via KISS TNC serial:
+#   - type: aprs_kiss
+#     name: aprs-tnc
+#     port: /dev/ttyUSB1
+#     baud: 9600
+#
+# APRS via APRS-IS internet:
+#   - type: aprs_is
+#     name: aprs-internet
+#     callsign: W1ABC-9
+#     passcode: 12345
+#     server: rotate.aprs2.net
+#     filter: "r/44.1/-69.1/50"
+#
+# APRS via Direwolf AGWPE TCP:
+#   - type: aprs_kiss
+#     name: aprs-direwolf
+#     host: localhost
+#     agwpe_port: 8000
+#
+# MeshCore via USB serial:
+#   - type: meshcore
+#     name: meshcore-usb
+#     port: /dev/ttyUSB2
+#     channel: TAC-1
+
+# ── Bridge rules (optional) ──────────────────────────────────────────────
+# Forward messages from one adapter to another.
+# bridge_rules:
+#   - from_adapter: meshtastic-usb
+#     to_adapter: aprs-internet
+#   - from_adapter: aprs-tnc
+#     to_adapter: meshtastic-usb
+
+# ── Real hardware examples added ─────────────────────────────────────────
+#
+# MeshCore via USB serial (Companion Radio firmware):
+#   - type: meshcore
+#     name: meshcore-usb
+#     transport: serial
+#     port: /dev/ttyUSB0       # or /dev/ttyACM0
+#     baud: 115200
+#     channel_idx: 0           # 0=public channel
+#     poll_interval: 2.0
+#
+# MeshCore via WiFi TCP (ESP32 with SerialWifiInterface):
+#   - type: meshcore
+#     name: meshcore-wifi
+#     transport: tcp
+#     host: 192.168.1.50
+#     tcp_port: 4403
+#     channel_idx: 0
+#
+# APRS-IS internet connection:
+#   - type: aprs_is
+#     name: aprs-internet
+#     callsign: W1ABC-9
+#     passcode: 12345          # -1 for receive-only
+#     server: rotate.aprs2.net
+#     filter: "r/44.1/-69.1/100"
+#
+# APRS KISS TNC via serial (hardware TNC):
+#   - type: aprs_kiss
+#     name: aprs-tnc
+#     transport: serial
+#     port: /dev/ttyUSB1
+#     baud: 9600
+#     callsign: W1ABC-9
+#     tx_path: WIDE1-1,WIDE2-1
+#
+# APRS KISS via Direwolf TCP:
+#   - type: aprs_kiss
+#     name: aprs-direwolf
+#     transport: tcp
+#     host: localhost
+#     tcp_port: 8001           # Direwolf default KISS-over-TCP port
+#     callsign: W1ABC-9
+
+# ── JS8Call HF adapter ────────────────────────────────────────────────────
+# (mock — for development without JS8Call running)
+  - type: mock_js8call
+    name: hf-js8call-mock
+    callsign: N0CALL        # replace with your callsign
+    interval_sec: 20.0
+
+# Real JS8Call (requires JS8Call running with TCP API enabled on port 2442):
+#   - type: js8call
+#     name: hf-js8call
+#     host: 127.0.0.1
+#     port: 2442
+#     callsign: W1ABC-9
+#     hb_interval: 30
+#     rx_activity: false     # true to see all raw band activity (noisy)
+#
+# Real Meshtastic (USB serial):
+#   - type: meshtastic
+#     name: meshtastic-usb
+#     transport: serial
+#     port: /dev/ttyUSB0     # or null for auto-detect
+#     channel_idx: 0
+#
+# Real Meshtastic (TCP/WiFi):
+#   - type: meshtastic
+#     name: meshtastic-wifi
+#     transport: tcp
+#     host: 192.168.1.100
+#     channel_idx: 0
+
+# ── SMS modem adapter ─────────────────────────────────────────────────────
+# (mock — for development without a physical modem)
+  - type: mock_sms
+    name: sms-mock
+    interval_sec: 25.0
+
+# Real SMS modem (SIM800L, SIM7600, Huawei E3372, etc.):
+#   - type: sms
+#     name: sms
+#     port: /dev/ttyUSB0     # SIM7600: usually /dev/ttyUSB0
+#                            # SIM800L: /dev/ttyAMA0 (Pi UART) or /dev/ttyUSB0
+#     baud: 115200
+#     pin: "1234"            # omit if no SIM PIN
+#     delete_on_read: true
+#     poll_interval: 60
+#     pdu_mode: false        # true for Huawei sticks that misbehave in text mode
+#
+# Hardware notes:
+#   SIM7600 HAT: set port to /dev/ttyUSB0 (AT+SMS port, NOT GPS or diagnostic)
+#   SIM800L GPIO: needs 3.7-4.2V power supply separate from Pi 3.3V
+#   Huawei E3372h: may need 'usb_modeswitch' to switch from storage to modem mode
+#     sudo apt install usb-modeswitch
+#     plug in, then: usb_modeswitch -v 12d1 -p 1f01 -J
+
+# ── Pat Winlink adapter ────────────────────────────────────────────────────
+# (mock — for development without Pat installed)
+  - type: mock_pat_winlink
+    name: winlink-mock
+    callsign: N0CALL        # replace with your callsign
+    interval_sec: 45.0
+
+# Real Pat Winlink (requires Pat running with HTTP API):
+#
+# SETUP:
+#   1. Install Pat:
+#      wget https://github.com/la5nta/pat/releases/latest/download/pat_linux_arm64.tar.gz
+#      sudo tar -xzf pat_linux_arm64.tar.gz -C /usr/local/bin/ pat
+#      # (use linux_amd64 for x86 thin client)
+#
+#   2. Configure Pat (first time only):
+#      sudo -u ech pat configure
+#      # Set: callsign, Winlink password (blank first time), transport
+#
+#   3. Install Pat systemd service:
+#      sudo cp /opt/ech/systemd/pat.service /etc/systemd/system/
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable pat
+#      sudo systemctl start pat
+#
+#   4. First Winlink registration (one time, needs internet):
+#      pat connect telnet
+#      # Password will arrive in first inbox message
+#
+#   5. Enable in config:
+#   - type: pat_winlink
+#     name: winlink
+#     callsign: W1ABC-9           # REQUIRED — your Winlink callsign
+#     pat_url: http://127.0.0.1:8080
+#     poll_interval: 300          # seconds between inbox polls
+#     auto_connect: false         # true to auto-connect on startup + after send
+#     connect_alias: telnet       # telnet | ardop | ax25 | vara-hf | vara-fm
+#
+# Transport notes:
+#   telnet    — internet only; good for testing and internet-connected EOC
+#   ardop     — HF via ARDOP TNC (open source, Pi-compatible, free)
+#               requires ardopc running: https://www.cantab.net/users/john.wiseman/Documents/ARDOPC.html
+#   ax25      — VHF/UHF packet via Linux AX.25 stack or KISS TNC
+#   vara-hf   — HF via VARA (proprietary but runs on Wine on Linux)
+#   vara-fm   — VHF via VARA FM (proprietary)
+
+# ── MeshCore → MeshMapper MQTT Bridge ────────────────────────────────────
+# Republishes MeshCore data from ECH's serial connection to an MQTT broker
+# so meshcore-mqtt-live-map can display your nodes on its map.
+# ECH uses the SAME serial connection — no second hardware reader needed.
+#
+# To use with meshcore-mqtt-live-map:
+#   1. Run a local MQTT broker (mosquitto):
+#      sudo apt install mosquitto mosquitto-clients -y
+#      sudo systemctl enable mosquitto
+#
+#   2. Enable this bridge:
+meshcore_bridge:
+  enabled: false              # set true to activate
+  mqtt_host: localhost        # where your MQTT broker is
+  mqtt_port: 1883
+  # mqtt_username: subscriber
+  # mqtt_password: changeme
+  topic_prefix: meshcore      # meshcore-mqtt-live-map subscribes to meshcore/#
+  adapter_name: meshcore-usb  # which ECH adapter to mirror (or leave null for auto)
+  publish_decoded: true       # publish decoded JSON alongside raw bytes
+  qos: 0
+#
+# Then point meshcore-mqtt-live-map at the same broker:
+#   MQTT_HOST=localhost MQTT_PORT=1883 MQTT_TOPIC=meshcore/#
+#
+# For LetsMesh / EastMesh public broker:
+#   mqtt_host: mqtt.letsmesh.com
+#   mqtt_port: 1883
+#   mqtt_username: your_subscriber_account
+#   mqtt_password: your_password
+#   topic_prefix: meshcore

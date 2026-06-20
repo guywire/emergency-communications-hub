@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECH — Login</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--green:#3fb950;--red:#f85149;--blue:#388bfd;--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);display:flex;align-items:center;justify-content:center}
+.login-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:40px;width:340px;text-align:center}
+.logo{font-family:var(--mono);font-size:24px;color:var(--green);margin-bottom:4px;letter-spacing:.08em}
+.subtitle{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:32px;letter-spacing:.05em}
+label{display:block;text-align:left;font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:4px;margin-top:16px}
+input{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 12px;border-radius:6px;outline:none}
+input:focus{border-color:var(--blue)}
+.login-btn{width:100%;margin-top:24px;background:var(--green);border:none;color:#0d1117;font-family:var(--mono);font-size:13px;font-weight:500;padding:10px;border-radius:6px;cursor:pointer;letter-spacing:.04em}
+.login-btn:hover{opacity:.9}
+.error{font-family:var(--mono);font-size:11px;color:var(--red);margin-top:12px;display:none}
+.hint{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:16px}
+</style>
+</head>
+<body>
+<div class="login-card">
+  <div class="logo">▣ ECH</div>
+  <div class="subtitle">Emergency Communications Hub</div>
+  <form id="login-form" method="POST" action="/api/auth/login">
+    <input type="hidden" id="next-input" name="next" value="/">
+    <label>Username</label>
+    <input type="text" name="username" id="username" placeholder="username" autocomplete="username">
+    <label>Password</label>
+    <input type="password" name="password" id="password" placeholder="password" autocomplete="current-password">
+    <button type="submit" class="login-btn">Sign in</button>
+  </form>
+  <div class="error" id="error-msg" style="display:none">Invalid username or password</div>
+  <div class="hint">Change default password in Settings → Users after first login</div>
+</div>
+<script>
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('next')) document.getElementById('next-input').value = params.get('next');
+  if (params.get('error')) document.getElementById('error-msg').style.display = 'block';
+})();
+</script>
+</body>
+</html>
