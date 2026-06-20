@@ -1,7 +1,8 @@
 # Emergency Communications Hub (ECH) — Requirements v3.0
 # Prepared for Claude Code handoff
 
-## Current version: v0.9.8 → v1.0.0-rc1
+## Current version: v1.0.0-rc3 (local) / v1.0.0-rc2 (live server as of 2026-06-20)
+## See WORK_STATUS.md for deployment status and resume instructions
 
 ---
 
@@ -65,72 +66,91 @@ All adapters inherit from `ech/adapters/base.py:Adapter`. Registered in `ech/mai
 | `/settings` | `settings.html` | Service status, mode, weather, adapters, users, MQTT bridge |
 | `/simulation` | `simulation.html` | Mock node/message editor, simulation pause, inject |
 
-## 5. Known Bugs To Fix (Claude Code)
+## 5. Bug Tracker
 
-### High priority
+### Fixed in v1.0.0-rc1 / v0.9.x
 
 **SIM-1: Simulation pause doesn't stop mock messages**
-- Root cause: state.py was cancelling _run_task which mock adapters restart; now uses `_paused` flag on base Adapter
-- Status: Fixed in v0.9.9 — all mock adapters check `if self._paused: continue` at top of loop
-- Test: Toggle simulation off → verify no new messages appear in inbox for 30s
+- Status: ✅ Fixed v0.9.9 — all mock adapters check `if self._paused: continue` at top of loop
 
 **SIM-2: Edit simulation nodes doesn't work**
-- Root cause: JSON.stringify in onclick attribute gets corrupted by HTML escaping
-- Status: Fixed in v0.9.9 — nodes stored in `_nodeStore` dict, buttons use `editNodeById(id)`
-- Test: Add a node, click Edit, verify form populates
+- Status: ✅ Fixed v0.9.9 — nodes stored in `_nodeStore` dict, buttons use `editNodeById(id)`
 
 **SIM-3: Mock nodes default to ocean (0,0)**
-- Root cause: Removed hardcoded positions without adding configurable defaults
-- Status: Fixed in v0.9.9 — mock adapters accept `base_lat`/`base_lon` config keys and generate concentric circle positions
-- Action needed: Operator configures base location once in config.yaml
+- Status: ✅ Fixed v0.9.9 — mock adapters accept `base_lat`/`base_lon` config keys
 
-**UI-1: Clear message display does nothing**
-- Root cause: clearMessageDisplay() wasn't clearing `state.messages` array, only the DOM
-- Status: Fixed in v0.9.9
-
-**UI-2: OP: W1ABC hardcoded in header**
-- Root cause: Hardcoded default string, operator callsign not loaded from state on page load
-- Status: Fixed in v0.9.9 — click the OP: display to set callsign, persisted in DB
-
-**UI-3: Timezone always UTC, no option for local**
-- Status: Fixed in v0.9.9 — UTC/LOCAL toggle button in header, persisted in localStorage
-
-**UI-4: Meshtastic and MeshCore same color on map**
-- Status: Fixed in v0.9.9 — Meshtastic=green (#3fb950), MeshCore=orange (#f78c6c)
-
-**UI-5: Favicon missing from map, logs, simulation pages**
-- Status: Fixed in v0.9.9
+**UI-1 thru UI-5:** ✅ Fixed v0.9.9 (clear display, OP callsign, UTC/LOCAL toggle, colors, favicon)
 
 **SVC-1: Service status shows "Failed to load"**
-- Root cause: systemctl not in uvicorn's PATH; also ech user needs systemd read permission
-- Status: Fixed in v0.9.9 — uses /bin/systemctl full path
-- May still need: `sudo usermod -aG systemd-journal ech`
+- Status: ✅ Fixed v0.9.9 — uses /bin/systemctl full path. rc3 improves error message to show HTTP status code.
+- If still failing: `sudo usermod -aG systemd-journal ech`
 
-**PKG-1: `{ech` directory appearing in tarballs**
-- Root cause: tar glob `ech/**` was picking up a literal `{ech` directory at the same level
-- Status: Fixed in v0.9.9 — `{ech` directory deleted, tar exclude patterns tightened
+**AUTH-1, WL-1, MAP-1:** ✅ Fixed in earlier versions
 
-### Medium priority
+**WISH-1/2/3:** ✅ PSKReporter, map colors, MQTT status added v0.9.9
 
-**AUTH-1: Login page appears but unauthenticated requests weren't redirected**
-- Status: Fixed in v0.9.8 — FastAPI middleware added
+### Fixed in v1.0.0-rc2 (deployed 2026-06-20)
 
-**WL-1: Winlink send returns 400 "Missing date value"**  
-- Status: Fixed in v0.9.4 — `date` field added to outbox POST payload
+**ADAPT-1: Real adapter crashes entire startup**
+- Root cause: `import serial_asyncio` at module level in meshcore.py, aprs_kiss.py, at_engine.py
+- Fix: build_adapter() uses `importlib.import_module()` (lazy). serial_asyncio moved inside connect()
+- Files: ech/main.py, ech/adapters/meshcore.py, ech/adapters/aprs_kiss.py, ech/adapters/at_engine.py
 
-**MAP-1: Map doesn't show nodes because positions removed**
-- Status: Fixed in v0.9.9 — nodes use concentric positions when base_lat/base_lon configured
+**AUTH-2: Login sets cookie but redirect loops back to /login**
+- Root cause: JS fetch() + window.location pattern unreliable with SameSite=Lax across some browsers
+- Fix: Login form uses HTML form POST → HTTP 303 + Set-Cookie in one response
+- Files: ech/ui/templates/login.html, ech/api/app.py
 
-### Low priority / Wishlist
+**PSK-1: PSKReporter no rate limiting + JSON parse error**
+- Root cause: No caching; also PSKReporter returns XML not JSON; encap=1 wrapped in CDATA
+- Fix: Module-level 5-min TTL cache; switched to xml.etree.ElementTree parsing
+- File: ech/api/app.py
 
-**WISH-1: PSKReporter/GridTracker callsign spots on map**
-- Status: Added in v0.9.9 — PSK button on map fetches PSKReporter spots via backend proxy; GRID button shows Maidenhead grid squares
+**LOC-1: base_lat/base_lon requires config.yaml edit**
+- Fix: "BASE LOCATION" section in Settings page with GPS detect + save buttons
+- Files: ech/ui/templates/settings.html, ech/api/app.py
 
-**WISH-2: Different colors per adapter type on map**
-- Status: Fixed in v0.9.9
+**SVC-2: Service restart buttons fail (sudo requires password)**
+- Fix: install.sh writes /etc/sudoers.d/ech-services (passwordless whitelist)
+- File: scripts/install.sh
 
-**WISH-3: MQTT settings visible in web UI**
-- Status: Added in v0.9.9 — Settings page shows MQTT adapter status and MeshMapper bridge health
+### Fixed in v1.0.0-rc3 (local only, NOT YET deployed — see WORK_STATUS.md)
+
+**SIM-PAUSE: Simulation state not propagated on restart**
+- Root cause: state.py init() loaded simulation_enabled from DB but never called set_simulation(),
+  so adapters defaulted to _paused=False even when simulation was disabled.
+- Fix: init() iterates router._adapters and sets _paused=True if simulation_enabled is False
+- File: ech/core/state.py
+
+**CLOCK: UTC clock doesn't switch to local time**
+- Root cause: tick() hardcoded UTC without checking _showLocal flag
+- Fix: tick() branches on _showLocal, uses Intl.DateTimeFormat for timezone name
+- File: ech/ui/templates/index.html
+
+**OP-CS: Operator callsign uses browser prompt() (unreliable)**
+- Root cause: promptOperator() used window.prompt() which can be blocked by browsers
+- Fix: Inline input field appears in header span on click; saves on Enter/blur; Escape cancels
+- File: ech/ui/templates/index.html
+
+**SVC-ERR: Service load failure shows generic message**
+- Fix: loadServices() checks r.ok and shows actual HTTP status code in error message
+- File: ech/ui/templates/settings.html
+
+**MOCK-DISASTER: Simulation messages generic, not scenario-relevant**
+- Fix: All 6 mock adapters updated with cold weather disaster scenario
+  (frozen pipes, warming centers, trees down from storm, Canadian lobster poachers)
+- Also: base_lat: 44.1059 / base_lon: -69.1128 added to all mock adapters in config.yaml
+- Files: all ech/adapters/mock_*.py, config.yaml
+
+### Open / Next Sprint
+
+**SEC-01 P0: Default admin password** — force password change on first login
+**SEC-02 P0: No HTTPS** — add TLS cert generation to install.sh
+**SEC-03 P1: No role enforcement** on /api/users, /api/adapter-config, service restart
+**SEC-04 P1: No login brute-force protection**
+**SEC-08 P2: DBLogHandler asyncio loop param** — crashes Python 3.12+
+**MQTT-TEST: Real adapter MQTT posting** — not yet tested on live hardware
+**MEM-RELOAD: /api/base-location** should update live adapter positions without restart
 
 ## 6. Configuration Reference
 

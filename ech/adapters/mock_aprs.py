@@ -28,20 +28,22 @@ APRS_STATIONS = [
 ]
 
 APRS_MESSAGES = [
-    "QRV and monitoring",
-    "Position updated via GPS",
-    "Digi operational, hearing 8 stations",
-    "Weather: clear, wind SW 12mph",
-    "Battery on solar, 13.2V",
-    "EOC relay active on 144.390",
-    "Traveling south on Rte 1",
-    "Test packet 73",
+    "Wx: 7F windchill -14F, roads icing over",
+    "Tree down blocking Rte 1 MM18, use detour via Rte 3",
+    "Warming Center at High School open, capacity 100",
+    "Digi operational, hearing 9 stations through storm",
+    "Generator fuel low at shelter, need resupply ASAP",
+    "Multiple frozen pipe reports in downtown sector",
+    "Mobile patrol — welfare check on elderly residents",
+    "EOC relay on 144.390, all traffic clear",
+    "Canadian fishing vessels at harbor, harbor master notified",
+    "Power restoration ETA unknown — utility crew on site",
 ]
 
 APRS_STATUS = [
-    "Emergency Coordinator on duty",
-    "ARES NET in 30 min",
-    "Shelter open, 23 occupants",
+    "ARES EC on duty — winter storm response active",
+    "Net check-in 1830Z — all stations report",
+    "Warming Center A: 41 occupants, accepting more — heat OK",
 ]
 
 
@@ -127,7 +129,7 @@ class MockAPRSAdapter(Adapter):
                 priority = Priority.NORMAL
                 if self._packet_count % 20 == 0:
                     priority = Priority.EMERGENCY
-                    body = f"MAYDAY {station['call']} emergency position {lat:.4f}N {abs(lon):.4f}W"
+                    body = f"MAYDAY {station['call']} STRANDED — vehicle off road in snowdrift {lat:.4f}N {abs(lon):.4f}W"
                     msg_lat, msg_lon = round(lat, 5), round(lon, 5)
 
                 msg = NormalizedMessage(

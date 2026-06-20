@@ -50,6 +50,13 @@ class ECHState:
         self._operator_callsign = await self._db.get_kv("operator_callsign") or ""
         log.info("ECHState: mode=%s simulation=%s incident=%s",
                  self._mode, self._simulation_enabled, self._incident_name)
+        # Propagate simulation state to any already-connected adapters so that
+        # a disabled simulation stays paused across restarts.
+        if not self._simulation_enabled and self._router:
+            for adapter_name, adapter in self._router._adapters.items():
+                if hasattr(adapter, '_paused'):
+                    adapter._paused = True
+                    log.info("ECHState init: paused adapter '%s' (simulation disabled)", adapter_name)
 
     # ── Mode ──────────────────────────────────────────────────────────────
 

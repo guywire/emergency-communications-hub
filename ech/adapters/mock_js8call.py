@@ -28,22 +28,22 @@ HF_STATIONS = [
 ]
 
 HF_MSGS = [
-    "Net check-in, all ok here",
-    "QSL last message 73",
-    "Signal report here is 559",
-    "Standing by for traffic",
-    "Wx report: clear, temp 58F winds SW",
-    "Battery at 80pct solar charging",
-    "Mobile unit en route to shelter",
-    "Resource list follows on next tx",
-    "All nets monitoring 7.078 dial",
-    "QRM from local noise source, copying ok",
+    "Net check-in, storm monitoring ongoing SNR",
+    "Wx: temp 6F, wind NW 28mph, windchill -18F SNR",
+    "Frozen pipe burst at County Road shelter, crew dispatched SNR",
+    "Tree down on power line Rte 1 — utility ETA 4hrs SNR",
+    "Warming center at library: 22 occupants, space for 60 more SNR",
+    "Battery backup on generator, 13.8V nominal SNR",
+    "Mobile welfare check unit cleared sector 2, 3 assists SNR",
+    "All HF nets monitoring 7.078 dial through the storm SNR",
+    "Canadian vessel activity reported near Penobscot Bay — monitoring SNR",
+    "Road crews working Cedar Lane, ETA clearance 2 hours SNR",
 ]
 
 HF_NET_CALLS = [
-    "@ALLCALL: ARES net starting now, all stations check in",
-    "@NET: Traffic follows, stand by",
-    "@ALLCALL: Clear for emergency traffic only",
+    "@ALLCALL: ARES winter storm net active, all stations check in",
+    "@NET: ICS-213 resource request traffic follows, stand by",
+    "@ALLCALL: Priority traffic — warming center overflow, need locations",
 ]
 
 BANDS = [
@@ -114,7 +114,7 @@ class MockJS8CallAdapter(Adapter):
                     from_id = "W1NET"
                     priority = Priority.ELEVATED
                 elif self._tick % 13 == 0:
-                    body = "MAYDAY W1SAR emergency position needed"
+                    body = "MAYDAY W1SAR — person with hypothermia symptoms at harbor, need EMS"
                     from_id = "W1SAR"
                     priority = Priority.EMERGENCY
                 else:

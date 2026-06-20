@@ -37,17 +37,23 @@ adapters:
     channel: 0
     interval_sec: 8.0
     node_count: 5
+    base_lat: 44.1059
+    base_lon: -69.1128
 
   - type: mock_aprs
     name: aprs-mock
     source: aprsis          # aprsis | kiss | agwpe
     filter_radius: 50       # km
     interval_sec: 12.0
+    base_lat: 44.1059
+    base_lon: -69.1128
 
   - type: mock_meshcore
     name: meshcore-mock
     channel: TAC-1
     interval_sec: 15.0
+    base_lat: 44.1059
+    base_lon: -69.1128
 
 # ── Real hardware examples (commented out) ───────────────────────────────
 #
@@ -148,6 +154,8 @@ adapters:
     name: hf-js8call-mock
     callsign: N0CALL        # replace with your callsign
     interval_sec: 20.0
+    base_lat: 44.1059
+    base_lon: -69.1128
 
 # Real JS8Call (requires JS8Call running with TCP API enabled on port 2442):
 #   - type: js8call
@@ -177,6 +185,8 @@ adapters:
   - type: mock_sms
     name: sms-mock
     interval_sec: 25.0
+    base_lat: 44.1059
+    base_lon: -69.1128
 
 # Real SMS modem (SIM800L, SIM7600, Huawei E3372, etc.):
 #   - type: sms
@@ -202,6 +212,8 @@ adapters:
     name: winlink-mock
     callsign: N0CALL        # replace with your callsign
     interval_sec: 45.0
+    base_lat: 44.1059
+    base_lon: -69.1128
 
 # Real Pat Winlink (requires Pat running with HTTP API):
 #

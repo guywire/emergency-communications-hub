@@ -14,6 +14,9 @@ ech.db
 *.db
 /var/
 
+# Work status / deployment notes — may contain server credentials
+WORK_STATUS.md
+
 # Config with real credentials — operators must create from template
 # /etc/ech/config.yaml is NOT tracked; copy config.yaml and edit locally
 # Do NOT commit files containing real callsigns, passcodes, or passwords

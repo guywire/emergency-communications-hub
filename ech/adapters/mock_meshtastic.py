@@ -19,11 +19,11 @@ from ech.core.models import ChannelHealth, MeshNode, NormalizedMessage, Priority
 log = logging.getLogger(__name__)
 
 FAKE_NODES = [
-    {"id": "!a1b2c3d4", "long": "Alpha Node",   "short": "ALF"},
-    {"id": "!b2c3d4e5", "long": "Bravo Node",   "short": "BRV"},
-    {"id": "!c3d4e5f6", "long": "Charlie Node", "short": "CHL"},
-    {"id": "!d4e5f6a7", "long": "Delta Node",   "short": "DLT"},
-    {"id": "!e5f6a7b8", "long": "Echo Node",    "short": "ECH"},
+    {"id": "!a1b2c3d4", "long": "EOC Main",          "short": "EOC"},
+    {"id": "!b2c3d4e5", "long": "Warming Center A",   "short": "WCA"},
+    {"id": "!c3d4e5f6", "long": "Warming Center B",   "short": "WCB"},
+    {"id": "!d4e5f6a7", "long": "Mobile Unit 1",      "short": "MU1"},
+    {"id": "!e5f6a7b8", "long": "Public Works Depot", "short": "PWD"},
 ]
 
 def _concentric_positions(lat, lon, n, inner_km=2.0, outer_km=6.0):
@@ -40,14 +40,18 @@ def _concentric_positions(lat, lon, n, inner_km=2.0, outer_km=6.0):
     return out
 
 CHECK_IN_MESSAGES = [
-    "Net check-in, all systems nominal",
-    "Mobile unit, position updated",
-    "EOC relay online, traffic clear",
-    "CERT team staged at parking lot",
-    "Shelter capacity 47 of 120",
-    "Requesting resource list update",
-    "Signal good, battery 78%",
-    "No traffic, standing by",
+    "Warming Center A open, capacity 80, currently 34 occupants",
+    "Warming Center B open at high school gym — heat is on",
+    "Road closure: Elm St impassable, tree down across road",
+    "Temp: 8°F windchill -12°F — hypothermia risk for unsheltered",
+    "Frozen pipe burst at Town Hall, water shut off, crew en route",
+    "Power out in sector 4, generator running at warming center",
+    "Public Works has 2 chainsaws on Maple Ave clearing debris",
+    "Pipe freeze advisory in effect for all unheated structures",
+    "Warming Center A requests 20 more blankets from supply cache",
+    "Tree down on power line at Main & Oak, utility crew notified",
+    "Mobile Unit 1 checking on elderly residents in sector 2",
+    "Canadian border patrol reports unusual lobster trap activity — monitoring",
 ]
 
 
@@ -160,10 +164,10 @@ class MockMeshtasticAdapter(Adapter):
                 body = random.choice(CHECK_IN_MESSAGES)
                 if tick % 5 == 0:
                     priority = Priority.ELEVATED
-                    body = "⚡ Elevated: requesting status from all units"
+                    body = "⚡ ELEVATED: multiple frozen pipe reports — all units confirm status"
                 if tick % 17 == 0:
                     priority = Priority.EMERGENCY
-                    body = "🚨 EMERGENCY: shelter at capacity, need overflow location"
+                    body = "🚨 EMERGENCY: Canadians spotted at harbor — lobster traps being stolen, request marine unit"
 
                 msg = NormalizedMessage(
                     source_adapter=self.name,

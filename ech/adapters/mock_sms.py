@@ -19,24 +19,26 @@ from ech.core.models import NormalizedMessage, Priority
 log = logging.getLogger(__name__)
 
 FAKE_CONTACTS = [
-    {"number": "+12075551001", "name": "John EOC Director"},
-    {"number": "+12075551002", "name": "Sarah CERT Lead"},
-    {"number": "+12075551003", "name": "Mike Shelter Mgr"},
-    {"number": "+12075551004", "name": "Lisa DEM Liaison"},
-    {"number": "+12075551005", "name": "Tom Mobile Unit"},
+    {"number": "+12075551001", "name": "Pat EOC Director"},
+    {"number": "+12075551002", "name": "Ray CERT Lead"},
+    {"number": "+12075551003", "name": "Sue Warming Center Mgr"},
+    {"number": "+12075551004", "name": "Dan DEM Liaison"},
+    {"number": "+12075551005", "name": "Chris DPW Supervisor"},
 ]
 
 SMS_MESSAGES = [
-    "En route to staging area, ETA 15 min",
-    "Shelter at 40% capacity, accepting more",
-    "Road closure on Rte 1 near mile marker 22",
-    "Need 3 additional cots at main shelter",
-    "All units report in please",
-    "Generator fuel running low, need resupply",
-    "Medical team on scene, situation stable",
-    "Communications check — please acknowledge",
-    "EOC activated, report to primary location",
-    "Resource request: 2 chain saws, safety gear",
+    "Tree down on Oak St — sending crew now, ETA 30 min",
+    "Warming Center B at capacity (80), redirecting to high school",
+    "Pipe burst in Town Hall basement — water off, plumber called",
+    "Road closure Rte 1 MM22 — large oak across both lanes",
+    "Need 10 more cots and blankets at warming center ASAP",
+    "Generator at warming center low on fuel — can you authorize refill?",
+    "Welfare check complete sector 3 — 2 residents transported to warming center",
+    "Harbor reports 3 unknown vessels near lobster beds — coast guard alerted",
+    "Power out in 4 neighborhoods, utility ETA 6 hrs",
+    "Salt truck broke down on Cedar Ave — other truck covering",
+    "Can someone check on Mrs. Landry at 14 Pine? No answer on phone",
+    "Windchill hits -20F tonight — running extra patrol for stranded motorists",
 ]
 
 
@@ -101,10 +103,10 @@ class MockSMSAdapter(Adapter):
                 priority = Priority.NORMAL
 
                 if self._tick % 9 == 0:
-                    body = "URGENT: need immediate assistance at shelter B"
+                    body = "URGENT: suspected hypothermia case at warming center, ambulance requested"
                     priority = Priority.ELEVATED
                 elif self._tick % 19 == 0:
-                    body = "911 EMERGENCY all units respond to main shelter NOW"
+                    body = "EMERGENCY: CANADIAN LOBSTER POACHERS confirmed at docks — all units respond"
                     priority = Priority.EMERGENCY
 
                 msg = NormalizedMessage(

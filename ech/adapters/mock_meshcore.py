@@ -19,10 +19,10 @@ from ech.core.models import ChannelHealth, MeshNode, NormalizedMessage, Priority
 log = logging.getLogger(__name__)
 
 MESHCORE_NODES = [
-    {"id": "NODE-1", "name": "Node Alpha"},
-    {"id": "NODE-2", "name": "Node Bravo"},
-    {"id": "NODE-3", "name": "Node Charlie"},
-    {"id": "NODE-4", "name": "Node Delta"},
+    {"id": "NODE-1", "name": "EOC Relay"},
+    {"id": "NODE-2", "name": "Harbor Master"},
+    {"id": "NODE-3", "name": "DPW Truck 3"},
+    {"id": "NODE-4", "name": "Red Cross Shelter"},
 ]
 
 def _concentric_positions(lat, lon, n, inner_km=3.0, outer_km=9.0):
@@ -38,13 +38,15 @@ def _concentric_positions(lat, lon, n, inner_km=3.0, outer_km=9.0):
     return out
 
 MESHCORE_MSGS = [
-    "MeshCore node online",
-    "Channel traffic clear",
-    "Relay connected, -5dB path",
-    "Search team at grid ref 447112",
-    "Resources available at staging",
-    "Need repeat, partial decode",
-    "ACK last message, 10-4",
+    "TAC-1 relay online, path clear",
+    "DPW Truck 3: Elm St cleared, moving to Pine Ave",
+    "Red Cross Shelter: 58 occupants, need more cots",
+    "Harbor Master: 4 Canadian vessels in restricted zone — watching",
+    "EOC Relay: check-in all units, cold weather protocol active",
+    "Frozen water main confirmed at Industrial Park, DPW responding",
+    "Need repeat, partial decode — storm interference on link",
+    "ACK last, 10-4 — warming center status received",
+    "Windchill advisory: -15°F overnight, all welfare checks complete",
 ]
 
 
@@ -129,7 +131,7 @@ class MockMeshCoreAdapter(Adapter):
                 priority = Priority.NORMAL
                 if tick % 11 == 0:
                     priority = Priority.ELEVATED
-                    body = "⚡ ELEVATED: requesting immediate resource check"
+                    body = "⚡ ELEVATED: pipe freeze cascade risk — need plumber at Town Hall NOW"
 
                 msg = NormalizedMessage(
                     source_adapter=self.name,

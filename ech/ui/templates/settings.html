@@ -319,7 +319,9 @@ async function loadServices() {
   const body = document.getElementById('services-body');
   if (!body) return;
   try {
-    const data = await fetch('/api/system/services').then(r=>r.json());
+    const r = await fetch('/api/system/services');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
     body.innerHTML = data.services.map(sv => {
       const cls = sv.ok ? 'svc-ok' : (sv.active === 'inactive' ? 'svc-warn' : 'svc-err');
       const stateLabel = sv.ok
@@ -341,7 +343,7 @@ async function loadServices() {
       </div>`;
     }).join('');
   } catch(e) {
-    body.innerHTML = '<div style="color:var(--red);font-family:var(--mono);font-size:11px">Failed to load service status</div>';
+    body.innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:11px">Failed to load service status: ${e.message}</div>`;
   }
 }
 

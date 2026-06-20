@@ -27,25 +27,25 @@ WINLINK_STATIONS = [
 ]
 
 WINLINK_SUBJECTS = [
-    "SITREP: Shelter Status",
-    "ICS-213: Resource Request",
-    "Net check-in",
-    "Position report",
-    "Damage assessment update",
+    "SITREP: Warming Center Status",
+    "ICS-213: Resource Request — Blankets/Cots",
+    "Winter Storm Net check-in",
+    "Damage assessment: frozen pipes",
+    "Road closure update",
     "Supply request: generator fuel",
-    "Medical team status",
-    "Road closure notification",
+    "Welfare check summary",
+    "BOLO: Unauthorized vessels near lobster beds",
 ]
 
 WINLINK_BODIES = [
-    "All stations report in. Net active on Winlink.",
-    "Shelter capacity: 67 of 120. Accepting more evacuees.",
-    "Resource request: 2 chain saws, safety equipment at main staging.",
-    "Road closure confirmed on Rte 1 MP22 due to flooding.",
-    "Medical team on scene at shelter B. Situation stable.",
-    "Generator at shelter A needs fuel. Requesting resupply ETA.",
-    "Damage assessment complete for grid ref 447-112. Sending full report.",
-    "All EOC positions staffed. ICS structure activated.",
+    "All stations report in. Winter storm net active on Winlink. Temp -2F at EOC.",
+    "Warming Center A: 54/80 capacity. Accepting more. Heat stable, generator nominal.",
+    "ICS-213 resource request: 30 blankets, 15 cots, 2 propane heaters — needed at HS shelter by 1800Z.",
+    "Road closures confirmed: Rte 1 MP22 (tree), Cedar Ave (ice), Industrial Park (water main break).",
+    "Welfare check complete sectors 1-4. 7 residents transported to warming center. No injuries.",
+    "Generator at Warming Center B: fuel at 25%. Requesting immediate resupply. ETA needed.",
+    "Frozen pipe damage assessment complete for downtown: 14 structures affected, 3 require immediate attention.",
+    "Harbor Master to EOC: 3 Canadian-registered vessels observed removing untagged lobster traps. Coast Guard notified.",
 ]
 
 
@@ -112,12 +112,12 @@ class MockPatWinlinkAdapter(Adapter):
                 priority = Priority.NORMAL
 
                 if self._tick % 8 == 0:
-                    subject = "URGENT: ICS-213 Resource Request"
-                    body    = "URGENT resource request: immediate need for cots and blankets."
+                    subject = "URGENT: Warming Center Overflow"
+                    body    = "URGENT: High School warming center at capacity. Need overflow site. Temperature -8F outside."
                     priority = Priority.ELEVATED
                 elif self._tick % 20 == 0:
                     subject = "EMERGENCY TRAFFIC"
-                    body    = "EMERGENCY: structure collapse at shelter B, all units respond."
+                    body    = "EMERGENCY: Confirmed hypothermia victim — 4 Birch St. EMS dispatched. Requesting CERT welfare check sweep."
                     priority = Priority.EMERGENCY
 
                 nm = NormalizedMessage(

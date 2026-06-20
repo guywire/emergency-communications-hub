@@ -821,8 +821,17 @@ const state = {
 // ── Clock ────────────────────────────────────────────────────────────────
 function tick() {
   const now = new Date();
-  document.getElementById('clock').textContent =
-    now.toUTCString().slice(17, 25) + ' UTC';
+  let label;
+  if (_showLocal) {
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mm = String(now.getMinutes()).padStart(2,'0');
+    const ss = String(now.getSeconds()).padStart(2,'0');
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'LOCAL';
+    label = `${hh}:${mm}:${ss} ${tz}`;
+  } else {
+    label = now.toUTCString().slice(17, 25) + ' UTC';
+  }
+  document.getElementById('clock').textContent = label;
 }
 setInterval(tick, 1000); tick();
 
@@ -1321,16 +1330,30 @@ function showServicePanel() {
 
 
 // ── Operator callsign ─────────────────────────────────────────────────────
-async function promptOperator() {
-  const current = document.getElementById('operator-display').textContent.replace('OP: ','').trim();
-  const cs = prompt('Enter operator callsign:', current === '—' ? '' : current);
-  if (cs === null) return;   // cancelled
-  await fetch('/api/state/operator', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({callsign: cs.toUpperCase()})
+function promptOperator() {
+  const el = document.getElementById('operator-display');
+  const current = el.textContent.replace('OP: ','').trim().replace('—','');
+  // Replace span text with an inline input
+  el.innerHTML = `<input id="op-input" type="text" value="${current}"
+    style="width:90px;font-family:var(--mono);font-size:11px;padding:1px 4px;
+    border:1px solid var(--blue);background:var(--bg2);color:var(--text);border-radius:3px"
+    maxlength="10" placeholder="CALLSIGN" autofocus>`;
+  const input = document.getElementById('op-input');
+  input.select();
+  async function save() {
+    const cs = input.value.trim().toUpperCase();
+    el.textContent = 'OP: ' + (cs || '—');
+    await fetch('/api/state/operator', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({callsign: cs})
+    });
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') { el.textContent = 'OP: ' + (current || '—'); }
   });
-  document.getElementById('operator-display').textContent = 'OP: ' + (cs.toUpperCase() || '—');
 }
 
 // ── Timezone toggle ───────────────────────────────────────────────────────
