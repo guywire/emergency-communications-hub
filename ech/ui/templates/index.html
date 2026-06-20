@@ -818,6 +818,9 @@ const state = {
   wsRetries: 0,
 };
 
+// ── Timezone toggle (declared early — tick() reads it) ────────────────────
+let _showLocal = localStorage.getItem('ech_show_local_time') === 'true';
+
 // ── Clock ────────────────────────────────────────────────────────────────
 function tick() {
   const now = new Date();
@@ -1357,8 +1360,6 @@ function promptOperator() {
 }
 
 // ── Timezone toggle ───────────────────────────────────────────────────────
-let _showLocal = localStorage.getItem('ech_show_local_time') === 'true';
-
 function toggleTimezone() {
   _showLocal = !_showLocal;
   localStorage.setItem('ech_show_local_time', _showLocal);
