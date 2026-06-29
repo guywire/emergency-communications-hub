@@ -53,6 +53,7 @@ class NormalizedMessage:
     raw: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
+        _raw = self.raw or {}
         return {
             "id": self.id,
             "source_adapter": self.source_adapter,
@@ -70,6 +71,8 @@ class NormalizedMessage:
             "path": self.path,
             "via_mqtt": self.via_mqtt,
             "msg_type": self.msg_type,
+            "snr": _raw.get("snr"),
+            "rssi": _raw.get("rssi"),
         }
 
 

@@ -413,6 +413,22 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 .msg-path-badge.status-heard     { color: #9c6edd; border-color: #4a3070; }
 .msg-path-badge.status-sent_to_air { color: #60a0d0; border-color: #203050; }
 .msg-path-badge.status-failed    { color: var(--red); border-color: #5a1010; }
+.msg-sig-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid;
+  cursor: default;
+  user-select: none;
+}
+.msg-sig-badge.sig-good    { color: #4caf50; border-color: #1a4a1a; background: #0a1a0a; }
+.msg-sig-badge.sig-fair    { color: #c8a830; border-color: #4a3a00; background: #1a1200; }
+.msg-sig-badge.sig-weak    { color: #d07030; border-color: #4a2800; background: #1a0e00; }
+.msg-sig-badge.sig-bad     { color: #e05040; border-color: #5a1010; background: #1a0808; }
+.msg-sig-badge.sig-unknown { color: #7a9abf; border-color: #2a3a4a; background: #1a1a2a; }
 .msg-detail-btn {
   font-family: var(--mono);
   font-size: 11px;
@@ -1339,7 +1355,10 @@ function buildMsgEl(msg) {
     if (hasHop)  detail += `hops: ${msg.hop_count}${msg.hop_start != null ? ' / '+msg.hop_start : ''}\n`;
     if (isMqtt)  detail += `via: MQTT gateway\n`;
     if (hasPath) detail += `path: ${msg.path}\n`;
-    if (raw.snr != null) detail += `snr: ${raw.snr.toFixed(1)} dB\n`;
+    const _snr = msg.snr != null ? msg.snr : raw.snr;
+    const _rssi = msg.rssi != null ? msg.rssi : raw.rssi;
+    if (_snr != null) detail += `snr: ${parseFloat(_snr).toFixed(1)} dB\n`;
+    if (_rssi != null) detail += `rssi: ${_rssi} dBm\n`;
     if (pktTs) {
       const devTime = new Date(pktTs * 1000).toUTCString().slice(5, 25);
       const rxTime  = ts.toUTCString().slice(5, 25);
@@ -1353,6 +1372,24 @@ function buildMsgEl(msg) {
       : 'Click to show routing detail';
     pathBadge = `<span id="${badgeId}" class="msg-path-badge${mqttCls}" title="${hopTip}" onclick="togglePathDetail('${detailId}')">${label}</span>
 <div id="${detailId}" class="msg-path-detail">${escHtml(detail.trim())}</div>`;
+  }
+
+  // Signal strength badge — always visible when SNR or RSSI is available
+  const _msgSnr  = msg.snr  != null ? msg.snr  : raw.snr;
+  const _msgRssi = msg.rssi != null ? msg.rssi : raw.rssi;
+  let sigBadge = '';
+  if (_msgSnr != null || _msgRssi != null) {
+    const snrVal = _msgSnr != null ? parseFloat(_msgSnr) : null;
+    const sigCls = snrVal == null ? 'sig-unknown'
+                 : snrVal >= -5  ? 'sig-good'
+                 : snrVal >= -10 ? 'sig-fair'
+                 : snrVal >= -15 ? 'sig-weak'
+                 : 'sig-bad';
+    const snrTxt  = snrVal != null ? `${snrVal.toFixed(1)} dB` : '';
+    const rssiTxt = _msgRssi != null ? `${_msgRssi} dBm` : '';
+    const sigLabel = snrTxt || rssiTxt;
+    const sigTitle = [snrTxt ? `SNR: ${snrTxt}` : '', rssiTxt ? `RSSI: ${rssiTxt}` : ''].filter(Boolean).join('  ');
+    sigBadge = `<span class="msg-sig-badge ${sigCls}" title="${escHtml(sigTitle)}">${escHtml(sigLabel)}</span>`;
   }
 
   const isOutbound = msg.from_id === 'local' || msg.source_channel === 'outbound';
@@ -1369,6 +1406,7 @@ function buildMsgEl(msg) {
         ${channelTag}
         ${priorityFlag}
         ${pathBadge}
+        ${sigBadge}
         ${decryptBadge}
         ${deliveryHTML}
         ${(msg.source_channel === 'DM' && msg.from_id !== 'local') ? `<span onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Reply to this DM" style="font-family:var(--mono);font-size:10px;color:var(--blue);cursor:pointer;padding:1px 5px;border:1px solid var(--border);border-radius:3px;white-space:nowrap">↩ Reply</span>` : ''}
@@ -1482,7 +1520,10 @@ function buildMsgDetailHTML(msg) {
     if (Math.abs(diffSec) > 5) rows.push(['Clock diff', `${diffSec > 0 ? '+' : ''}${diffSec}s`]);
   }
   if (raw.decrypted_with) rows.push(['Decrypted', `🔓 key: ${escHtml(raw.decrypted_with)}`]);
-  if (raw.snr != null) rows.push(['SNR', `${raw.snr.toFixed(1)} dB`]);
+  const _detSnr  = msg.snr  != null ? msg.snr  : raw.snr;
+  const _detRssi = msg.rssi != null ? msg.rssi : raw.rssi;
+  if (_detSnr  != null) rows.push(['SNR',  `${parseFloat(_detSnr).toFixed(1)} dB`]);
+  if (_detRssi != null) rows.push(['RSSI', `${_detRssi} dBm`]);
   if (msg.lat != null && msg.lon != null) rows.push(['Position', `${parseFloat(msg.lat).toFixed(5)}, ${parseFloat(msg.lon).toFixed(5)}`]);
   rows.push(['ID', `<span style="color:var(--muted);word-break:break-all">${escHtml(msg.id)}</span>`]);
 

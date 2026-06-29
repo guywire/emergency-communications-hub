@@ -302,6 +302,8 @@ class Database:
             row["delivery_status"]  = raw.pop("_delivery_status", None)
             row["delivery_path"]    = raw.pop("_delivery_path", None)
             row["msg_type"]         = raw.pop("_msg_type", "text")
+            row["snr"]              = raw.get("snr")
+            row["rssi"]             = raw.get("rssi")
             result.append(row)
         return result
 
