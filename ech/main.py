@@ -292,21 +292,19 @@ async def run(config: dict) -> None:
     # Build server list: always HTTP, optionally HTTPS on a second port
     _servers: list[uvicorn.Server] = []
 
-    http_server = uvicorn.Server(uvicorn.Config(
-        app, host=host, port=port,
-        log_level=log_level.lower(), access_log=False,
-        install_signal_handlers=False,
-    ))
+    _http_cfg = uvicorn.Config(app, host=host, port=port,
+                               log_level=log_level.lower(), access_log=False)
+    http_server = uvicorn.Server(_http_cfg)
+    http_server.install_signal_handlers = False
     _servers.append(http_server)
     log.info("ECH starting on http://%s:%d", host, port)
 
     if _crt_path:
-        https_server = uvicorn.Server(uvicorn.Config(
-            app, host=host, port=_tls_port,
-            ssl_certfile=str(_crt_path), ssl_keyfile=str(_key_path),
-            log_level=log_level.lower(), access_log=False,
-            install_signal_handlers=False,
-        ))
+        _tls_cfg = uvicorn.Config(app, host=host, port=_tls_port,
+                                  ssl_certfile=str(_crt_path), ssl_keyfile=str(_key_path),
+                                  log_level=log_level.lower(), access_log=False)
+        https_server = uvicorn.Server(_tls_cfg)
+        https_server.install_signal_handlers = False
         _servers.append(https_server)
         log.info("ECH TLS starting on https://%s:%d", host, _tls_port)
 
