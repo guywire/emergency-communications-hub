@@ -51,11 +51,13 @@ CHECK_IN_MESSAGES = [
     "Warming Center A requests 20 more blankets from supply cache",
     "Tree down on power line at Main & Oak, utility crew notified",
     "Mobile Unit 1 checking on elderly residents in sector 2",
-    "Canadian border patrol reports unusual lobster trap activity — monitoring",
+    "Harbor watch: large lobster congregation at Pier 4, nature or coordination unclear",
 ]
 
 
 class MockMeshtasticAdapter(Adapter):
+    is_mock = True
+
     """
     Drop-in Meshtastic adapter that emits fake messages at a configurable rate.
     Config keys:
@@ -116,6 +118,16 @@ class MockMeshtasticAdapter(Adapter):
                 pass
         log.info("%s: disconnected", self.name)
 
+    def set_base_location(self, lat: float, lon: float) -> None:
+        self._base_lat = lat
+        self._base_lon = lon
+        if self._nodes:
+            positions = _concentric_positions(lat, lon, len(self._nodes))
+            for i, node in enumerate(self._nodes):
+                if i < len(positions):
+                    node.lat, node.lon = positions[i]
+            log.info("%s: repositioned %d nodes around (%.4f, %.4f)", self.name, len(self._nodes), lat, lon)
+
     async def send(self, message: NormalizedMessage) -> bool:
         await asyncio.sleep(0.1)   # simulate TX delay
         log.debug("%s: TX → %s | %s", self.name, message.to_id or "broadcast", message.body[:60])
@@ -141,7 +153,7 @@ class MockMeshtasticAdapter(Adapter):
         tick = 0
         try:
             while self._connected:
-                if getattr(self, '_paused', False):
+                if self.is_paused():
                     await asyncio.sleep(1.0)
                     continue
                 await asyncio.sleep(self._interval)
@@ -167,7 +179,7 @@ class MockMeshtasticAdapter(Adapter):
                     body = "⚡ ELEVATED: multiple frozen pipe reports — all units confirm status"
                 if tick % 17 == 0:
                     priority = Priority.EMERGENCY
-                    body = "🚨 EMERGENCY: Canadians spotted at harbor — lobster traps being stolen, request marine unit"
+                    body = "🚨 EMERGENCY: Lobster coalition storming Pier 4 — claws up, blocking dock access, request marine unit"
 
                 msg = NormalizedMessage(
                     source_adapter=self.name,

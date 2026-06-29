@@ -36,7 +36,7 @@ class AuthManager:
         """Create default admin user if no users exist."""
         users = await self._db.get_users()
         if not users:
-            await self.create_user("admin", "admin", "admin")
+            await self.create_user("admin", "admin", "admin", must_change_pw=True)
             log.warning(
                 "AUTH: Created default admin/admin account — "
                 "CHANGE THIS PASSWORD immediately in Settings → Users"
@@ -44,7 +44,8 @@ class AuthManager:
 
     # ── Users ─────────────────────────────────────────────────────────────
 
-    async def create_user(self, username: str, password: str, role: str = "operator") -> bool:
+    async def create_user(self, username: str, password: str, role: str = "operator",
+                          must_change_pw: bool = False) -> bool:
         import bcrypt
         pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
         try:
@@ -52,6 +53,7 @@ class AuthManager:
                 "username": username,
                 "pw_hash": pw_hash,
                 "role": role,
+                "must_change_pw": must_change_pw,
             })
             log.info("AUTH: user '%s' created with role '%s'", username, role)
             return True
@@ -63,6 +65,7 @@ class AuthManager:
         import bcrypt
         pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
         await self._db.update_user_password(username, pw_hash)
+        log.info("AUTH: password changed for '%s'", username)
         return True
 
     async def delete_user(self, username: str) -> None:
@@ -95,7 +98,7 @@ class AuthManager:
         await self._db.delete_session(token)
 
     async def get_session(self, token: str) -> Optional[dict]:
-        """Return session dict {username, role} or None if invalid/expired."""
+        """Return session dict {username, role, must_change_pw} or None if invalid/expired."""
         if not token:
             return None
         session = await self._db.get_session(token)
@@ -105,7 +108,10 @@ class AuthManager:
         if datetime.now(timezone.utc) > expires:
             await self._db.delete_session(token)
             return None
-        return {"username": session["username"], "role": session["role"]}
+        user = await self._db.get_user(session["username"])
+        must_change = bool(user and user.get("must_change_pw"))
+        return {"username": session["username"], "role": session["role"],
+                "must_change_pw": must_change}
 
     async def require_session(self, request) -> Optional[dict]:
         """Extract and validate session from request cookie."""

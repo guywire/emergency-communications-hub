@@ -19,13 +19,20 @@ from ech.core.models import ChannelHealth, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
 
-APRS_STATIONS = [
-    {"call": "W1PBR-9",   "name": "W1PBR Mobile",    "lat": 44.102, "lon": -69.118},
-    {"call": "KD1NET",    "name": "KD1NET",           "lat": 44.108, "lon": -69.125},
-    {"call": "N1EOC-1",   "name": "N1EOC EOC Relay",  "lat": 44.112, "lon": -69.115},
-    {"call": "W1XYZ-7",   "name": "W1XYZ Digi",       "lat": 44.095, "lon": -69.100},
-    {"call": "KB1MARF",   "name": "KB1MARF Fixed",    "lat": 44.120, "lon": -69.135},
+_STATION_TEMPLATES = [
+    {"call": "W1PBR-9",   "name": "W1PBR Mobile",    "dlat": -0.010, "dlon": +0.018},
+    {"call": "KD1NET",    "name": "KD1NET",           "dlat": +0.008, "dlon": -0.014},
+    {"call": "N1EOC-1",   "name": "N1EOC EOC Relay",  "dlat": +0.012, "dlon": +0.005},
+    {"call": "W1XYZ-7",   "name": "W1XYZ Digi",       "dlat": -0.005, "dlon": -0.022},
+    {"call": "KB1MARF",   "name": "KB1MARF Fixed",    "dlat": +0.018, "dlon": +0.010},
 ]
+_DEFAULT_LAT, _DEFAULT_LON = 44.110, -69.118
+
+def _build_stations(base_lat: float, base_lon: float) -> list[dict]:
+    return [
+        {**t, "lat": round(base_lat + t["dlat"], 5), "lon": round(base_lon + t["dlon"], 5)}
+        for t in _STATION_TEMPLATES
+    ]
 
 APRS_MESSAGES = [
     "Wx: 7F windchill -14F, roads icing over",
@@ -36,7 +43,7 @@ APRS_MESSAGES = [
     "Multiple frozen pipe reports in downtown sector",
     "Mobile patrol — welfare check on elderly residents",
     "EOC relay on 144.390, all traffic clear",
-    "Canadian fishing vessels at harbor, harbor master notified",
+    "Angry lobsters seen on town dock, harbor master notified",
     "Power restoration ETA unknown — utility crew on site",
 ]
 
@@ -48,6 +55,8 @@ APRS_STATUS = [
 
 
 class MockAPRSAdapter(Adapter):
+    is_mock = True
+
     """
     Mock APRS adapter simulating a mix of position, message, and status packets.
     Config keys:
@@ -65,6 +74,9 @@ class MockAPRSAdapter(Adapter):
         self._interval = config.get("interval_sec", 12.0)
         self._packet_count = 0
         self._run_task: asyncio.Task | None = None
+        self._base_lat = float(config.get("base_lat", _DEFAULT_LAT))
+        self._base_lon = float(config.get("base_lon", _DEFAULT_LON))
+        self._stations = _build_stations(self._base_lat, self._base_lon)
 
     async def connect(self) -> None:
         log.info("%s: connecting (mock, source=%s)", self.name, self._source)
@@ -84,6 +96,12 @@ class MockAPRSAdapter(Adapter):
                 pass
         log.info("%s: disconnected", self.name)
 
+    def set_base_location(self, lat: float, lon: float) -> None:
+        self._base_lat = lat
+        self._base_lon = lon
+        self._stations = _build_stations(lat, lon)
+        log.info("%s: repositioned stations around (%.4f, %.4f)", self.name, lat, lon)
+
     async def send(self, message: NormalizedMessage) -> bool:
         """Send an APRS message packet to a specific callsign."""
         await asyncio.sleep(0.2)
@@ -95,13 +113,13 @@ class MockAPRSAdapter(Adapter):
         log.debug("%s: RX loop started", self.name)
         try:
             while self._connected:
-                if getattr(self, '_paused', False):
+                if self.is_paused():
                     await asyncio.sleep(1.0)
                     continue
                 await asyncio.sleep(self._interval + random.uniform(-2, 2))
                 self._packet_count += 1
 
-                station = random.choice(APRS_STATIONS)
+                station = random.choice(self._stations)
                 packet_type = random.choices(
                     ["position", "message", "status"],
                     weights=[0.6, 0.3, 0.1],
@@ -118,7 +136,7 @@ class MockAPRSAdapter(Adapter):
                     )
                     msg_lat, msg_lon = round(lat, 5), round(lon, 5)
                 elif packet_type == "message":
-                    dest = random.choice(APRS_STATIONS)
+                    dest = random.choice(self._stations)
                     body = f":{dest['call']:<9}:{random.choice(APRS_MESSAGES)}"
                     msg_lat, msg_lon = None, None
                 else:

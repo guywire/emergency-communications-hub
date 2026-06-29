@@ -1,0 +1,71 @@
+# ECH — Simulation Configuration
+# Runs on port 8766 alongside the live instance (port 8765).
+# All adapters are mocks — no real hardware is connected.
+# Use for: training demos, emergency personnel orientation, tabletop exercises.
+#
+# Deploy: copy to /etc/ech/config-sim.yaml on the server.
+# Start:  sudo systemctl start ech-sim
+# Access: http://<server-ip>:8766/
+
+server:
+  host: "0.0.0.0"
+  port: 8766
+  # secure_cookies: true    # enable when ECH is behind HTTPS
+
+database:
+  path: "ech-sim.db"
+
+logging:
+  level: "INFO"
+
+operator:
+  callsign: "N0CALL"
+  name: "ECH Operator"
+
+incident:
+  name: "SIMULATION EXERCISE"
+
+adapters:
+
+  - type: mock_meshtastic
+    name: meshtastic-sim
+    channel: 0
+    interval_sec: 8.0
+    node_count: 7
+    base_lat: 44.1059
+    base_lon: -69.1128
+
+  - type: mock_aprs
+    name: aprs-sim
+    source: aprsis
+    filter_radius: 50
+    interval_sec: 12.0
+    base_lat: 44.1059
+    base_lon: -69.1128
+
+  - type: mock_meshcore
+    name: meshcore-sim
+    channel: TAC-1
+    interval_sec: 15.0
+    base_lat: 44.1059
+    base_lon: -69.1128
+
+  - type: mock_js8call
+    name: hf-js8call-sim
+    callsign: W1SIM
+    interval_sec: 20.0
+    base_lat: 44.1059
+    base_lon: -69.1128
+
+  - type: mock_sms
+    name: sms-sim
+    interval_sec: 25.0
+    base_lat: 44.1059
+    base_lon: -69.1128
+
+  - type: mock_pat_winlink
+    name: winlink-sim
+    callsign: W1SIM
+    interval_sec: 45.0
+    base_lat: 44.1059
+    base_lon: -69.1128

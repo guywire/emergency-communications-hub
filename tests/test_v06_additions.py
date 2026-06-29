@@ -150,17 +150,31 @@ async def test_ducting_detection(engine):
 
 
 @pytest.mark.asyncio
-async def test_nonmesh_adapter_ignored(engine):
+async def test_noncomms_adapter_ignored(engine):
     msg = NormalizedMessage(
-        source_adapter="aprs-mock",
-        source_channel="144.390",
-        from_id="W1ABC-9",
+        source_adapter="sms-twilio",
+        source_channel="SMS",
+        from_id="+15555551234",
         body="Test",
-        lat=44.1, lon=-69.1,
-        raw={"altitude": 9999},
+        raw={},
     )
     findings = await engine.process(msg)
-    assert findings == []  # APRS not a mesh adapter
+    assert findings == []  # SMS / non-RF adapters are not processed
+
+
+@pytest.mark.asyncio
+async def test_aprs_path_change_detected(engine):
+    """APRS digipeater path changes should flag a path_change anomaly."""
+    from ech.core.models import NormalizedMessage
+    kwargs = dict(source_adapter="aprs-is", source_channel="144.390",
+                  from_id="W1ABC-9", body="Pos", raw={})
+    # Establish baseline path over 4 messages
+    for p in ["APRS,WIDE1-1,WIDE2-1", "APRS,WIDE1-1,WIDE2-1",
+              "APRS,WIDE1-1,WIDE2-1", "APRS,WIDE1-1,WIDE2-1"]:
+        await engine.process(NormalizedMessage(path=p, **kwargs))
+    # Sudden different path should be flagged
+    findings = await engine.process(NormalizedMessage(path="APRS,KA1ABC-3,WIDE2-1", **kwargs))
+    assert any(f.rule == "path_change" for f in findings)
 
 
 def test_acknowledge_finding(engine):

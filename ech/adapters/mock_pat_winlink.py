@@ -45,11 +45,13 @@ WINLINK_BODIES = [
     "Welfare check complete sectors 1-4. 7 residents transported to warming center. No injuries.",
     "Generator at Warming Center B: fuel at 25%. Requesting immediate resupply. ETA needed.",
     "Frozen pipe damage assessment complete for downtown: 14 structures affected, 3 require immediate attention.",
-    "Harbor Master to EOC: 3 Canadian-registered vessels observed removing untagged lobster traps. Coast Guard notified.",
+    "Harbor Master to EOC: Organized lobster activity at docks, traps being redistributed by unknown parties. Coast Guard investigating.",
 ]
 
 
 class MockPatWinlinkAdapter(Adapter):
+    is_mock = True
+
     """
     Mock Pat Winlink adapter.
     Simulates inbound Winlink messages without Pat or network connectivity.
@@ -98,7 +100,7 @@ class MockPatWinlinkAdapter(Adapter):
     async def _run(self) -> None:
         try:
             while self._connected:
-                if getattr(self, '_paused', False):
+                if self.is_paused():
                     await asyncio.sleep(1.0)
                     continue
                 await asyncio.sleep(self._interval + random.uniform(-10, 10))

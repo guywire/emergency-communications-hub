@@ -1,287 +1,404 @@
 # ECH — Emergency Communications Hub
-# Configuration file
-# Copy this to /etc/ech/config.yaml for production deployment.
+# Reference configuration file.
+#
+# Deployment:
+#   - First install:  copied automatically to /etc/ech/config.yaml
+#   - Subsequent:     /etc/ech/config.yaml is PRESERVED (not overwritten by deploy)
+#   - Secrets:        keep /etc/ech/config.yaml out of git; this file uses N0CALL placeholders only
 
+# ── Server ────────────────────────────────────────────────────────────────────
 server:
   host: "0.0.0.0"
   port: 8765
+  # secure_cookies: true    # enable when ECH is behind HTTPS (nginx/caddy reverse proxy)
 
 database:
   path: "ech.db"
+
+# ── TLS / HTTPS (optional) ────────────────────────────────────────────────────
+# Enables HTTPS so Web Serial CAT works from any browser on the LAN.
+# The server generates a self-signed CA cert once (data_dir/ech-ca.crt).
+# Operators download and trust that CA cert once; all future ECH deployments
+# (any IP) are then trusted automatically — ideal for contest sites where
+# the IP changes each event.
+#
+# Setup:
+#   1. Set enabled: true, restart ECH.
+#   2. Browse to http://<ip>:8765/ca.crt and trust the CA in your OS/browser.
+#   3. Connect to https://<ip>:8766 — Ham Log now shows "🔌 Connect Radio".
+#   4. Optional: install zeroconf  (pip install zeroconf)  for ech.local mDNS.
+#
+# tls:
+#   enabled: false
+#   https_port: 8766        # HTTPS port alongside HTTP on 8765
+#   data_dir: "."           # where ech-ca.crt/key and ech-server.crt/key live
+
+# ── System GPS (optional) ─────────────────────────────────────────────────────
+# Reads NMEA sentences from a serial GPS receiver (e.g. ublox) and feeds
+# the position to all adapters as the ECH base location.
+# When a fix is acquired the base_lat/base_lon updates automatically —
+# APRS beacons, mock node positions, and map centering all follow.
+#
+# gps:
+#   port: /dev/ttyAMA0       # serial port (Pi UART) or /dev/ttyUSB1 for USB
+#   baud: 9600               # ublox default; some units use 115200
+#   time_sync: true          # set system clock from GPS UTC (requires sudo)
+#   update_interval: 30      # seconds between location updates to ECH state
+#   min_satellites: 4        # minimum sats required for a valid fix
 
 logging:
   level: "INFO"
 
 operator:
-  callsign: "N0CALL"
+  callsign: "N0CALL"          # replace with your callsign on the server
+
+# ── Ham Radio Log ─────────────────────────────────────────────────────────────
+# Multi-station contest logging with ADIF/Cabrillo/POTA/SOTA export and
+# live upload to QRZ.com, Club Log, POTA, and SOTA.
+#
+# hamlog:
+#   callsign: "W1ABC"              # club or station callsign for log header
+#   operator: "W1ABC"             # primary operator callsign
+#   grid: "FN42"                  # Maidenhead grid square
+#   power: "LOW"                  # LOW / HIGH / QRP
+#   contest: "ARRL-FIELD-DAY"     # default contest: ARRL-FIELD-DAY, POTA, SOTA, GENERAL
+#
+#   # ARRL Field Day specific
+#   field_day_class: "2A"         # e.g. 1A, 2A, 3A ... 1B, 2B ... 1E etc.
+#   field_day_section: "ME"       # ARRL/RAC section abbreviation
+#
+#   # POTA (Parks on the Air)
+#   pota_ref: "K-0001"            # park reference number
+#
+#   # SOTA (Summits on the Air)
+#   sota_ref: "W1/EM-001"         # summit reference
+#
+#   # Live upload credentials (keep in /etc/ech/config.yaml, not git)
+#   qrz_api_key: ""               # QRZ.com XML plan logbook API key
+#   clublog_api_key: ""           # Club Log API key
+#   clublog_email: ""             # Club Log account email
+#   pota_username: ""             # pota.app username
+#   pota_password: ""             # pota.app password
+#   sota_username: ""             # sota.org username
+#   sota_password: ""             # sota.org password
   name: "ECH Operator"
 
 incident:
   name: "EXERCISE"
 
-# ── Adapters ──────────────────────────────────────────────────────────────
-# type options (mock):
-#   mock_meshtastic  — simulated Meshtastic mesh traffic
-#   mock_aprs        — simulated APRS-IS/TNC traffic
-#   mock_meshcore    — simulated MeshCore traffic
+# ── Adapters ──────────────────────────────────────────────────────────────────
 #
-# type options (real hardware — uncomment when ready):
-#   meshtastic       — real Meshtastic node via USB serial/BLE/TCP
-#   aprs_kiss        — real TNC via KISS serial or Direwolf AGWPE TCP
-#   aprs_is          — real APRS-IS internet connection
-#   meshcore         — real MeshCore node via USB serial/BLE
+# Mock adapters (simulated traffic — for dev/demo):
+#   mock_meshtastic  mock_aprs  mock_meshcore  mock_js8call  mock_sms  mock_pat_winlink
+#
+# Real adapters (live hardware):
+#   meshtastic       aprs_kiss  aprs_is        meshcore      js8call   sms  pat_winlink
+#   mqtt             reticulum  aredn_ami       asterisk
 
 adapters:
-  - type: mock_meshtastic
-    name: meshtastic-mock
-    channel: 0
-    interval_sec: 8.0
-    node_count: 5
-    base_lat: 44.1059
-    base_lon: -69.1128
 
-  - type: mock_aprs
-    name: aprs-mock
-    source: aprsis          # aprsis | kiss | agwpe
-    filter_radius: 50       # km
-    interval_sec: 12.0
-    base_lat: 44.1059
-    base_lon: -69.1128
+# ── Live adapters — uncomment and fill in for your hardware ──────────────────
+# For a simulation-only demo instance, use config-sim.yaml (port 8766) instead.
 
-  - type: mock_meshcore
-    name: meshcore-mock
-    channel: TAC-1
-    interval_sec: 15.0
-    base_lat: 44.1059
-    base_lon: -69.1128
-
-# ── Real hardware examples (commented out) ───────────────────────────────
+# ── MeshCore (real hardware) ──────────────────────────────────────────────────
 #
-# Meshtastic via USB serial:
-#   - type: meshtastic
-#     name: meshtastic-usb
-#     port: /dev/ttyUSB0      # or /dev/ttyACM0
-#     channel: 0
-#
-# Meshtastic via TCP (remote node on AREDN/LAN):
-#   - type: meshtastic
-#     name: meshtastic-net
-#     host: 192.168.1.50
-#     port: 4403
-#     channel: 0
-#
-# APRS via KISS TNC serial:
-#   - type: aprs_kiss
-#     name: aprs-tnc
-#     port: /dev/ttyUSB1
-#     baud: 9600
-#
-# APRS via APRS-IS internet:
-#   - type: aprs_is
-#     name: aprs-internet
-#     callsign: W1ABC-9
-#     passcode: 12345
-#     server: rotate.aprs2.net
-#     filter: "r/44.1/-69.1/50"
-#
-# APRS via Direwolf AGWPE TCP:
-#   - type: aprs_kiss
-#     name: aprs-direwolf
-#     host: localhost
-#     agwpe_port: 8000
-#
-# MeshCore via USB serial:
+# Serial (USB direct — private key auto-retrieved at startup via 'get prv.key'):
 #   - type: meshcore
-#     name: meshcore-usb
-#     port: /dev/ttyUSB2
-#     channel: TAC-1
-
-# ── Bridge rules (optional) ──────────────────────────────────────────────
-# Forward messages from one adapter to another.
-# bridge_rules:
-#   - from_adapter: meshtastic-usb
-#     to_adapter: aprs-internet
-#   - from_adapter: aprs-tnc
-#     to_adapter: meshtastic-usb
-
-# ── Real hardware examples added ─────────────────────────────────────────
-#
-# MeshCore via USB serial (Companion Radio firmware):
-#   - type: meshcore
-#     name: meshcore-usb
+#     name: meshcore
 #     transport: serial
-#     port: /dev/ttyUSB0       # or /dev/ttyACM0
+#     port: auto               # auto-detect; or specify e.g. /dev/ttyUSB0 / COM3
 #     baud: 115200
-#     channel_idx: 0           # 0=public channel
+#     channel_idx: 0           # 0 = public/default channel
+#     channel_name: "TAC-1"    # optional: switch to named channel at startup
 #     poll_interval: 2.0
+#     app_name: ECH
+#     max_hops: 0              # outgoing message hop limit (0 = device default; 3 = local mesh).
+#     channel_keys:            # optional: per-channel PSKs for decrypting received messages.
+#       - idx: 0               #   channel index (0 = Public)
+#         key: "AQ=="          #   base64 OR 32-hex-char key. "AQ==" is the MeshCore/Meshtastic default PSK.
+#       - idx: 1               #   all default hashtag channels share the same public PSK
+#         key: "AQ=="
+#       - idx: 2
+#         key: "AQ=="
+#       - idx: 3
+#         key: "AQ=="
 #
-# MeshCore via WiFi TCP (ESP32 with SerialWifiInterface):
+# WiFi/TCP (node's built-in TCP companion server, default port 4403):
+#   NOTE: TCP mode cannot auto-retrieve the private key.
+#         Get it once via serial console: run 'get prv.key' and copy the 128-hex output.
+#         Put it in private_key under the LetsMesh MQTT adapter below.
 #   - type: meshcore
-#     name: meshcore-wifi
+#     name: meshcore
 #     transport: tcp
-#     host: 192.168.1.50
+#     host: 192.168.1.50       # node IP
 #     tcp_port: 4403
 #     channel_idx: 0
+#     contact_path_size: 64    # set to 3 for 3-byte path hashing
+#     poll_interval: 2.0
+
+# ── MQTT adapters ─────────────────────────────────────────────────────────────
 #
-# APRS-IS internet connection:
-#   - type: aprs_is
-#     name: aprs-internet
-#     callsign: W1ABC-9
-#     passcode: 12345          # -1 for receive-only
-#     server: rotate.aprs2.net
-#     filter: "r/44.1/-69.1/100"
+# Each [[mqtt]] entry is a separate broker connection.
+# Brokers receive and/or publish messages depending on configured topics.
 #
-# APRS KISS TNC via serial (hardware TNC):
-#   - type: aprs_kiss
-#     name: aprs-tnc
-#     transport: serial
-#     port: /dev/ttyUSB1
-#     baud: 9600
-#     callsign: W1ABC-9
-#     tx_path: WIDE1-1,WIDE2-1
+# ── LetsMesh (community MeshCore MQTT network) ────────────────────────────────
+# Auth uses the MeshCore device's Ed25519 hardware key (JWT scheme from meshcoretomqtt).
+# If MeshCore transport is SERIAL: private key is auto-retrieved at startup — no config needed.
+# If MeshCore transport is TCP:    paste the key from 'get prv.key' on the serial console.
+# GitHub: https://github.com/Cisien/meshcoretomqtt  (auth scheme reference)
 #
-# APRS KISS via Direwolf TCP:
-#   - type: aprs_kiss
-#     name: aprs-direwolf
-#     transport: tcp
+#   - type: mqtt
+#     name: letsmesh-us
+#     host: mqtt-us-v1.letsmesh.net
+#     port: 443
+#     tls: true
+#     transport: websockets
+#     pubkey_auth: meshcore        # must match the MeshCore adapter's 'name' above
+#     private_key: ""              # leave blank if serial (auto); paste 128-hex for TCP
+#     token_ttl: 3600              # JWT lifetime (seconds); reconnects before expiry
+#     topics:
+#       - "meshcore/+/+/packets"
+#       - "meshcore/+/+/status"
+#
+#   - type: mqtt
+#     name: letsmesh-eu
+#     host: mqtt-eu-v1.letsmesh.net
+#     port: 443
+#     tls: true
+#     transport: websockets
+#     pubkey_auth: meshcore
+#     private_key: ""
+#     topics:
+#       - "meshcore/+/+/packets"
+#
+# ── Meshtastic public MQTT ────────────────────────────────────────────────────
+#   - type: mqtt
+#     name: meshtastic-public
+#     host: mqtt.meshtastic.org
+#     port: 1883
+#     topics:
+#       - "msh/US/ME/#"          # adjust region/channel filter as needed
+#
+# ── Local mosquitto broker ────────────────────────────────────────────────────
+#   - type: mqtt
+#     name: local-mqtt
 #     host: localhost
-#     tcp_port: 8001           # Direwolf default KISS-over-TCP port
-#     callsign: W1ABC-9
-
-# ── JS8Call HF adapter ────────────────────────────────────────────────────
-# (mock — for development without JS8Call running)
-  - type: mock_js8call
-    name: hf-js8call-mock
-    callsign: N0CALL        # replace with your callsign
-    interval_sec: 20.0
-    base_lat: 44.1059
-    base_lon: -69.1128
-
-# Real JS8Call (requires JS8Call running with TCP API enabled on port 2442):
-#   - type: js8call
-#     name: hf-js8call
-#     host: 127.0.0.1
-#     port: 2442
-#     callsign: W1ABC-9
-#     hb_interval: 30
-#     rx_activity: false     # true to see all raw band activity (noisy)
+#     port: 1883
+#     username: subscriber       # omit for anonymous
+#     password: changeme
+#     topics:
+#       - "meshcore/#"
+#       - "meshtastic/#"
+#     publish_topic: "ech/alerts"
 #
-# Real Meshtastic (USB serial):
+# ── Generic broker (username/password) ───────────────────────────────────────
+#   - type: mqtt
+#     name: my-broker
+#     host: broker.example.com
+#     port: 1883
+#     username: user
+#     password: pass
+#     tls: false
+#     transport: tcp             # tcp (default) | websockets
+#     client_id: ech-node        # default: ech-{name}
+#     keepalive: 60
+#     qos: 0
+#     topics:
+#       - "#"
+#     publish_topic: "ech/outbound"
+
+# ── Meshtastic (real hardware) ────────────────────────────────────────────────
+#
+# USB serial:
 #   - type: meshtastic
 #     name: meshtastic-usb
 #     transport: serial
-#     port: /dev/ttyUSB0     # or null for auto-detect
+#     port: /dev/ttyUSB0        # or null for auto-detect
 #     channel_idx: 0
+#     channel_name: "LongFast"  # optional: use this named channel for TX
 #
-# Real Meshtastic (TCP/WiFi):
+# TCP/WiFi:
 #   - type: meshtastic
 #     name: meshtastic-wifi
 #     transport: tcp
 #     host: 192.168.1.100
 #     channel_idx: 0
+#
+# LoRa / GPS can be configured live from the Settings page after connecting.
+# On first use, set region (e.g. US) and modem preset (e.g. LongFast) so the
+# device is on the correct band.  Enable GPS (ublox / built-in) for time sync
+# and automatic position reporting.  These write to device flash via the
+# Meshtastic Admin API and persist across reboots.
 
-# ── SMS modem adapter ─────────────────────────────────────────────────────
-# (mock — for development without a physical modem)
-  - type: mock_sms
-    name: sms-mock
-    interval_sec: 25.0
-    base_lat: 44.1059
-    base_lon: -69.1128
+# ── APRS (real hardware) ──────────────────────────────────────────────────────
+#
+# APRS-IS internet:
+#   - type: aprs_is
+#     name: aprs-internet
+#     callsign: N0CALL-9
+#     passcode: 12345            # -1 for receive-only
+#     server: rotate.aprs2.net
+#     filter: "r/44.1/-69.1/100"
+#
+# KISS TNC serial (hardware TNC or Direwolf serial):
+#   - type: aprs_kiss
+#     name: aprs-tnc
+#     transport: serial
+#     port: /dev/ttyUSB1
+#     baud: 9600
+#     callsign: N0CALL-9
+#     tx_path: WIDE1-1,WIDE2-1
+#
+# Direwolf KISS over TCP:
+#   - type: aprs_kiss
+#     name: aprs-direwolf
+#     transport: tcp
+#     host: localhost
+#     tcp_port: 8001             # Direwolf default KISS-over-TCP
+#     callsign: N0CALL-9
 
-# Real SMS modem (SIM800L, SIM7600, Huawei E3372, etc.):
+# ── JS8Call HF (real) ─────────────────────────────────────────────────────────
+#   Requires JS8Call running with TCP API enabled on port 2442.
+#   - type: js8call
+#     name: hf-js8call
+#     host: 127.0.0.1
+#     port: 2442
+#     callsign: N0CALL-9
+#     hb_interval: 30
+#     rx_activity: false         # true = show all raw band activity (noisy)
+
+# ── SMS modem (real) ──────────────────────────────────────────────────────────
+#   Supports SIM800L, SIM7600, Huawei E3372, etc.
 #   - type: sms
 #     name: sms
-#     port: /dev/ttyUSB0     # SIM7600: usually /dev/ttyUSB0
-#                            # SIM800L: /dev/ttyAMA0 (Pi UART) or /dev/ttyUSB0
+#     port: /dev/ttyUSB0         # SIM7600: usually /dev/ttyUSB0
 #     baud: 115200
-#     pin: "1234"            # omit if no SIM PIN
+#     pin: "1234"                # omit if no SIM PIN
 #     delete_on_read: true
 #     poll_interval: 60
-#     pdu_mode: false        # true for Huawei sticks that misbehave in text mode
-#
-# Hardware notes:
-#   SIM7600 HAT: set port to /dev/ttyUSB0 (AT+SMS port, NOT GPS or diagnostic)
-#   SIM800L GPIO: needs 3.7-4.2V power supply separate from Pi 3.3V
-#   Huawei E3372h: may need 'usb_modeswitch' to switch from storage to modem mode
-#     sudo apt install usb-modeswitch
-#     plug in, then: usb_modeswitch -v 12d1 -p 1f01 -J
+#     pdu_mode: false            # true for some Huawei sticks
+#   #
+#   # Hardware notes:
+#   #   SIM7600 HAT:  set port to the AT+SMS port, NOT GPS or diagnostic
+#   #   SIM800L GPIO: needs 3.7-4.2V supply separate from Pi 3.3V
+#   #   Huawei E3372h: may need usb_modeswitch first:
+#   #     sudo apt install usb-modeswitch
+#   #     usb_modeswitch -v 12d1 -p 1f01 -J
 
-# ── Pat Winlink adapter ────────────────────────────────────────────────────
-# (mock — for development without Pat installed)
-  - type: mock_pat_winlink
-    name: winlink-mock
-    callsign: N0CALL        # replace with your callsign
-    interval_sec: 45.0
-    base_lat: 44.1059
-    base_lon: -69.1128
-
-# Real Pat Winlink (requires Pat running with HTTP API):
+# ── Pat Winlink (real) ────────────────────────────────────────────────────────
+#   Requires Pat running with HTTP API.  Setup:
+#     wget https://github.com/la5nta/pat/releases/latest/download/pat_linux_arm64.tar.gz
+#     sudo tar -xzf pat_*.tar.gz -C /usr/local/bin/ pat
+#     sudo -u ech pat configure     # set callsign and Winlink password
+#     sudo systemctl enable --now pat
 #
-# SETUP:
-#   1. Install Pat:
-#      wget https://github.com/la5nta/pat/releases/latest/download/pat_linux_arm64.tar.gz
-#      sudo tar -xzf pat_linux_arm64.tar.gz -C /usr/local/bin/ pat
-#      # (use linux_amd64 for x86 thin client)
-#
-#   2. Configure Pat (first time only):
-#      sudo -u ech pat configure
-#      # Set: callsign, Winlink password (blank first time), transport
-#
-#   3. Install Pat systemd service:
-#      sudo cp /opt/ech/systemd/pat.service /etc/systemd/system/
-#      sudo systemctl daemon-reload
-#      sudo systemctl enable pat
-#      sudo systemctl start pat
-#
-#   4. First Winlink registration (one time, needs internet):
-#      pat connect telnet
-#      # Password will arrive in first inbox message
-#
-#   5. Enable in config:
 #   - type: pat_winlink
 #     name: winlink
-#     callsign: W1ABC-9           # REQUIRED — your Winlink callsign
+#     callsign: N0CALL-9
 #     pat_url: http://127.0.0.1:8080
-#     poll_interval: 300          # seconds between inbox polls
-#     auto_connect: false         # true to auto-connect on startup + after send
-#     connect_alias: telnet       # telnet | ardop | ax25 | vara-hf | vara-fm
-#
-# Transport notes:
-#   telnet    — internet only; good for testing and internet-connected EOC
-#   ardop     — HF via ARDOP TNC (open source, Pi-compatible, free)
-#               requires ardopc running: https://www.cantab.net/users/john.wiseman/Documents/ARDOPC.html
-#   ax25      — VHF/UHF packet via Linux AX.25 stack or KISS TNC
-#   vara-hf   — HF via VARA (proprietary but runs on Wine on Linux)
-#   vara-fm   — VHF via VARA FM (proprietary)
+#     poll_interval: 300
+#     auto_connect: false
+#     connect_alias: telnet          # telnet | ardop | ax25 | vara-hf | vara-fm
 
-# ── MeshCore → MeshMapper MQTT Bridge ────────────────────────────────────
-# Republishes MeshCore data from ECH's serial connection to an MQTT broker
-# so meshcore-mqtt-live-map can display your nodes on its map.
-# ECH uses the SAME serial connection — no second hardware reader needed.
-#
-# To use with meshcore-mqtt-live-map:
-#   1. Run a local MQTT broker (mosquitto):
-#      sudo apt install mosquitto mosquitto-clients -y
-#      sudo systemctl enable mosquitto
-#
-#   2. Enable this bridge:
+# ── Asterisk/PBX (real) ───────────────────────────────────────────────────────
+#   Bridges VoIP/PSTN calls with ECH messaging via Asterisk AGI.
+#   - type: asterisk
+#     name: pbx
+#     host: 127.0.0.1
+#     ami_port: 5038
+#     username: ech
+#     password: changeme
+#     context: from-internal
+
+# ── AREDN (real) ─────────────────────────────────────────────────────────────
+#   Polls AREDN mesh node API for topology and device info.
+#   - type: aredn_ami
+#     name: aredn
+#     host: localnode.local.mesh
+#     poll_interval: 60
+
+# ── Bridge rules (optional) ───────────────────────────────────────────────────
+# Forward messages from one adapter's output to another's send().
+# bridge_rules:
+#   - from_adapter: meshcore
+#     to_adapter: letsmesh-us
+#   - from_adapter: aprs-internet
+#     to_adapter: meshtastic-usb
+
+# ── MeshCore → MQTT bridge (legacy internal bridge) ──────────────────────────
+# This is the older bridge implemented in meshcore_bridge.py.
+# For most setups, prefer the mqtt adapter above with pubkey_auth instead.
+# Keep enabled: false unless you specifically need the internal bridge.
 meshcore_bridge:
-  enabled: false              # set true to activate
-  mqtt_host: localhost        # where your MQTT broker is
+  enabled: false
+  mqtt_host: localhost
   mqtt_port: 1883
   # mqtt_username: subscriber
   # mqtt_password: changeme
-  topic_prefix: meshcore      # meshcore-mqtt-live-map subscribes to meshcore/#
-  adapter_name: meshcore-usb  # which ECH adapter to mirror (or leave null for auto)
-  publish_decoded: true       # publish decoded JSON alongside raw bytes
+  topic_prefix: meshcore
+  adapter_name: meshcore        # which MeshCore adapter to mirror (null = auto)
+  iata_code: "XXX"              # 3-letter IATA airport code for your region
+  publish_decoded: true
   qos: 0
+
+# ── Mesh bot ──────────────────────────────────────────────────────────────────
+# General-purpose bot: ping, weather, overhead, satpass, solar/space, help.
+# All commands share the same channel list and cooldown settings.
+# No API key required for any command.  Requires: pip install skyfield
 #
-# Then point meshcore-mqtt-live-map at the same broker:
-#   MQTT_HOST=localhost MQTT_PORT=1883 MQTT_TOPIC=meshcore/#
+# Commands:
+#   ping              — echo with SNR/hop metadata
+#   weather <zip5>    — NWS current conditions + forecast (US zip codes)
+#   overhead          — closest aircraft from dump1090 JSON within radius
+#   satpass [name]    — next ISS / NOAA satellite pass (requires lat/lon)
+#   solar / space     — SFI, SSN, K-index from hamqsl.com
+#   help              — list commands
+mesh_bot:
+  enabled: true
+  channels: ["#weather", "#cmd", "#mesh"]  # ["*"] = every channel
+  adapters: []                  # [] = all adapters; e.g. ["meshcore-1"]
+  reply_dm: true                # true = DM sender; false = channel broadcast
+  per_user_cooldown_sec: 30     # per-sender cooldown shared across all commands
+  global_cooldown_sec: 5        # minimum gap between any two bot replies (flood guard)
+  max_reply_len: 200            # hard cap — keeps reply to one LoRa payload
+
+  # Observer coordinates — used by overhead, satpass, and weather without a zip.
+  # Falls back to weather_service.nws_lat / nws_lon if not set here.
+  lat: null
+  lon: null
+
+  # Aircraft overhead (dump1090 / readsb)
+  dump1090_path: "/run/dump1090-fa/aircraft.json"
+  overhead_radius_nm: 20        # nautical miles
+
+  # Satellite passes (skyfield)
+  tle_targets: ["ISS (ZARYA)", "NOAA 19", "NOAA 18"]
+
+  # Solar / space weather (hamqsl.com — no key needed)
+  solar_cache_sec: 900          # re-fetch after 15 minutes
+
+# weather_bot key is still accepted as an alias for mesh_bot (backwards compat)
+
+# ── CAT radio control (rigctld / Hamlib) ──────────────────────────────────────
+# ECH connects to a running rigctld process over TCP and polls freq/mode every
+# poll_interval seconds. Changes are broadcast to all browsers as cat_update
+# WebSocket events so the ham log auto-fills frequency, band, and mode.
 #
-# For LetsMesh / EastMesh public broker:
-#   mqtt_host: mqtt.letsmesh.com
-#   mqtt_port: 1883
-#   mqtt_username: your_subscriber_account
-#   mqtt_password: your_password
-#   topic_prefix: meshcore
+# rigctld setup (run before starting ECH):
+#   Xiegu G90  (CI-V, 19200): rigctld -m 3083 -r /dev/ttyUSB0 -s 19200 -t 4532
+#   Icom IC-7300 (9600):      rigctld -m 3073 -r /dev/ttyUSB0 -s 9600 -t 4532
+#   Icom IC-705:              rigctld -m 3085 -r /dev/ttyUSB0 -t 4532
+#   Icom IC-9700:             rigctld -m 3081 -r /dev/ttyUSB0 -t 4532
+#   Yaesu FT-991A (38400):    rigctld -m 1035 -r /dev/ttyUSB0 -s 38400 -t 4532
+#   Yaesu FT-817/818 (9600):  rigctld -m 1039 -r /dev/ttyUSB0 -s 9600 -t 4532
+#   Yaesu FT-DX10 (38400):    rigctld -m 1043 -r /dev/ttyUSB0 -s 38400 -t 4532
+#   Dummy (no hardware):      rigctld -m 1 -t 4532
+#
+#   Install: sudo apt install libhamlib-utils
+#   Find rig model number: rigctl -l | grep -i "xiegu\|icom\|yaesu"
+cat:
+  enabled: false              # set true after rigctld is running
+  rigctld_host: localhost
+  rigctld_port: 4532
+  poll_interval: 2.0          # seconds between freq/mode polls
+  auto_fill_hamlog: true      # push updates to ham log via WebSocket

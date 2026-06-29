@@ -1,0 +1,20 @@
+[Unit]
+Description=ECH Emergency Communications Hub — Simulation Instance (port 8766)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=ech
+Group=ech
+WorkingDirectory=/var/lib/ech
+ExecStart=/opt/ech/.venv/bin/ech --config /etc/ech/config-sim.yaml
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ech-sim
+
+[Install]
+WantedBy=multi-user.target

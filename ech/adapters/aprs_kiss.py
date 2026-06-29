@@ -314,6 +314,11 @@ class APRSKISSAdapter(Adapter):
         lat = packet.get("latitude")
         lon = packet.get("longitude")
 
+        # Extract digipeater path: "SRC>DEST,DIGI1*,DIGI2:..." → "DEST,DIGI1*,DIGI2"
+        aprs_path = None
+        if ">" in raw_str and ":" in raw_str:
+            aprs_path = raw_str.split(">", 1)[1].split(":", 1)[0] or None
+
         msg = NormalizedMessage(
             source_adapter=self.name,
             source_channel=f"144.390 (KISS)",
@@ -322,7 +327,8 @@ class APRSKISSAdapter(Adapter):
             body=body,
             lat=float(lat) if lat else None,
             lon=float(lon) if lon else None,
-            raw={"format": packet.get("format", ""), "raw": raw_str[:120]},
+            path=aprs_path,
+            raw={"format": packet.get("format", "")},
         )
         await self._enqueue(msg)
         log.debug("APRS-KISS %s: pkt from %s: %s", self.name, from_id, body[:60])

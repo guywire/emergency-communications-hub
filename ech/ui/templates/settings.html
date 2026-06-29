@@ -111,7 +111,14 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
         <span id="loc-save-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none">Saved — restart ECH to apply to mock adapters</span>
       </div>
       <div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--muted)">
-        Affects: map default center, mock node positions. Requires ECH restart to reposition mock nodes.
+        Affects: map default center, mock node positions, APRS beacon position. Requires ECH restart to reposition mock nodes.
+      </div>
+      <div style="margin-top:14px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px">
+        <div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);margin-bottom:8px">System GPS receiver (ublox serial)</div>
+        <div id="gps-status-row" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px">Loading…</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">
+          Configure in config.yaml under <code style="background:var(--bg2);padding:1px 4px;border-radius:2px">gps:</code> — the receiver feeds the system base location automatically.
+        </div>
       </div>
     </div>
   </div>
@@ -159,14 +166,9 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
           <label>NWS area (state code)</label>
           <input type="text" id="wx-area" placeholder="ME" maxlength="2" style="text-transform:uppercase">
         </div>
-        <div>
-          <label>Latitude (optional)</label>
-          <input type="number" id="wx-lat" placeholder="44.1" step="0.01">
-        </div>
-        <div>
-          <label>Longitude (optional)</label>
-          <input type="number" id="wx-lon" placeholder="-69.1" step="0.01">
-        </div>
+      </div>
+      <div style="margin-top:6px;font-size:11px;color:var(--muted)" id="wx-coords-note">
+        Coordinates: set Base Location above — county-level alerts are more precise than state code.
       </div>
       <div class="row" style="margin-top:12px">
         <div>
@@ -179,7 +181,7 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
             <label><input type="checkbox" id="sev-extreme" checked> Extreme</label>
             <label><input type="checkbox" id="sev-severe" checked> Severe</label>
             <label><input type="checkbox" id="sev-moderate" checked> Moderate</label>
-            <label><input type="checkbox" id="sev-minor"> Minor</label>
+            <label><input type="checkbox" id="sev-minor" checked> Minor</label>
           </div>
         </div>
       </div>
@@ -190,8 +192,43 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
           <span class="toggle-slider"></span>
         </label>
       </div>
+      <div style="margin-top:10px">
+        <label>Auto-broadcast adapters (comma-separated names, blank = all connected)</label>
+        <input type="text" id="wx-auto-adapters" placeholder="meshcore1, meshtastic1" style="font-family:var(--mono);font-size:11px">
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">New NWS alert IDs are only broadcast once regardless of this setting.</div>
+      </div>
       <button class="btn btn-green" style="margin-top:16px" onclick="saveWxConfig()">Save weather config</button>
+      <button class="btn" style="margin-top:16px;margin-left:8px" onclick="pollWeatherNow()">Poll NWS now</button>
       <span id="save-toast">✓ Saved</span>
+      <div id="wx-alerts-panel" style="margin-top:14px;display:none">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Active NWS Alerts</div>
+        <div id="wx-alerts-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Live adapter control ────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('adapter-live-body')">
+      <span class="section-title">ADAPTER CONTROL</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Enable/disable adapters without restart</span>
+    </div>
+    <div id="adapter-live-body" class="section-body">
+      <div id="adapter-live-list"><div style="font-family:var(--mono);font-size:11px;color:var(--dim)">Loading…</div></div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:10px">
+        Pausing an adapter stops it from generating mock traffic immediately. Does not affect config.yaml.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MeshCore tools ───────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('meshcore-tools-body'); loadMeshCoreTools()">
+      <span class="section-title">MESHCORE TOOLS</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Channel management &amp; key export</span>
+    </div>
+    <div id="meshcore-tools-body" class="section-body" style="display:none">
+      <div id="meshcore-tools-list"><div style="font-family:var(--mono);font-size:11px;color:var(--dim)">Loading…</div></div>
     </div>
   </div>
 
@@ -204,14 +241,14 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     <div id="adapter-body" class="section-body">
       <div id="adapter-list"></div>
       <div style="margin-top:16px">
-        <label>Raw config.yaml adapters (YAML)</label>
+        <label>Raw adapter config (JSON — saved to config.yaml)</label>
         <textarea id="adapter-yaml" spellcheck="false"></textarea>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="btn btn-green" onclick="saveAdapters()">Save (requires ECH restart)</button>
           <button class="btn btn-yellow" onclick="restartECH()">Restart ECH</button>
         </div>
         <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px">
-          Changes take effect after restart. Syntax errors will prevent ECH from starting.
+          Changes take effect after restart. The editor shows JSON; it is converted to YAML when saved.
         </div>
       </div>
     </div>
@@ -261,7 +298,11 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
         <div><label>From adapter</label><input type="text" id="bridge-from" placeholder="meshtastic-usb"></div>
         <div><label>To adapter</label><input type="text" id="bridge-to" placeholder="aprs-internet"></div>
       </div>
-      <button class="btn btn-green" style="margin-top:8px" onclick="addBridgeRule()">Add rule</button>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button class="btn btn-green" onclick="addBridgeRule()">Add rule</button>
+        <button class="btn btn-blue" onclick="saveBridgeRules()">Save &amp; apply</button>
+        <span id="bridge-save-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none">Saved and applied live</span>
+      </div>
     </div>
   </div>
 
@@ -275,15 +316,111 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     <div id="mqtt-body" class="section-body">
       <div id="mqtt-status" style="margin-bottom:12px;font-family:var(--mono);font-size:11px;color:var(--muted)">Loading…</div>
       <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px">
-        MQTT adapters and the MeshCore→MeshMapper bridge are configured in
-        <code style="background:var(--bg3);padding:2px 5px;border-radius:3px">/etc/ech/config.yaml</code>.
-        Edit the adapter list below or SSH to the host to edit directly.
+        Click a preset to preview it, then click <strong>Add to config</strong> to write it to config.yaml (requires ECH restart to connect).
       </div>
-      <div style="margin-top:8px">
-        <button class="btn btn-green" onclick="testMeshMapper()">Test MeshMapper bridge</button>
-        <button class="btn btn-blue" onclick="loadMQTTStatus()" style="margin-left:8px">↻ Refresh</button>
+      <div style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--text);margin:12px 0 4px">Subscribe presets (receive from external brokers)</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+        <button class="btn btn-blue" onclick="mqttPreset('boston')">Greater Boston Mesh</button>
+        <button class="btn btn-blue" onclick="mqttPreset('meshtastic')">Meshtastic Public</button>
+        <button class="btn btn-blue" onclick="mqttPreset('letsmesh_us')">LetsMesh US</button>
+        <button class="btn btn-blue" onclick="mqttPreset('letsmesh_eu')">LetsMesh EU</button>
+        <button class="btn btn-blue" onclick="mqttPreset('meshmapper_rx')">MeshMapper (monitor)</button>
+      </div>
+      <div style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--text);margin:8px 0 4px">Publish presets (MeshCore bridge → external map tools)</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+        <button class="btn btn-blue" onclick="mqttPreset('bridge_local')">Bridge → Local Mosquitto</button>
+        <button class="btn btn-blue" onclick="mqttPreset('bridge_meshmapper')">Bridge → MeshMapper</button>
+        <button class="btn btn-blue" onclick="mqttPreset('bridge_letsmesh')">Bridge → LetsMesh US</button>
+      </div>
+      <pre id="mqtt-preset-box" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:10px;font-family:var(--mono);font-size:10px;color:var(--text);white-space:pre-wrap;margin-bottom:8px"></pre>
+      <div id="mqtt-preset-actions" style="display:none;margin-bottom:10px;display:flex;gap:8px;align-items:center">
+        <button id="mqtt-add-btn" class="btn btn-green" onclick="">Add to config</button>
+        <span id="mqtt-add-note" style="font-family:var(--mono);font-size:10px;color:var(--dim)"></span>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button id="bridge-toggle-btn" class="btn btn-green" onclick="toggleBridge()" style="display:none"></button>
+        <button class="btn btn-blue" onclick="loadMQTTStatus()">↻ Refresh</button>
       </div>
       <div id="mqtt-bridge-status" style="margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--dim)"></div>
+      <div style="margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--muted)">
+        Bridge pushes your local MeshCore USB data to a MQTT broker so MeshMapper/live-map tools can track your nodes.
+        The MQTT adapters above subscribe <em>from</em> external brokers — separate data flow.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PSKReporter ────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('psk-body')">
+      <span class="section-title">PSKREPORTER STATUS</span>
+    </div>
+    <div id="psk-body" class="section-body">
+      <div id="psk-status-panel" style="font-family:var(--mono);font-size:11px;color:var(--muted)">Loading…</div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <input type="text" id="psk-callsign" placeholder="Callsign (optional)" style="width:140px">
+        <select id="psk-band" style="width:100px">
+          <option value="">All bands</option>
+          <option value="40m">40m</option>
+          <option value="20m">20m</option>
+          <option value="15m">15m</option>
+          <option value="10m">10m</option>
+          <option value="6m">6m</option>
+        </select>
+        <button class="btn btn-blue" onclick="fetchPSK()">Fetch spots</button>
+        <button class="btn btn-blue" onclick="loadPSKStatus()">↻ Refresh status</button>
+      </div>
+      <div id="psk-spots" style="margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--muted)"></div>
+    </div>
+  </div>
+
+  <!-- ── PBX / Asterisk ───────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('pbx-body')">
+      <span class="section-title">PBX / ASTERISK</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Click-to-call, paging, inbound call logging</span>
+    </div>
+    <div id="pbx-body" class="section-body" style="display:none">
+      <div id="pbx-status-panel" style="font-family:var(--mono);font-size:11px;color:var(--muted)">Loading…</div>
+      <div style="margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--text)">
+        <strong>Quick test</strong>
+        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+          <input type="text" id="pbx-dest" placeholder="Destination (ext or number)" style="width:200px">
+          <button class="btn btn-green" onclick="settingsPbxCall()">📞 Call</button>
+          <button class="btn btn-blue" onclick="settingsPbxPage()">📢 Page all</button>
+        </div>
+      </div>
+      <div style="margin-top:14px;font-family:var(--mono);font-size:10px;color:var(--muted)">
+        Config preset (add to config.yaml, then restart ECH):
+      </div>
+      <pre style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:10px;font-family:var(--mono);font-size:10px;color:var(--text);white-space:pre-wrap;margin-top:6px"># Asterisk PBX — real hardware via AMI
+- type: asterisk
+  name: pbx
+  ami_host: 127.0.0.1      # Asterisk host (localhost if on same machine)
+  ami_port: 5038
+  ami_username: ech
+  ami_secret: changeme
+  local_extension: "101"   # Your ATA/phone extension
+  page_target: "SIP/101"   # Extensions to page (& separated for multiple)
+  context: from-internal
+  caller_id: "ECH &lt;100&gt;"
+  log_inbound: true
+  log_outbound: true
+  # Screen phone (add later):
+  # screen_extension: "102"
+  # screen_push_url: "http://192.168.1.50/CGI/Execute"
+
+# --- OR for testing without hardware ---
+- type: mock_asterisk
+  name: pbx-mock
+  interval_sec: 60
+  local_extension: "101"</pre>
+      <div style="margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--muted)">
+        Asterisk AMI requires <code>manager.conf</code> with ECH user having <code>system,call,log,originate</code> permissions.
+        See <a href="https://docs.asterisk.org/Configuration/Interfaces/Asterisk-Manager-Interface-AMI/" target="_blank" style="color:var(--blue)">Asterisk AMI docs</a>.
+      </div>
+      <div style="margin-top:6px">
+        <button class="btn btn-blue" onclick="loadPBXStatus()">↻ Refresh</button>
+      </div>
     </div>
   </div>
 
@@ -318,32 +455,45 @@ let bridgeRules = [];
 async function loadServices() {
   const body = document.getElementById('services-body');
   if (!body) return;
+  body.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">Checking…</div>';
   try {
     const r = await fetch('/api/system/services');
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status} — ${await r.text()}`);
     const data = await r.json();
+    if (!data.services || !data.services.length) throw new Error('Empty response');
     body.innerHTML = data.services.map(sv => {
-      const cls = sv.ok ? 'svc-ok' : (sv.active === 'inactive' ? 'svc-warn' : 'svc-err');
-      const stateLabel = sv.ok
-        ? `<span style="color:var(--green)">● active</span>`
-        : sv.active === 'inactive'
-          ? `<span style="color:var(--yellow)">● inactive</span>`
-          : `<span style="color:var(--red)">● ${esc(sv.active)}</span>`;
+      let cls, stateLabel;
+      if (sv.ok === null) {
+        cls = 'svc-warn';
+        stateLabel = `<span style="color:var(--yellow)">● unknown</span>`;
+      } else if (sv.ok) {
+        cls = 'svc-ok';
+        stateLabel = `<span style="color:var(--green)">● active</span>`;
+      } else if (sv.active === 'inactive') {
+        cls = 'svc-warn';
+        stateLabel = `<span style="color:var(--yellow)">● inactive</span>`;
+      } else {
+        cls = 'svc-err';
+        stateLabel = `<span style="color:var(--red)">● ${esc(sv.active)}</span>`;
+      }
+      const note = sv.note ? `<span style="color:var(--dim)"> — ${esc(sv.note)}</span>` : '';
+      const errNote = sv.error ? `<span style="color:var(--red)"> — ${esc(sv.error)}</span>` : '';
       return `<div class="svc-row">
         <div class="svc-indicator ${cls}"></div>
         <div class="svc-info">
           <div class="svc-lbl">${esc(sv.label)}</div>
-          <div class="svc-meta">${stateLabel} &nbsp;·&nbsp; ${esc(sv.enabled)} &nbsp;·&nbsp; port ${esc(sv.port)}</div>
+          <div class="svc-meta">${stateLabel} &nbsp;·&nbsp; ${esc(sv.enabled||'—')} &nbsp;·&nbsp; port ${esc(sv.port)}${note}${errNote}</div>
         </div>
         <div class="svc-actions">
-          ${!sv.ok ? `<button class="btn btn-green" onclick="doRestart('${esc(sv.name)}')">Start</button>` : ''}
-          <button class="btn" style="border-color:var(--border);color:var(--muted)" onclick="doRestart('${esc(sv.name)}')">Restart</button>
-          ${!sv.ok && sv.name !== 'ech' ? `<button class="btn btn-blue" onclick="installService('${esc(sv.name)}')">Install</button>` : ''}
+          ${sv.ok === false && sv.active !== 'unknown' ? `<button class="btn btn-green" onclick="doRestart('${esc(sv.name)}')">Start</button>` : ''}
+          ${sv.ok !== null ? `<button class="btn" style="border-color:var(--border);color:var(--muted)" onclick="doRestart('${esc(sv.name)}')">Restart</button>` : ''}
+          ${sv.ok === false && sv.name !== 'ech' ? `<button class="btn btn-blue" onclick="installService('${esc(sv.name)}')">Install</button>` : ''}
         </div>
       </div>`;
     }).join('');
   } catch(e) {
-    body.innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:11px">Failed to load service status: ${e.message}</div>`;
+    body.innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:11px;padding:8px">Failed to load service status: ${e.message}<br><span style="color:var(--dim)">Check browser console for details. Is ECH running?</span></div>`;
+    console.error('loadServices error:', e);
   }
 }
 
@@ -387,26 +537,51 @@ async function loadMQTTStatus() {
     // MeshCore bridge status
     const bridge = await fetch('/api/meshcore-bridge').then(r=>r.json());
     const bel = document.getElementById('mqtt-bridge-status');
+    const btn = document.getElementById('bridge-toggle-btn');
+    btn.style.display = '';
     if (bridge.enabled) {
-      bel.innerHTML = `MeshMapper bridge: <span style="color:${bridge.connected?'var(--green)':'var(--red)'}">${bridge.connected?'connected':'disconnected'}</span>`
+      const connColor = bridge.connected ? 'var(--green)' : 'var(--red)';
+      const connText  = bridge.connected ? 'connected'    : 'disconnected';
+      bel.innerHTML = `MeshCore bridge: <span style="color:${connColor}">${connText}</span>`
         + ` → ${esc(bridge.broker)} prefix <code>${esc(bridge.topic_prefix)}</code>`
-        + ` | ${bridge.published} packets published | queue: ${bridge.queue_depth}`;
+        + ` | ${bridge.published} pkts published | queue: ${bridge.queue_depth}`;
+      btn.textContent = 'Disable bridge';
+      btn.className = 'btn btn-red';
+      btn.dataset.enable = '0';
     } else {
-      bel.innerHTML = 'MeshMapper bridge: <span style="color:var(--dim)">disabled</span>'
-        + ' — enable in config.yaml under <code>meshcore_bridge: enabled: true</code>';
+      bel.innerHTML = 'MeshCore bridge: <span style="color:var(--dim)">disabled</span>'
+        + ' (publishes to local mosquitto on localhost:1883)';
+      btn.textContent = 'Enable bridge';
+      btn.className = 'btn btn-green';
+      btn.dataset.enable = '1';
     }
   } catch(e) {
     document.getElementById('mqtt-status').textContent = 'Error loading MQTT status';
   }
 }
 
-async function testMeshMapper() {
-  const r = await fetch('/api/meshcore-bridge').then(r=>r.json());
-  if (!r.enabled) {
-    alert('MeshMapper bridge is disabled.\n\nEnable in /etc/ech/config.yaml:\n\nmeshcore_bridge:\n  enabled: true\n  mqtt_host: localhost\n  topic_prefix: meshcore');
-    return;
+async function toggleBridge() {
+  const btn = document.getElementById('bridge-toggle-btn');
+  const enable = btn.dataset.enable === '1';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/meshcore-bridge/enable', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: enable}),
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      toast(enable ? 'Bridge enabled — restart ECH to connect' : 'Bridge disabled', 'ok');
+      await loadMQTTStatus();
+    } else {
+      toast('Error: ' + (d.detail || 'unknown'), 'err');
+      btn.disabled = false;
+    }
+  } catch(e) {
+    toast('Request failed', 'err');
+    btn.disabled = false;
   }
-  alert(`Bridge status: ${r.connected ? 'CONNECTED' : 'DISCONNECTED'}\nBroker: ${r.broker}\nTopic: ${r.topic_prefix}/#\nPublished: ${r.published} packets\n\nCheck Mosquitto: sudo systemctl status mosquitto`);
 }
 
 function setSysbarPref(enabled) {
@@ -446,11 +621,36 @@ async function saveBaseLocation() {
   await fetch('/api/adapter-config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ adapters, bridge_rules: ac.bridge_rules }),
+    body: JSON.stringify({ adapters, bridge_rules: bridgeRules }),
   });
   const msg = document.getElementById('loc-save-msg');
   msg.style.display = 'inline';
   setTimeout(() => { msg.style.display = 'none'; }, 6000);
+}
+
+async function loadGpsStatus() {
+  const el = document.getElementById('gps-status-row');
+  if (!el) return;
+  try {
+    const d = await fetch('/api/gps').then(r => r.json());
+    if (!d.enabled) {
+      el.innerHTML = `<span style="color:var(--muted)">Not configured — add <code style="background:var(--bg2);padding:1px 3px;border-radius:2px">gps: port: /dev/ttyAMA0</code> to config.yaml</span>`;
+      return;
+    }
+    const fix = d.fix;
+    if (fix) {
+      const ts = fix.ts ? new Date(fix.ts).toLocaleTimeString() : '?';
+      const alt = fix.alt != null ? ` alt ${fix.alt.toFixed(0)}m` : '';
+      const sync = d.time_synced ? ' · clock synced' : (d.time_sync ? ' · sync pending' : '');
+      el.innerHTML = `<span style="color:var(--green)">&#x25CF; Fix: ${fix.lat.toFixed(5)}, ${fix.lon.toFixed(5)}${alt} @ ${ts}${sync}</span>`;
+    } else if (d.error) {
+      el.innerHTML = `<span style="color:var(--red)">&#x25CF; Error: ${esc(d.error)}</span> <span style="color:var(--muted)">(port: ${esc(d.port)})</span>`;
+    } else {
+      el.innerHTML = `<span style="color:var(--yellow)">&#x25CF; Waiting for fix… (port: ${esc(d.port)}, ${d.baud} baud)</span>`;
+    }
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--muted)">GPS status unavailable</span>`;
+  }
 }
 
 function detectLocation() {
@@ -469,9 +669,16 @@ async function init() {
 
   loadServices();
   setInterval(loadServices, 15000);
+  loadAdapterLive();
+  setInterval(loadAdapterLive, 10000);
   loadMQTTStatus();
+  loadPBXStatus();
   loadLiveStats();
   setInterval(loadLiveStats, 5000);
+
+  // Load system GPS status
+  loadGpsStatus();
+  setInterval(loadGpsStatus, 15000);
 
   // Load state
   const state = await fetch('/api/state').then(r=>r.json());
@@ -479,11 +686,20 @@ async function init() {
   document.getElementById('sim-toggle').checked = state.simulation_enabled !== false;
   setModeDisplay(state.mode || 'standard');
 
-  // Load weather config
+  // Load weather config and active alerts
   const wx = await fetch('/api/weather/config').then(r=>r.json());
+  const st = await fetch('/api/state').then(r=>r.json()).catch(()=>({}));
+  loadWxAlerts();
   if (wx.nws_area) document.getElementById('wx-area').value = wx.nws_area;
-  if (wx.nws_lat) document.getElementById('wx-lat').value = wx.nws_lat;
-  if (wx.nws_lon) document.getElementById('wx-lon').value = wx.nws_lon;
+  // Show current coordinates in the weather section note
+  const coordsNote = document.getElementById('wx-coords-note');
+  if (coordsNote) {
+    const lat = st.base_lat ?? wx.nws_lat;
+    const lon = st.base_lon ?? wx.nws_lon;
+    if (lat != null && lon != null) {
+      coordsNote.innerHTML = `Polling by coordinates: <code>${lat}, ${lon}</code> (set in Base Location above)`;
+    }
+  }
   document.getElementById('wx-poll').value = wx.poll_interval_sec || 300;
   const sev = wx.severity_filter || ['Extreme','Severe','Moderate'];
   document.getElementById('sev-extreme').checked = sev.includes('Extreme');
@@ -491,6 +707,7 @@ async function init() {
   document.getElementById('sev-moderate').checked = sev.includes('Moderate');
   document.getElementById('sev-minor').checked = sev.includes('Minor');
   document.getElementById('wx-auto-broadcast').checked = wx.auto_broadcast_extreme || false;
+  if (wx.auto_broadcast_adapters) document.getElementById('wx-auto-adapters').value = wx.auto_broadcast_adapters.join(', ');
 
   // Load adapter config
   const ac = await fetch('/api/adapter-config').then(r=>r.json());
@@ -549,14 +766,48 @@ async function saveWxConfig() {
   if (document.getElementById('sev-minor').checked) sev.push('Minor');
   const cfg = {
     nws_area: document.getElementById('wx-area').value.toUpperCase(),
-    nws_lat: parseFloat(document.getElementById('wx-lat').value) || null,
-    nws_lon: parseFloat(document.getElementById('wx-lon').value) || null,
     poll_interval_sec: parseInt(document.getElementById('wx-poll').value) || 300,
     severity_filter: sev,
     auto_broadcast_extreme: document.getElementById('wx-auto-broadcast').checked,
+    auto_broadcast_adapters: document.getElementById('wx-auto-adapters').value.split(',').map(s=>s.trim()).filter(Boolean),
   };
   await fetch('/api/weather/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
   toast('Weather config saved — takes effect immediately');
+  loadWxAlerts();
+}
+
+async function loadWxAlerts() {
+  const d = await fetch('/api/weather/alerts').then(r=>r.json()).catch(()=>null);
+  if (!d) return;
+  const panel = document.getElementById('wx-alerts-panel');
+  const list = document.getElementById('wx-alerts-list');
+  panel.style.display = 'block';
+  const srcLabel = d.poll_source
+    ? `<span style="font-size:10px;color:var(--muted)">Polling: <code>${esc(d.poll_source)}</code></span>`
+    : '';
+  if (!d.alerts || d.alerts.length === 0) {
+    list.innerHTML = `<div style="color:var(--green);font-size:12px">No active NWS alerts &emsp;${srcLabel}</div>`;
+    return;
+  }
+  const SEV_COLOR = {Extreme:'#ff4444', Severe:'#ff8800', Moderate:'#ffcc00', Minor:'#aaaaaa'};
+  list.innerHTML += d.alerts.map(a => {
+    const color = SEV_COLOR[a.severity] || '#888';
+    const expires = a.expires ? new Date(a.expires).toLocaleString() : '';
+    return `<div style="border-left:3px solid ${color};padding:6px 10px;margin-bottom:6px;background:var(--bg2,#1e1e1e);border-radius:3px;font-size:12px">
+      <div><strong style="color:${color}">${esc(a.severity)}</strong> — ${esc(a.event)}</div>
+      <div style="color:var(--muted);font-size:11px">${esc(a.area||'')}</div>
+      ${expires ? `<div style="color:var(--muted);font-size:10px">Expires: ${esc(expires)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function pollWeatherNow() {
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = 'Polling…';
+  await fetch('/api/weather/poll', {method:'POST'}).catch(()=>null);
+  await loadWxAlerts();
+  btn.disabled = false; btn.textContent = 'Poll NWS now';
+  toast('NWS poll complete');
 }
 
 function renderAdapterList(adapters) {
@@ -592,13 +843,30 @@ async function restartECH() {
 }
 
 function renderUsers(users) {
-  document.getElementById('user-list').innerHTML = users.map(u =>
-    `<div class="user-row">
+  const me = currentUser && currentUser.username;
+  document.getElementById('user-list').innerHTML = users.map(u => {
+    const isSelf = u.username === me;
+    const kickBtn = !isSelf
+      ? `<button class="btn btn-yellow" onclick="kickUser('${esc(u.username)}')" style="padding:3px 8px;font-size:10px" title="Force logout all sessions">Kick</button>`
+      : '';
+    return `<div class="user-row">
       <span class="user-name">${esc(u.username)}</span>
       <span class="user-role">${esc(u.role)}</span>
+      ${kickBtn}
       <button class="btn btn-red" onclick="deleteUser('${esc(u.username)}')" style="padding:3px 8px;font-size:10px">Delete</button>
-    </div>`
-  ).join('') || '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No users</div>';
+    </div>`;
+  }).join('') || '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No users</div>';
+}
+
+async function kickUser(username) {
+  if (!confirm(`Force logout "${username}"? They will need to log in again.`)) return;
+  const r = await fetch(`/api/auth/sessions/${encodeURIComponent(username)}`, {method: 'DELETE'});
+  const d = await r.json();
+  if (d.status === 'ok') {
+    toast(`${username} logged out (${d.sessions_revoked} session${d.sessions_revoked !== 1 ? 's' : ''} revoked)`);
+  } else {
+    toast(`Error: ${d.detail || 'unknown'}`, true);
+  }
 }
 
 async function addUser() {
@@ -654,6 +922,816 @@ function deleteBridge(i) {
   renderBridgeRules();
 }
 
+async function saveBridgeRules() {
+  const r = await fetch('/api/bridge-rules', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rules: bridgeRules}),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    const msg = document.getElementById('bridge-save-msg');
+    msg.textContent = d.warning ? `Applied live (config save failed: ${d.warning})` : 'Saved and applied live';
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 3000);
+  } else {
+    toast(`Bridge save failed: ${d.detail}`, 'err');
+  }
+}
+
+// ── Adapter live control ──────────────────────────────────────────────────
+async function loadAdapterLive() {
+  const el = document.getElementById('adapter-live-list');
+  try {
+    const r = await fetch('/api/channels');
+    const data = await r.json();
+    const adapters = data.channels || [];
+    if (!adapters.length) { el.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No adapters connected</div>'; return; }
+    el.innerHTML = adapters.map(a => {
+      const isRunning = a.state === 'connected';
+      const paused = a.detail && a.detail.paused;
+      const dot = isRunning ? (paused ? '⏸' : '●') : '○';
+      const dotColor = isRunning ? (paused ? 'var(--yellow)' : 'var(--green)') : 'var(--red)';
+      const aEsc = esc(a.adapter);
+      // MeshCore channel switcher
+      const isMeshCore = a.adapter.toLowerCase().includes('meshcore');
+      const chName = a.detail && (a.detail.channel_name || a.detail.channel || '');
+      const txCh = isMeshCore && a.detail && a.detail.tx_channel ? a.detail.tx_channel : null;
+      const chStr = txCh
+        ? ` <span style="color:var(--muted);font-size:10px" title="TX on this channel only — receives from all channels">[TX: ${esc(txCh)} · RX: all]</span>`
+        : (chName ? ` <span style="color:var(--muted);font-size:10px">[ch: ${esc(chName)}]</span>` : '');
+      const discoverInt = a.detail && a.detail.discovery_interval ? ` (auto-discover every ${a.detail.discovery_interval}s)` : '';
+      const battStr = isMeshCore && a.detail && a.detail.battery_v != null
+        ? ` <span style="font-family:var(--mono);font-size:10px;color:${a.detail.battery_v < 3.5 ? 'var(--red)' : a.detail.battery_v < 3.7 ? 'var(--yellow,#ff0)' : 'var(--green)'}" title="Device battery voltage">${a.detail.battery_v.toFixed(2)}V</span>` : '';
+      const hwStr = isMeshCore && a.detail && a.detail.hardware ? ` <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">${esc(a.detail.hardware)}</span>` : '';
+      const fwStr = isMeshCore && a.detail && a.detail.firmware  ? ` <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">${esc(a.detail.firmware)}</span>` : '';
+      const curMaxHops = a.detail && a.detail.max_hops != null ? a.detail.max_hops : 0;
+      const chList = a.detail && a.detail.channels_list ? a.detail.channels_list : [];
+      const chOpts = chList.length
+        ? chList.map(c => `<option value="${c.idx}">${c.idx}: ${esc(c.name)}</option>`).join('')
+        : '';
+      const chInput = chOpts
+        ? `<select id="ch-${aEsc}" style="width:130px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">${chOpts}</select>`
+        : `<input id="ch-${aEsc}" type="text" placeholder="name or index 0-7" style="width:130px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">`;
+      // MeshCore: channel rename table (one row per slot)
+      const mcChRenameRows = chList.map(c =>
+        `<div style="display:flex;align-items:center;gap:6px;padding:2px 0">
+          <span style="font-family:var(--mono);font-size:10px;color:var(--dim);width:18px;flex-shrink:0">${c.idx}</span>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted);width:110px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis" title="${esc(c.name)}">${esc(c.name) || '<em style="color:var(--dim)">unnamed</em>'}</span>
+          <input type="text" id="mcren-${aEsc}-${c.idx}" placeholder="new name" value="${esc(c.name)}" style="width:120px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+          <button class="btn btn-blue" style="padding:2px 8px;font-size:10px" onclick="renameMeshCoreChannel('${aEsc}',${c.idx})">Rename</button>
+        </div>`
+      ).join('');
+      const mcChRenameTable = chList.length ? `
+        <div style="width:100%;margin-top:6px;padding:6px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px">
+          <div style="font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted);margin-bottom:6px">Rename channels on device</div>
+          ${mcChRenameRows}
+        </div>` : '';
+      const chSwitcher = isMeshCore ? `
+        ${chInput}
+        <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="switchChannel('${aEsc}')">Switch TX ch</button>
+        <button id="disc-${aEsc}" class="btn btn-blue" style="padding:3px 8px;font-size:10px" title="Solicit node advertisements now${esc(discoverInt)}" onclick="discoverNodes('${aEsc}')">Discover</button>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:4px">Hops:</span>
+        <select id="hops-${aEsc}" style="font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px" title="Max hops for outgoing messages">
+          <option value="0" ${curMaxHops===0?'selected':''}>default</option>
+          <option value="1" ${curMaxHops===1?'selected':''}>1</option>
+          <option value="2" ${curMaxHops===2?'selected':''}>2</option>
+          <option value="3" ${curMaxHops===3?'selected':''}>3</option>
+        </select>
+        <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="setMaxHops('${aEsc}')">Set hops</button>
+        <button id="scan-${aEsc}" class="btn btn-blue" style="padding:3px 8px;font-size:10px" title="Query device for all channel slots (0–255) via CMD_GET_CHANNEL 0x1F — takes ~13s" onclick="scanChannels('${aEsc}')">Scan channels</button>
+        ${mcChRenameTable}` : '';
+      // Meshtastic controls
+      const isMeshtastic = a.adapter.includes('meshtastic') && !a.adapter.includes('mock');
+      const txIdx = a.detail ? (a.detail.channel_idx || 0) : 0;
+      const monList = a.detail && a.detail.monitored_channels ? a.detail.monitored_channels.join(',') : '';
+      const devChList = a.detail && a.detail.channels_list ? a.detail.channels_list : [];
+      const devChOpts = devChList.map(c => `<option value="${c.idx}"${c.idx===txIdx?' selected':''}>${c.idx}: ${esc(c.name)}</option>`).join('');
+      const mtChRenameRows = devChList.map(c =>
+        `<div style="display:flex;align-items:center;gap:6px;padding:2px 0">
+          <span style="font-family:var(--mono);font-size:10px;color:var(--dim);width:18px;flex-shrink:0">${c.idx}</span>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted);width:110px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis" title="${esc(c.name)}">${esc(c.name) || '<em style="color:var(--dim)">unnamed</em>'}</span>
+          <input type="text" id="mtren-${aEsc}-${c.idx}" placeholder="new name" value="${esc(c.name)}" style="width:120px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+          <button class="btn btn-blue" style="padding:2px 8px;font-size:10px" onclick="renameMeshtasticChannel('${aEsc}',${c.idx})">Rename</button>
+        </div>`
+      ).join('');
+      const mtChRenameTable = devChList.length ? `
+          <div style="margin-top:2px;display:flex;flex-direction:column;gap:0">
+            <div style="font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted);margin-bottom:4px">Rename channels on device</div>
+            ${mtChRenameRows}
+          </div>` : '';
+      const meshtasticControls = isMeshtastic ? `
+        <div style="width:100%;margin-top:6px;padding:6px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;display:flex;flex-direction:column;gap:6px">
+          <div style="font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted)">Meshtastic channels</div>
+          ${mtChRenameTable}
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">TX ch:</span>
+            ${devChOpts ? `<select id="mtx-sel-${aEsc}" style="font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">${devChOpts}</select>` : `<input id="mtx-idx-${aEsc}" type="number" min="0" max="7" value="${txIdx}" style="width:44px;font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">`}
+            <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="setMeshtasticTx('${aEsc}')">Set TX</button>
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:8px">Monitor (indices):</span>
+            <input id="mmon-${aEsc}" type="text" value="${monList}" placeholder="0,1,2 or blank=all" style="width:120px;font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+            <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="setMeshtasticMonitor('${aEsc}')">Apply</button>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Configure channel on device:</span>
+            <select id="mch-preset-${aEsc}" style="font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px" onchange="applyMeshtasticPreset('${aEsc}')">
+              <option value="">— preset —</option>
+              <option value="longfast">LongFast (default)</option>
+              <option value="longslow">LongSlow</option>
+              <option value="mediumfast">MediumFast</option>
+              <option value="mediumslow">MediumSlow</option>
+              <option value="shortfast">ShortFast</option>
+              <option value="shortslow">ShortSlow</option>
+              <option value="custom">Custom</option>
+            </select>
+            <input id="mch-idx-${aEsc}" type="number" min="0" max="7" value="0" placeholder="slot" style="width:44px;font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px" title="Channel slot 0–7">
+            <input id="mch-name-${aEsc}" type="text" placeholder="name (blank=default)" style="width:110px;font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+            <input id="mch-psk-${aEsc}" type="text" placeholder="PSK base64 (blank=default)" style="width:160px;font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px" title="Leave blank for firmware default key. Custom: 16 or 32 random bytes, base64-encoded">
+            <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="configureMeshtasticChannel('${aEsc}')">Push to device</button>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">LoRa:</span>
+            <select id="mlora-region-${aEsc}" style="font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px" title="LoRa region for legal RF band compliance">
+              <option value="">— region —</option>
+              <option value="us">US (915 MHz)</option>
+              <option value="eu_433">EU 433 MHz</option>
+              <option value="eu_868">EU 868 MHz</option>
+              <option value="anz">ANZ (Australia/NZ)</option>
+              <option value="cn">CN (China)</option>
+              <option value="jp">JP (Japan)</option>
+              <option value="kr">KR (Korea)</option>
+              <option value="ru">RU (Russia)</option>
+              <option value="in">IN (India)</option>
+              <option value="tw">TW (Taiwan)</option>
+              <option value="sg_923">SG 923</option>
+            </select>
+            <select id="mlora-preset-${aEsc}" style="font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px" title="Modem preset controls SF/BW/CR — must match all nodes in the mesh">
+              <option value="">— modem preset —</option>
+              <option value="longfast">LongFast (default)</option>
+              <option value="longslow">LongSlow</option>
+              <option value="mediumfast">MediumFast</option>
+              <option value="mediumslow">MediumSlow</option>
+              <option value="shortfast">ShortFast</option>
+              <option value="shortslow">ShortSlow</option>
+            </select>
+            <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="setMeshtasticLora('${aEsc}')">Apply LoRa</button>
+            <button class="btn btn-green" style="padding:3px 8px;font-size:10px" onclick="applyMeshtasticUSDefaults('${aEsc}')" title="Region: US · LongFast · Slot 20 · PSK: AQ==">US Defaults</button>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Device GPS chip:</span>
+            <select id="mgps-mode-${aEsc}" style="font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px" title="GPS mode on the Meshtastic radio itself (not the ECH server GPS)">
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Disabled</option>
+              <option value="not_present">Not present</option>
+            </select>
+            <input id="mgps-bcast-${aEsc}" type="number" min="0" max="3600" placeholder="bcast s" style="width:64px;font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px" title="Position broadcast interval in seconds (0 = device default; blank = unchanged)">
+            <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="setMeshtasticGps('${aEsc}')">Apply</button>
+          </div>
+        </div>` : '';
+      return `<div class="adapter-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="color:${dotColor};font-size:14px">${dot}</span>
+        <span class="adapter-name" style="flex:1">${esc(a.adapter)}${chStr}${hwStr}${fwStr}${battStr}</span>
+        <span class="adapter-type">${esc(a.state)}</span>
+        ${chSwitcher}
+        <button class="btn ${paused?'btn-green':'btn-yellow'}" style="padding:3px 10px;font-size:10px" onclick="toggleAdapter('${aEsc}', ${!paused})">${paused?'Resume':'Pause'}</button>
+        ${meshtasticControls}
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:11px">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+async function setMeshtasticTx(adapterName) {
+  const sel = document.getElementById(`mtx-sel-${adapterName}`);
+  const inp = document.getElementById(`mtx-idx-${adapterName}`);
+  const idx = parseInt(sel ? sel.value : inp.value);
+  if (isNaN(idx)) return;
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/channel`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({channel: idx}),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    toast(`${adapterName}: TX → ch${d.channel_idx}${d.channel_name ? ' ('+d.channel_name+')' : ''}`, 'ok');
+    setTimeout(loadAdapterLive, 400);
+  } else {
+    toast(`TX channel failed: ${d.detail}`, 'err');
+  }
+}
+
+async function setMeshtasticMonitor(adapterName) {
+  const raw = document.getElementById(`mmon-${adapterName}`).value.trim();
+  const indices = raw ? raw.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : null;
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/meshtastic/monitored`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({indices}),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    const label = d.monitored_channels ? `ch ${d.monitored_channels.join(', ')}` : 'all channels';
+    toast(`${adapterName}: monitoring ${label}`, 'ok');
+  } else {
+    toast(`Monitor set failed: ${d.detail}`, 'err');
+  }
+}
+
+function applyMeshtasticPreset(adapterName) {
+  const preset = document.getElementById(`mch-preset-${adapterName}`).value;
+  if (!preset || preset === 'custom') return;
+  const nameMap = {longfast:'',longslow:'',mediumfast:'',mediumslow:'',shortfast:'',shortslow:''};
+  document.getElementById(`mch-name-${adapterName}`).value = nameMap[preset] !== undefined ? nameMap[preset] : preset;
+  document.getElementById(`mch-psk-${adapterName}`).value = '';  // default key
+  document.getElementById(`mch-idx-${adapterName}`).value = '0'; // presets apply to primary
+}
+
+async function configureMeshtasticChannel(adapterName) {
+  const idxEl  = document.getElementById(`mch-idx-${adapterName}`);
+  const nameEl = document.getElementById(`mch-name-${adapterName}`);
+  const pskEl  = document.getElementById(`mch-psk-${adapterName}`);
+  const presetEl = document.getElementById(`mch-preset-${adapterName}`);
+  const idx    = parseInt(idxEl.value) || 0;
+  const name   = nameEl.value.trim();
+  const psk    = pskEl.value.trim() || null;
+  const preset = presetEl.value && presetEl.value !== 'custom' ? presetEl.value : null;
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/meshtastic/channel`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({idx, name, psk_b64: psk, modem_preset: preset}),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    toast(`${adapterName}: ch${idx} configured${name ? ' "'+name+'"' : ''}${preset ? ' ('+preset+')' : ''}`, 'ok');
+    setTimeout(loadAdapterLive, 800);
+  } else {
+    toast(`Channel configure failed: ${d.detail}`, 'err');
+  }
+}
+
+async function setMeshtasticLora(adapterName) {
+  const region = document.getElementById(`mlora-region-${adapterName}`)?.value || null;
+  const preset = document.getElementById(`mlora-preset-${adapterName}`)?.value || null;
+  if (!region && !preset) { toast('Select a region or modem preset first', 'err'); return; }
+  const body = {};
+  if (region) body.region = region;
+  if (preset) body.modem_preset = preset;
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/meshtastic/lora`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    toast(`${adapterName}: LoRa → ${d.changed.join(', ')}`, 'ok');
+  } else {
+    toast(`LoRa config failed: ${d.detail}`, 'err');
+  }
+}
+
+async function applyMeshtasticUSDefaults(adapterName) {
+  // Push: Region=US, LongFast preset, frequency slot 20, channel name=LongFast, PSK=AQ==
+  try {
+    const enc = encodeURIComponent(adapterName);
+    // Step 1: LoRa config (region + preset + frequency slot)
+    const r1 = await fetch(`/api/adapters/${enc}/meshtastic/lora`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({region: 'us', modem_preset: 'longfast', channel_num: 20}),
+    });
+    const d1 = await r1.json();
+    if (d1.status !== 'ok') { toast(`US Defaults: LoRa failed — ${d1.detail}`, 'err'); return; }
+    // Step 2: Channel 0 — name=LongFast, PSK=AQ==
+    const r2 = await fetch(`/api/adapters/${enc}/meshtastic/channel`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({idx: 0, name: 'LongFast', psk_b64: 'AQ==', modem_preset: 'longfast'}),
+    });
+    const d2 = await r2.json();
+    if (d2.status !== 'ok') { toast(`US Defaults: channel failed — ${d2.detail}`, 'err'); return; }
+    toast(`${adapterName}: US defaults applied — Region US, LongFast, slot 20`, 'ok');
+    setTimeout(loadAdapterLive, 1200);
+  } catch(e) {
+    toast(`US Defaults error: ${e.message}`, 'err');
+  }
+}
+
+async function setMeshtasticGps(adapterName) {
+  const mode = document.getElementById(`mgps-mode-${adapterName}`)?.value || 'enabled';
+  const bcastEl = document.getElementById(`mgps-bcast-${adapterName}`);
+  const bcastRaw = bcastEl?.value?.trim();
+  const broadcast_secs = bcastRaw !== '' && bcastRaw != null ? parseInt(bcastRaw, 10) : null;
+  const body = {gps_mode: mode};
+  if (broadcast_secs !== null && !isNaN(broadcast_secs)) body.broadcast_secs = broadcast_secs;
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/meshtastic/gps`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    const bstr = d.broadcast_secs != null ? `, bcast ${d.broadcast_secs}s` : '';
+    toast(`${adapterName}: GPS mode → ${d.gps_mode}${bstr}`, 'ok');
+  } else {
+    toast(`GPS config failed: ${d.detail}`, 'err');
+  }
+}
+
+async function switchChannel(adapterName) {
+  const el = document.getElementById(`ch-${adapterName}`);
+  if (!el) return;
+  const raw = el.value.trim();
+  if (!raw) return;
+  // Send as int if it looks like a number, else string
+  const channel = /^\d+$/.test(raw) ? parseInt(raw, 10) : raw;
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/channel`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({channel}),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    const label = d.channel_name ? `${d.channel_name} (ch${d.channel_idx})` : `ch${d.channel_idx}`;
+    toast(`${adapterName}: TX → ${label}`);
+    setTimeout(loadAdapterLive, 600);
+  } else {
+    toast(`Channel switch failed: ${d.detail}`);
+  }
+}
+
+async function discoverNodes(adapterName) {
+  const btn = document.getElementById(`disc-${adapterName}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Discovering…'; }
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/discover`, {method: 'POST'});
+    const d = await r.json();
+    if (d.status === 'ok') {
+      toast(`${adapterName}: discovery pulse sent — ${d.node_count} node(s) known`);
+      setTimeout(loadAdapterLive, 1500);
+    } else {
+      toast(`Discovery failed: ${d.detail}`);
+    }
+  } catch(e) {
+    toast(`Discovery error: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Discover'; }
+  }
+}
+
+async function scanChannels(adapterName) {
+  const btn = document.getElementById(`scan-${adapterName}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Scanning…'; }
+  toast(`${adapterName}: scanning all channel slots (0–255) — takes ~13s…`);
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/scan_channels`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({max_idx: 255}),
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      const named = d.channels.filter(c => !c.name.match(/^ch\d+$/));
+      toast(`${adapterName}: scan done — ${d.count} slot(s) found (${named.length} named)`, 'ok');
+      setTimeout(loadAdapterLive, 500);
+    } else {
+      toast(`Scan failed: ${d.detail}`, 'err');
+    }
+  } catch(e) {
+    toast(`Scan error: ${e.message}`, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Scan channels'; }
+  }
+}
+
+async function setMaxHops(adapterName) {
+  const el = document.getElementById(`hops-${adapterName}`);
+  const hops = parseInt(el?.value ?? '0', 10);
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/max_hops`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({max_hops: hops}),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    toast(`${adapterName}: max hops → ${d.max_hops === 0 ? 'device default' : d.max_hops}`, 'ok');
+  } else {
+    toast(`Set hops failed: ${d.detail}`, 'err');
+  }
+}
+
+async function renameMeshCoreChannel(adapterName, idx) {
+  const inp = document.getElementById(`mcren-${adapterName}-${idx}`);
+  const newName = inp ? inp.value.trim() : '';
+  if (!newName) { toast('Enter a channel name', 'err'); return; }
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/add_channel`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({idx, name: newName}),
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      toast(`${adapterName}: channel ${idx} renamed to "${newName}"`, 'ok');
+      setTimeout(loadAdapterLive, 800);
+    } else {
+      toast(`Rename failed: ${d.detail || JSON.stringify(d)}`, 'err');
+    }
+  } catch(e) {
+    toast(`Rename error: ${e.message}`, 'err');
+  }
+}
+
+async function renameMeshtasticChannel(adapterName, idx) {
+  const inp = document.getElementById(`mtren-${adapterName}-${idx}`);
+  const newName = inp ? inp.value.trim() : '';
+  if (!newName) { toast('Enter a channel name', 'err'); return; }
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/meshtastic/channel`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({idx, name: newName}),
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      toast(`${adapterName}: channel ${idx} renamed to "${newName}"`, 'ok');
+      setTimeout(loadAdapterLive, 1500);
+    } else {
+      toast(`Rename failed: ${d.detail || JSON.stringify(d)}`, 'err');
+    }
+  } catch(e) {
+    toast(`Rename error: ${e.message}`, 'err');
+  }
+}
+
+async function toggleAdapter(name, enable) {
+  await fetch(`/api/adapters/${encodeURIComponent(name)}/enabled`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enabled: enable})
+  });
+  setTimeout(loadAdapterLive, 500);
+  toast(`${name}: ${enable ? 'resumed' : 'paused'}`);
+}
+
+// ── PSKReporter ──────────────────────────────────────────────────────────
+async function loadPSKStatus() {
+  const el = document.getElementById('psk-status-panel');
+  try {
+    const s = await fetch('/api/pskreporter/status').then(r=>r.json());
+    const ageStr = s.cache_age_sec != null ? `${s.cache_age_sec}s ago` : 'no cache';
+    const dot = s.cache_valid ? '●' : '○';
+    const dotColor = s.cache_valid ? 'var(--green)' : (s.last_failure ? 'var(--red)' : 'var(--dim)');
+    el.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <div>Status <span style="color:${dotColor}">${dot}</span> ${s.cache_valid ? 'cached' : 'no data'}</div>
+      <div>Spot count: <b style="color:var(--text)">${s.spot_count}</b></div>
+      <div>Cache age: <b style="color:var(--text)">${ageStr}</b> / TTL ${s.cache_ttl_sec}s</div>
+      <div>Total fetches: <b style="color:var(--text)">${s.total_fetches}</b></div>
+      <div>Last success: <span style="color:var(--muted)">${s.last_success || 'never'}</span></div>
+      <div>Last failure: <span style="color:${s.last_failure?'var(--red)':'var(--dim)'}">${s.last_failure || 'none'}</span></div>
+      ${s.last_error ? `<div style="grid-column:span 2;color:var(--red)">Error: ${esc(s.last_error)}</div>` : ''}
+    </div>`;
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--red)">Failed: ${esc(e.message)}</span>`;
+  }
+}
+
+async function fetchPSK() {
+  const callsign = document.getElementById('psk-callsign').value.trim();
+  const band = document.getElementById('psk-band').value;
+  const el = document.getElementById('psk-spots');
+  el.textContent = 'Fetching…';
+  try {
+    const params = new URLSearchParams();
+    if (callsign) params.append('callsign', callsign);
+    if (band) params.append('band', band);
+    const d = await fetch(`/api/pskreporter/spots?${params}`).then(r=>r.json());
+    if (d.error) { el.innerHTML = `<span style="color:var(--red)">Error: ${esc(d.error)}</span>`; return; }
+    el.innerHTML = `<div style="color:var(--muted);margin-bottom:6px">${d.total} spots${d.cached ? ` (cached ${d.cache_age_sec}s ago)` : ' (live)'}</div>` +
+      (d.spots.slice(0,20).map(s => `<div>${esc(s.senderCallsign)} → ${esc(s.receiverCallsign)} ${esc(s.mode)} ${s.sNR>0?'+':''}${s.sNR}dB ${esc(s.receiverLocator)}</div>`).join('') || '<div style="color:var(--dim)">No spots found</div>');
+    loadPSKStatus();
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`;
+  }
+}
+
+// ── PBX / Asterisk ───────────────────────────────────────────────────────
+async function loadPBXStatus() {
+  const el = document.getElementById('pbx-status-panel');
+  if (!el) return;
+  try {
+    const d = await fetch('/api/pbx/status').then(r=>r.json());
+    if (!d.enabled) {
+      el.innerHTML = '<span style="color:var(--muted)">No PBX adapter configured. Add <code>type: asterisk</code> or <code>type: mock_asterisk</code> to config.yaml.</span>';
+      return;
+    }
+    const conn = d.connected ? '<span style="color:var(--green)">● connected</span>' : '<span style="color:var(--red)">● offline</span>';
+    const active = d.active_calls?.length || 0;
+    const recent = d.recent_calls?.length || 0;
+    el.innerHTML = `Adapter: <b>${esc(d.adapter)}</b> ${conn} · Active calls: <b>${active}</b> · Recent: <b>${recent}</b>` +
+      (d.detail?.ami_host ? `<br>AMI: ${esc(d.detail.ami_host)} · Ext: ${esc(d.detail.local_ext||'?')}` : '');
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--red)">PBX error: ${esc(e.message)}</span>`;
+  }
+}
+
+async function settingsPbxCall() {
+  const dest = document.getElementById('pbx-dest')?.value?.trim();
+  if (!dest) { alert('Enter a destination extension or number'); return; }
+  const r = await fetch('/api/pbx/call', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({destination: dest}),
+  });
+  const d = await r.json();
+  alert(d.status === 'ok' ? `Calling ${dest}…` : `Error: ${d.detail || d.status}`);
+}
+
+async function settingsPbxPage() {
+  const r = await fetch('/api/pbx/announce', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({}),
+  });
+  const d = await r.json();
+  alert(d.status === 'ok' ? 'Page sent to all extensions' : `Error: ${d.detail || d.status}`);
+}
+
+// ── MQTT presets ─────────────────────────────────────────────────────────
+const MQTT_PRESETS = {
+  boston: `# Greater Boston Mesh  (Meshtastic regional broker)
+# Requires free registration at bostonme.sh
+# Use "Add to config" button — do not paste directly into config.yaml
+- type: mqtt
+  name: mqtt-boston-mesh
+  host: mqttmc01.bostonme.sh
+  port: 443
+  transport: websockets
+  tls: true
+  username: YOUR_USERNAME
+  password: YOUR_PASSWORD
+  topics:
+  - msh/US/MA/#`,
+
+  meshtastic: `# Meshtastic Public MQTT Broker
+# Public credentials — read-only community traffic
+# Use "Add to config" button — do not paste directly into config.yaml
+- type: mqtt
+  name: mqtt-meshtastic
+  host: mqtt.meshtastic.org
+  port: 1883
+  username: meshdev
+  password: large4cats
+  topics:
+  - msh/US/2/json/LongFast/#`,
+
+  letsmesh_us: `# LetsMesh US  (MeshCore network, WebSocket+TLS)
+# Auth: auto-generated Ed25519 JWT from your MeshCore device key (no token to paste)
+# For serial transport the private key is fetched automatically.
+# For TCP transport add:  private_key: <128-hex from "get prv.key">
+- type: mqtt
+  name: mqtt-letsmesh-us
+  host: mqtt-us-v1.letsmesh.net
+  port: 443
+  transport: websockets
+  tls: true
+  pubkey_auth: meshcore      # name of your meshcore adapter in this config
+  topics:
+  - meshcore/+/+/packets
+  - meshcore/+/+/status`,
+
+  letsmesh_eu: `# LetsMesh EU  (MeshCore network, WebSocket+TLS)
+# Auth: auto-generated Ed25519 JWT from your MeshCore device key (no token to paste)
+- type: mqtt
+  name: mqtt-letsmesh-eu
+  host: mqtt-eu-v1.letsmesh.net
+  port: 443
+  transport: websockets
+  tls: true
+  pubkey_auth: meshcore      # name of your meshcore adapter in this config
+  topics:
+  - meshcore/+/+/packets
+  - meshcore/+/+/status`,
+
+  meshmapper_rx: `# MeshMapper (monitor/receive — see other nodes on the map)
+# Auth: auto-generated Ed25519 JWT from your MeshCore device key.
+# ECH also publishes TO MeshMapper via the MeshCore Bridge preset below.
+- type: mqtt
+  name: mqtt-meshmapper-rx
+  host: mqtt.meshmapper.net
+  port: 443
+  transport: websockets
+  tls: true
+  pubkey_auth: meshcore      # name of your meshcore adapter in this config
+  topics:
+  - meshcore/+/+/packets
+  - meshcore/+/+/status`,
+
+  // ── Bridge presets — go under 'meshcore_bridge:' not 'adapters:'
+  bridge_local: `# MeshCore Bridge → Local Mosquitto  (recommended starting point)
+# No credentials needed; bridge your USB MeshCore to a local broker first.
+# Then use meshcore-packet-capture or mosquitto bridge to forward upstream.
+meshcore_bridge:
+  enabled: true
+  iata_code: BOS            # 3-letter IATA code for your region (e.g. BOS, MAN, SYD)
+  device_pubkey: ""         # leave blank — auto-detected from MeshCore device
+  mqtt_host: localhost
+  mqtt_port: 1883
+  status_interval: 300      # send node status every 5 min`,
+
+  bridge_meshmapper: `# MeshCore Bridge → MeshMapper  (publish your nodes to the map)
+# Requires MeshMapper account and MeshCore Auth Token.
+# Topic: meshcore/{IATA}/{PUBLIC_KEY}/packets
+meshcore_bridge:
+  enabled: true
+  iata_code: BOS            # 3-letter IATA code for your region
+  device_pubkey: ""         # auto-detected, or paste your 64-char hex pubkey
+  mqtt_host: mqtt.meshmapper.net
+  mqtt_port: 443
+  mqtt_websocket: true
+  mqtt_tls: true
+  mqtt_username: YOUR_MESHCORE_AUTH_TOKEN
+  mqtt_password: ""
+  status_interval: 300`,
+
+  bridge_letsmesh: `# MeshCore Bridge → LetsMesh US  (publish your nodes to LetsMesh)
+# Requires LetsMesh account and MeshCore Auth Token.
+meshcore_bridge:
+  enabled: true
+  iata_code: BOS
+  device_pubkey: ""
+  mqtt_host: mqtt-us-v1.letsmesh.net
+  mqtt_port: 443
+  mqtt_websocket: true
+  mqtt_tls: true
+  mqtt_username: YOUR_MESHCORE_AUTH_TOKEN
+  mqtt_password: ""
+  status_interval: 300`,
+};
+
+const MQTT_PRESET_DICTS = {
+  boston: {
+    type: 'mqtt', name: 'mqtt-boston-mesh',
+    host: 'mqttmc01.bostonme.sh', port: 443,
+    transport: 'websockets', tls: true,
+    username: 'YOUR_USERNAME', password: 'YOUR_PASSWORD',
+    topics: ['msh/US/MA/#'],
+  },
+  meshtastic: {
+    type: 'mqtt', name: 'mqtt-meshtastic',
+    host: 'mqtt.meshtastic.org', port: 1883,
+    username: 'meshdev', password: 'large4cats',
+    topics: ['msh/US/2/json/LongFast/#'],
+  },
+  letsmesh_us: {
+    type: 'mqtt', name: 'mqtt-letsmesh-us',
+    host: 'mqtt-us-v1.letsmesh.net', port: 443,
+    transport: 'websockets', tls: true,
+    pubkey_auth: '__MESHCORE__',   // replaced with actual adapter name at save time
+    topics: ['meshcore/+/+/packets', 'meshcore/+/+/status'],
+  },
+  letsmesh_eu: {
+    type: 'mqtt', name: 'mqtt-letsmesh-eu',
+    host: 'mqtt-eu-v1.letsmesh.net', port: 443,
+    transport: 'websockets', tls: true,
+    pubkey_auth: '__MESHCORE__',
+    topics: ['meshcore/+/+/packets', 'meshcore/+/+/status'],
+  },
+  meshmapper_rx: {
+    type: 'mqtt', name: 'mqtt-meshmapper-rx',
+    host: 'mqtt.meshmapper.net', port: 443,
+    transport: 'websockets', tls: true,
+    pubkey_auth: '__MESHCORE__',
+    topics: ['meshcore/+/+/packets', 'meshcore/+/+/status'],
+  },
+  // Bridge presets write to meshcore_bridge: key, not adapters:
+  bridge_local:      { _bridge: true, name: 'bridge_local' },
+  bridge_meshmapper: { _bridge: true, name: 'bridge_meshmapper' },
+  bridge_letsmesh:   { _bridge: true, name: 'bridge_letsmesh' },
+};
+
+async function mqttPreset(key) {
+  let text = MQTT_PRESETS[key] || '';
+  // Substitute actual meshcore adapter name if we can
+  if (text.includes('pubkey_auth: meshcore')) {
+    try {
+      const cfg = await fetch('/api/adapter-config').then(r=>r.json());
+      const mc = (cfg.adapters||[]).find(a => a.type === 'meshcore');
+      if (mc && mc.name !== 'meshcore') text = text.replace(/pubkey_auth: meshcore/g, `pubkey_auth: ${mc.name}`);
+    } catch(e) {}
+  }
+  const box = document.getElementById('mqtt-preset-box');
+  box.textContent = text;
+  box.style.display = 'block';
+  const actions = document.getElementById('mqtt-preset-actions');
+  const btn = document.getElementById('mqtt-add-btn');
+  const note = document.getElementById('mqtt-add-note');
+  const dict = MQTT_PRESET_DICTS[key];
+  actions.style.display = 'flex';
+  const isBridge = dict && dict._bridge;
+  btn.textContent = isBridge
+    ? `Write bridge config (${key.replace('bridge_', '')})`
+    : `Add ${dict?.name || key} to adapters`;
+  btn.onclick = () => addMQTTPreset(key);
+  note.textContent = isBridge ? 'Writes meshcore_bridge: section — not an adapter' : '';
+  note.style.color = 'var(--muted)';
+}
+
+async function addMQTTPreset(key) {
+  const dictTemplate = MQTT_PRESET_DICTS[key];
+  if (!dictTemplate) return;
+  const btn = document.getElementById('mqtt-add-btn');
+  const note = document.getElementById('mqtt-add-note');
+  btn.disabled = true;
+  try {
+    const current = await fetch('/api/adapter-config').then(r => r.json());
+
+    // Resolve __MESHCORE__ placeholder to the actual meshcore adapter name
+    const dict = Object.assign({}, dictTemplate);
+    if (dict.pubkey_auth === '__MESHCORE__') {
+      const mcAdapter = (current.adapters || []).find(a => a.type === 'meshcore');
+      if (mcAdapter) {
+        dict.pubkey_auth = mcAdapter.name;
+      } else {
+        note.innerHTML = 'No MeshCore adapter found in config — add a meshcore adapter first, then retry.';
+        note.style.color = 'var(--yellow)';
+        btn.disabled = false;
+        return;
+      }
+    }
+
+    // Bridge presets write a meshcore_bridge: block via a dedicated endpoint
+    if (dict._bridge) {
+      const r = await fetch('/api/meshcore-bridge/enable', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled: true}),
+      });
+      const data = await r.json();
+      note.textContent = 'Bridge config written — edit config.yaml to add credentials, then restart';
+      note.style.color = 'var(--green)';
+      btn.textContent = '✓ Done';
+      loadMQTTStatus();
+      return;
+    }
+
+    const adapters = current.adapters || [];
+    if (adapters.some(a => a.name === dict.name)) {
+      note.textContent = `${dict.name} is already in config`;
+      note.style.color = 'var(--yellow)';
+      btn.disabled = false;
+      return;
+    }
+    adapters.push(dict);
+    const r = await fetch('/api/adapter-config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({adapters, bridge_rules: bridgeRules}),
+    });
+    const data = await r.json();
+    if (data.status === 'ok') {
+      note.textContent = 'Added — restart ECH to connect';
+      note.style.color = 'var(--green)';
+      btn.textContent = '✓ Added';
+      loadMQTTStatus();
+    } else {
+      // Show just the single adapter entry to paste into config.yaml
+      const singleYaml = adapterToYaml(dict);
+      note.innerHTML = 'Permission denied — add this entry manually under <code>adapters:</code> in <code>/etc/ech/config.yaml</code>:';
+      if (data.fix_hint) {
+        note.innerHTML += '<br><small style="color:var(--muted)">Or fix ownership: <code>' + esc(data.fix_hint) + '</code></small>';
+      }
+      const pre = document.createElement('pre');
+      pre.style.cssText = 'background:var(--bg2,#1e1e1e);padding:8px;border-radius:4px;font-size:11px;overflow-x:auto;max-height:200px;cursor:pointer;margin:4px 0;white-space:pre;';
+      pre.title = 'Click to copy';
+      pre.textContent = singleYaml;
+      pre.onclick = () => navigator.clipboard.writeText(singleYaml).then(() => { pre.style.outline = '2px solid var(--green)'; setTimeout(() => pre.style.outline = '', 1500); });
+      note.appendChild(pre);
+      note.style.color = 'var(--red)';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    note.textContent = 'Error: ' + e.message;
+    note.style.color = 'var(--red)';
+    btn.disabled = false;
+  }
+}
+
+// Serialize a single adapter dict to a YAML list entry (the - key: value block)
+function adapterToYaml(obj) {
+  const lines = [];
+  const indent = '  ';
+  let first = true;
+  for (const [k, v] of Object.entries(obj)) {
+    if (k.startsWith('_')) continue;
+    const prefix = first ? '- ' : indent;
+    first = false;
+    if (Array.isArray(v)) {
+      lines.push(prefix + k + ':');
+      for (const item of v) lines.push(indent + '- ' + item);
+    } else if (v === null || v === undefined) {
+      lines.push(prefix + k + ':');
+    } else if (typeof v === 'boolean') {
+      lines.push(prefix + k + ': ' + v);
+    } else if (typeof v === 'number') {
+      lines.push(prefix + k + ': ' + v);
+    } else {
+      // Quote strings that contain YAML special chars or are empty
+      const s = String(v);
+      const needsQuote = s === '' || /[:#\[\]{},&*?|<>=!%@`]/.test(s);
+      lines.push(prefix + k + ': ' + (needsQuote ? "'" + s.replace(/'/g, "''") + "'" : s));
+    }
+  }
+  return lines.join('\n');
+}
+
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 function toast(msg) {
@@ -663,7 +1741,202 @@ function toast(msg) {
   setTimeout(() => t.style.display = 'none', 3000);
 }
 
+// ── MeshCore tools ────────────────────────────────────────────────────────
+async function loadMeshCoreTools() {
+  const el = document.getElementById('meshcore-tools-list');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/channels');
+    const data = await r.json();
+    const adapters = (data.channels || []).filter(a =>
+      a.adapter.toLowerCase().includes('meshcore') && !a.adapter.toLowerCase().includes('mock')
+    );
+    if (!adapters.length) {
+      el.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No MeshCore adapters connected</div>';
+      return;
+    }
+    el.innerHTML = adapters.map(a => {
+      const aName = a.adapter;
+      const aEsc  = esc(aName);
+      return `<div style="margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+        <div style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--green);margin-bottom:8px">${aEsc}</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:6px">Add / overwrite channel slot</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input id="mc-ch-idx-${aEsc}" type="number" min="0" max="7" value="1" placeholder="idx" style="width:52px;font-family:var(--mono);font-size:11px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+          <input id="mc-ch-name-${aEsc}" type="text" placeholder="channel name" style="width:150px;font-family:var(--mono);font-size:11px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+          <input id="mc-ch-key-${aEsc}" type="text" placeholder="key hex (optional, 32 chars)" style="width:220px;font-family:var(--mono);font-size:11px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+          <button class="btn btn-blue" style="padding:4px 10px;font-size:10px" onclick="mcAddChannel('${aEsc}')">Set channel</button>
+        </div>
+        <div id="mc-ch-result-${aEsc}" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px"></div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:10px;margin-bottom:4px">Private key (serial transport only)</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="mc-privkey-${aEsc}" type="password" readonly placeholder="—" style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px;letter-spacing:0.05em">
+          <button class="btn btn-yellow" style="padding:4px 10px;font-size:10px" onclick="mcTogglePrivkey('${aEsc}')">Show</button>
+          <button class="btn btn-blue" style="padding:4px 10px;font-size:10px" onclick="mcLoadPrivkey('${aEsc}')">Fetch</button>
+        </div>
+        <div style="font-size:10px;color:var(--dim);margin-top:3px">Never share — used to authenticate LetsMesh MQTT. Fetched once at adapter startup via serial.</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:10px;margin-bottom:4px">Decryption key inventory</div>
+        <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Keys loaded from CHANNEL_INFO frames + common defaults are tried automatically on encrypted messages.</div>
+        <button class="btn btn-blue" style="padding:3px 10px;font-size:10px;margin-bottom:6px" onclick="mcShowKeys('${aEsc}')">Show keys</button>
+        <div id="mc-keys-${aEsc}" style="font-family:var(--mono);font-size:9.5px;color:var(--muted);white-space:pre-wrap;display:none"></div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:10px;margin-bottom:6px">Raw packet log</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+          <select id="mc-pkt-filter-${aEsc}" style="font-family:var(--mono);font-size:10px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+            <option value="">All types</option>
+            <option value="0x0c">0x0C BATTERY</option>
+            <option value="0x0d">0x0D DEVICE_INFO</option>
+            <option value="0x12">0x12 CHANNEL_INFO</option>
+            <option value="0x82">0x82 SEND_CONFIRMED</option>
+            <option value="0x88">0x88 CHANNEL_MSG</option>
+            <option value="0x80">0x80 NODE_ADVERT</option>
+            <option value="0x06">0x06 MSG_SENT</option>
+            <option value="0x05">0x05 SELF_INFO</option>
+          </select>
+          <button class="btn btn-blue" style="padding:3px 10px;font-size:10px" onclick="mcLoadPackets('${aEsc}')">Fetch</button>
+          <button class="btn" style="padding:3px 10px;font-size:10px" onclick="mcClearPackets('${aEsc}')">Clear</button>
+          <span id="mc-pkt-count-${aEsc}" style="font-size:10px;color:var(--dim)"></span>
+        </div>
+        <pre id="mc-pkt-log-${aEsc}" style="font-family:var(--mono);font-size:9.5px;background:var(--bg2,#0d0d0d);border:1px solid var(--border);border-radius:4px;padding:8px;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:var(--text);margin:0">—</pre>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--red)">Error loading MeshCore adapters</div>';
+  }
+}
+
+async function mcAddChannel(adapterName) {
+  const idx  = parseInt(document.getElementById(`mc-ch-idx-${adapterName}`).value) || 1;
+  const name = document.getElementById(`mc-ch-name-${adapterName}`).value.trim();
+  const key  = document.getElementById(`mc-ch-key-${adapterName}`).value.trim();
+  const res  = document.getElementById(`mc-ch-result-${adapterName}`);
+  if (!name) { res.textContent = 'Name required'; res.style.color = 'var(--red)'; return; }
+  res.textContent = 'Setting…'; res.style.color = 'var(--muted)';
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/add_channel`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({idx, name, key_hex: key || null}),
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      res.textContent = `✓ Channel ${d.idx} set to "${d.name}"`;
+      res.style.color = 'var(--green)';
+    } else {
+      res.textContent = `Error: ${d.detail || 'unknown'}`;
+      res.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    res.textContent = `Error: ${e.message}`;
+    res.style.color = 'var(--red)';
+  }
+}
+
+async function mcLoadPrivkey(adapterName) {
+  const inp = document.getElementById(`mc-privkey-${adapterName}`);
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/privkey`);
+    const d = await r.json();
+    if (d.status === 'ok') {
+      inp.value = d.privkey_hex;
+      inp.type = 'password';
+    } else {
+      inp.value = d.detail || 'Not available';
+      inp.type = 'text';
+    }
+  } catch(e) {
+    inp.value = 'Fetch error';
+    inp.type = 'text';
+  }
+}
+
+function mcTogglePrivkey(adapterName) {
+  const inp = document.getElementById(`mc-privkey-${adapterName}`);
+  const btn = inp.nextElementSibling;
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    btn.textContent = 'Hide';
+  } else {
+    inp.type = 'password';
+    btn.textContent = 'Show';
+  }
+}
+
+// ── MeshCore key inventory ────────────────────────────────────────────────
+async function mcShowKeys(adapterName) {
+  const el = document.getElementById(`mc-keys-${adapterName}`);
+  if (!el) return;
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  el.textContent = 'Loading…';
+  el.style.display = 'block';
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/key_inventory`);
+    const d = await r.json();
+    let lines = [];
+    lines.push('── Channel keys (from CHANNEL_INFO) ──');
+    if (d.channel_keys && d.channel_keys.length) {
+      d.channel_keys.forEach(k => lines.push(`  ch${k.idx} "${k.name}"  ${k.key_hex}…`));
+    } else {
+      lines.push('  (none yet)');
+    }
+    lines.push('');
+    lines.push('── Common/default keys tried on encrypted msgs ──');
+    if (d.common_keys && d.common_keys.length) {
+      d.common_keys.forEach(k => lines.push(`  ${k.label.padEnd(22)}  ${k.key_hex}`));
+    }
+    el.textContent = lines.join('\n');
+  } catch(e) {
+    el.textContent = `Error: ${e.message}`;
+  }
+}
+
+// ── MeshCore raw packet viewer ─────────────────────────────────────────────
+const _PTYPE_LABELS = {
+  '0x00': 'OK', '0x01': 'ERROR',
+  '0x02': 'CONTACT_START', '0x03': 'CONTACT', '0x04': 'CONTACT_END',
+  '0x05': 'SELF_INFO', '0x06': 'MSG_SENT', '0x07': 'CONTACT_MSG',
+  '0x08': 'CHANNEL_MSG', '0x0a': 'NO_MORE_MSGS', '0x0c': 'BATTERY',
+  '0x0d': 'DEVICE_INFO', '0x10': 'CONTACT_MSG_V3', '0x11': 'CHANNEL_MSG_V3',
+  '0x12': 'CHANNEL_INFO', '0x80': 'PUSH_ADVERT', '0x81': 'PUSH_PATH',
+  '0x82': 'SEND_CONFIRMED', '0x83': 'PUSH_MSG_WAITING', '0x88': 'CHANNEL_MSG_PUSH',
+};
+function mcFmtPkt(p) {
+  const d = new Date(p.ts * 1000);
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  const ss = String(d.getSeconds()).padStart(2,'0');
+  const label = _PTYPE_LABELS[p.type_hex] || p.type;
+  const hex = p.hex || '';
+  const preview = hex.length > 64 ? hex.slice(0,64) + '…' : hex;
+  return `${hh}:${mm}:${ss}  ${p.type_hex}  ${label.padEnd(18,' ')}  ${p.len}B  ${preview}`;
+}
+async function mcLoadPackets(adapterName) {
+  const pre = document.getElementById(`mc-pkt-log-${adapterName}`);
+  const cnt = document.getElementById(`mc-pkt-count-${adapterName}`);
+  const filter = document.getElementById(`mc-pkt-filter-${adapterName}`)?.value || '';
+  if (!pre) return;
+  pre.textContent = 'Loading…';
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/packets?limit=200`);
+    const d = await r.json();
+    let pkts = d.packets || [];
+    if (filter) pkts = pkts.filter(p => p.type_hex === filter);
+    if (cnt) cnt.textContent = `${pkts.length} packet${pkts.length!==1?'s':''}`;
+    pre.textContent = pkts.length ? pkts.map(mcFmtPkt).join('\n') : '(no packets)';
+  } catch(e) {
+    pre.textContent = `Error: ${e.message}`;
+  }
+}
+function mcClearPackets(adapterName) {
+  const pre = document.getElementById(`mc-pkt-log-${adapterName}`);
+  const cnt = document.getElementById(`mc-pkt-count-${adapterName}`);
+  if (pre) pre.textContent = '—';
+  if (cnt) cnt.textContent = '';
+}
+
 init();
+loadAdapterLive();
+loadMeshCoreTools();
+loadPSKStatus();
 </script>
 </body>
 </html>

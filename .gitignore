@@ -17,6 +17,9 @@ ech.db
 # Work status / deployment notes — may contain server credentials
 WORK_STATUS.md
 
+# Deploy credentials — never commit
+deploy/local.env
+
 # Config with real credentials — operators must create from template
 # /etc/ech/config.yaml is NOT tracked; copy config.yaml and edit locally
 # Do NOT commit files containing real callsigns, passcodes, or passwords
@@ -40,6 +43,16 @@ Thumbs.db
 .coverage
 htmlcov/
 
-# Tarballs
+# Tarballs and local backups
 *.tar.gz
+*.tar
 *.zip
+
+# Temp working docs and inspection dirs
+Tempmeshcore_inspect/
+New folder/
+ech/core/state.py.v2
+ECH_meshcore_further_advice.txt
+ECV_v3_fixes.txt
+ECH_REQUIREMENTS_AND_PROGRESS.md
+ECH ADAPTER ENHANCEMENT REQUIREMENT.txt

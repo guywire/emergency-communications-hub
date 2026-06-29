@@ -41,7 +41,7 @@ MESHCORE_MSGS = [
     "TAC-1 relay online, path clear",
     "DPW Truck 3: Elm St cleared, moving to Pine Ave",
     "Red Cross Shelter: 58 occupants, need more cots",
-    "Harbor Master: 4 Canadian vessels in restricted zone — watching",
+    "Harbor Master: lobster coalition forming at restricted zone — watching closely",
     "EOC Relay: check-in all units, cold weather protocol active",
     "Frozen water main confirmed at Industrial Park, DPW responding",
     "Need repeat, partial decode — storm interference on link",
@@ -51,6 +51,8 @@ MESHCORE_MSGS = [
 
 
 class MockMeshCoreAdapter(Adapter):
+    is_mock = True
+
     """
     Mock MeshCore adapter.
     Config keys:
@@ -106,6 +108,16 @@ class MockMeshCoreAdapter(Adapter):
                 pass
         log.info("%s: disconnected", self.name)
 
+    def set_base_location(self, lat: float, lon: float) -> None:
+        self._base_lat = lat
+        self._base_lon = lon
+        if self._nodes:
+            positions = _concentric_positions(lat, lon, len(self._nodes))
+            for i, node in enumerate(self._nodes):
+                if i < len(positions):
+                    node.lat, node.lon = positions[i]
+            log.info("%s: repositioned %d nodes around (%.4f, %.4f)", self.name, len(self._nodes), lat, lon)
+
     async def send(self, message: NormalizedMessage) -> bool:
         await asyncio.sleep(0.15)
         log.debug("%s: TX → %s | %s", self.name, message.to_id or "ch", message.body[:60])
@@ -117,7 +129,7 @@ class MockMeshCoreAdapter(Adapter):
         tick = 0
         try:
             while self._connected:
-                if getattr(self, '_paused', False):
+                if self.is_paused():
                     await asyncio.sleep(1.0)
                     continue
                 await asyncio.sleep(self._interval + random.uniform(-3, 3))
@@ -154,7 +166,9 @@ class MockMeshCoreAdapter(Adapter):
 
     def _health_detail(self) -> dict:
         return {
-            "channel": self._channel,
+            "device_name": "ECH-Sim",
+            "tx_channel": f"0:{self._channel}",
+            "channel_idx": 0,
+            "channels_list": [{"idx": 0, "name": self._channel}],
             "node_count": len(self._nodes),
-            "mode": "mock",
         }

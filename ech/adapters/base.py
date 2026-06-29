@@ -31,13 +31,21 @@ class Adapter(ABC):
     5. disconnect()       — clean teardown; called on shutdown or config reload
     """
 
+    is_mock: bool = False  # override to True in mock/sim adapters
+
     def __init__(self, config: dict):
         self.config = config
         self.name: str = config.get("name", self.__class__.__name__.lower())
         self._connected = False
+        self._paused = False
         self._last_rx = None
         self._last_tx = None
         self._rx_queue: asyncio.Queue[NormalizedMessage] = asyncio.Queue(maxsize=512)
+        # Delivery tracking — set by router after registration
+        self._last_sent_uuid: str | None = None   # UUID of most recently sent message
+        self._router_notify = None                 # async callback(adapter, uuid, status, detail)
+        self._router_notify_nodes = None           # async callback(adapter, node_count)
+        self._router_broadcast = None              # async callback(event_type, data_dict)
 
     # ── Required ──────────────────────────────────────────────────────────
 
@@ -67,15 +75,44 @@ class Adapter(ABC):
         """Return visible mesh nodes. Override for Meshtastic / MeshCore."""
         return []
 
+    async def time_sync(self) -> bool:
+        """Sync the device clock to current UTC. Override in adapters that support it."""
+        return False
+
+    async def announce(self) -> bool:
+        """Broadcast node presence to the network. Override in adapters that support it."""
+        return False
+
+    async def ping(self, node_id: str) -> dict:
+        """Send a traceroute/ping to a discovered node. Override in adapters that support it."""
+        return {"status": "unsupported"}
+
     async def health(self) -> ChannelHealth:
         from ech.core.models import ChannelState
+        detail = self._health_detail()
+        detail["paused"] = self._paused
         return ChannelHealth(
             adapter=self.name,
             state=ChannelState.CONNECTED if self._connected else ChannelState.DISCONNECTED,
             last_rx=self._last_rx,
             last_tx=self._last_tx,
-            detail=self._health_detail(),
+            detail=detail,
         )
+
+    def pause(self) -> None:
+        self._paused = True
+        log.info("%s: paused", self.name)
+
+    def resume(self) -> None:
+        self._paused = False
+        log.info("%s: resumed", self.name)
+
+    def set_base_location(self, lat: float, lon: float) -> None:
+        """Update simulated node positions. Override in mock adapters; no-op for real ones."""
+        pass
+
+    def is_paused(self) -> bool:
+        return self._paused
 
     def _health_detail(self) -> dict:
         """Override to add adapter-specific stats to the health payload."""
@@ -87,10 +124,13 @@ class Adapter(ABC):
         """
         Async generator consumed by the router.
         Pulls from the internal queue populated by _run().
+        When paused, drains the queue without yielding so it doesn't overflow.
         """
         while self._connected:
             try:
                 msg = await asyncio.wait_for(self._rx_queue.get(), timeout=1.0)
+                if self._paused:
+                    continue   # discard — adapter is paused
                 self._last_rx = msg.timestamp
                 yield msg
             except asyncio.TimeoutError:

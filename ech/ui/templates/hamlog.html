@@ -1,0 +1,3840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECH — Ham Log</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPgogIDxyZWN0IHg9IjE1IiB5PSI4IiB3aWR0aD0iMiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzNmYjk1MCIvPgogIDxyZWN0IHg9IjEwIiB5PSIxMiIgd2lkdGg9IjEyIiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cG9seWdvbiBwb2ludHM9IjE2LDYgMTIsMTIgMjAsMTIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cmVjdCB4PSIxMyIgeT0iMjQiIHdpZHRoPSI2IiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iMTAiIHI9IjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM4OGJmZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8Y2lyY2xlIGN4PSIyNCIgY3k9IjEwIiByPSIyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzODhiZmQiIHN0cm9rZS13aWR0aD0iMS41Ii8+Cjwvc3ZnPg==">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── Theme: Dark (default) ───────────────────────────────── */
+:root, [data-theme="dark"] {
+  --bg:       #0d1117;
+  --bg2:      #161b22;
+  --bg3:      #1c2230;
+  --border:   #30363d;
+  --border2:  #444c56;
+  --text:     #e6edf3;
+  --muted:    #8b949e;
+  --dim:      #484f58;
+  --green:    #3fb950;
+  --green-bg: #122a1a;
+  --yellow:   #d29922;
+  --yellow-bg:#2a1f00;
+  --red:      #f85149;
+  --red-bg:   #2d0f0f;
+  --blue:     #388bfd;
+  --blue-bg:  #051d4d;
+  --accent:   #3fb950;
+  --accent-bg:#122a1a;
+  --mono:     'IBM Plex Mono', monospace;
+  --sans:     'IBM Plex Sans', sans-serif;
+}
+
+/* ── Theme: Light ────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg:       #ffffff;
+  --bg2:      #f6f8fa;
+  --bg3:      #eaeef2;
+  --border:   #d0d7de;
+  --border2:  #b0bac3;
+  --text:     #1f2328;
+  --muted:    #636c76;
+  --dim:      #9aa3ab;
+  --green:    #1a7f37;
+  --green-bg: #dafbe1;
+  --yellow:   #9a6700;
+  --yellow-bg:#fff8c5;
+  --red:      #cf222e;
+  --red-bg:   #ffebe9;
+  --blue:     #0969da;
+  --blue-bg:  #ddf4ff;
+  --accent:   #1a7f37;
+  --accent-bg:#dafbe1;
+}
+
+/* ── Theme: Blue ─────────────────────────────────────────── */
+[data-theme="blue"] {
+  --bg:       #0a0f1e;
+  --bg2:      #0d1530;
+  --bg3:      #111d3d;
+  --border:   #1e3052;
+  --border2:  #2d4570;
+  --text:     #cdd9f5;
+  --muted:    #6b82b5;
+  --dim:      #3a4d6e;
+  --green:    #4db8ff;
+  --green-bg: #091d35;
+  --yellow:   #f0b429;
+  --yellow-bg:#1e1600;
+  --red:      #ff6b6b;
+  --red-bg:   #2a0808;
+  --blue:     #79b8ff;
+  --blue-bg:  #091d35;
+  --accent:   #4db8ff;
+  --accent-bg:#091d35;
+}
+
+/* ── Theme: Green (operator console) ────────────────────── */
+[data-theme="green"] {
+  --bg:       #050e05;
+  --bg2:      #081208;
+  --bg3:      #0b160b;
+  --border:   #1a3a1a;
+  --border2:  #2a5a2a;
+  --text:     #a8ffb0;
+  --muted:    #4d8f55;
+  --dim:      #2a4f2e;
+  --green:    #39ff5a;
+  --green-bg: #041204;
+  --yellow:   #ccff00;
+  --yellow-bg:#111800;
+  --red:      #ff4455;
+  --red-bg:   #1a0005;
+  --blue:     #00e5ff;
+  --blue-bg:  #001a1f;
+  --accent:   #39ff5a;
+  --accent-bg:#041204;
+}
+
+/* ── Theme: High Contrast (WCAG 2.1 AAA) ────────────────── */
+/* All text/background pairs meet ≥7:1 contrast ratio.       */
+/* Accent colors use yellow (#ffeb3b on #000) = 14.7:1.      */
+/* Distinguishable without relying on hue alone (CB safe).   */
+[data-theme="hc"] {
+  --bg:       #000000;
+  --bg2:      #0d0d0d;
+  --bg3:      #1a1a1a;
+  --border:   #767676;   /* 4.6:1 on #000 — AA for UI components */
+  --border2:  #a0a0a0;   /* 7.0:1 — AAA */
+  --text:     #ffffff;   /* 21:1 */
+  --muted:    #d4d4d4;   /* 14.7:1 */
+  --dim:      #a0a0a0;   /* 7.0:1 — AAA threshold */
+  --green:    #00e676;   /* 9.3:1 — bright green, CB-distinguishable from red */
+  --green-bg: #001a0d;
+  --yellow:   #ffeb3b;   /* 14.7:1 — primary accent, maximum visibility */
+  --yellow-bg:#1a1400;
+  --red:      #ff5252;   /* 5.9:1 — vivid red, sufficient contrast */
+  --red-bg:   #1a0000;
+  --blue:     #40c4ff;   /* 9.0:1 — cyan-blue, CB-safe (tritanopia visible) */
+  --blue-bg:  #001a26;
+  --accent:   #ffeb3b;   /* yellow = highest visibility interactive color */
+  --accent-bg:#1a1400;
+  --mono:     'IBM Plex Mono', monospace;
+  --sans:     'IBM Plex Sans', sans-serif;
+}
+
+/* Heavier borders and focus rings in HC mode for keyboard nav */
+[data-theme="hc"] input,
+[data-theme="hc"] select,
+[data-theme="hc"] button {
+  outline-offset: 2px;
+}
+[data-theme="hc"] input:focus,
+[data-theme="hc"] select:focus,
+[data-theme="hc"] button:focus {
+  outline: 3px solid #ffeb3b;
+}
+[data-theme="hc"] .field-group input,
+[data-theme="hc"] .field-group select {
+  border-width: 2px;
+}
+[data-theme="hc"] #log-table tbody tr:hover {
+  outline: 2px solid #ffeb3b;
+  outline-offset: -1px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  overflow: hidden;
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+#header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  height: 48px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 10;
+}
+.back {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--blue);
+  text-decoration: none;
+}
+.back:hover { text-decoration: underline; }
+.logo {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--green);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.hdr-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.hdr-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+#header select {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+}
+#header select:focus { border-color: var(--blue); }
+#op-callsign {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--green);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+#qso-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+#score-display {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--yellow);
+  white-space: nowrap;
+}
+.spacer { flex: 1; }
+#w1aw-strip {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+#w1aw-strip.w1aw-warn  { border-color: var(--yellow); color: var(--yellow); }
+#w1aw-strip.w1aw-live  {
+  border-color: var(--green); color: var(--green); font-weight: 600;
+  animation: w1awPulse 1.2s ease-in-out infinite;
+}
+@keyframes w1awPulse {
+  0%,100% { opacity:1; }
+  50%      { opacity:.45; }
+}
+#clock {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+.conn-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  display: inline-block;
+  flex-shrink: 0;
+}
+.conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+/* ── Entry form ─────────────────────────────────────────── */
+#entry-panel {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 20px 12px;
+  flex-shrink: 0;
+}
+.form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.form-row + .form-row { margin-top: 8px; }
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.field-group label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.field-group input,
+.field-group select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.1s;
+}
+.field-group input:focus,
+.field-group select:focus { border-color: var(--blue); }
+.field-group input.dup { border-color: var(--yellow); background: var(--yellow-bg); }
+
+#f-callsign  { width: 110px; text-transform: uppercase; letter-spacing: 0.06em; }
+#f-band      { width: 80px; }
+#f-mode      { width: 80px; }
+#f-freq      { width: 90px; }
+#f-station   { width: 70px; }
+#f-sent-exch { width: 90px; }
+#f-rcvd-exch { width: 90px; }
+#f-park-ref  { width: 110px; text-transform: uppercase; }
+#f-summit-ref{ width: 110px; text-transform: uppercase; }
+#f-rst-sent  { width: 55px; }
+#f-rst-rcvd  { width: 55px; }
+#f-notes     { width: 180px; }
+#f-time      { width: 70px; font-variant-numeric: tabular-nums; }
+#f-op-name   { width: 140px; }
+#f-country   { width: 100px; }
+#f-state     { width: 70px; text-transform: uppercase; }
+#f-county    { width: 110px; }
+#f-grid      { width: 80px; text-transform: uppercase; letter-spacing: 0.06em; }
+#f-power     { width: 100px; }
+#f-time-off  { width: 70px; font-variant-numeric: tabular-nums; }
+
+#btn-log {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s;
+  align-self: flex-end;
+}
+#btn-log:hover:not(:disabled) { background: var(--accent-bg); }
+#btn-log:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--dim);
+  color: var(--dim);
+  background: transparent;
+}
+
+#dup-warning {
+  display: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--yellow);
+  background: var(--yellow-bg);
+  border: 1px solid var(--yellow);
+  border-radius: 4px;
+  padding: 4px 10px;
+  margin-top: 6px;
+}
+
+/* ── Stats bar ──────────────────────────────────────────── */
+#stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 20px;
+  height: 30px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.stat-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 16px;
+  border-right: 1px solid var(--border);
+  margin-right: 16px;
+  flex-shrink: 0;
+}
+.stat-group:last-of-type {
+  border-right: none;
+  margin-right: 0;
+}
+.stat-lbl {
+  color: var(--dim);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.stat-band, .stat-mode {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.stat-band span, .stat-mode span { color: var(--text); font-weight: 500; }
+#stat-score { color: var(--yellow); }
+#stat-score span { color: var(--yellow); font-weight: 500; }
+.stats-spacer { flex: 1; }
+#btn-import {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+#btn-import:hover { border-color: var(--blue); color: var(--blue); }
+
+/* ── QSO table ──────────────────────────────────────────── */
+#log-area {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+#log-table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+#log-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+#log-table thead th {
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  user-select: none;
+}
+#log-table thead th.th-num  { width: 48px; text-align: right; }
+#log-table thead th.th-del  { width: 36px; }
+#log-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+#log-table tbody tr:hover { background: var(--bg2); }
+#log-table tbody tr.deleted { opacity: 0.35; }
+#log-table tbody tr.deleted td { text-decoration: line-through; }
+#log-table tbody td {
+  padding: 5px 10px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.td-num  { text-align: right; color: var(--dim); font-size: 11px; }
+.td-time { color: var(--muted); }
+.td-call { font-weight: 500; color: var(--text); letter-spacing: 0.05em; }
+.td-band { color: var(--blue); }
+.td-mode { color: var(--green); }
+.td-exch { color: var(--muted); }
+.td-freq { color: var(--dim); font-size: 11px; }
+.td-stn  { color: var(--dim); text-align: center; }
+.td-del  { text-align: center; }
+.del-btn {
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: color 0.1s, background 0.1s;
+  font-family: var(--mono);
+}
+.del-btn:hover { color: var(--red); background: var(--red-bg); }
+
+/* Source badges */
+.src-badge {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.src-manual  { background: var(--bg3); color: var(--muted); border: 1px solid var(--border); }
+.src-winlink { background: var(--yellow-bg); color: var(--yellow); }
+.src-aprs    { background: var(--blue-bg);   color: var(--blue); }
+.src-ft8     { background: var(--bg3);       color: var(--muted); border: 1px solid var(--border); }
+.src-ft4     { background: var(--bg3);       color: var(--muted); border: 1px solid var(--border); }
+.src-js8     { background: var(--blue-bg);   color: var(--blue); }
+.src-ws      { background: var(--blue-bg);   color: var(--blue); }
+
+/* Empty state */
+#log-empty {
+  display: none;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* ── Footer ─────────────────────────────────────────────── */
+#footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.footer-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.footer-lbl {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+/* ── Footer dropdown menus ──────────────────────────────── */
+.ftr-dd { position: relative; }
+.ftr-dd-btn {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 9px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ftr-dd-btn:hover { border-color: var(--blue); color: var(--blue); }
+.ftr-dd-menu {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  min-width: 170px;
+  z-index: 200;
+  overflow: hidden;
+  box-shadow: 0 -4px 12px rgba(0,0,0,.4);
+}
+.ftr-dd.open .ftr-dd-menu { display: block; }
+.ftr-dd-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.ftr-dd-item:hover { background: var(--bg3); color: var(--blue); }
+.ftr-dd-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 0;
+}
+.btn {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.1s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn:hover { border-color: var(--blue); color: var(--blue); }
+.btn-export { border-color: var(--border2); }
+.btn-upload { border-color: var(--border2); }
+.btn-upload.uploading,
+.ftr-dd-item.uploading  { color: var(--muted); cursor: wait; opacity: 0.7; }
+.btn-upload.upload-ok,
+.ftr-dd-item.upload-ok  { color: var(--green); }
+.btn-upload.upload-err,
+.ftr-dd-item.upload-err { color: var(--red); }
+.upload-spinner {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border: 1px solid var(--muted);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Toasts ─────────────────────────────────────────────── */
+#toast-area {
+  position: fixed;
+  bottom: 16px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 99;
+}
+.toast {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 8px 14px;
+  border-radius: 4px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  animation: slideIn 0.2s ease;
+  max-width: 340px;
+  word-break: break-word;
+}
+.toast.ok   { border-left: 3px solid var(--green); }
+.toast.err  { border-left: 3px solid var(--red); }
+.toast.warn { border-left: 3px solid var(--yellow); }
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Scrollbar ──────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+
+/* ── Station bar ─────────────────────────────────────────── */
+#station-bar {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+#station-bar-tiles { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
+.stn-tile {
+  display: flex; gap: 5px; align-items: center;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 4px; padding: 3px 8px; font-family: var(--mono); font-size: 11px;
+}
+.stn-tile.mine { border-color: var(--accent); }
+.stn-op { color: var(--green); font-weight: 500; }
+.stn-band { color: var(--blue); }
+.stn-mode { color: var(--muted); }
+#my-station { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+#my-op { font-family: var(--mono); font-size: 12px; width: 90px; text-transform: uppercase;
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  padding: 3px 6px; border-radius: 4px; outline: none; }
+#my-op:focus { border-color: var(--blue); }
+#my-band-sel, #my-mode-sel { font-family: var(--mono); font-size: 11px;
+  background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+  padding: 3px 5px; border-radius: 4px; cursor: pointer; }
+
+/* ── Split layout ────────────────────────────────────────── */
+#main-split { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+#left-col { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+#right-panel { width: 280px; flex-shrink: 0; border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden; background: var(--bg2); }
+
+/* ── Right panel tabs ────────────────────────────────────── */
+#rp-tab-bar { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.rp-tab { flex: 1; background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 7px 4px;
+  cursor: pointer; white-space: nowrap; position: relative; }
+.rp-tab:hover { color: var(--text); }
+.rp-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-badge {
+  display: none; position: absolute; top: 3px; right: 2px;
+  background: var(--red); color: #fff; font-size: 8px; font-weight: 700;
+  min-width: 14px; height: 14px; border-radius: 7px; line-height: 14px;
+  text-align: center; padding: 0 3px;
+}
+.tab-badge.visible { display: inline-block; }
+.rp-pane { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+
+/* ── Band map ────────────────────────────────────────────── */
+.bandmap-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+.bandmap-table th { color: var(--dim); font-weight: 400; text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--border); }
+.bm-band { color: var(--blue); width: 52px; padding: 3px 4px; }
+.bm-op { background: var(--bg3); border-radius: 3px; padding: 2px 5px; margin: 1px; display: inline-block; }
+.bm-op.mine { border: 1px solid var(--accent); }
+.bm-mode { color: var(--muted); font-size: 10px; }
+
+/* ── Sections ────────────────────────────────────────────── */
+#sec-header { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+#sec-search { flex: 1; font-family: var(--mono); font-size: 11px; background: var(--bg);
+  border: 1px solid var(--border); color: var(--text); padding: 4px 6px; border-radius: 4px; outline: none; }
+#sec-search:focus { border-color: var(--blue); }
+#sec-worked-count { font-family: var(--mono); font-size: 10px; color: var(--muted); white-space: nowrap; }
+#sec-map { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+.sec-district { display: flex; align-items: center; gap: 3px; }
+.sec-dlabel { font-family: var(--mono); font-size: 9px; color: var(--dim); width: 22px; flex-shrink: 0; }
+.sec-tiles { display: flex; flex-wrap: wrap; gap: 2px; }
+.sec-tile { font-family: var(--mono); font-size: 9px; padding: 2px 3px;
+  background: var(--bg3); color: var(--dim); border-radius: 2px; cursor: default;
+  border: 1px solid transparent; white-space: nowrap; }
+.sec-tile.w1 { background: var(--green-bg); color: var(--green); border-color: var(--green); opacity: 0.7; }
+.sec-tile.w2 { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+#sec-list { display: flex; flex-direction: column; gap: 1px; flex: 1; }
+.sec-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 3px; font-family: var(--mono); font-size: 11px; }
+.sec-row.worked { background: var(--green-bg); }
+.sec-abbr { width: 36px; font-weight: 500; }
+.sec-count { color: var(--green); font-size: 11px; }
+
+/* ── Dupe detail ─────────────────────────────────────────── */
+#dupe-detail { background: var(--yellow-bg); border: 1px solid var(--yellow); border-radius: 4px;
+  padding: 6px 8px; font-family: var(--mono); font-size: 11px; margin-top: 4px; }
+.dup-row { display: flex; gap: 10px; align-items: center; padding: 2px 0; }
+.dup-row.same-band { color: var(--yellow); }
+
+/* ── Chat ────────────────────────────────────────────────── */
+#chat-msgs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
+  padding: 4px; min-height: 0; }
+.chat-msg { font-family: var(--mono); font-size: 11px; padding: 4px 6px;
+  background: var(--bg3); border-radius: 4px; border-left: 2px solid var(--border); }
+.chat-msg.mine { border-left-color: var(--accent); }
+.chat-op { color: var(--green); font-weight: 500; }
+.chat-time { color: var(--dim); font-size: 10px; }
+.chat-text { color: var(--text); margin-top: 2px; word-break: break-word; }
+#chat-input-row { display: flex; gap: 4px; flex-shrink: 0; padding: 4px 0; }
+#chat-input { flex: 1; font-family: var(--mono); font-size: 12px;
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  padding: 5px 8px; border-radius: 4px; outline: none; }
+#chat-input:focus { border-color: var(--blue); }
+</style>
+</head>
+<body>
+<!-- Low-storage warning banner (fixed bottom) -->
+<div id="storage-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:950;padding:5px 16px;font-family:var(--mono);font-size:11px;font-weight:600;align-items:center;gap:10px;background:#2a1f00;border-top:2px solid var(--yellow);color:var(--yellow)">
+  <span>&#9888; LOW DISK SPACE: <span id="storage-banner-detail"></span> — log entries may stop saving</span>
+  <button onclick="document.getElementById('storage-banner').style.display='none'" style="margin-left:auto;background:none;border:1px solid currentColor;color:inherit;padding:1px 8px;cursor:pointer;border-radius:3px;font-size:10px">Dismiss</button>
+</div>
+<div id="app">
+
+  <!-- ── Header ── -->
+  <div id="header">
+    <a class="back" href="/">← ECH</a>
+    <div class="hdr-sep"></div>
+    <a href="/map" title="Open node map with Ham Log QSO layer"
+       style="font-family:var(--mono);font-size:10px;color:var(--muted);text-decoration:none;padding:2px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg3)"
+       onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">&#9783; Map</a>
+    <div class="hdr-sep"></div>
+
+    <select id="contest-sel" onchange="onContestChange()" title="Contest / operating mode">
+      <option value="ARRL-FIELD-DAY">ARRL-FIELD-DAY</option>
+      <option value="POTA">POTA</option>
+      <option value="SOTA">SOTA</option>
+      <option value="GENERAL">GENERAL</option>
+    </select>
+
+    <div class="hdr-sep"></div>
+    <span class="hdr-label">Stn</span>
+    <select id="station-sel" onchange="onStationChange()" title="Your station number (1–5)">
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5">5</option>
+    </select>
+
+    <div class="hdr-sep"></div>
+    <span id="op-callsign" title="Operator callsign from config">—</span>
+
+    <div class="spacer"></div>
+
+    <select id="theme-sel" onchange="setTheme(this.value)" title="Color scheme"
+      style="font-family:var(--mono);font-size:10px;padding:2px 5px;border-radius:4px;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;outline:none">
+      <option value="dark">Dark</option>
+      <option value="light">Light</option>
+      <option value="blue">Blue</option>
+      <option value="green">Green</option>
+      <option value="hc">High Contrast</option>
+    </select>
+    <div class="hdr-sep"></div>
+
+    <span id="qso-count">0 QSOs</span>
+    <span id="score-display" title="Field Day score — click for bonus points" onclick="openBonusPanel()" style="cursor:pointer">0 pts</span>
+    <button id="bonus-btn" onclick="openBonusPanel()" title="ARRL Field Day bonus points"
+      style="display:none;font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg3);color:var(--yellow);border-radius:3px;cursor:pointer;margin-left:2px">+ Bonuses</button>
+    <span class="conn-dot" id="ws-dot" title="WebSocket"></span>
+    <span id="cat-pill" title="CAT radio control" style="display:none;align-items:center;gap:4px;font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);border-radius:3px;background:var(--bg3);cursor:default">
+      <span id="cat-dot" style="width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block"></span>
+      <span id="cat-label">CAT</span>
+    </span>
+    <button id="webserial-btn" onclick="toggleRigModal()" style="display:none;font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);border-radius:3px;cursor:pointer"
+      title="Connect radio via USB serial (Web Serial API — requires HTTPS)">🔌 Connect Radio</button>
+    <span id="clock">00:00:00Z</span>
+    <span id="auth-user-wrap" style="display:none;align-items:center;gap:5px;margin-left:6px">
+      <span id="auth-username" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
+      <button onclick="doLogout()"
+        style="font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);border-radius:3px;cursor:pointer"
+        title="Sign out">Sign out</button>
+    </span>
+  </div>
+
+  <!-- ── Station Bar ── -->
+  <div id="station-bar">
+    <div id="station-bar-tiles"></div>
+    <div id="my-station">
+      <input id="my-op" type="text" placeholder="Your callsign" maxlength="8" autocomplete="off" value="">
+      <input id="my-grid" type="text" placeholder="Grid (e.g. DN41)" maxlength="8" autocomplete="off"
+        style="width:70px;font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.05em;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;outline:none"
+        title="Your Maidenhead grid locator — used for distance/bearing calculations"
+        oninput="this.value=this.value.toUpperCase();_myLatLon=null"
+        onchange="saveMyGrid(this.value)">
+      <select id="my-band-sel"></select>
+      <select id="my-mode-sel"></select>
+      <button onclick="updateMyStation()" class="btn btn-blue" style="padding:3px 8px;font-size:11px">Set</button>
+    </div>
+  </div>
+
+  <!-- ── Main split ── -->
+  <div id="main-split">
+  <div id="left-col">
+
+  <!-- ── Entry form ── -->
+  <div id="entry-panel">
+    <!-- Row 1: always visible -->
+    <div class="form-row" id="row1">
+      <div class="field-group">
+        <label for="f-callsign">Callsign *</label>
+        <div style="display:flex;gap:3px;align-items:center">
+          <input id="f-callsign" type="text" placeholder="W1XYZ"
+                 autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"
+                 oninput="onCallsignInput()" onkeydown="onCallsignKey(event)"
+                 onblur="onCallsignBlur()"
+                 tabindex="1" style="flex:1;min-width:0">
+          <button id="btn-lookup" onclick="triggerCallsignLookup()" title="Look up callsign (callook.info / hamdb.org)"
+                  style="font-size:11px;padding:2px 5px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);border-radius:3px;cursor:pointer;flex-shrink:0;line-height:1">&#128269;</button>
+        </div>
+      </div>
+      <div class="field-group">
+        <label for="f-band">Band</label>
+        <select id="f-band" tabindex="2"></select>
+      </div>
+      <div class="field-group">
+        <label for="f-mode">Mode</label>
+        <select id="f-mode" tabindex="3"></select>
+      </div>
+      <div class="field-group">
+        <label for="f-freq">Freq MHz</label>
+        <input id="f-freq" type="number" placeholder="14.225" step="0.001" min="0.1" max="2500"
+               tabindex="4">
+        <button id="cat-tune-btn" onclick="catTune()" title="Send this frequency and mode to the radio via CAT"
+          style="display:none;font-family:var(--mono);font-size:10px;padding:2px 6px;border:1px solid var(--border);background:var(--bg3);color:var(--blue);border-radius:3px;cursor:pointer;margin-left:3px">→ Radio</button>
+      </div>
+      <div class="field-group" id="cat-lock-group" style="display:none">
+        <label style="cursor:pointer" title="Auto-fill freq/band/mode from radio">CAT</label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px">
+          <input type="checkbox" id="cat-lock" checked onchange="toggleCatLock()" style="cursor:pointer">
+          Auto-fill
+        </label>
+      </div>
+      <div class="field-group">
+        <label for="f-station">Station</label>
+        <select id="f-station" tabindex="5">
+          <option>1</option><option>2</option><option>3</option>
+          <option>4</option><option>5</option>
+        </select>
+      </div>
+      <button id="btn-log" onclick="logQSO()" disabled tabindex="10" title="Log QSO (Ctrl+Enter)">
+        Log QSO ↵
+      </button>
+    </div>
+
+    <!-- Row 2a: FIELD-DAY -->
+    <div class="form-row" id="row-fd">
+      <div class="field-group">
+        <label for="f-sent-exch">Sent Exch</label>
+        <input id="f-sent-exch" type="text" placeholder="2A ME" autocomplete="off"
+               tabindex="6">
+      </div>
+      <div class="field-group">
+        <label for="f-rcvd-exch">Rcvd Exch</label>
+        <input id="f-rcvd-exch" type="text" placeholder="3A VT" autocomplete="off"
+               tabindex="7" onkeydown="onRcvdKey(event)">
+      </div>
+      <div class="field-group">
+        <label for="f-time">Time UTC</label>
+        <input id="f-time" type="text" placeholder="1500" maxlength="4"
+               pattern="[0-9]{4}" tabindex="8">
+      </div>
+      <div class="field-group">
+        <label for="f-rst-sent-fd">RST Sent</label>
+        <input id="f-rst-sent-fd" type="text" placeholder="59" maxlength="3" tabindex="9">
+      </div>
+      <div class="field-group">
+        <label for="f-rst-rcvd-fd">RST Rcvd</label>
+        <input id="f-rst-rcvd-fd" type="text" placeholder="59" maxlength="3" tabindex="10">
+      </div>
+    </div>
+
+    <!-- Row 2b: POTA -->
+    <div class="form-row" id="row-pota" style="display:none">
+      <div class="field-group">
+        <label for="f-park-ref">Park Ref</label>
+        <input id="f-park-ref" type="text" placeholder="K-1234" autocomplete="off"
+               tabindex="6">
+      </div>
+      <div class="field-group">
+        <label for="f-time-pota">Time UTC</label>
+        <input id="f-time-pota" type="text" placeholder="1500" maxlength="4" tabindex="7">
+      </div>
+      <div class="field-group">
+        <label for="f-rst-sent-pota">RST Sent</label>
+        <input id="f-rst-sent-pota" type="text" placeholder="59" maxlength="3" tabindex="8">
+      </div>
+      <div class="field-group">
+        <label for="f-rst-rcvd-pota">RST Rcvd</label>
+        <input id="f-rst-rcvd-pota" type="text" placeholder="59" maxlength="3" tabindex="9"
+               onkeydown="onRcvdKey(event)">
+      </div>
+    </div>
+
+    <!-- Row 2c: SOTA -->
+    <div class="form-row" id="row-sota" style="display:none">
+      <div class="field-group">
+        <label for="f-summit-ref">Summit Ref</label>
+        <input id="f-summit-ref" type="text" placeholder="W6/NS-001" autocomplete="off"
+               tabindex="6">
+      </div>
+      <div class="field-group">
+        <label for="f-time-sota">Time UTC</label>
+        <input id="f-time-sota" type="text" placeholder="1500" maxlength="4" tabindex="7">
+      </div>
+      <div class="field-group">
+        <label for="f-rst-sent-sota">RST Sent</label>
+        <input id="f-rst-sent-sota" type="text" placeholder="59" maxlength="3" tabindex="8">
+      </div>
+      <div class="field-group">
+        <label for="f-rst-rcvd-sota">RST Rcvd</label>
+        <input id="f-rst-rcvd-sota" type="text" placeholder="59" maxlength="3" tabindex="9"
+               onkeydown="onRcvdKey(event)">
+      </div>
+    </div>
+
+    <!-- Row 2d: GENERAL -->
+    <div class="form-row" id="row-general" style="display:none">
+      <div class="field-group">
+        <label for="f-rst-sent">RST Sent</label>
+        <input id="f-rst-sent" type="text" placeholder="59" maxlength="3" tabindex="6">
+      </div>
+      <div class="field-group">
+        <label for="f-rst-rcvd">RST Rcvd</label>
+        <input id="f-rst-rcvd" type="text" placeholder="59" maxlength="3" tabindex="7">
+      </div>
+      <div class="field-group">
+        <label for="f-time-general">Time UTC</label>
+        <input id="f-time-general" type="text" placeholder="1500" maxlength="4" tabindex="8"
+               onkeydown="onRcvdKey(event)">
+      </div>
+    </div>
+
+    <!-- Row 3: Comments — always visible -->
+    <div class="form-row">
+      <div class="field-group" style="flex:1;min-width:160px;max-width:420px">
+        <label for="f-notes">Comments</label>
+        <input id="f-notes" type="text" placeholder="Optional comments" autocomplete="off"
+               style="width:100%" tabindex="10" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btn-log').click();}">
+      </div>
+    </div>
+
+    <!-- Row 4: Additional contact info — Name / QTH / Grid / Power / Time Off -->
+    <div class="form-row" id="row-extra">
+      <div class="field-group">
+        <label for="f-op-name">Name</label>
+        <input id="f-op-name" type="text" placeholder="Operator name" maxlength="40" tabindex="11" autocomplete="off">
+      </div>
+      <div class="field-group">
+        <label for="f-country">Country</label>
+        <input id="f-country" type="text" placeholder="e.g. USA" maxlength="30" tabindex="12" autocomplete="off">
+      </div>
+      <div class="field-group">
+        <label for="f-state">State/Prov</label>
+        <input id="f-state" type="text" placeholder="e.g. CT" maxlength="10" tabindex="13" autocomplete="off">
+      </div>
+      <div class="field-group">
+        <label for="f-county">County</label>
+        <input id="f-county" type="text" placeholder="optional" maxlength="40" tabindex="14" autocomplete="off">
+      </div>
+      <div class="field-group">
+        <label for="f-grid">Grid</label>
+        <input id="f-grid" type="text" placeholder="FN31" maxlength="8" tabindex="15" autocomplete="off">
+      </div>
+      <div class="field-group">
+        <label for="f-power">Their Power</label>
+        <select id="f-power" tabindex="16">
+          <option value="">—</option>
+          <option value="QRP">QRP (&lt;5W)</option>
+          <option value="LOW">Low (100W)</option>
+          <option value="HIGH">High (1500W)</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label for="f-time-off">Time Off UTC</label>
+        <input id="f-time-off" type="text" placeholder="1530" maxlength="4" tabindex="17" autocomplete="off">
+      </div>
+    </div>
+
+    <div id="dup-warning">⚠ Duplicate: this callsign is already in the log</div>
+    <div id="dupe-detail" style="display:none"></div>
+  </div>
+
+  <!-- ── Stats bar ── -->
+  <div id="stats-bar">
+    <div class="stat-group">
+      <span class="stat-lbl">Band</span>
+      <span id="stat-bands" class="stat-band">—</span>
+    </div>
+    <div class="stat-group">
+      <span class="stat-lbl">Mode</span>
+      <span id="stat-modes" class="stat-mode">—</span>
+    </div>
+    <div class="stat-group" id="score-group">
+      <span class="stat-lbl">Score</span>
+      <span id="stat-score"><span>0</span></span>
+    </div>
+    <div class="stats-spacer"></div>
+    <button id="btn-import" onclick="importFromECH()">↓ Import from ECH adapters</button>
+  </div>
+
+  <!-- ── QSO log table ── -->
+  <div id="log-area">
+    <table id="log-table">
+      <thead>
+        <tr>
+          <th class="th-num">#</th>
+          <th>Time UTC</th>
+          <th>Callsign</th>
+          <th>Band</th>
+          <th>Mode</th>
+          <th>RST S</th>
+          <th>RST R</th>
+          <th>Exch S/R</th>
+          <th>Country</th>
+          <th>Grid</th>
+          <th>Dist</th>
+          <th>Name</th>
+          <th>Pwr</th>
+          <th>Freq</th>
+          <th>Stn</th>
+          <th>Comments</th>
+          <th>Source</th>
+          <th class="th-del"></th>
+        </tr>
+      </thead>
+      <tbody id="log-tbody"></tbody>
+    </table>
+    <div id="log-empty">No QSOs logged yet — make your first contact above</div>
+  </div>
+
+  </div><!-- #left-col -->
+
+  <!-- ── Right panel ── -->
+  <div id="right-panel">
+    <div id="rp-tab-bar">
+      <button class="rp-tab active" id="tab-bandmap" onclick="showRpTab('bandmap')">Band Map</button>
+      <button class="rp-tab" id="tab-sections" onclick="showRpTab('sections')">Sections</button>
+      <button class="rp-tab" id="tab-chat" onclick="showRpTab('chat')">Chat<span class="tab-badge" id="chat-badge"></span></button>
+      <button class="rp-tab" id="tab-prop" onclick="showRpTab('prop')">Conditions</button>
+      <button class="rp-tab" id="tab-dx" onclick="showRpTab('dx')">DX Spots</button>
+    </div>
+
+    <div class="rp-pane" id="rp-bandmap">
+      <!-- rendered by renderBandMap() -->
+    </div>
+
+    <div class="rp-pane" id="rp-sections" style="display:none">
+      <div id="sec-header">
+        <input id="sec-search" type="text" placeholder="Search sections…" oninput="renderSections()" autocomplete="off">
+        <span id="sec-worked-count">0/83 sections</span>
+      </div>
+      <div id="sec-map"></div>
+      <div id="sec-list"></div>
+    </div>
+
+    <div class="rp-pane" id="rp-chat" style="display:none">
+      <div id="chat-msgs"></div>
+      <div id="chat-input-row">
+        <input id="chat-input" type="text" placeholder="Type message…" maxlength="300" autocomplete="off"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();sendChat();}">
+        <button onclick="sendChat()" class="btn btn-blue" style="padding:3px 8px;font-size:11px">Send</button>
+      </div>
+    </div>
+
+    <div class="rp-pane" id="rp-prop" style="display:none">
+      <div id="prop-header" style="display:flex;align-items:center;justify-content:space-between;padding:4px 6px;border-bottom:1px solid var(--border)">
+        <span style="font-size:10px;color:var(--muted)">Band Conditions &amp; Solar Data</span>
+        <button onclick="loadPropagation(true)" style="font-size:9px;padding:2px 6px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);border-radius:3px;cursor:pointer">↻ Refresh</button>
+      </div>
+      <div id="prop-content" style="padding:6px;overflow-y:auto;height:calc(100% - 32px)">
+        <div style="color:var(--muted);font-size:10px;text-align:center;padding:20px 0">Click Refresh to load band conditions</div>
+      </div>
+    </div>
+
+    <div class="rp-pane" id="rp-dx" style="display:none">
+      <div id="dx-header" style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+        <span style="font-size:10px;color:var(--muted);flex-shrink:0">DX Spots</span>
+        <select id="dx-band-filter" style="font-family:var(--mono);font-size:10px;padding:1px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:3px"
+                onchange="loadDxSpots()">
+          <option value="">All bands</option>
+        </select>
+        <label style="font-size:10px;color:var(--muted);display:flex;align-items:center;gap:3px;cursor:pointer">
+          <input type="checkbox" id="dx-filter-worked" onchange="renderDxSpots()" style="cursor:pointer">
+          <span>Hide worked</span>
+        </label>
+        <div style="flex:1"></div>
+        <button onclick="loadDxSpots(true)" style="font-size:9px;padding:2px 6px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);border-radius:3px;cursor:pointer">↻</button>
+      </div>
+      <!-- Submit a spot -->
+      <div id="dx-submit-row" style="display:flex;gap:4px;align-items:center;padding:4px 6px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+        <span style="font-size:9px;color:var(--yellow);font-family:var(--mono);flex-shrink:0">Spot:</span>
+        <input id="dx-s-dx"   type="text" placeholder="DX call" maxlength="12"
+          style="width:72px;font-family:var(--mono);font-size:10px;padding:1px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:3px"
+          onkeydown="if(event.key==='Enter')document.getElementById('dx-s-freq').focus()">
+        <input id="dx-s-freq" type="text" placeholder="kHz" maxlength="10"
+          style="width:60px;font-family:var(--mono);font-size:10px;padding:1px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:3px"
+          onkeydown="if(event.key==='Enter')document.getElementById('dx-s-comment').focus()">
+        <input id="dx-s-comment" type="text" placeholder="comment (opt.)" maxlength="60"
+          style="flex:1;min-width:60px;font-family:var(--mono);font-size:10px;padding:1px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:3px"
+          onkeydown="if(event.key==='Enter')submitSpot()">
+        <button onclick="submitSpot()" style="font-size:9px;padding:2px 7px;border:1px solid var(--yellow);background:var(--bg3);color:var(--yellow);border-radius:3px;cursor:pointer;white-space:nowrap">▶ Send</button>
+      </div>
+      <div id="dx-list" style="overflow-y:auto;height:calc(100% - 70px);font-size:10px">
+        <div style="color:var(--muted);text-align:center;padding:20px 0;font-size:10px">Click ↻ to load DX spots</div>
+      </div>
+    </div>
+  </div><!-- #right-panel -->
+
+  </div><!-- #main-split -->
+
+  <!-- ── Footer — Import / Export / Upload dropdowns ── -->
+  <div id="footer">
+
+    <!-- Export ▾ -->
+    <div class="ftr-dd" id="dd-export">
+      <button class="ftr-dd-btn" onclick="ftrToggle('dd-export')">⬇ Export ▾</button>
+      <div class="ftr-dd-menu">
+        <button class="ftr-dd-item" onclick="exportFile('adif');    ftrClose()">⬇ ADIF (.adi)</button>
+        <button class="ftr-dd-item" onclick="exportFile('cabrillo');ftrClose()">⬇ Cabrillo (.log)</button>
+        <div class="ftr-dd-sep"></div>
+        <button class="ftr-dd-item" onclick="exportFile('pota');    ftrClose()">⬇ POTA CSV</button>
+        <button class="ftr-dd-item" onclick="exportFile('sota');    ftrClose()">⬇ SOTA CSV</button>
+      </div>
+    </div>
+
+    <!-- Import ▾ -->
+    <div class="ftr-dd" id="dd-import">
+      <button class="ftr-dd-btn" onclick="ftrToggle('dd-import')">⬆ Import ▾</button>
+      <div class="ftr-dd-menu">
+        <button class="ftr-dd-item" onclick="triggerImport('adif');     ftrClose()">⬆ From ADIF file</button>
+        <button class="ftr-dd-item" onclick="triggerImport('cabrillo'); ftrClose()">⬆ From Cabrillo log</button>
+        <button class="ftr-dd-item" onclick="triggerImport('csv');      ftrClose()">⬆ From CSV</button>
+        <div class="ftr-dd-sep"></div>
+        <button class="ftr-dd-item" onclick="importFromECH();           ftrClose()" id="btn-import">⬆ From ECH adapters</button>
+      </div>
+    </div>
+
+    <!-- Upload ▾ -->
+    <div class="ftr-dd" id="dd-upload">
+      <button class="ftr-dd-btn" onclick="ftrToggle('dd-upload')">↑ Upload ▾</button>
+      <div class="ftr-dd-menu">
+        <button class="ftr-dd-item" id="upload-qrz"     onclick="uploadTo('qrz');     ftrClose()">↑ QRZ.com</button>
+        <button class="ftr-dd-item" id="upload-clublog" onclick="uploadTo('clublog'); ftrClose()">↑ Club Log</button>
+        <div class="ftr-dd-sep"></div>
+        <button class="ftr-dd-item" id="upload-pota"    onclick="uploadTo('pota');    ftrClose()">↑ POTA</button>
+        <button class="ftr-dd-item" id="upload-sota"    onclick="uploadTo('sota');    ftrClose()">↑ SOTA</button>
+      </div>
+    </div>
+
+    <div class="footer-group" style="margin-left:auto;gap:10px">
+      <div id="w1aw-strip" onclick="openW1AWSchedule()" title="W1AW Field Day Bulletin Schedule — click for full schedule" style="display:none">&#x1F4FB; W1AW</div>
+      <span style="font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:.05em">ECH Ham Log</span>
+    </div>
+  </div>
+
+</div><!-- #app -->
+
+<div id="toast-area"></div>
+
+<script>
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────
+let qsoList   = [];          // full in-memory array, newest first
+let deletedIds= new Set();   // optimistic deletes
+let editingId = null;        // id of QSO currently being edited inline
+let config    = {};          // from /api/hamlog/config
+let userRole  = 'operator';  // 'admin' or 'operator' — loaded from /api/auth/me
+let wsConn    = null;
+let timeTimer = null;
+
+const BANDS_ALL = ['160M','80M','60M','40M','30M','20M','17M','15M','12M','10M','6M','2M','1.25M','70CM','33CM','23CM'];
+const MODES_ALL = ['PH','CW','DI','SSB','FM','AM','FT8','FT4','JS8','WSPR','PACKET','APRS','WINLINK'];
+const MODES_FD  = ['PH','CW','DI'];
+
+// Callsign prefix → {country, state} for auto-populate
+const CALL_PREFIXES = (function() {
+  const p = {};
+  // USA call districts
+  const usDist = [
+    ['1','MA'], ['2','NJ'], ['3','PA'], ['4','GA'], ['5','TX'],
+    ['6','CA'], ['7','OR'], ['8','OH'], ['9','IL'], ['0','CO'],
+  ];
+  for (const [d, st] of usDist) {
+    for (const c of ['W','K','N']) p[c+d] = {country:'USA', state:st};
+    // AA-AK series
+    for (const a of ['A','B','C','D','E','F','G','H','I','J','K']) {
+      p['A'+a+d] = {country:'USA', state:st};
+    }
+  }
+  // Alaska / Hawaii / territories
+  p['KL'] = {country:'USA', state:'AK'}; p['AL'] = {country:'USA', state:'AK'};
+  p['KH'] = {country:'USA', state:'HI'}; p['AH'] = {country:'USA', state:'HI'};
+  p['KP'] = {country:'Puerto Rico', state:''};
+  p['WP'] = {country:'Puerto Rico', state:''};
+  // Canada
+  for (const pre of ['VE1','VE2','VE3','VE4','VE5','VE6','VE7','VE8','VE9','VA',
+                      'VY','VO','CF','CG','CH','CI','CJ','CK']) {
+    p[pre] = {country:'Canada', state:''};
+  }
+  // UK
+  p['G']  = {country:'England', state:''}; p['M']  = {country:'England', state:''};
+  p['GM'] = {country:'Scotland', state:''}; p['MM'] = {country:'Scotland', state:''};
+  p['GW'] = {country:'Wales', state:''}; p['MW'] = {country:'Wales', state:''};
+  p['GI'] = {country:'N.Ireland', state:''}; p['MI'] = {country:'N.Ireland', state:''};
+  p['GJ'] = {country:'Jersey', state:''}; p['GU'] = {country:'Guernsey', state:''};
+  p['GD'] = {country:'Isle of Man', state:''};
+  // Europe
+  p['DL'] = p['DJ'] = p['DK'] = {country:'Germany', state:''};
+  p['F']  = {country:'France', state:''}; p['TM'] = {country:'France', state:''};
+  p['I']  = p['IZ'] = p['IK'] = p['IV'] = {country:'Italy', state:''};
+  p['EA'] = p['EB'] = p['EC'] = {country:'Spain', state:''};
+  p['CT'] = p['CS'] = {country:'Portugal', state:''};
+  p['EI'] = {country:'Ireland', state:''};
+  p['PA'] = p['PB'] = p['PC'] = p['PD'] = p['PE'] = p['PH'] = p['PI'] = {country:'Netherlands', state:''};
+  p['ON'] = p['OO'] = {country:'Belgium', state:''};
+  p['OZ'] = {country:'Denmark', state:''};
+  p['SM'] = p['SA'] = p['SE'] = p['SF'] = p['SG'] = p['SH'] = p['SI'] = p['SJ'] = p['SK'] = p['SL'] = {country:'Sweden', state:''};
+  p['OH'] = p['OF'] = p['OG'] = {country:'Finland', state:''};
+  p['LA'] = p['LB'] = p['LC'] = p['LD'] = p['LE'] = p['LF'] = p['LG'] = {country:'Norway', state:''};
+  p['OE'] = {country:'Austria', state:''}; p['HB9'] = {country:'Switzerland', state:''};
+  p['SP'] = p['SN'] = p['SO'] = p['SQ'] = p['SR'] = {country:'Poland', state:''};
+  p['OK'] = p['OL'] = {country:'Czech Rep.', state:''};
+  p['OM'] = {country:'Slovakia', state:''};
+  p['HA'] = p['HG'] = {country:'Hungary', state:''};
+  p['YO'] = p['YP'] = p['YQ'] = p['YR'] = {country:'Romania', state:''};
+  p['LZ'] = {country:'Bulgaria', state:''}; p['SV'] = {country:'Greece', state:''};
+  p['UR'] = p['US'] = p['UT'] = p['UU'] = p['UV'] = p['UW'] = p['UX'] = p['UY'] = p['UZ'] = {country:'Ukraine', state:''};
+  p['UA'] = p['UB'] = p['UC'] = p['UD'] = p['UE'] = p['UF'] = p['UG'] = {country:'Russia', state:''};
+  p['ES'] = {country:'Estonia', state:''};
+  p['YL'] = {country:'Latvia', state:''}; p['LY'] = {country:'Lithuania', state:''};
+  p['9A'] = {country:'Croatia', state:''}; p['S5'] = {country:'Slovenia', state:''};
+  p['T9'] = {country:'Bosnia-Herz.', state:''}; p['YU'] = {country:'Serbia', state:''};
+  p['Z3'] = {country:'N.Macedonia', state:''}; p['ZA'] = {country:'Albania', state:''};
+  p['TA'] = p['TB'] = p['TC'] = {country:'Turkey', state:''};
+  // Asia / Pacific
+  p['JA'] = p['JE'] = p['JF'] = p['JG'] = p['JH'] = p['JI'] = p['JJ'] = p['JK'] = p['JL'] =
+  p['JM'] = p['JN'] = p['JO'] = p['JP'] = p['JQ'] = p['JR'] = p['JS'] = {country:'Japan', state:''};
+  p['BG'] = p['BA'] = p['BD'] = p['BE'] = p['BF'] = p['BH'] = p['BJ'] = p['BK'] = p['BL'] =
+  p['BM'] = p['BT'] = p['BV'] = p['BY'] = p['BZ'] = {country:'China', state:''};
+  p['VK'] = {country:'Australia', state:''};
+  p['ZL'] = {country:'New Zealand', state:''};
+  p['HL'] = p['DS'] = p['DT'] = {country:'S.Korea', state:''};
+  p['VU'] = p['VT'] = p['AT'] = p['AU'] = p['AV'] = p['AW'] = {country:'India', state:''};
+  p['HS'] = p['E2'] = {country:'Thailand', state:''};
+  // Americas
+  p['PY'] = p['PP'] = p['PQ'] = p['PR'] = p['PS'] = p['PT'] = p['PU'] = p['PV'] = p['PW'] = p['PX'] = {country:'Brazil', state:''};
+  p['LU'] = p['LO'] = p['LP'] = p['LQ'] = p['LR'] = p['LS'] = p['LT'] = p['LV'] = p['LW'] = {country:'Argentina', state:''};
+  p['XE'] = p['XF'] = {country:'Mexico', state:''};
+  p['TI'] = {country:'Costa Rica', state:''};
+  p['YV'] = p['YW'] = {country:'Venezuela', state:''};
+  p['CE'] = p['CA'] = p['CB'] = p['CC'] = p['CD'] = {country:'Chile', state:''};
+  p['OA'] = p['OB'] = p['OC'] = {country:'Peru', state:''};
+  p['HI'] = {country:'Dominican Rep.', state:''};
+  p['CO'] = p['CM'] = p['T4'] = {country:'Cuba', state:''};
+  p['CX'] = {country:'Uruguay', state:''};
+  p['CP'] = {country:'Bolivia', state:''};
+  // Africa / Middle East
+  p['ZS'] = p['ZR'] = p['ZT'] = p['ZU'] = {country:'S.Africa', state:''};
+  p['ZB'] = {country:'Gibraltar', state:''};
+  p['4X'] = p['4Z'] = {country:'Israel', state:''};
+  p['A4'] = {country:'Oman', state:''}; p['HZ'] = {country:'Saudi Arabia', state:''};
+  p['9K'] = {country:'Kuwait', state:''};
+  return p;
+})();
+
+function callsignLookup(cs) {
+  if (!cs) return {};
+  cs = cs.toUpperCase().trim();
+  // Try longest prefix first (4 chars down to 1)
+  for (let len = 4; len >= 1; len--) {
+    const pre = cs.slice(0, len);
+    if (CALL_PREFIXES[pre]) return CALL_PREFIXES[pre];
+  }
+  return {};
+}
+
+// ── UUID helper (works on HTTP, no secure-context required) ───────────────
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try { return crypto.randomUUID(); } catch (_) {}
+  }
+  // Fallback: crypto.getRandomValues is available in non-secure contexts
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.random() * 256 | 0;
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const h = Array.from(bytes).map(b => b.toString(16).padStart(2, '0'));
+  return `${h.slice(0,4).join('')}-${h.slice(4,6).join('')}-${h.slice(6,8).join('')}-${h.slice(8,10).join('')}-${h.slice(10).join('')}`;
+}
+
+// ── HTML escape helper ─────────────────────────────────────────────────────
+function esc(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function toast(msg, type = '') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-area').appendChild(el);
+  setTimeout(() => el.remove(), 4500);
+}
+
+// ── UTC clock ──────────────────────────────────────────────────────────────
+function tickClock() {
+  const now = new Date();
+  const hh = String(now.getUTCHours()).padStart(2,'0');
+  const mm = String(now.getUTCMinutes()).padStart(2,'0');
+  const ss = String(now.getUTCSeconds()).padStart(2,'0');
+  document.getElementById('clock').textContent = `${hh}:${mm}:${ss}Z`;
+  updateDefaultTime();
+}
+
+function utcHHMM() {
+  const now = new Date();
+  return String(now.getUTCHours()).padStart(2,'0') + String(now.getUTCMinutes()).padStart(2,'0');
+}
+
+function updateDefaultTime() {
+  // Update all time fields that are empty or were auto-filled (not user-edited)
+  const ids = ['f-time','f-time-pota','f-time-sota','f-time-general'];
+  const val = utcHHMM();
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.dataset.userEdited) el.value = val;
+  });
+}
+
+// Mark time fields as user-edited when typed into
+document.querySelectorAll('#f-time,#f-time-pota,#f-time-sota,#f-time-general')
+  .forEach(el => {
+    el.addEventListener('input', () => { el.dataset.userEdited = '1'; });
+    el.addEventListener('blur',  () => { if (!el.value) delete el.dataset.userEdited; });
+  });
+
+// ── Band / Mode selects ────────────────────────────────────────────────────
+function populateBandMode() {
+  const contest = document.getElementById('contest-sel').value;
+  const bandSel = document.getElementById('f-band');
+  const modeSel = document.getElementById('f-mode');
+
+  const prevBand = bandSel.value;
+  const prevMode = modeSel.value;
+
+  bandSel.innerHTML = BANDS_ALL.map(b => `<option>${b}</option>`).join('');
+
+  const modes = contest === 'ARRL-FIELD-DAY' ? MODES_FD : MODES_ALL;
+  modeSel.innerHTML = modes.map(m => `<option>${m}</option>`).join('');
+
+  // Restore previous selection if still valid
+  if ([...bandSel.options].some(o => o.value === prevBand)) bandSel.value = prevBand;
+  if ([...modeSel.options].some(o => o.value === prevMode)) modeSel.value = prevMode;
+  else if (contest === 'ARRL-FIELD-DAY') modeSel.value = 'PH';
+
+  // Also populate station bar band/mode selects
+  const myBandSel = document.getElementById('my-band-sel');
+  const myModeSel = document.getElementById('my-mode-sel');
+  if (myBandSel) {
+    const prevMyBand = myBandSel.value;
+    myBandSel.innerHTML = BANDS_ALL.map(b => `<option>${b}</option>`).join('');
+    if ([...myBandSel.options].some(o => o.value === prevMyBand)) myBandSel.value = prevMyBand;
+    else myBandSel.value = '20M';
+  }
+  if (myModeSel) {
+    const prevMyMode = myModeSel.value;
+    myModeSel.innerHTML = modes.map(m => `<option>${m}</option>`).join('');
+    if ([...myModeSel.options].some(o => o.value === prevMyMode)) myModeSel.value = prevMyMode;
+    else myModeSel.value = modes[0];
+  }
+}
+
+// ── Contest change ─────────────────────────────────────────────────────────
+function onContestChange() {
+  const contest = document.getElementById('contest-sel').value;
+
+  document.getElementById('row-fd').style.display      = contest === 'ARRL-FIELD-DAY' ? '' : 'none';
+  document.getElementById('row-pota').style.display    = contest === 'POTA'            ? '' : 'none';
+  document.getElementById('row-sota').style.display    = contest === 'SOTA'            ? '' : 'none';
+  document.getElementById('row-general').style.display = contest === 'GENERAL'         ? '' : 'none';
+
+  // Score display only relevant for FIELD-DAY
+  const showScore = contest === 'ARRL-FIELD-DAY';
+  document.getElementById('score-display').style.display = showScore ? '' : 'none';
+  document.getElementById('score-group').style.display   = showScore ? '' : 'none';
+  document.getElementById('bonus-btn').style.display     = showScore ? '' : 'none';
+  document.getElementById('w1aw-strip').style.display    = showScore ? '' : 'none';
+
+  populateBandMode();
+  loadQSOs();
+}
+
+// ── Station selector ───────────────────────────────────────────────────────
+function onStationChange() {
+  const val = document.getElementById('station-sel').value;
+  localStorage.setItem('ech_hamlog_station', val);
+  document.getElementById('f-station').value = val;
+}
+
+// ── Auth role + logout ─────────────────────────────────────────────────────
+async function doLogout() {
+  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+  location.href = '/';
+}
+
+async function loadRole() {
+  try {
+    const r = await fetch('/api/auth/me');
+    if (r.ok) {
+      const d = await r.json();
+      userRole = d.role || 'operator';
+      if (d.authenticated && d.username) {
+        const wrap  = document.getElementById('auth-user-wrap');
+        const label = document.getElementById('auth-username');
+        if (wrap)  wrap.style.display = 'flex';
+        if (label) label.textContent  = d.username;
+      }
+    }
+  } catch (e) { /* auth disabled — treat as admin */ userRole = 'admin'; }
+}
+
+// ── Config ─────────────────────────────────────────────────────────────────
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/hamlog/config');
+    if (!r.ok) throw new Error(r.statusText);
+    config = await r.json();
+    document.getElementById('op-callsign').textContent = config.callsign || '—';
+    // Populate grid input: prefer localStorage (operator may have changed it), then config
+    const gridEl = document.getElementById('my-grid');
+    if (gridEl) {
+      const savedGrid = localStorage.getItem('ech_hamlog_grid') || config.grid || '';
+      gridEl.value = savedGrid.toUpperCase();
+      if (savedGrid) _myLatLon = null;  // force recalculate with real grid
+    }
+    // Pre-fill sent exchange for Field Day
+    if (config.field_day_class && config.field_day_section) {
+      const fd = `${config.field_day_class} ${config.field_day_section}`;
+      document.getElementById('f-sent-exch').value = fd;
+    }
+    // Pre-fill park/summit refs
+    if (config.pota_ref) document.getElementById('f-park-ref').value = config.pota_ref;
+    if (config.sota_ref) document.getElementById('f-summit-ref').value = config.sota_ref;
+  } catch (e) {
+    // Config endpoint may not exist yet — silently ignore
+    console.warn('loadConfig:', e.message);
+  }
+}
+
+// ── Load QSOs ──────────────────────────────────────────────────────────────
+async function loadQSOs() {
+  const contest = document.getElementById('contest-sel').value;
+  try {
+    const r = await fetch(`/api/hamlog/qsos?contest=${encodeURIComponent(contest)}&limit=500`);
+    if (!r.ok) throw new Error(r.statusText);
+    const data = await r.json();
+    qsoList = (data.qsos || []).slice().reverse(); // newest first
+    deletedIds.clear();
+    renderTable();
+    updateStats();
+    updateHeader();
+    renderSections();
+  } catch (e) {
+    console.warn('loadQSOs:', e.message);
+    // Gracefully render empty state
+    renderTable();
+    updateStats();
+    updateHeader();
+    renderSections();
+  }
+}
+
+// ── Log a QSO ─────────────────────────────────────────────────────────────
+async function logQSO() {
+  const callEl = document.getElementById('f-callsign');
+  const callsign = callEl.value.trim().toUpperCase();
+  if (!callsign) return;
+
+  const contest  = document.getElementById('contest-sel').value;
+  const band     = document.getElementById('f-band').value;
+  const mode     = document.getElementById('f-mode').value;
+  const freq     = parseFloat(document.getElementById('f-freq').value) || null;
+  const station  = document.getElementById('f-station').value;
+
+  let sent_exch = '', rcvd_exch = '', sent_rst = '59', rcvd_rst = '59';
+  let pota_ref = '', sota_ref = '';
+  let timeVal  = utcHHMM();
+
+  if (contest === 'ARRL-FIELD-DAY') {
+    sent_exch = document.getElementById('f-sent-exch').value.trim();
+    rcvd_exch = document.getElementById('f-rcvd-exch').value.trim();
+    timeVal   = document.getElementById('f-time').value || timeVal;
+    sent_rst  = document.getElementById('f-rst-sent-fd').value || '59';
+    rcvd_rst  = document.getElementById('f-rst-rcvd-fd').value || '59';
+  } else if (contest === 'POTA') {
+    pota_ref  = document.getElementById('f-park-ref').value.trim().toUpperCase();
+    timeVal   = document.getElementById('f-time-pota').value || timeVal;
+    sent_rst  = document.getElementById('f-rst-sent-pota').value || '59';
+    rcvd_rst  = document.getElementById('f-rst-rcvd-pota').value || '59';
+  } else if (contest === 'SOTA') {
+    sota_ref  = document.getElementById('f-summit-ref').value.trim().toUpperCase();
+    timeVal   = document.getElementById('f-time-sota').value || timeVal;
+    sent_rst  = document.getElementById('f-rst-sent-sota').value || '59';
+    rcvd_rst  = document.getElementById('f-rst-rcvd-sota').value || '59';
+  } else {
+    sent_rst  = document.getElementById('f-rst-sent').value || '59';
+    rcvd_rst  = document.getElementById('f-rst-rcvd').value || '59';
+    timeVal   = document.getElementById('f-time-general').value || timeVal;
+  }
+  const notes = document.getElementById('f-notes').value.trim();
+
+  // Build ISO timestamp from today + HHMM
+  const now = new Date();
+  const hh = timeVal.slice(0,2), mm = timeVal.slice(2,4);
+  const ts  = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+                                parseInt(hh,10), parseInt(mm,10), 0)).toISOString();
+
+  // Generate ID client-side so the WS echo dedup works even if WS arrives
+  // before the fetch response (server broadcasts before returning HTTP response).
+  const clientId = generateUUID();
+
+  const payload = {
+    id: clientId,
+    callsign, band, mode, freq_mhz: freq,
+    sent_rst, rcvd_rst, sent_exch, rcvd_exch,
+    notes, pota_ref, sota_ref,
+    station_id: station,
+    contest,
+    timestamp: ts,
+    source: 'manual',
+    name:     (document.getElementById('f-op-name').value || '').trim(),
+    power:    document.getElementById('f-power').value || '',
+    time_off: (document.getElementById('f-time-off').value || '').trim(),
+    country:  (document.getElementById('f-country').value || '').trim(),
+    state:    (document.getElementById('f-state').value || '').trim().toUpperCase(),
+    county:   (document.getElementById('f-county').value || '').trim(),
+    grid:     (document.getElementById('f-grid').value || '').trim().toUpperCase(),
+  };
+
+  // Add to list immediately — WS echo will check and skip this id.
+  const optimisticQso = { ...payload };
+  qsoList.unshift(optimisticQso);
+  renderTable();
+  updateStats();
+  updateHeader();
+  renderSections();
+
+  const btn = document.getElementById('btn-log');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/hamlog/qsos', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) {
+      // Roll back the optimistic insert on failure
+      qsoList = qsoList.filter(q => q.id !== clientId);
+      renderTable(); updateStats(); updateHeader();
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || r.statusText);
+    }
+    const data = await r.json();
+    // Replace optimistic entry with server's canonical copy (same id)
+    const qso = data.qso || optimisticQso;
+    const idx = qsoList.findIndex(q => q.id === clientId);
+    if (idx !== -1) qsoList[idx] = qso;
+    renderTable();
+    updateStats();
+    updateHeader();
+    renderSections();
+
+    // Clear callsign + dup state; keep band/mode/sent-exch for next QSO
+    callEl.value = '';
+    document.getElementById('dup-warning').style.display = 'none';
+    document.getElementById('dupe-detail').style.display = 'none';
+    callEl.classList.remove('dup');
+
+    // Clear per-QSO fields
+    if (contest === 'ARRL-FIELD-DAY') {
+      document.getElementById('f-rcvd-exch').value = '';
+    } else if (contest === 'POTA') {
+      document.getElementById('f-rst-rcvd-pota').value = '';
+    } else if (contest === 'SOTA') {
+      document.getElementById('f-rst-rcvd-sota').value = '';
+    } else {
+      document.getElementById('f-rst-rcvd').value = '';
+    }
+    document.getElementById('f-notes').value = '';
+    document.getElementById('f-op-name').value = '';
+    document.getElementById('f-power').value = '';
+    document.getElementById('f-time-off').value = '';
+    document.getElementById('f-country').value = '';
+    document.getElementById('f-state').value = '';
+    document.getElementById('f-county').value = '';
+    document.getElementById('f-grid').value = '';
+
+    callEl.focus();
+    toast(`Logged: ${callsign} on ${band} ${mode}`, 'ok');
+  } catch (e) {
+    toast(`Log failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = !callEl.value.trim();
+  }
+}
+
+// ── Delete QSO ─────────────────────────────────────────────────────────────
+function confirmDelete(id) {
+  const q = qsoList.find(q => q.id === id);
+  const label = q ? `${q.callsign} on ${q.band} ${q.mode}` : 'this QSO';
+  if (!confirm(`Delete ${label}?\nThis cannot be undone.`)) return;
+  deleteQSO(id);
+}
+
+async function deleteQSO(id) {
+  // Optimistic UI
+  deletedIds.add(id);
+  const row = document.querySelector(`tr[data-id="${CSS.escape(id)}"]`);
+  if (row) row.classList.add('deleted');
+
+  try {
+    const r = await fetch(`/api/hamlog/qsos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(r.statusText);
+    qsoList = qsoList.filter(q => q.id !== id);
+    deletedIds.delete(id);
+    renderTable();
+    updateStats();
+    updateHeader();
+    renderSections();
+  } catch (e) {
+    deletedIds.delete(id);
+    if (row) row.classList.remove('deleted');
+    toast(`Delete failed: ${e.message}`, 'err');
+  }
+}
+
+// ── Dup check ─────────────────────────────────────────────────────────────
+function checkDup(callsign) {
+  if (!callsign) {
+    document.getElementById('dup-warning').style.display = 'none';
+    document.getElementById('f-callsign').classList.remove('dup');
+    return false;
+  }
+  const up = callsign.toUpperCase();
+  const isDup = qsoList.some(q => !deletedIds.has(q.id) && q.callsign === up);
+  document.getElementById('dup-warning').style.display = isDup ? 'block' : 'none';
+  document.getElementById('f-callsign').classList.toggle('dup', isDup);
+  return isDup;
+}
+
+function autoFillLocation(callsign) {
+  const loc = callsignLookup(callsign);
+  if (!loc.country && !loc.state) return;
+  const cEl = document.getElementById('f-country');
+  const sEl = document.getElementById('f-state');
+  if (cEl && !cEl.value) cEl.value = loc.country || '';
+  if (sEl && !sEl.value) sEl.value = loc.state   || '';
+  // Show distance hint in dupe-detail if no dupes visible
+  const dupeEl = document.getElementById('dupe-detail');
+  if (dupeEl && dupeEl.style.display === 'none') {
+    const db = qsoDistBearing(callsign);
+    if (db) {
+      dupeEl.style.display = '';
+      dupeEl.innerHTML = `<div style="font-size:10px;color:var(--blue)">&#8602; ${db.km} km ${db.card} (${db.deg}°) · ${db.mi} mi</div>`;
+    }
+  }
+}
+
+// ── Callsign input handlers ────────────────────────────────────────────────
+function onCallsignInput() {
+  const el    = document.getElementById('f-callsign');
+  const val   = el.value.trim();
+  const isWild = hasWildcard(val);
+  document.getElementById('btn-log').disabled = !val || isWild;
+  if (!isWild) checkDup(val);
+  else { document.getElementById('dup-warning').style.display = 'none'; el.classList.remove('dup'); }
+  showDupeDetail(val.toUpperCase());
+}
+
+function onCallsignBlur() {
+  const val = document.getElementById('f-callsign').value.trim();
+  if (!val) return;
+  autoFillLocation(val);
+  // Auto-lookup from database for full-length callsigns
+  if (val.length >= 4) {
+    lookupCallsign(val).then(d => { if (d) applyCallsignData(d); });
+  }
+}
+
+function onCallsignKey(e) {
+  if (e.key === 'Escape') {
+    document.getElementById('f-callsign').value = '';
+    onCallsignInput();
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const contest = document.getElementById('contest-sel').value;
+    const val = document.getElementById('f-callsign').value.trim();
+    autoFillLocation(val);
+    if (val.length >= 4) lookupCallsign(val).then(d => { if (d) applyCallsignData(d); });
+    const isDup = checkDup(val);
+    if (isDup) {
+      document.getElementById('f-band').focus();
+    } else {
+      focusRcvdField(contest);
+    }
+  }
+  if (e.ctrlKey && e.key === 'Enter') {
+    e.preventDefault();
+    logQSO();
+  }
+}
+
+function focusRcvdField(contest) {
+  if (contest === 'ARRL-FIELD-DAY') document.getElementById('f-rcvd-exch').focus();
+  else if (contest === 'POTA')       document.getElementById('f-rst-rcvd-pota').focus();
+  else if (contest === 'SOTA')       document.getElementById('f-rst-rcvd-sota').focus();
+  else                               document.getElementById('f-rst-rcvd').focus();
+}
+
+function onRcvdKey(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    logQSO();
+  }
+  if (e.ctrlKey && e.key === 'Enter') {
+    e.preventDefault();
+    logQSO();
+  }
+}
+
+// Global Ctrl+Enter
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'Enter') {
+    e.preventDefault();
+    logQSO();
+  }
+});
+
+// ── Render table ───────────────────────────────────────────────────────────
+function renderTable() {
+  const tbody = document.getElementById('log-tbody');
+  const empty = document.getElementById('log-empty');
+
+  const visible = qsoList.filter(q => !deletedIds.has(q.id));
+  const total   = visible.length;
+
+  if (total === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  const isAdmin = userRole === 'admin';
+  tbody.innerHTML = visible.map((q, i) => {
+    const num    = total - i;
+    const time   = fmtTime(q.timestamp);
+    const freq   = q.freq_mhz ? q.freq_mhz.toFixed(3) : '—';
+    const srcCls = srcClass(q.source || 'manual');
+    const srcLbl = esc(q.source || 'manual');
+    const sExch  = esc(q.sent_exch || '');
+    const rExch  = esc(q.rcvd_exch || '');
+    const rstS   = esc(q.sent_rst || '59');
+    const rstR   = esc(q.rcvd_rst || '59');
+    const qstate = esc(q.state || '');
+    const qcntry = esc(q.country || '');
+    const qlocLabel = [qstate, qcntry].filter(Boolean).join(' / ');
+    const qgrid  = esc(q.grid || '');
+    const qname  = esc(q.name || '');
+    const qpwr   = esc(q.power || '');
+    const qid    = esc(q.id);
+    const db     = qsoDistBearing(q.callsign);
+    const qdist  = db ? `<span title="${db.deg}° ${db.card} · ${db.mi} mi" style="white-space:nowrap">${db.km}km ${db.card}</span>` : '';
+
+    if (editingId === q.id) {
+      // Inline edit row
+      const bandOpts = BANDS_ALL.map(b => `<option${b===q.band?' selected':''}>${b}</option>`).join('');
+      const modeOpts = MODES_ALL.map(m => `<option${m===q.mode?' selected':''}>${m}</option>`).join('');
+      return `<tr data-id="${qid}" style="background:var(--bg3)">
+        <td class="td-num">${num}</td>
+        <td><input id="eq-time" value="${esc(time.replace('Z',''))}" style="width:46px;${inputStyle}" title="HHMM UTC"></td>
+        <td><input id="eq-call" value="${esc(q.callsign)}" style="width:76px;${inputStyle}" maxlength="12"></td>
+        <td><select id="eq-band" style="width:60px;${selectStyle}">${bandOpts}</select></td>
+        <td><select id="eq-mode" style="width:46px;${selectStyle}">${modeOpts}</select></td>
+        <td><input id="eq-rst-s" value="${esc(q.sent_rst||'59')}" style="width:36px;${inputStyle}" maxlength="3"></td>
+        <td><input id="eq-rst-r" value="${esc(q.rcvd_rst||'59')}" style="width:36px;${inputStyle}" maxlength="3"></td>
+        <td><input id="eq-sent" value="${sExch}" style="width:60px;${inputStyle}" placeholder="s/r exch"></td>
+        <td style="white-space:nowrap"><input id="eq-state" value="${esc(q.state||'')}" style="width:34px;${inputStyle};text-transform:uppercase" placeholder="ST" maxlength="4" title="State/Province"><input id="eq-country" value="${esc(q.country||'')}" style="width:54px;${inputStyle};margin-left:2px" placeholder="country"></td>
+        <td><input id="eq-grid" value="${esc(q.grid||'')}" style="width:52px;${inputStyle}" placeholder="grid" maxlength="8"></td>
+        <td style="color:var(--dim);font-size:9px;padding:2px 4px">${qdist||'—'}</td>
+        <td><input id="eq-name" value="${esc(q.name||'')}" style="width:70px;${inputStyle}" placeholder="name"></td>
+        <td><input id="eq-power" value="${esc(q.power||'')}" style="width:50px;${inputStyle}" placeholder="pwr"></td>
+        <td><input id="eq-freq" value="${esc(q.freq_mhz||'')}" style="width:60px;${inputStyle}" placeholder="MHz"></td>
+        <td><input id="eq-stn"  value="${esc(q.station_id||'1')}" style="width:28px;${inputStyle}" maxlength="1"></td>
+        <td><input id="eq-notes" value="${esc(q.notes||'')}" style="width:100px;${inputStyle}" placeholder="comments"></td>
+        <td><span class="src-badge ${srcCls}">${srcLbl}</span></td>
+        <td style="white-space:nowrap">
+          <button onclick="saveEdit('${qid}')" style="font-size:10px;padding:2px 7px;border-radius:3px;border:1px solid var(--green);background:rgba(63,185,80,.1);color:var(--green);cursor:pointer" title="Save">✓</button>
+          <button onclick="cancelEdit()" style="font-size:10px;padding:2px 7px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer" title="Cancel">✕</button>
+        </td>
+      </tr>`;
+    }
+
+    const editBtn = `<button onclick="startEdit('${qid}')" style="font-size:10px;padding:2px 6px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer" title="Edit QSO">✎</button>`;
+    const delBtn  = isAdmin
+      ? `<button class="del-btn" onclick="confirmDelete('${qid}')" title="Delete QSO (admin only)">✕</button>`
+      : `<button class="del-btn" disabled title="Delete requires admin" style="opacity:.3;cursor:not-allowed">✕</button>`;
+    const notesText = esc(q.notes || '');
+    const exchTxt = [sExch, rExch].filter(Boolean).join(' / ') || '—';
+    return `<tr data-id="${qid}">
+      <td class="td-num">${num}</td>
+      <td class="td-time">${esc(time)}</td>
+      <td class="td-call">${esc(q.callsign)}</td>
+      <td class="td-band">${esc(q.band)}</td>
+      <td class="td-mode">${esc(q.mode)}</td>
+      <td class="td-exch">${rstS}</td>
+      <td class="td-exch">${rstR}</td>
+      <td class="td-exch" style="color:var(--muted)">${exchTxt}</td>
+      <td class="td-exch" style="color:var(--muted)">${qlocLabel || '—'}</td>
+      <td class="td-exch" style="color:var(--dim);font-family:var(--mono);font-size:9px">${qgrid}</td>
+      <td class="td-exch" style="color:var(--muted);font-size:9px">${qdist}</td>
+      <td class="td-exch" style="color:var(--muted)">${qname}</td>
+      <td class="td-exch" style="color:var(--muted)">${qpwr}</td>
+      <td class="td-freq">${esc(freq)}</td>
+      <td class="td-stn">${esc(q.station_id || '—')}</td>
+      <td class="td-notes" style="color:var(--muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${notesText}">${notesText}</td>
+      <td><span class="src-badge ${srcCls}">${srcLbl}</span></td>
+      <td style="white-space:nowrap">${editBtn} ${delBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+const inputStyle  = 'font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:2px';
+const selectStyle = 'font-family:var(--mono);font-size:10px;padding:2px 2px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:2px';
+
+function startEdit(id) {
+  editingId = id;
+  renderTable();
+  // Focus callsign field after render
+  setTimeout(() => { const el = document.getElementById('eq-call'); if (el) el.focus(); }, 0);
+}
+
+function cancelEdit() {
+  editingId = null;
+  renderTable();
+}
+
+async function saveEdit(id) {
+  const q = qsoList.find(q => q.id === id);
+  if (!q) return;
+
+  const timeVal = (document.getElementById('eq-time').value || '').trim().replace(':','');
+  const now = new Date();
+  const hh = timeVal.slice(0,2) || '00', mm = timeVal.slice(2,4) || '00';
+  const ts = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+                               parseInt(hh,10), parseInt(mm,10))).toISOString();
+
+  const updated = {
+    ...q,
+    callsign:   (document.getElementById('eq-call').value || '').trim().toUpperCase() || q.callsign,
+    band:        document.getElementById('eq-band').value || q.band,
+    mode:        document.getElementById('eq-mode').value || q.mode,
+    sent_rst:    document.getElementById('eq-rst-s').value.trim() || '59',
+    rcvd_rst:    document.getElementById('eq-rst-r').value.trim() || '59',
+    sent_exch:   document.getElementById('eq-sent').value.trim(),
+    rcvd_exch:   q.rcvd_exch || '',
+    state:       (document.getElementById('eq-state')?.value || '').trim().toUpperCase(),
+    country:     document.getElementById('eq-country').value.trim(),
+    name:        document.getElementById('eq-name').value.trim(),
+    power:       document.getElementById('eq-power').value.trim(),
+    grid:        (document.getElementById('eq-grid')?.value || '').trim().toUpperCase(),
+    freq_mhz:    parseFloat(document.getElementById('eq-freq').value) || q.freq_mhz,
+    station_id:  document.getElementById('eq-stn').value.trim() || q.station_id,
+    notes:       document.getElementById('eq-notes').value.trim(),
+    timestamp:   ts,
+  };
+
+  try {
+    const r = await fetch(`/api/hamlog/qsos/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(updated),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || r.statusText);
+    const data = await r.json();
+    const idx = qsoList.findIndex(q => q.id === id);
+    if (idx !== -1) qsoList[idx] = data.qso || updated;
+    editingId = null;
+    renderTable(); updateStats(); updateHeader(); renderSections();
+    toast('QSO updated', 'ok');
+  } catch (e) {
+    toast(`Save failed: ${e.message}`, 'err');
+  }
+}
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  try {
+    const d = new Date(ts);
+    const h = String(d.getUTCHours()).padStart(2,'0');
+    const m = String(d.getUTCMinutes()).padStart(2,'0');
+    return `${h}${m}Z`;
+  } catch { return ts; }
+}
+
+function srcClass(src) {
+  const s = (src || '').toLowerCase();
+  if (s === 'winlink') return 'src-winlink';
+  if (s === 'aprs')    return 'src-aprs';
+  if (s === 'ft8')     return 'src-ft8';
+  if (s === 'ft4')     return 'src-ft4';
+  if (s === 'js8')     return 'src-js8';
+  if (s === 'ws' || s === 'websocket') return 'src-ws';
+  return 'src-manual';
+}
+
+// ── Update stats ───────────────────────────────────────────────────────────
+function updateStats() {
+  const visible = qsoList.filter(q => !deletedIds.has(q.id));
+  const contest = document.getElementById('contest-sel').value;
+
+  // Band counts
+  const bandMap = {};
+  visible.forEach(q => { bandMap[q.band] = (bandMap[q.band] || 0) + 1; });
+  const bandStr = Object.entries(bandMap)
+    .sort((a,b) => b[1]-a[1])
+    .map(([b,n]) => `<span>${esc(b)}</span>: ${n}`)
+    .join('&ensp;') || '—';
+  document.getElementById('stat-bands').innerHTML = bandStr;
+
+  // Mode counts
+  const modeMap = {};
+  visible.forEach(q => { modeMap[q.mode] = (modeMap[q.mode] || 0) + 1; });
+  const modeStr = Object.entries(modeMap)
+    .sort((a,b) => b[1]-a[1])
+    .map(([m,n]) => `<span>${esc(m)}</span>: ${n}`)
+    .join('&ensp;') || '—';
+  document.getElementById('stat-modes').innerHTML = modeStr;
+
+  // Score (Field Day: PH=1, CW/DI=2 + bonuses)
+  if (contest === 'ARRL-FIELD-DAY') {
+    const qsoScore   = visible.reduce((acc, q) => acc + (q.mode === 'PH' ? 1 : 2), 0);
+    const bonusScore = calcBonusTotal();
+    const total      = qsoScore + bonusScore;
+    const bonusLabel = bonusScore > 0 ? ` + ${bonusScore} bonus` : '';
+    document.getElementById('stat-score').innerHTML = `<span>${total}</span>${bonusScore > 0 ? `<span style="font-size:9px;color:var(--muted)"> (${qsoScore} QSO${bonusLabel})</span>` : ''}`;
+    document.getElementById('score-display').textContent = `${total} pts`;
+  }
+}
+
+// ── Update header counts ───────────────────────────────────────────────────
+function updateHeader() {
+  const visible = qsoList.filter(q => !deletedIds.has(q.id)).length;
+  document.getElementById('qso-count').textContent = `${visible} QSO${visible !== 1 ? 's' : ''}`;
+}
+
+// ── Export ─────────────────────────────────────────────────────────────────
+function exportFile(format) {
+  const contest = document.getElementById('contest-sel').value;
+  let url = `/api/hamlog/export/${format}?contest=${encodeURIComponent(contest)}`;
+  if (format === 'cabrillo' && contest === 'ARRL-FIELD-DAY') {
+    const b = JSON.stringify(getFdBonusPayload());
+    url += `&bonuses=${encodeURIComponent(b)}`;
+  }
+  const a   = document.createElement('a');
+  a.href    = url;
+  a.download= '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ── Upload ─────────────────────────────────────────────────────────────────
+async function uploadTo(service) {
+  const contest = document.getElementById('contest-sel').value;
+  const btn = document.getElementById(`upload-${service}`);
+  if (!btn || btn.classList.contains('uploading')) return;
+
+  const origHTML = btn.innerHTML;
+  btn.classList.add('uploading');
+  btn.innerHTML = `<span class="upload-spinner"></span> Uploading…`;
+  btn.disabled  = true;
+
+  try {
+    const r = await fetch(`/api/hamlog/upload/${service}?contest=${encodeURIComponent(contest)}`, {
+      method: 'POST'
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data.status === 'error') {
+      throw new Error(data.detail || r.statusText);
+    }
+    btn.classList.remove('uploading');
+    btn.classList.add('upload-ok');
+    btn.innerHTML = `✓ ${service.charAt(0).toUpperCase() + service.slice(1)}`;
+    toast(`Upload to ${service} succeeded`, 'ok');
+    setTimeout(() => {
+      btn.classList.remove('upload-ok');
+      btn.innerHTML = origHTML;
+      btn.disabled  = false;
+    }, 3500);
+  } catch (e) {
+    btn.classList.remove('uploading');
+    btn.classList.add('upload-err');
+    btn.innerHTML = `✗ ${service}`;
+    toast(`Upload to ${service} failed: ${e.message}`, 'err');
+    setTimeout(() => {
+      btn.classList.remove('upload-err');
+      btn.innerHTML = origHTML;
+      btn.disabled  = false;
+    }, 3500);
+  }
+}
+
+// ── Import from ECH adapters ───────────────────────────────────────────────
+async function importFromECH() {
+  const btn = document.getElementById('btn-import');
+  btn.disabled = true;
+  btn.textContent = '↓ Importing…';
+  try {
+    const r = await fetch('/api/hamlog/import', { method: 'POST' });
+    if (!r.ok) throw new Error(r.statusText);
+    const data = await r.json();
+    const added = data.added || 0;
+    toast(`Imported ${added} QSO${added !== 1 ? 's' : ''} from ECH adapters`, added > 0 ? 'ok' : 'warn');
+    if (added > 0) loadQSOs();
+  } catch (e) {
+    toast(`Import failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↓ Import from ECH adapters';
+  }
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url   = `${proto}//${location.host}/ws`;
+  try {
+    wsConn = new WebSocket(url);
+  } catch (e) {
+    return;
+  }
+  const dot = document.getElementById('ws-dot');
+
+  wsConn.onopen  = () => { dot.classList.add('live'); };
+  wsConn.onclose = () => {
+    dot.classList.remove('live');
+    setTimeout(connectWS, 5000);
+  };
+  wsConn.onerror = () => { dot.classList.remove('live'); };
+
+  wsConn.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.type === 'qso' && msg.data) {
+      const qso = msg.data;
+      const contest = document.getElementById('contest-sel').value;
+      if (qso.contest && qso.contest !== contest) return;
+      if (qsoList.some(q => q.id === qso.id)) return;
+      qsoList.unshift(qso);
+      renderTable(); updateStats(); updateHeader(); renderSections();
+      toast(`New QSO from Stn ${qso.station_id || '?'}: ${qso.callsign} ${qso.band} ${qso.mode}`, '');
+    } else if (msg.type === 'qso_deleted' && msg.data) {
+      const id = msg.data.id;
+      qsoList = qsoList.filter(q => q.id !== id);
+      deletedIds.delete(id);
+      if (editingId === id) editingId = null;
+      renderTable(); updateStats(); updateHeader(); renderSections();
+    } else if (msg.type === 'qso_updated' && msg.data && msg.data.qso) {
+      const updated = msg.data.qso;
+      const idx = qsoList.findIndex(q => q.id === updated.id);
+      if (idx !== -1) {
+        qsoList[idx] = updated;
+        if (editingId === updated.id) editingId = null;
+        renderTable(); updateStats(); updateHeader(); renderSections();
+      }
+    } else if (msg.type === 'hamlog_station' && msg.data) {
+      const s = msg.data;
+      const idx = allStations.findIndex(st => st.station_id === s.station_id);
+      if (idx !== -1) allStations[idx] = s; else allStations.push(s);
+      renderStationBar(allStations);
+      renderBandMap(allStations);
+    } else if (msg.type === 'cat_update' && msg.data) {
+      applyCatUpdate(msg.data);
+    } else if (msg.type === 'cat_status' && msg.data) {
+      applyCatStatus(msg.data);
+    } else if (msg.type === 'hamlog_chat' && msg.data) {
+      const el = document.getElementById('chat-msgs');
+      if (el && msg.data.id > chatLastId) {
+        el.appendChild(makeChatEl(msg.data));
+        chatLastId = msg.data.id;
+        el.scrollTop = el.scrollHeight;
+        if (document.getElementById('rp-chat').style.display === 'none') {
+          const n = (parseInt(document.getElementById('chat-badge').dataset.n || '0') + 1);
+          const badge = document.getElementById('chat-badge');
+          badge.dataset.n = n;
+          badge.textContent = n > 9 ? '9+' : n;
+          badge.classList.add('visible');
+        }
+      }
+    }
+  };
+}
+
+// ── Restore station from localStorage ─────────────────────────────────────
+function restoreStation() {
+  const saved = localStorage.getItem('ech_hamlog_station');
+  if (saved) {
+    const sel = document.getElementById('station-sel');
+    if ([...sel.options].some(o => o.value === saved)) {
+      sel.value = saved;
+    }
+  }
+  // Sync f-station to match
+  const stationVal = document.getElementById('station-sel').value;
+  document.getElementById('f-station').value = stationVal;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+// ── Theme ─────────────────────────────────────────────────────────────────
+function setTheme(name) {
+  document.documentElement.setAttribute('data-theme', name);
+  localStorage.setItem('ech_hamlog_theme', name);
+  const sel = document.getElementById('theme-sel');
+  if (sel) sel.value = name;
+}
+
+function restoreTheme() {
+  const saved = localStorage.getItem('ech_hamlog_theme') || 'dark';
+  setTheme(saved);
+}
+
+// ── Station management ────────────────────────────────────────────────────
+let myStationId = sessionStorage.getItem('ech_hamlog_sid') || (() => {
+  const id = generateUUID();
+  sessionStorage.setItem('ech_hamlog_sid', id);
+  return id;
+})();
+let myOperator = localStorage.getItem('ech_hamlog_operator') || '';
+let allStations = [];
+
+async function updateMyStation() {
+  const op   = document.getElementById('my-op').value.trim().toUpperCase();
+  const band = document.getElementById('my-band-sel').value;
+  const mode = document.getElementById('my-mode-sel').value;
+  myOperator = op;
+  localStorage.setItem('ech_hamlog_operator', op);
+  const r = await fetch('/api/hamlog/stations', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({station_id: myStationId, operator: op, band, mode})
+  }).catch(() => null);
+  if (r && r.ok) {
+    const d = await r.json();
+    const updated = [...allStations.filter(s => s.station_id !== myStationId), d.station];
+    renderStationBar(updated);
+    renderBandMap(updated);
+  }
+}
+
+async function loadStations() {
+  const r = await fetch('/api/hamlog/stations').catch(() => null);
+  if (!r || !r.ok) return;
+  const d = await r.json();
+  allStations = d.stations || [];
+  renderStationBar(allStations);
+  renderBandMap(allStations);
+}
+
+function renderStationBar(stations) {
+  allStations = stations;
+  const el = document.getElementById('station-bar-tiles');
+  el.innerHTML = stations.map(s => {
+    const isMine = s.station_id === myStationId;
+    return `<div class="stn-tile${isMine?' mine':''}">
+      <span class="stn-op">${esc(s.operator || '?')}</span>
+      <span class="stn-band">${esc(s.band)}</span>
+      <span class="stn-mode">${esc(s.mode)}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Band map ──────────────────────────────────────────────────────────────
+const BANDS_DISPLAY = ['160M','80M','40M','20M','15M','10M','6M','2M'];
+
+function renderBandMap(stations) {
+  const el = document.getElementById('rp-bandmap');
+  if (!el) return;
+  if (!stations.length) {
+    el.innerHTML = `<div style="padding:12px;font-size:11px;color:var(--dim);line-height:1.6">
+      No active stations yet.<br>
+      Enter your callsign + band/mode in the station bar above and click <b style="color:var(--text)">Set</b> to register.
+    </div>`;
+    return;
+  }
+  const byBand = {};
+  stations.forEach(s => {
+    if (!byBand[s.band]) byBand[s.band] = [];
+    byBand[s.band].push(s);
+  });
+  el.innerHTML = `<table class="bandmap-table">
+    <thead><tr><th>Band</th><th>Operators</th></tr></thead>
+    <tbody>
+    ${BANDS_DISPLAY.filter(b => byBand[b]).map(b =>
+      `<tr><td class="bm-band">${esc(b)}</td><td>${byBand[b].map(s =>
+        `<span class="bm-op${s.station_id===myStationId?' mine':''}">${esc(s.operator||'?')} <span class="bm-mode">${esc(s.mode)}</span></span>`
+      ).join(' ')}</td></tr>`
+    ).join('')}
+    </tbody></table>`;
+}
+
+// ── ARRL Sections ─────────────────────────────────────────────────────────
+const ARRL_DISTRICTS = [
+  {label:'W1', sections:['CT','EMA','ME','NH','RI','VT','WMA']},
+  {label:'W2', sections:['ENY','NLI','NNJ','NNY','SNJ','WNY']},
+  {label:'W3', sections:['DE','EPA','MDC','WPA']},
+  {label:'W4', sections:['AL','GA','KY','NFL','NC','SC','SFL','TN','VA','WCF']},
+  {label:'W5', sections:['AR','LA','MS','NM','NTX','OK','STX','WTX']},
+  {label:'W6', sections:['EB','LAX','ORG','SB','SCV','SDG','SF','SJV','SV','PAC']},
+  {label:'W7', sections:['AK','AZ','EWA','ID','MT','NV','OR','UT','WWA','WY']},
+  {label:'W8', sections:['MI','OH','WV']},
+  {label:'W9', sections:['IL','IN','WI']},
+  {label:'W0', sections:['CO','IA','KS','MN','MO','NE','ND','SD']},
+  {label:'VE', sections:['AB','BC','MB','NL','NS','ONE','ONN','ONS','QC','SK','TER','MAR']},
+  {label:'DX',  sections:['DX']},
+];
+
+function extractSection(rcvd_exch) {
+  if (!rcvd_exch) return null;
+  const parts = rcvd_exch.trim().toUpperCase().split(/\s+/);
+  return parts.length >= 2 ? parts[parts.length - 1] : null;
+}
+
+function getSectionCounts() {
+  const counts = {};
+  const contest = document.getElementById('contest-sel').value;
+  qsoList.filter(q => !deletedIds.has(q.id) && q.contest === contest).forEach(q => {
+    const sec = extractSection(q.rcvd_exch);
+    if (sec) counts[sec] = (counts[sec] || 0) + 1;
+  });
+  return counts;
+}
+
+function renderSections() {
+  const contest = document.getElementById('contest-sel').value;
+  const listEl = document.getElementById('sec-list');
+  const mapEl  = document.getElementById('sec-map');
+  const countEl = document.getElementById('sec-worked-count');
+  const searchEl = document.getElementById('sec-search');
+
+  if (contest !== 'ARRL-FIELD-DAY') {
+    if (countEl) countEl.textContent = '';
+    if (searchEl) searchEl.style.display = 'none';
+    if (mapEl) mapEl.innerHTML = '';
+    if (listEl) listEl.innerHTML = `<div style="padding:12px 4px;font-size:11px;color:var(--dim);line-height:1.6">
+      Sections tracking is used for ARRL Field Day.<br>Switch the contest selector to <b style="color:var(--text)">ARRL-FIELD-DAY</b> to see worked sections.
+    </div>`;
+    return;
+  }
+  if (searchEl) searchEl.style.display = '';
+
+  const counts = getSectionCounts();
+  const filterEl = document.getElementById('sec-search');
+  const filter = filterEl ? filterEl.value.toUpperCase() : '';
+
+  const allSecs = ARRL_DISTRICTS.flatMap(d => d.sections);
+  const filtered = filter ? allSecs.filter(s => s.includes(filter)) : allSecs;
+  const worked = filtered.filter(s => counts[s]);
+  const unworked = filtered.filter(s => !counts[s]);
+
+  if (countEl) countEl.textContent = `${Object.keys(counts).filter(s => allSecs.includes(s)).length}/${allSecs.length} sections`;
+
+  if (listEl) {
+    listEl.innerHTML = [...worked.sort(), ...unworked.sort()].map(s => {
+      const c = counts[s] || 0;
+      return `<div class="sec-row${c>0?' worked':''}">
+        <span class="sec-abbr">${esc(s)}</span>
+        <span class="sec-count">${c > 0 ? c : ''}</span>
+      </div>`;
+    }).join('');
+  }
+
+  renderSectionMap(counts);
+}
+
+function renderSectionMap(counts) {
+  const el = document.getElementById('sec-map');
+  if (!el) return;
+  el.innerHTML = ARRL_DISTRICTS.map(d => {
+    const tiles = d.sections.map(s => {
+      const c = counts[s] || 0;
+      const cls = c === 0 ? '' : c === 1 ? ' w1' : ' w2';
+      return `<span class="sec-tile${cls}" title="${s}: ${c} QSO${c!==1?'s':''}">${s}</span>`;
+    }).join('');
+    return `<div class="sec-district"><span class="sec-dlabel">${esc(d.label)}</span><div class="sec-tiles">${tiles}</div></div>`;
+  }).join('');
+}
+
+// ── Dupe detail ───────────────────────────────────────────────────────────
+function wildcardToRegex(pattern) {
+  // Convert ham-radio wildcard (* = any chars, ? = one char) to anchored regex
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+                         .replace(/\*/g, '.*')
+                         .replace(/\?/g, '.');
+  return new RegExp('^' + escaped + '$');
+}
+
+function hasWildcard(s) { return s.includes('*') || s.includes('?'); }
+
+function showDupeDetail(callsign) {
+  const el = document.getElementById('dupe-detail');
+  if (!el) return;
+  if (!callsign || callsign.length < 2) { el.style.display = 'none'; return; }
+  const contest = document.getElementById('contest-sel').value;
+  const band = document.getElementById('f-band').value;
+  const mode = document.getElementById('f-mode').value;
+
+  // ── Wildcard search ──────────────────────────────────────────────────────
+  if (hasWildcard(callsign)) {
+    let re;
+    try { re = wildcardToRegex(callsign); } catch(_) { el.style.display = 'none'; return; }
+    const matches = qsoList.filter(q => !deletedIds.has(q.id) && re.test(q.callsign));
+    const unique  = [...new Map(matches.map(q => [q.callsign, q])).values()].slice(0, 20);
+    if (unique.length) {
+      el.style.display = '';
+      el.innerHTML =
+        `<div style="font-size:10px;color:var(--muted);margin-bottom:3px">Wildcard matches (${unique.length}):</div>
+         <div style="display:flex;flex-wrap:wrap;gap:4px">` +
+        unique.map(q => {
+          const loc = [q.state, q.country].filter(Boolean).join('/');
+          const tip = [q.band, q.mode, loc, q.name].filter(Boolean).join(' · ');
+          return `<span onclick="document.getElementById('f-callsign').value='${esc(q.callsign)}';onCallsignInput();"
+            title="${esc(tip)}"
+            style="font-family:var(--mono);font-size:11px;padding:1px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg3);cursor:pointer;color:var(--text)">${esc(q.callsign)}</span>`;
+        }).join('') +
+        `</div>`;
+    } else {
+      el.style.display = '';
+      el.innerHTML = `<div style="font-size:10px;color:var(--muted)">No log entries match <b style="color:var(--text)">${esc(callsign)}</b></div>`;
+    }
+    return;
+  }
+
+  // ── Exact match — show bands/modes worked ───────────────────────────────
+  const exactDupes = qsoList.filter(q => !deletedIds.has(q.id) && q.callsign === callsign && q.contest === contest);
+  if (exactDupes.length) {
+    const db = qsoDistBearing(callsign);
+    const distStr = db ? ` · ${db.km}km ${db.card} (${db.deg}°)` : '';
+    el.style.display = '';
+    el.innerHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:3px">Previously worked:${distStr ? `<span style="color:var(--blue)">${distStr}</span>` : ''}</div>` +
+      exactDupes.map(q => {
+        const isDup = q.band === band && q.mode === mode;
+        const t = q.timestamp ? new Date(q.timestamp).toUTCString().slice(17,22) : '?';
+        const cname = q.name ? ` · ${esc(q.name)}` : '';
+        const ccntry = q.country ? ` · ${esc(q.country)}` : '';
+        return `<div class="dup-row${isDup?' same-band':''}">
+          <span>${esc(q.band)}</span><span>${esc(q.mode)}</span>
+          <span style="color:var(--muted)">${t}Z${cname}${ccntry}</span>
+          ${isDup?'<span style="color:var(--yellow)">&#9888; DUPE</span>':'<span style="color:var(--green)">&#10003; new band</span>'}
+        </div>`;
+      }).join('');
+    return;
+  }
+
+  // ── Prefix match — type-ahead hints ─────────────────────────────────────
+  if (callsign.length >= 2) {
+    const partial = qsoList.filter(q => !deletedIds.has(q.id) &&
+      q.callsign.startsWith(callsign) && q.callsign !== callsign && q.contest === contest);
+    const unique = [...new Set(partial.map(q => q.callsign))].slice(0, 8);
+    if (unique.length) {
+      el.style.display = '';
+      el.innerHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:3px">In log (partial match):</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">` +
+        unique.map(cs => `<span onclick="document.getElementById('f-callsign').value='${esc(cs)}';onCallsignInput();"
+          style="font-family:var(--mono);font-size:11px;padding:1px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg3);cursor:pointer;color:var(--text)">${esc(cs)}</span>`
+        ).join('') +
+        `</div>`;
+      return;
+    }
+  }
+  el.style.display = 'none';
+}
+
+// ── Callsign prefix → approximate lat/lon ─────────────────────────────────
+const CALL_COORDS = (function() {
+  const c = {};
+  const usDist = [
+    ['1',42.5,-71.5],['2',40.7,-74.0],['3',39.9,-75.2],['4',33.7,-84.4],
+    ['5',32.3,-97.3],['6',36.8,-119.4],['7',47.0,-121.0],['8',41.5,-82.0],
+    ['9',41.9,-87.6],['0',39.7,-104.9],
+  ];
+  for (const [d,lat,lon] of usDist)
+    for (const p of ['W','K','N']) c[p+d] = [lat,lon];
+  c['KL']=c['AL']=[64.2,-153.0]; c['KH']=c['AH']=[21.3,-157.8];
+  c['KP']=c['WP']=[18.2,-66.5];
+  c['VE1']=c['VA1']=[44.6,-63.6]; c['VE2']=c['VA2']=[46.8,-71.2];
+  c['VE3']=c['VA3']=[43.7,-79.4]; c['VE4']=c['VA4']=[49.9,-97.1];
+  c['VE5']=c['VA5']=[50.4,-104.6]; c['VE6']=c['VA6']=[53.5,-113.5];
+  c['VE7']=c['VA7']=[49.3,-123.1]; c['VE8']=[62.4,-114.4];
+  c['VE9']=[46.1,-64.8]; c['VO']=[47.6,-52.7]; c['VY']=[60.7,-135.1];
+  c['G']=c['M']=[51.5,-0.1]; c['GM']=c['MM']=[55.9,-3.2];
+  c['GW']=c['MW']=[51.5,-3.2]; c['GI']=c['MI']=[54.6,-5.9];
+  c['EI']=[53.3,-6.3]; c['GJ']=[49.2,-2.1]; c['GU']=[49.5,-2.5]; c['GD']=[54.2,-4.5];
+  c['DL']=c['DJ']=c['DK']=[51.2,10.5];
+  c['F']=c['TM']=[46.6,2.0]; c['I']=c['IZ']=c['IK']=[41.9,12.5];
+  c['EA']=c['EB']=[40.4,-3.7]; c['CT']=c['CS']=[38.7,-9.1];
+  c['PA']=c['PD']=c['PH']=[52.4,4.9]; c['ON']=[50.8,4.4]; c['OZ']=[55.7,12.6];
+  c['SM']=c['SA']=c['SK']=[59.3,18.1]; c['OH']=c['OF']=[60.2,24.9];
+  c['LA']=c['LB']=[59.9,10.8]; c['OE']=[48.2,16.4]; c['HB9']=[46.9,7.4];
+  c['SP']=c['SN']=[52.2,21.0]; c['OK']=c['OL']=[50.1,14.4];
+  c['OM']=[48.1,17.1]; c['HA']=c['HG']=[47.5,19.1]; c['YO']=[44.4,26.1];
+  c['LZ']=[42.7,23.3]; c['SV']=[37.9,23.7];
+  c['UR']=c['UT']=c['US']=[50.4,30.5]; c['UA']=c['UB']=[55.8,37.6];
+  c['ES']=[59.4,24.7]; c['YL']=[56.9,24.1]; c['LY']=[54.7,25.3];
+  c['9A']=[45.8,16.0]; c['S5']=[46.1,14.5]; c['TA']=c['TC']=[39.9,32.9];
+  c['JA']=c['JE']=c['JH']=[36.2,138.3]; c['BG']=c['BY']=c['BT']=[39.9,116.4];
+  c['VK']=[-25.0,133.0]; c['ZL']=[-41.3,174.8]; c['HL']=c['DS']=[37.5,127.0];
+  c['VU']=c['AT']=[28.6,77.2]; c['HS']=c['E2']=[13.8,100.5];
+  c['PY']=c['PP']=c['PT']=[-15.8,-47.9]; c['LU']=c['LO']=[-34.6,-58.4];
+  c['XE']=c['XF']=[23.6,-102.6]; c['TI']=[9.9,-84.1]; c['YV']=c['YW']=[10.5,-66.9];
+  c['CE']=c['CA']=[-33.5,-70.7]; c['OA']=c['OC']=[-12.0,-77.0];
+  c['CO']=c['CM']=[23.1,-82.4]; c['CX']=[-34.9,-56.2];
+  c['ZS']=c['ZR']=[-25.7,28.2]; c['4X']=c['4Z']=[31.8,35.2];
+  c['A4']=[23.6,58.6]; c['HZ']=[24.7,46.7]; c['9K']=[29.4,47.9];
+  return c;
+})();
+
+function callToLatLon(cs) {
+  if (!cs) return null;
+  cs = cs.toUpperCase().trim();
+  for (let len = 4; len >= 1; len--) {
+    const pre = cs.slice(0, len);
+    if (CALL_COORDS[pre]) return CALL_COORDS[pre];
+  }
+  return null;
+}
+
+function maidenheadToLatLon(grid) {
+  if (!grid || grid.length < 4) return null;
+  grid = grid.toUpperCase();
+  const lon = (grid.charCodeAt(0) - 65) * 20
+            + parseInt(grid[2]) * 2
+            + (grid.length >= 6 ? (grid.charCodeAt(4) - 65) / 12 + 1/24 : 1)
+            - 180;
+  const lat = (grid.charCodeAt(1) - 65) * 10
+            + parseInt(grid[3])
+            + (grid.length >= 6 ? (grid.charCodeAt(5) - 65) / 24 + 1/48 : 0.5)
+            - 90;
+  return [lat, lon];
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371, toR = d => d * Math.PI / 180;
+  const dLat = toR(lat2 - lat1), dLon = toR(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(toR(lat1)) * Math.cos(toR(lat2)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function bearingDeg(lat1, lon1, lat2, lon2) {
+  const toR = d => d * Math.PI / 180;
+  const dLon = toR(lon2 - lon1);
+  const y = Math.sin(dLon) * Math.cos(toR(lat2));
+  const x = Math.cos(toR(lat1)) * Math.sin(toR(lat2))
+          - Math.sin(toR(lat1)) * Math.cos(toR(lat2)) * Math.cos(dLon);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function degToCardinal(deg) {
+  return ['N','NE','E','SE','S','SW','W','NW'][Math.round(deg / 45) % 8];
+}
+
+let _myLatLon = null;
+function myLatLon() {
+  if (_myLatLon) return _myLatLon;
+  // Live grid input takes priority over stored config
+  const liveGrid = (document.getElementById('my-grid')?.value || '').trim().toUpperCase();
+  if (liveGrid.length >= 4) {
+    _myLatLon = maidenheadToLatLon(liveGrid);
+    if (_myLatLon) return _myLatLon;
+  }
+  if (config.grid) {
+    _myLatLon = maidenheadToLatLon(config.grid);
+    if (_myLatLon) return _myLatLon;
+  }
+  if (config.callsign) {
+    // Callsign prefix is very coarse — don't cache so grid entry overrides it immediately
+    return callToLatLon(config.callsign);
+  }
+  return null;
+}
+
+async function saveMyGrid(gridVal) {
+  const g = (gridVal || '').trim().toUpperCase();
+  _myLatLon = null;  // force recalculate
+  localStorage.setItem('ech_hamlog_grid', g);
+  if (g.length >= 4) {
+    try {
+      await fetch('/api/hamlog/config', {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({grid: g}),
+      });
+      config.grid = g;
+    } catch(_) {}
+  }
+}
+
+function qsoDistBearing(callsign) {
+  const me = myLatLon();
+  if (!me) return null;
+  const them = callToLatLon(callsign);
+  if (!them) return null;
+  const km  = haversineKm(me[0], me[1], them[0], them[1]);
+  const deg = bearingDeg(me[0], me[1], them[0], them[1]);
+  return {
+    km:   Math.round(km),
+    mi:   Math.round(km * 0.621371),
+    deg:  Math.round(deg),
+    card: degToCardinal(deg),
+  };
+}
+
+// ── Band conditions (hamqsl.com) ───────────────────────────────────────────
+let _propCache = null;
+let _propFetchedAt = 0;
+
+async function loadPropagation(force = false) {
+  const el = document.getElementById('prop-content');
+  if (!el) return;
+  const now = Date.now();
+  if (!force && _propCache && now - _propFetchedAt < 15 * 60 * 1000) {
+    renderPropagation(_propCache);
+    return;
+  }
+  el.innerHTML = '<div style="color:var(--muted);font-size:10px;text-align:center;padding:20px 0">Fetching solar data…</div>';
+  try {
+    const r = await fetch('/api/propagation');
+    if (!r.ok) throw new Error(r.statusText);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    _propCache = data;
+    _propFetchedAt = now;
+    renderPropagation(data);
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--red);font-size:10px;padding:10px">Failed: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderPropagation(d) {
+  const el = document.getElementById('prop-content');
+  if (!el) return;
+
+  const condColor = c => {
+    const cl = (c || '').toLowerCase();
+    if (cl === 'excellent') return 'var(--green)';
+    if (cl === 'good')      return '#7ee787';
+    if (cl === 'fair')      return 'var(--yellow)';
+    if (cl === 'poor')      return 'var(--red)';
+    return 'var(--muted)';
+  };
+
+  const kColor = k => {
+    const n = parseFloat(k);
+    if (n <= 1) return 'var(--green)';
+    if (n <= 2) return '#7ee787';
+    if (n <= 3) return 'var(--yellow)';
+    if (n <= 4) return '#e3804a';
+    return 'var(--red)';
+  };
+
+  const bandOrder = ['80m-40m','30m-20m','17m-15m','12m-10m'];
+  const bandLabel = {'80m-40m':'80/40m','30m-20m':'30/20m','17m-15m':'17/15m','12m-10m':'12/10m'};
+
+  let html = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:8px">
+      <div style="font-size:10px;color:var(--muted)">Solar Flux (SFI)
+        <span style="font-family:var(--mono);color:var(--text);float:right">${esc(d.sfi || '—')}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted)">Sunspots
+        <span style="font-family:var(--mono);color:var(--text);float:right">${esc(d.sunspots || '—')}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted)">A-Index
+        <span style="font-family:var(--mono);color:${kColor(d.aindex)};float:right">${esc(d.aindex || '—')}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted)">K-Index
+        <span style="font-family:var(--mono);color:${kColor(d.kindex)};float:right">${esc(d.kindex || '—')}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted)">X-Ray
+        <span style="font-family:var(--mono);color:var(--text);float:right">${esc(d.xray || '—')}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted)">Geomag
+        <span style="font-family:var(--mono);color:${kColor(d.kindex)};float:right">${esc(d.geomagfield || '—')}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted)">Noise
+        <span style="font-family:var(--mono);color:var(--text);float:right">${esc(d.signalnoise || '—')}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted)">Solar Wind
+        <span style="font-family:var(--mono);color:var(--text);float:right">${esc(d.solarwind ? d.solarwind+' km/s' : '—')}</span>
+      </div>
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:6px;margin-bottom:4px">
+      <table style="width:100%;font-size:10px;border-collapse:collapse">
+        <thead>
+          <tr>
+            <th style="text-align:left;color:var(--muted);font-weight:400;padding:2px 0">Band</th>
+            <th style="color:var(--muted);font-weight:400;padding:2px 4px">Day</th>
+            <th style="color:var(--muted);font-weight:400;padding:2px 4px">Night</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+  for (const key of bandOrder) {
+    const b = d.bands[key] || {};
+    const day   = b.day   || '—';
+    const night = b.night || '—';
+    html += `<tr>
+      <td style="padding:3px 0;color:var(--text);font-family:var(--mono)">${bandLabel[key] || key}</td>
+      <td style="text-align:center;padding:3px 4px">
+        <span style="color:${condColor(day)};font-family:var(--mono)">${esc(day)}</span>
+      </td>
+      <td style="text-align:center;padding:3px 4px">
+        <span style="color:${condColor(night)};font-family:var(--mono)">${esc(night)}</span>
+      </td>
+    </tr>`;
+  }
+
+  html += `</tbody></table></div>`;
+  if (d.created) {
+    html += `<div style="font-size:9px;color:var(--dim);margin-top:4px">Updated: ${esc(d.created)}</div>`;
+  }
+  html += `<div style="font-size:9px;color:var(--dim);margin-top:2px">Source: hamqsl.com · refreshes every 15 min</div>`;
+
+  el.innerHTML = html;
+}
+
+// ── Callsign database lookup ──────────────────────────────────────────────
+let _lookupCache = {};
+
+async function lookupCallsign(cs) {
+  cs = cs.toUpperCase().trim();
+  if (!cs || cs.length < 3) return null;
+  if (_lookupCache[cs]) return _lookupCache[cs];
+  try {
+    const r = await fetch(`/api/callsign/${encodeURIComponent(cs)}`);
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (d.error) return null;
+    _lookupCache[cs] = d;
+    return d;
+  } catch { return null; }
+}
+
+async function triggerCallsignLookup() {
+  const cs = (document.getElementById('f-callsign').value || '').trim().toUpperCase();
+  if (!cs) return;
+  const btn = document.getElementById('btn-lookup');
+  btn.textContent = '…';
+  btn.disabled = true;
+  try {
+    const d = await lookupCallsign(cs);
+    if (!d) { toast(`No data found for ${cs}`, 'err'); return; }
+    applyCallsignData(d);
+    toast(`Loaded: ${cs} — ${d.name || ''}${d.country ? ' · ' + d.country : ''} [${d.source}]`, 'ok');
+  } finally {
+    btn.textContent = '🔍';
+    btn.disabled = false;
+  }
+}
+
+function applyCallsignData(d) {
+  // Only fill if field is currently empty — never overwrite user input
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val && !el.value.trim()) el.value = val;
+  };
+  set('f-op-name', d.name);
+  set('f-country',  d.country);
+  set('f-state',    d.state);
+  set('f-county',   d.county);
+  set('f-grid',     d.grid);
+  // Show distance if we now have a grid for them
+  if (d.lat && d.lon) {
+    const me = myLatLon();
+    if (me) {
+      const lat = parseFloat(d.lat), lon = parseFloat(d.lon);
+      if (!isNaN(lat) && !isNaN(lon)) {
+        const km  = haversineKm(me[0], me[1], lat, lon);
+        const deg = bearingDeg(me[0], me[1], lat, lon);
+        const dupeEl = document.getElementById('dupe-detail');
+        if (dupeEl) {
+          dupeEl.style.display = '';
+          const existing = dupeEl.innerHTML;
+          const distLine = `<div style="font-size:10px;color:var(--blue)">&#8602; ${Math.round(km)} km ${degToCardinal(deg)} (${Math.round(deg)}°) · ${Math.round(km*0.621)} mi${d.grid ? ' · ' + d.grid : ''}</div>`;
+          if (!existing.includes('&#8602;')) dupeEl.innerHTML = distLine + existing;
+          else dupeEl.innerHTML = distLine + existing.replace(/<div[^>]*>&#8602;.*?<\/div>/, '');
+        }
+      }
+    }
+  }
+}
+
+// ── DX Spots ──────────────────────────────────────────────────────────────
+let _dxSpots = [];
+let _dxAutoTimer = null;
+
+// Map ECH band names to DX Summit band format
+const DX_BAND_MAP = {
+  '160M':'160m','80M':'80m','60M':'60m','40M':'40m','30M':'30m',
+  '20M':'20m','17M':'17m','15M':'15m','12M':'12m','10M':'10m',
+  '6M':'6m','2M':'2m','1.25M':'1.25m','70CM':'70cm',
+};
+
+function initDxTab() {
+  // Populate band filter dropdown once
+  const sel = document.getElementById('dx-band-filter');
+  if (sel.options.length <= 1) {
+    for (const b of BANDS_ALL) {
+      const o = document.createElement('option');
+      o.value = DX_BAND_MAP[b] || b.toLowerCase();
+      o.textContent = b;
+      sel.appendChild(o);
+    }
+  }
+  // Sync to current log band
+  const curBand = DX_BAND_MAP[document.getElementById('f-band').value] || '';
+  if (sel.value !== curBand) sel.value = curBand;
+  if (_dxSpots.length === 0) loadDxSpots();
+}
+
+async function loadDxSpots(force = false) {
+  const band = document.getElementById('dx-band-filter')?.value || '';
+  const list = document.getElementById('dx-list');
+  if (!list) return;
+  if (!force && _dxSpots.length > 0) { renderDxSpots(); return; }
+  list.innerHTML = '<div style="color:var(--muted);text-align:center;padding:14px;font-size:10px">Fetching DX spots…</div>';
+  try {
+    const url = '/api/dx/spots?limit=75' + (band ? `&band=${encodeURIComponent(band)}` : '');
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(r.statusText);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    _dxSpots = data.spots || [];
+    renderDxSpots();
+    // Auto-refresh every 3 min while tab is open
+    clearTimeout(_dxAutoTimer);
+    _dxAutoTimer = setTimeout(() => {
+      if (document.getElementById('rp-dx')?.style.display !== 'none') loadDxSpots(true);
+    }, 180000);
+  } catch (e) {
+    list.innerHTML = `<div style="color:var(--red);padding:10px;font-size:10px">Failed: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderDxSpots() {
+  const list = document.getElementById('dx-list');
+  if (!list) return;
+  const hideWorked = document.getElementById('dx-filter-worked')?.checked;
+  const workedCalls = new Set(qsoList.filter(q => !deletedIds.has(q.id)).map(q => q.callsign));
+  const band = document.getElementById('dx-band-filter')?.value || '';
+
+  let spots = _dxSpots;
+  if (band) spots = spots.filter(s => (s.band || '').toLowerCase() === band.toLowerCase()
+                                    || String(s.frequency||'').startsWith(bandToFreqPrefix(band)));
+  if (hideWorked) spots = spots.filter(s => !workedCalls.has((s.dx_call||'').toUpperCase()));
+
+  if (!spots.length) {
+    list.innerHTML = '<div style="color:var(--muted);text-align:center;padding:14px;font-size:10px">No spots for selected filter</div>';
+    return;
+  }
+
+  list.innerHTML = spots.map(s => {
+    const dx      = (s.dx_call || '').toUpperCase();
+    const de      = (s.de_call || s.callsign || '').toUpperCase();
+    const freq    = s.frequency ? parseFloat(s.frequency).toFixed(1)
+                  : s.freq     ? parseFloat(s.freq).toFixed(1) : '—';
+    const sBand   = s.band || freqToBand(parseFloat(s.frequency || s.freq));
+    const info    = esc(s.info || '');
+    const ts      = s.time ? s.time.slice(11,16) : '';
+    const worked  = workedCalls.has(dx);
+    const isLocal = s.source === 'local';
+    const wStyle  = worked ? 'color:var(--green)' : isLocal ? 'color:var(--yellow)' : 'color:var(--text)';
+    const rowBg   = isLocal ? 'background:rgba(210,153,34,0.08)' : '';
+    const badge   = isLocal ? '<span style="font-size:8px;color:var(--yellow);margin-left:3px">[our]</span>' : '';
+    return `<div class="dx-spot-row" onclick="fillFromSpot('${esc(dx)}','${esc(freq)}','${esc(sBand)}')"
+      style="display:grid;grid-template-columns:80px 58px 44px 1fr 36px;gap:0 4px;
+             padding:3px 6px;border-bottom:1px solid var(--border);cursor:pointer;align-items:center;${rowBg}"
+      onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='${isLocal?'rgba(210,153,34,0.08)':''}'">
+      <span style="font-family:var(--mono);font-size:10px;font-weight:500;${wStyle}">${esc(dx)}${worked?' ✓':''}${badge}</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--blue)">${freq}</span>
+      <span style="font-size:9px;color:var(--muted)">${esc(sBand.toUpperCase())}</span>
+      <span style="font-size:9px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${info}">${info || esc(de)}</span>
+      <span style="font-size:9px;color:var(--dim);text-align:right">${ts}</span>
+    </div>`;
+  }).join('');
+}
+
+async function submitSpot() {
+  const dx      = (document.getElementById('dx-s-dx')?.value || '').trim().toUpperCase();
+  const freq    = (document.getElementById('dx-s-freq')?.value || '').trim();
+  const comment = (document.getElementById('dx-s-comment')?.value || '').trim();
+  if (!dx || !freq) { alert('DX callsign and frequency (kHz) are required'); return; }
+  const spotter = config?.callsign || document.getElementById('my-op')?.value || '';
+  try {
+    const r = await fetch('/api/dx/spots', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({dx, freq, comment, spotter}),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    document.getElementById('dx-s-dx').value = '';
+    document.getElementById('dx-s-freq').value = '';
+    document.getElementById('dx-s-comment').value = '';
+    // Add immediately to local list and re-render
+    _dxSpots.unshift(d.spot);
+    renderDxSpots();
+  } catch(e) {
+    alert('Spot failed: ' + e.message);
+  }
+}
+
+function bandToFreqPrefix(band) {
+  const map = {'160m':'1.','80m':'3.','40m':'7.','30m':'10.','20m':'14.',
+               '17m':'18.','15m':'21.','12m':'24.','10m':'28.','6m':'50.'};
+  return map[band.toLowerCase()] || '';
+}
+
+function freqToBand(mhz) {
+  if (!mhz) return '';
+  if (mhz < 2) return '160m';
+  if (mhz < 5) return '80m';
+  if (mhz < 8) return '40m';
+  if (mhz < 12) return '30m';
+  if (mhz < 16) return '20m';
+  if (mhz < 19) return '17m';
+  if (mhz < 22) return '15m';
+  if (mhz < 26) return '12m';
+  if (mhz < 35) return '10m';
+  if (mhz < 55) return '6m';
+  return '';
+}
+
+function fillFromSpot(dx, freqKhz, band) {
+  // Fill callsign
+  const csEl = document.getElementById('f-callsign');
+  csEl.value = dx;
+  onCallsignInput();
+  // Set frequency (spots give kHz, form wants MHz)
+  const freqMhz = parseFloat(freqKhz) / 1000;
+  if (!isNaN(freqMhz)) {
+    const fEl = document.getElementById('f-freq');
+    if (fEl) fEl.value = freqMhz.toFixed(3);
+  }
+  // Set band
+  const ecBand = band.toUpperCase().replace('M','M');
+  const bandEl = document.getElementById('f-band');
+  if (bandEl) {
+    const opt = [...bandEl.options].find(o => o.value === ecBand);
+    if (opt) bandEl.value = ecBand;
+  }
+  csEl.focus();
+  // Auto-lookup the DX callsign
+  lookupCallsign(dx).then(d => { if (d) applyCallsignData(d); });
+}
+
+// ── Right panel tabs ──────────────────────────────────────────────────────
+function showRpTab(name) {
+  ['bandmap','sections','chat','prop','dx'].forEach(t => {
+    document.getElementById(`rp-${t}`).style.display = t === name ? '' : 'none';
+    document.getElementById(`tab-${t}`).classList.toggle('active', t === name);
+  });
+  if (name === 'sections') renderSections();
+  if (name === 'chat') {
+    const badge = document.getElementById('chat-badge');
+    badge.classList.remove('visible');
+    badge.dataset.n = '0';
+    badge.textContent = '';
+  }
+  if (name === 'prop') loadPropagation();
+  if (name === 'dx') initDxTab();
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────
+let chatLastId = 0;
+
+async function loadChat() {
+  const r = await fetch(`/api/hamlog/chat?since_id=${chatLastId}&limit=200`).catch(() => null);
+  if (!r || !r.ok) return;
+  const d = await r.json();
+  const msgs = d.messages || [];
+  if (msgs.length) {
+    const el = document.getElementById('chat-msgs');
+    msgs.forEach(m => el.appendChild(makeChatEl(m)));
+    chatLastId = msgs[msgs.length-1].id;
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+function makeChatEl(m) {
+  const div = document.createElement('div');
+  div.className = 'chat-msg' + (m.station_id === myStationId ? ' mine' : '');
+  const t = m.timestamp ? new Date(m.timestamp).toUTCString().slice(17,22) : '';
+  div.innerHTML = `<span class="chat-op">${esc(m.operator||'?')}</span> <span class="chat-time">${t}Z</span><div class="chat-text">${esc(m.text)}</div>`;
+  return div;
+}
+
+async function sendChat() {
+  const inp = document.getElementById('chat-input');
+  const text = inp.value.trim();
+  if (!text) return;
+  const op = document.getElementById('my-op').value.trim().toUpperCase() || myOperator || '?';
+  inp.value = '';
+  const r = await fetch('/api/hamlog/chat', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({station_id: myStationId, operator: op, text})
+  }).catch(() => null);
+  if (r && r.ok) {
+    const d = await r.json().catch(() => null);
+    const msg = d && d.message;
+    if (msg && msg.id > chatLastId) {
+      const el = document.getElementById('chat-msgs');
+      if (el) {
+        el.appendChild(makeChatEl(msg));
+        chatLastId = msg.id;
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+  } else {
+    inp.value = text;
+    toast('Chat send failed — check connection', 'err');
+  }
+}
+
+// ── W1AW Field Day 2026 Bulletin Schedule ─────────────────────────────────
+// Source: ARRL official 2026 W1AW FD bulletin schedule PDF (April 2026)
+// Field Day: June 27 1800Z – June 28 2100Z. Bulletins begin Friday night.
+// CW freqs:     1.8025 3.5815 7.0475 14.0475 18.0775 21.0675 28.0675 50.350 147.555
+// Digital freqs:3.5975 7.095  14.095 18.1025 21.095  28.095  50.350  147.555
+// Phone freqs:  1.855  3.990  7.290  14.290  18.160  21.390  28.590  50.350  147.555
+const W1AW_FD_CW    = [1.8025,3.5815,7.0475,14.0475,18.0775,21.0675,28.0675,50.350,147.555];
+const W1AW_FD_DIG   = [3.5975,7.095,14.095,18.1025,21.095,28.095,50.350,147.555];
+const W1AW_FD_PHONE = [1.855,3.990,7.290,14.290,18.160,21.390,28.590,50.350,147.555];
+const W1AW_FD_2026 = [
+  // Friday night (local) → early Saturday UTC — advance bulletins
+  {iso:'2026-06-27T00:00Z', day:'Fri', mode:'CW',      freqs:W1AW_FD_CW},
+  {iso:'2026-06-27T01:00Z', day:'Fri', mode:'Digital',  freqs:W1AW_FD_DIG},
+  {iso:'2026-06-27T01:45Z', day:'Fri', mode:'Phone',    freqs:W1AW_FD_PHONE},
+  {iso:'2026-06-27T03:00Z', day:'Fri', mode:'CW',      freqs:W1AW_FD_CW},
+  // Saturday daytime — before FD starts at 1800Z
+  {iso:'2026-06-27T14:00Z', day:'Sat', mode:'CW',      freqs:W1AW_FD_CW},
+  {iso:'2026-06-27T15:00Z', day:'Sat', mode:'Phone',    freqs:W1AW_FD_PHONE},
+  // Saturday night → early Sunday UTC — during FD
+  {iso:'2026-06-28T00:00Z', day:'Sat', mode:'CW',      freqs:W1AW_FD_CW},
+  {iso:'2026-06-28T01:00Z', day:'Sat', mode:'Digital',  freqs:W1AW_FD_DIG},
+  {iso:'2026-06-28T01:45Z', day:'Sat', mode:'Phone',    freqs:W1AW_FD_PHONE},
+  // Sunday — during FD
+  {iso:'2026-06-28T14:00Z', day:'Sun', mode:'CW',      freqs:W1AW_FD_CW},
+  {iso:'2026-06-28T15:00Z', day:'Sun', mode:'Phone',    freqs:W1AW_FD_PHONE},
+  {iso:'2026-06-28T16:00Z', day:'Sun', mode:'Digital',  freqs:W1AW_FD_DIG},
+];
+const W1AW_DURATION_MS  = 30 * 60 * 1000;
+const W1AW_WARN_MS      = 10 * 60 * 1000;
+let _w1awToastShown = {};
+
+function _w1awTimes() {
+  return W1AW_FD_2026.map(e => ({...e, ms: new Date(e.iso).getTime()}));
+}
+
+function _w1awNext(now) {
+  const entries = _w1awTimes();
+  for (const e of entries) {
+    if (now < e.ms + W1AW_DURATION_MS) return e;
+  }
+  return null;
+}
+
+function checkW1AWAlerts() {
+  const strip = document.getElementById('w1aw-strip');
+  if (!strip || strip.style.display === 'none') return;
+
+  const now = Date.now();
+  const e   = _w1awNext(now);
+
+  if (!e) {
+    strip.innerHTML = '&#x1F4FB; W1AW &#x2713; done';
+    strip.className = '';
+    return;
+  }
+
+  const msToStart = e.ms - now;
+  const inAir     = msToStart <= 0 && now < e.ms + W1AW_DURATION_MS;
+  const warning   = msToStart > 0 && msToStart <= W1AW_WARN_MS;
+
+  if (inAir) {
+    const endMin = Math.ceil((e.ms + W1AW_DURATION_MS - now) / 60000);
+    strip.innerHTML = `&#x1F4FB; W1AW ON AIR ${e.mode} ~${endMin}m left`;
+    strip.className = 'w1aw-live';
+    if (!_w1awToastShown[e.iso]?.start) {
+      _w1awToastShown[e.iso] = {...(_w1awToastShown[e.iso]||{}), start:true};
+      toast(`W1AW ON AIR: ${e.mode} — ${e.freqs.filter(f=>f<50).join(' / ')} MHz`, 'ok');
+    }
+  } else if (warning) {
+    const minLeft = Math.ceil(msToStart / 60000);
+    strip.innerHTML = `&#x1F4FB; W1AW ${e.mode} in ${minLeft}m`;
+    strip.className = 'w1aw-warn';
+    if (!_w1awToastShown[e.iso]?.warn) {
+      _w1awToastShown[e.iso] = {...(_w1awToastShown[e.iso]||{}), warn:true};
+      toast(`W1AW bulletin in ~${minLeft} min: ${e.mode} ${e.freqs.filter(f=>f<50).join(' / ')} MHz`, 'warn');
+    }
+  } else {
+    const hrs  = Math.floor(msToStart / 3600000);
+    const mins = Math.floor((msToStart % 3600000) / 60000);
+    const countdown = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+    strip.innerHTML = `&#x1F4FB; W1AW ${e.mode} in ${countdown}`;
+    strip.className = '';
+  }
+}
+
+function startW1AWChecker() {
+  checkW1AWAlerts();
+  setInterval(checkW1AWAlerts, 30000);
+}
+
+function openW1AWSchedule() {
+  const now   = Date.now();
+  const entries = _w1awTimes();
+  let rows = '';
+  for (const e of entries) {
+    const past    = now > e.ms + W1AW_DURATION_MS;
+    const inAir   = now >= e.ms && now < e.ms + W1AW_DURATION_MS;
+    const warning = now < e.ms && (e.ms - now) <= W1AW_WARN_MS;
+    const dt      = new Date(e.ms);
+    const timeStr = dt.toUTCString().replace(/.*,\s*/,'').replace(/:\d\d GMT$/,' UTC');
+    const stateClass = past ? 'w1aw-past' : inAir ? 'w1aw-live' : warning ? 'w1aw-warn' : '';
+    const stateLabel = past ? '✓' : inAir ? '● ON AIR' : '';
+    const mStr = e.mode === 'CW' ? 'CW' : e.mode === 'Digital' ? 'DI' : 'SSB';
+    const freqLinks  = e.freqs.map(f => {
+      const khz = (f * 1000).toFixed(0);
+      return `<a href="#" onclick="event.preventDefault();event.stopPropagation();document.getElementById('f-freq').value='${khz}';document.getElementById('f-mode').value='${mStr}';toast('Freq set to ${f} MHz ${mStr}','ok')" title="Click to set frequency">${f}</a>`;
+    }).join(' / ');
+    const dayLabel = e.day || '';
+    rows += `<tr class="${stateClass}"><td>${dayLabel}</td><td>${timeStr}</td><td>${e.mode}</td><td>${freqLinks}</td><td>${stateLabel}</td></tr>`;
+  }
+  const html = `<div id="w1aw-modal-overlay" onclick="if(event.target===this)closeW1AWModal()"
+      style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;max-width:640px;width:96%;max-height:80vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <b style="font-size:13px">&#x1F4FB; W1AW Field Day 2026 Bulletin Schedule</b>
+        <button onclick="closeW1AWModal()" style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer">&times;</button>
+      </div>
+      <p style="font-size:10px;color:var(--muted);margin:0 0 8px">Copying a W1AW bulletin and submitting it earns <b>100 bonus points</b>.
+         Bulletins begin Friday night before FD. Field Day: <b>Jun 27 1800Z – Jun 28 2100Z</b>.
+         Digital = Baudot/PSK31/MFSK16. Click a frequency to pre-fill the log form.</p>
+      <style>
+        #w1aw-modal-overlay table { width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono) }
+        #w1aw-modal-overlay th,#w1aw-modal-overlay td { padding:4px 8px;border-bottom:1px solid var(--border);text-align:left }
+        #w1aw-modal-overlay th { color:var(--muted) }
+        #w1aw-modal-overlay tr.w1aw-live td { color:var(--green);font-weight:700 }
+        #w1aw-modal-overlay tr.w1aw-warn td { color:var(--yellow) }
+        #w1aw-modal-overlay tr.w1aw-past td { color:var(--muted);text-decoration:line-through }
+        #w1aw-modal-overlay a { color:var(--accent);text-decoration:none }
+        #w1aw-modal-overlay a:hover { text-decoration:underline }
+      </style>
+      <table>
+        <thead><tr><th>Day</th><th>Time (UTC)</th><th>Mode</th><th>Frequencies (MHz)</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p style="font-size:10px;color:var(--muted);margin:8px 0 0">After copying a bulletin, check <b>W1AW Field Day bulletin copied</b> in the bonus panel.</p>
+    </div>
+  </div>`;
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  document.body.appendChild(div.firstElementChild);
+}
+
+function closeW1AWModal() {
+  const el = document.getElementById('w1aw-modal-overlay');
+  if (el) el.remove();
+}
+
+(function init() {
+  restoreTheme();
+  restoreStation();
+  populateBandMode();
+  onContestChange();    // sets row visibility, score visibility, loads QSOs
+
+  loadConfig();
+  loadRole();
+  connectWS();
+
+  // UTC clock tick
+  tickClock();
+  setInterval(tickClock, 1000);
+  setInterval(loadStations, 30000);
+
+  // Default band: 20M
+  document.getElementById('f-band').value = '20M';
+
+  // Restore operator callsign
+  const savedOp = localStorage.getItem('ech_hamlog_operator') || '';
+  const myOpEl = document.getElementById('my-op');
+  if (myOpEl) myOpEl.value = savedOp;
+
+  // Load stations and chat
+  loadStations();
+  loadChat();
+  setInterval(loadChat, 30000);  // poll chat in case WS misses a message
+
+  // W1AW Field Day bulletin alerts
+  startW1AWChecker();
+
+  // Focus callsign on load
+  document.getElementById('f-callsign').focus();
+
+  // CAT — poll status once on load; WS events keep it live after that
+  initCat();
+  initWebSerial();
+
+  // Low-disk-space check
+  (async function checkStorage() {
+    try {
+      const r = await fetch('/api/system/storage');
+      if (!r.ok) return;
+      const d = await r.json();
+      const banner = document.getElementById('storage-banner');
+      const detail = document.getElementById('storage-banner-detail');
+      if (!banner || !detail) return;
+      if (d.warning || d.critical) {
+        banner.style.background     = d.critical ? '#2d0f0f'    : '#2a1f00';
+        banner.style.borderTopColor = d.critical ? 'var(--red)' : 'var(--yellow)';
+        banner.style.color          = d.critical ? 'var(--red)' : 'var(--yellow)';
+        detail.textContent = `${d.free_gb} GB free (${d.free_pct}% of ${d.total_gb} GB)`;
+        banner.style.display = 'flex';
+      }
+    } catch(_) {}
+  })();
+})();
+
+// ── CAT radio control ─────────────────────────────────────────────────────
+let _catConnected = false;
+let _catLock = true;   // auto-fill from radio when true
+
+function toggleCatLock() {
+  _catLock = document.getElementById('cat-lock').checked;
+}
+
+function applyCatStatus(d) {
+  const pill  = document.getElementById('cat-pill');
+  const dot   = document.getElementById('cat-dot');
+  const label = document.getElementById('cat-label');
+  if (!pill) return;
+  _catConnected = d.connected;
+  pill.style.display = 'flex';
+  dot.style.background = d.connected ? 'var(--green)' : 'var(--red)';
+  if (d.connected) {
+    const info = d.rig_info ? ` (${d.rig_info.slice(0,20)})` : '';
+    label.textContent = 'CAT' + info;
+    pill.title = `CAT connected — ${d.rig_info || 'rigctld'} at ${d.host}:${d.port}`;
+  } else {
+    label.textContent = d.error ? `CAT: ${d.error.slice(0,30)}` : 'CAT offline';
+    pill.title = `CAT disconnected — ${d.error || 'rigctld not reachable'}`;
+  }
+  // Show/hide → Radio button and CAT lock depending on connection
+  const tuneBtn = document.getElementById('cat-tune-btn');
+  const lockGrp = document.getElementById('cat-lock-group');
+  if (tuneBtn) tuneBtn.style.display = d.connected ? '' : 'none';
+  if (lockGrp) lockGrp.style.display = d.connected ? '' : 'none';
+}
+
+function applyCatUpdate(d) {
+  applyCatStatus(d);   // updates pill/dot
+  if (!_catLock || !d.connected) return;
+  // Auto-fill form fields if they are empty or if the field is focused elsewhere
+  const freqEl = document.getElementById('f-freq');
+  const bandEl = document.getElementById('f-band');
+  const modeEl = document.getElementById('f-mode');
+  // Only fill freq if user is not actively typing in it
+  if (d.freq_mhz && document.activeElement !== freqEl)
+    freqEl.value = d.freq_mhz.toFixed(4);
+  if (d.band && bandEl)
+    bandEl.value = d.band;
+  if (d.mode && modeEl) {
+    // Map ECH mode to the option values available in the select
+    const modeMap = {USB:'USB', LSB:'LSB', CW:'CW', AM:'AM', FM:'FM',
+                     DI:'DI', FT8:'FT8', FT4:'FT4', JS8:'JS8', PH:'PH'};
+    const opt = modeMap[d.mode] || 'PH';
+    if ([...modeEl.options].some(o => o.value === opt)) modeEl.value = opt;
+  }
+}
+
+async function catTune() {
+  const freqMhz = parseFloat(document.getElementById('f-freq').value);
+  const mode    = document.getElementById('f-mode').value;
+  if (!freqMhz) { toast('Enter a frequency first', 'err'); return; }
+  const hz = Math.round(freqMhz * 1_000_000);
+
+  // Web Serial path — runs entirely in the browser via USB serial
+  if (_wsSerial) {
+    try {
+      if (_wsRigType === 'civ') {
+        await civSetFreq(hz);
+        await civSetMode(mode);
+      } else {
+        await kenwoodSetFreq(hz);
+        await kenwoodSetMode(mode);
+      }
+      toast(`Radio → ${freqMhz.toFixed(4)} MHz ${mode}`, 'ok');
+    } catch(e) {
+      toast(`Serial error: ${e.message}`, 'err');
+    }
+    return;
+  }
+
+  // Server-side rigctld path
+  try {
+    const r = await fetch('/api/cat/set', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hz, mode}),
+    });
+    const d = await r.json();
+    if (d.status === 'ok' || d.status === 'partial')
+      toast(`Radio → ${freqMhz.toFixed(4)} MHz ${mode}`, 'ok');
+    else
+      toast(`CAT set failed: ${d.detail || JSON.stringify(d)}`, 'err');
+  } catch(e) {
+    toast(`CAT error: ${e.message}`, 'err');
+  }
+}
+
+async function initCat() {
+  try {
+    const r = await fetch('/api/cat/status');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.enabled === false) return;   // CAT not configured — hide pill
+    applyCatStatus(d);
+    if (d.connected && d.freq_mhz) applyCatUpdate(d);
+  } catch (_) {}   // silently ignore if endpoint missing
+}
+
+// ── Footer dropdown helpers ───────────────────────────────────────────────────
+function ftrToggle(id) {
+  const el = document.getElementById(id);
+  const wasOpen = el.classList.contains('open');
+  ftrClose();
+  if (!wasOpen) el.classList.add('open');
+}
+function ftrClose() {
+  document.querySelectorAll('.ftr-dd.open').forEach(el => el.classList.remove('open'));
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.ftr-dd')) ftrClose();
+});
+
+// ── Log import ────────────────────────────────────────────────────────────────
+function triggerImport(format) {
+  const accept = {
+    adif:      '.adi,.adif,.txt',
+    cabrillo:  '.log,.cbr,.txt',
+    csv:       '.csv,.txt',
+  }[format] || '.txt';
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = accept;
+  input.onchange = async e => {
+    const file = e.target.files[0];
+    if (file) await uploadLogFile(file, format);
+  };
+  input.click();
+}
+
+async function uploadLogFile(file, format) {
+  const contest = document.getElementById('my-contest')?.value
+                  || document.querySelector('[data-contest]')?.dataset.contest
+                  || 'GENERAL';
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+  formData.append('format', format);
+  formData.append('contest', contest);
+  try {
+    toast(`Importing ${format.toUpperCase()} — ${file.name}…`, 'ok');
+    const r = await fetch('/api/hamlog/import/file', { method: 'POST', body: formData });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.status === 'ok') {
+      const msg = `Imported ${d.added} QSO${d.added !== 1 ? 's' : ''}`
+                + (d.skipped ? ` (${d.skipped} duplicate${d.skipped !== 1 ? 's' : ''} skipped)` : '');
+      toast(msg, d.added > 0 ? 'ok' : 'warn');
+      if (d.added > 0) loadLog();
+    } else {
+      toast(`Import failed: ${d.detail || r.statusText}`, 'err');
+    }
+  } catch(e) {
+    toast(`Import error: ${e.message}`, 'err');
+  }
+}
+
+// ── ARRL Field Day Bonus Points ────────────────────────────────────────────
+const FD_BONUSES = [
+  // id, label, points-each, type('check'|'count'), max-multiplier, unit-label
+  {id:'w1aw_msg',      pts:100, type:'check', label:'W1AW Field Day bulletin copied'},
+  {id:'natural_power', pts:100, type:'check', label:'Natural/renewable power source'},
+  {id:'satellite',     pts:100, type:'check', label:'Satellite QSO made'},
+  {id:'public_loc',    pts:100, type:'check', label:'Operating from public location'},
+  {id:'info_table',    pts:100, type:'check', label:'Public information table staffed'},
+  {id:'sm_sec_msg',    pts:100, type:'check', label:'Message to ARRL SM or SEC'},
+  {id:'media',         pts:100, type:'check', label:'Media publicity (newspaper/TV/radio)'},
+  {id:'educational',   pts:100, type:'check', label:'Educational activity (licensing class etc.)'},
+  {id:'safety_officer',pts:100, type:'check', label:'Safety officer formally appointed'},
+  {id:'elected_visit', pts:100, type:'check', label:'Elected official or served agency visit'},
+  {id:'web_submit',    pts:50,  type:'check', label:'Log submitted via ARRL website (50 pts)'},
+  {id:'low_power',     pts:100, type:'count', max:99,  unit:'transmitter(s)',   label:'100W or less — per transmitter'},
+  {id:'emerg_power',   pts:100, type:'count', max:99,  unit:'position(s)',      label:'Emergency power only — per operating position'},
+  {id:'gota',          pts:100, type:'count', max:5,   unit:'× 10 QSOs',        label:'GOTA station QSOs (100 pts per 10, max 500)'},
+  {id:'youth',         pts:20,  type:'count', max:5,   unit:'licensed youth',   label:'Licensed youth under 18 (20 pts each, max 5)'},
+];
+
+const LS_KEY = 'ech_fd_bonuses';
+
+function _loadBonuses() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch { return {}; }
+}
+function _saveBonuses(vals) {
+  localStorage.setItem(LS_KEY, JSON.stringify(vals));
+}
+
+function calcBonusTotal() {
+  const vals = _loadBonuses();
+  return FD_BONUSES.reduce((sum, b) => {
+    if (b.type === 'check') return sum + (vals[b.id] ? b.pts : 0);
+    const n = Math.min(parseInt(vals[b.id] || 0, 10) || 0, b.max);
+    return sum + n * b.pts;
+  }, 0);
+}
+
+function getFdBonusPayload() {
+  const vals = _loadBonuses();
+  const out = {};
+  FD_BONUSES.forEach(b => {
+    if (b.type === 'check') { if (vals[b.id]) out[b.id] = {label: b.label, pts: b.pts}; }
+    else {
+      const n = Math.min(parseInt(vals[b.id] || 0, 10) || 0, b.max);
+      if (n > 0) out[b.id] = {label: b.label, pts: n * b.pts, count: n, pts_each: b.pts};
+    }
+  });
+  return out;
+}
+
+function openBonusPanel() {
+  const contest = document.getElementById('contest-sel').value;
+  if (contest !== 'ARRL-FIELD-DAY') return;
+  const vals = _loadBonuses();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'bonus-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:5000;display:flex;align-items:center;justify-content:center';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = 'background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:18px 20px;width:460px;max-width:96vw;max-height:88vh;overflow-y:auto;font-family:var(--mono);font-size:12px';
+
+  let rows = '';
+  FD_BONUSES.forEach(b => {
+    const v = vals[b.id];
+    if (b.type === 'check') {
+      rows += `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer">
+        <input type="checkbox" data-id="${b.id}" ${v ? 'checked' : ''} style="width:14px;height:14px;accent-color:var(--yellow)">
+        <span style="flex:1;color:var(--text)">${b.label}</span>
+        <span style="color:var(--yellow);min-width:52px;text-align:right">+${b.pts} pts</span>
+      </label>`;
+    } else {
+      const cur = Math.min(parseInt(v || 0, 10) || 0, b.max);
+      rows += `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+        <input type="number" data-id="${b.id}" value="${cur}" min="0" max="${b.max}" style="width:48px;padding:2px 4px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:3px;font-family:var(--mono);font-size:11px">
+        <span style="flex:1;color:var(--text)">${b.label}</span>
+        <span style="color:var(--yellow);min-width:52px;text-align:right" data-pts-id="${b.id}">+${cur * b.pts} pts</span>
+      </div>`;
+    }
+  });
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <b style="color:var(--yellow);font-size:13px">ARRL Field Day Bonus Activities</b>
+      <button onclick="document.getElementById('bonus-overlay').remove()" style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;line-height:1">✕</button>
+    </div>
+    <div style="color:var(--muted);font-size:10px;margin-bottom:10px">Check activities completed. Values are saved locally and included in Cabrillo export.</div>
+    ${rows}
+    <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between">
+      <span style="color:var(--muted)">Bonus total:</span>
+      <span id="bonus-total-display" style="color:var(--yellow);font-size:13px;font-weight:600">+${calcBonusTotal()} pts</span>
+    </div>`;
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  // Live update
+  panel.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const cur = _loadBonuses();
+      const b = FD_BONUSES.find(x => x.id === inp.dataset.id);
+      if (!b) return;
+      if (b.type === 'check') {
+        cur[b.id] = inp.checked;
+      } else {
+        const n = Math.min(parseInt(inp.value || 0, 10) || 0, b.max);
+        cur[b.id] = n;
+        const ptsEl = panel.querySelector(`[data-pts-id="${b.id}"]`);
+        if (ptsEl) ptsEl.textContent = `+${n * b.pts} pts`;
+      }
+      _saveBonuses(cur);
+      document.getElementById('bonus-total-display').textContent = `+${calcBonusTotal()} pts`;
+      updateStats();
+    });
+  });
+}
+
+// ── Web Serial CAT ────────────────────────────────────────────────────────────
+// Browser-side serial port access (Icom CI-V and Kenwood text CAT).
+// Requires SecureContext (HTTPS). Works in Chrome/Edge; not supported in Firefox.
+
+let _wsSerial = null;    // SerialPort object
+let _wsWriter = null;    // WritableStreamDefaultWriter
+let _wsReader = null;    // ReadableStreamDefaultReader
+let _wsRigType = null;   // 'civ' or 'kenwood'
+let _wsCivAddr = 0x70;   // CI-V rig address (Xiegu G90 default)
+let _wsPollTimer = null;
+let _serialBuf = [];     // shared byte accumulator for background reader loop
+let _rigModalOpen = false;
+
+function toggleRigModal() {
+  if (_wsSerial) { webSerialDisconnect(); return; }
+  const modal = document.getElementById('rig-modal');
+  _rigModalOpen = !_rigModalOpen;
+  modal.style.display = _rigModalOpen ? 'flex' : 'none';
+}
+
+function closeRigModal() {
+  _rigModalOpen = false;
+  document.getElementById('rig-modal').style.display = 'none';
+}
+
+function updateRigModal() {
+  const type = document.getElementById('ws-rig-type').value;
+  const civRow = document.getElementById('ws-civ-row');
+  if (civRow) civRow.style.display = type === 'civ' ? '' : 'none';
+}
+
+// Background reader loop — continuously fills _serialBuf from the serial port.
+async function _serialReaderLoop() {
+  try {
+    while (_wsSerial) {
+      const { value, done } = await _wsReader.read();
+      if (done) break;
+      if (value) for (const b of value) _serialBuf.push(b);
+    }
+  } catch (_) {}
+}
+
+async function _serialReadUntil(stopByte, timeoutMs = 600) {
+  const frame = [];
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (_serialBuf.length > 0) {
+      const b = _serialBuf.shift();
+      frame.push(b);
+      if (b === stopByte) return frame;
+    } else {
+      await new Promise(r => setTimeout(r, 5));
+    }
+  }
+  return null;
+}
+
+async function _serialReadText(terminator, timeoutMs = 600) {
+  const chars = [];
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (_serialBuf.length > 0) {
+      const b = _serialBuf.shift();
+      const c = String.fromCharCode(b);
+      chars.push(c);
+      if (c === terminator) return chars.join('');
+    } else {
+      await new Promise(r => setTimeout(r, 5));
+    }
+  }
+  return null;
+}
+
+// ── CI-V (Icom / Xiegu G90) ───────────────────────────────────────────────────
+
+// Frequency → 5-byte BCD array (LSB first, hamlib encoding)
+function civFreqToBytes(hz) {
+  const bytes = [];
+  let f = Math.round(hz);
+  for (let i = 0; i < 5; i++) {
+    bytes.push((f % 10) | ((Math.floor(f / 10) % 10) << 4));
+    f = Math.floor(f / 100);
+  }
+  return bytes;
+}
+
+function civBytesToFreq(bytes) {
+  let hz = 0, mult = 1;
+  for (let i = 0; i < 5; i++) {
+    hz += (bytes[i] & 0x0F) * mult; mult *= 10;
+    hz += ((bytes[i] >> 4) & 0x0F) * mult; mult *= 10;
+  }
+  return hz;
+}
+
+const CIV_MODE = { 0x00:'LSB',0x01:'USB',0x02:'AM',0x03:'CW',0x04:'DI',0x05:'FM',0x06:'CW',0x07:'DI',0x11:'USB' };
+const ECH_TO_CIV_MODE = { LSB:0x00,USB:0x01,AM:0x02,CW:0x03,FM:0x05,DI:0x04,FT8:0x04,FT4:0x04,JS8:0x04,PH:0x01 };
+
+async function civSend(cmd, data = []) {
+  const pkt = new Uint8Array([0xFE, 0xFE, _wsCivAddr, 0xE0, cmd, ...data, 0xFD]);
+  await _wsWriter.write(pkt);
+}
+
+async function civReadResp(expectedCmd) {
+  // CI-V radios echo the command first, then send the response.
+  // Keep reading frames until we get one addressed to the controller (0xE0).
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const frame = await _serialReadUntil(0xFD, 500);
+    if (!frame || frame.length < 6) return null;
+    if (frame[0] === 0xFE && frame[1] === 0xFE && frame[2] === 0xE0 &&
+        (expectedCmd === undefined || frame[4] === expectedCmd)) {
+      return frame;
+    }
+  }
+  return null;
+}
+
+async function civReadFreqMode() {
+  await civSend(0x03);           // read freq
+  const fr = await civReadResp(0x03);
+  let freq_hz = 0;
+  if (fr && fr.length >= 11) freq_hz = civBytesToFreq(fr.slice(5, 10));
+
+  await civSend(0x04);           // read mode
+  const mr = await civReadResp(0x04);
+  let mode = 'USB';
+  if (mr && mr.length >= 8) mode = CIV_MODE[mr[5]] || 'USB';
+
+  if (freq_hz > 0) {
+    applyCatUpdate({
+      connected: true, freq_hz, freq_mhz: freq_hz / 1e6,
+      band: wsBand(freq_hz), mode, rig_info: 'Web Serial / CI-V',
+    });
+  }
+}
+
+async function civSetFreq(hz) {
+  await civSend(0x00, civFreqToBytes(hz));
+  await civReadResp();  // consume echo/ack
+}
+
+async function civSetMode(mode) {
+  const modeCode = ECH_TO_CIV_MODE[mode] ?? 0x01;
+  const filterCode = (modeCode === 0x02) ? 0x05 : 0x02;  // AM wider filter
+  await civSend(0x01, [modeCode, filterCode]);
+  await civReadResp();
+}
+
+// ── Kenwood text CAT (TS-2000, FT-991A, Elecraft K3/K4/KX3) ──────────────────
+
+const KW_MODE = { '1':'LSB','2':'USB','3':'CW','4':'FM','5':'AM','6':'DI','9':'DI' };
+const ECH_TO_KW_MODE = { LSB:'1',USB:'2',CW:'3',FM:'4',AM:'5',DI:'6',FT8:'6',FT4:'6',JS8:'6',PH:'2' };
+
+async function kenwoodSend(cmd) {
+  await _wsWriter.write(new TextEncoder().encode(cmd));
+}
+
+async function kenwoodReadFreqMode() {
+  await kenwoodSend('FA;');
+  const faResp = await _serialReadText(';', 600);
+  let freq_hz = 0;
+  if (faResp && faResp.startsWith('FA')) freq_hz = parseInt(faResp.slice(2, 13)) || 0;
+
+  await kenwoodSend('MD;');
+  const mdResp = await _serialReadText(';', 400);
+  let mode = 'USB';
+  if (mdResp && mdResp.startsWith('MD')) mode = KW_MODE[mdResp[2]] || 'USB';
+
+  if (freq_hz > 0) {
+    applyCatUpdate({
+      connected: true, freq_hz, freq_mhz: freq_hz / 1e6,
+      band: wsBand(freq_hz), mode, rig_info: 'Web Serial / Kenwood',
+    });
+  }
+}
+
+async function kenwoodSetFreq(hz) {
+  const freqStr = Math.round(hz).toString().padStart(11, '0');
+  await kenwoodSend(`FA${freqStr};`);
+}
+
+async function kenwoodSetMode(mode) {
+  const digit = ECH_TO_KW_MODE[mode] || '2';
+  await kenwoodSend(`MD${digit};`);
+}
+
+// ── Band helper ───────────────────────────────────────────────────────────────
+
+function wsBand(hz) {
+  const mhz = hz / 1e6;
+  if (mhz >= 1.8   && mhz < 2.0)   return '160M';
+  if (mhz >= 3.5   && mhz < 4.0)   return '80M';
+  if (mhz >= 5.0   && mhz < 5.5)   return '60M';
+  if (mhz >= 7.0   && mhz < 7.3)   return '40M';
+  if (mhz >= 10.1  && mhz < 10.15) return '30M';
+  if (mhz >= 14.0  && mhz < 14.35) return '20M';
+  if (mhz >= 18.068&& mhz < 18.168)return '17M';
+  if (mhz >= 21.0  && mhz < 21.45) return '15M';
+  if (mhz >= 24.89 && mhz < 24.99) return '12M';
+  if (mhz >= 28.0  && mhz < 29.7)  return '10M';
+  if (mhz >= 50.0  && mhz < 54.0)  return '6M';
+  if (mhz >= 144.0 && mhz < 148.0) return '2M';
+  if (mhz >= 222.0 && mhz < 225.0) return '1.25M';
+  if (mhz >= 420.0 && mhz < 450.0) return '70CM';
+  return '';
+}
+
+// ── Connect / disconnect ──────────────────────────────────────────────────────
+
+async function webSerialConnect() {
+  if (!('serial' in navigator)) {
+    toast('Web Serial not supported in this browser — use Chrome or Edge over HTTPS', 'err');
+    closeRigModal(); return;
+  }
+  const typeEl    = document.getElementById('ws-rig-type');
+  const baudEl    = document.getElementById('ws-baud');
+  const civAddrEl = document.getElementById('ws-civ-addr');
+
+  const rigType = typeEl ? typeEl.value : 'civ';
+  const baud    = parseInt(baudEl ? baudEl.value : '19200');
+  const civAddr = parseInt(civAddrEl ? civAddrEl.value : '0x70', 16);
+
+  try {
+    const port = await navigator.serial.requestPort();
+    await port.open({ baudRate: baud, dataBits: 8, stopBits: 1, parity: 'none' });
+    _wsSerial  = port;
+    _wsWriter  = port.writable.getWriter();
+    _wsReader  = port.readable.getReader();
+    _wsRigType = rigType;
+    _wsCivAddr = civAddr;
+    _serialBuf = [];
+
+    _serialReaderLoop();  // start background reader (fire-and-forget)
+
+    const btn = document.getElementById('webserial-btn');
+    if (btn) {
+      btn.textContent = '🔌 Disconnect';
+      btn.style.borderColor = 'var(--green)';
+      btn.style.color       = 'var(--green)';
+    }
+    const pill = document.getElementById('cat-pill');
+    const tuneBtn = document.getElementById('cat-tune-btn');
+    const lockGrp = document.getElementById('cat-lock-group');
+    if (pill) { pill.style.display = 'flex'; }
+    if (document.getElementById('cat-dot')) document.getElementById('cat-dot').style.background = 'var(--green)';
+    if (document.getElementById('cat-label')) document.getElementById('cat-label').textContent = 'CAT (USB)';
+    if (tuneBtn) tuneBtn.style.display = '';
+    if (lockGrp) lockGrp.style.display = '';
+
+    _wsPollTimer = setInterval(wsSerialPoll, 2000);
+    await wsSerialPoll();
+    closeRigModal();
+    toast('Radio connected via Web Serial', 'ok');
+  } catch(e) {
+    toast(`Serial connect: ${e.message}`, 'err');
+  }
+}
+
+async function webSerialDisconnect() {
+  clearInterval(_wsPollTimer); _wsPollTimer = null;
+  try {
+    if (_wsReader) { try { _wsReader.cancel(); } catch(_){} _wsReader.releaseLock(); _wsReader = null; }
+    if (_wsWriter) { _wsWriter.releaseLock(); _wsWriter = null; }
+    if (_wsSerial) { await _wsSerial.close(); _wsSerial = null; }
+  } catch(_) {}
+  _serialBuf = [];
+  const pill    = document.getElementById('cat-pill');
+  const btn     = document.getElementById('webserial-btn');
+  const tuneBtn = document.getElementById('cat-tune-btn');
+  const lockGrp = document.getElementById('cat-lock-group');
+  if (pill)    pill.style.display = 'none';
+  if (btn)     { btn.textContent = '🔌 Connect Radio'; btn.style.borderColor = 'var(--border)'; btn.style.color = 'var(--muted)'; }
+  if (tuneBtn) tuneBtn.style.display = 'none';
+  if (lockGrp) lockGrp.style.display = 'none';
+  toast('Radio disconnected', 'ok');
+}
+
+async function wsSerialPoll() {
+  if (!_wsSerial) return;
+  try {
+    if (_wsRigType === 'civ') await civReadFreqMode();
+    else                      await kenwoodReadFreqMode();
+  } catch(e) {
+    console.warn('Serial poll error:', e);
+    applyCatStatus({connected: false, error: e.message});
+  }
+}
+
+function initWebSerial() {
+  const btn = document.getElementById('webserial-btn');
+  if (!btn) return;
+  const supported = ('serial' in navigator);
+  // Show button only when Web Serial is supported (HTTPS or localhost)
+  if (supported) btn.style.display = '';
+}
+</script>
+<!-- Rig selector modal -->
+<div id="rig-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)closeRigModal()">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:22px 24px;min-width:320px;max-width:420px;font-family:var(--sans);font-size:14px">
+    <div style="font-weight:600;font-size:15px;margin-bottom:14px;color:var(--text)">Connect Radio via USB Serial</div>
+
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:3px">Rig / protocol</label>
+    <select id="ws-rig-type" onchange="updateRigModal()" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-family:var(--mono);font-size:12px;margin-bottom:10px">
+      <option value="civ">Icom CI-V — Xiegu G90, IC-7300, IC-705, IC-9700</option>
+      <option value="kenwood">Kenwood / Elecraft — TS-590/2000, K3/K4/KX3, FT-991A</option>
+    </select>
+
+    <div id="ws-civ-row">
+      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:3px">CI-V address</label>
+      <select id="ws-civ-addr" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-family:var(--mono);font-size:12px;margin-bottom:10px">
+        <option value="0x70">0x70 — Xiegu G90</option>
+        <option value="0x94">0x94 — IC-7300</option>
+        <option value="0x91">0x91 — IC-705</option>
+        <option value="0x98">0x98 — IC-9700</option>
+        <option value="0xA2">0xA2 — IC-7100</option>
+        <option value="0x80">0x80 — IC-7200 / IC-7000</option>
+        <option value="0x88">0x88 — IC-7600</option>
+        <option value="0x74">0x74 — IC-718</option>
+      </select>
+    </div>
+
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:3px">Baud rate</label>
+    <select id="ws-baud" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-family:var(--mono);font-size:12px;margin-bottom:14px">
+      <option value="19200">19200 — Xiegu G90 default</option>
+      <option value="9600">9600 — Icom default</option>
+      <option value="38400">38400</option>
+      <option value="57600">57600 — Elecraft K3/K4</option>
+      <option value="115200">115200</option>
+    </select>
+
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button onclick="webSerialConnect()" style="flex:1;padding:6px 0;background:var(--blue-bg);border:1px solid var(--blue);color:var(--blue);border-radius:4px;cursor:pointer;font-family:var(--sans);font-weight:600">Connect</button>
+      <button onclick="closeRigModal()" style="flex:1;padding:6px 0;background:var(--bg3);border:1px solid var(--border);color:var(--muted);border-radius:4px;cursor:pointer;font-family:var(--sans)">Cancel</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted)">
+      Requires HTTPS — <a href="/tls-setup" target="_blank" style="color:var(--blue)">setup guide</a>.
+      Chrome/Edge only; Firefox does not support Web Serial.
+    </div>
+  </div>
+</div>
+</body>
+</html>

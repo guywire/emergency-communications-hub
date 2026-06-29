@@ -34,7 +34,7 @@ SMS_MESSAGES = [
     "Need 10 more cots and blankets at warming center ASAP",
     "Generator at warming center low on fuel — can you authorize refill?",
     "Welfare check complete sector 3 — 2 residents transported to warming center",
-    "Harbor reports 3 unknown vessels near lobster beds — coast guard alerted",
+    "Harbor reports lobsters blocking Pier 3 access — coast guard alerted",
     "Power out in 4 neighborhoods, utility ETA 6 hrs",
     "Salt truck broke down on Cedar Ave — other truck covering",
     "Can someone check on Mrs. Landry at 14 Pine? No answer on phone",
@@ -43,6 +43,8 @@ SMS_MESSAGES = [
 
 
 class MockSMSAdapter(Adapter):
+    is_mock = True
+
     """
     Mock SMS adapter.
     Config keys:
@@ -91,7 +93,7 @@ class MockSMSAdapter(Adapter):
         log.debug("%s: RX loop started", self.name)
         try:
             while self._connected:
-                if getattr(self, '_paused', False):
+                if self.is_paused():
                     await asyncio.sleep(1.0)
                     continue
                 await asyncio.sleep(self._interval + random.uniform(-5, 5))
@@ -106,7 +108,7 @@ class MockSMSAdapter(Adapter):
                     body = "URGENT: suspected hypothermia case at warming center, ambulance requested"
                     priority = Priority.ELEVATED
                 elif self._tick % 19 == 0:
-                    body = "EMERGENCY: CANADIAN LOBSTER POACHERS confirmed at docks — all units respond"
+                    body = "EMERGENCY: LOBSTER REVOLT confirmed at docks — claws up, all units respond"
                     priority = Priority.EMERGENCY
 
                 msg = NormalizedMessage(

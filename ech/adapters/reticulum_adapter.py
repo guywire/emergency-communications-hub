@@ -363,7 +363,7 @@ class MockReticulumAdapter(Adapter):
         peers = list(self._peers.items())
         try:
             while self._connected:
-                if getattr(self, '_paused', False):
+                if self.is_paused():
                     await asyncio.sleep(1.0)
                     continue
                 await asyncio.sleep(self._interval + random.uniform(-8, 8))

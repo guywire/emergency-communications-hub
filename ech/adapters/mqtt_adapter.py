@@ -16,17 +16,23 @@ Can also PUBLISH messages to topics — used for bridge rules and
 broadcasting alerts to mesh nodes via their MQTT gateways.
 
 Config keys:
-  name          str     adapter name (default: mqtt)
-  host          str     broker hostname (REQUIRED)
-  port          int     broker port (default: 1883)
-  username      str     broker username (optional)
-  password      str     broker password (optional)
-  tls           bool    enable TLS (default: False)
-  client_id     str     MQTT client ID (default: ech-{name})
-  topics        list    topics to subscribe to (default: ['#'])
-  publish_topic str     topic to publish outbound messages on (optional)
-  keepalive     int     keepalive seconds (default: 60)
-  qos           int     subscription QoS 0/1/2 (default: 0)
+  name              str     adapter name (default: mqtt)
+  host              str     broker hostname (REQUIRED)
+  port              int     broker port (default: 1883)
+  username          str     broker username (optional)
+  password          str     broker password (optional)
+  pubkey_auth       str     derive credentials from a MeshCore adapter's hardware key.
+                            Value is the MeshCore adapter name (e.g. "meshcore").
+                            Scheme: username=first8hexchars, password=full64hexkey.
+                            Overrides username/password if the pubkey is available.
+  pubkey_auth_mode  str     "letsmesh" (default) — username=8-char shortkey, password=full64hex
+                            "full"               — username=full64hex, password=full64hex
+  tls               bool    enable TLS (default: False)
+  client_id         str     MQTT client ID (default: ech-{name})
+  topics            list    topics to subscribe to (default: ['#'])
+  publish_topic     str     topic to publish outbound messages on (optional)
+  keepalive         int     keepalive seconds (default: 60)
+  qos               int     subscription QoS 0/1/2 (default: 0)
 
 Example configs:
   # Meshtastic public MQTT
@@ -45,19 +51,28 @@ Example configs:
     password: changeme
     topics: ["meshcore/#"]
 
-  # LetsMesh US broker (your EastMesh setup)
+  # LetsMesh broker — hardware-key JWT auth (meshcoretomqtt scheme)
+  # username = "v1_{PUBKEY_HEX}"  password = Ed25519-signed JWT
+  # Obtain private_key by running "get prv.key" on the MeshCore serial console.
   - type: mqtt
     name: letsmesh-us
-    host: mqtt.letsmesh.com
-    port: 1883
-    topics: ["meshcore/+/packets"]
+    host: mqtt-us-v1.letsmesh.net
+    port: 443
+    tls: true
+    transport: websockets
+    pubkey_auth: meshcore        # MeshCore adapter name to pull pubkey from
+    private_key: ""              # 64-byte hex private key from "get prv.key" (keep out of git)
+    token_ttl: 3600              # JWT lifetime in seconds (default 1 hour)
+    topics: ["meshcore/+/+/packets"]
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+import time
 from datetime import datetime, timezone
 
 from ech.adapters.base import Adapter
@@ -85,20 +100,90 @@ class MQTTAdapter(Adapter):
 
     def __init__(self, config: dict):
         super().__init__(config)
-        self.name          = config.get("name", "mqtt")
-        self._host         = config["host"]
-        self._port         = int(config.get("port", 1883))
-        self._username     = config.get("username")
-        self._password     = config.get("password")
-        self._tls          = bool(config.get("tls", False))
-        self._client_id    = config.get("client_id", f"ech-{self.name}")
-        self._topics       = config.get("topics", ["#"])
-        self._pub_topic    = config.get("publish_topic")
-        self._keepalive    = int(config.get("keepalive", 60))
-        self._qos          = int(config.get("qos", 0))
-        self._msg_count    = 0
+        self.name              = config.get("name", "mqtt")
+        self._host             = config["host"]
+        self._port             = int(config.get("port", 1883))
+        self._username         = config.get("username")
+        self._password         = config.get("password")
+        self._pubkey_auth      = config.get("pubkey_auth")        # MeshCore adapter name
+        self._pubkey_auth_mode = config.get("pubkey_auth_mode", "letsmesh")
+        self._private_key      = config.get("private_key", "").strip()  # 64-byte hex Ed25519 key
+        self._token_ttl        = int(config.get("token_ttl", 3600))
+        self._tls              = bool(config.get("tls", False))
+        self._client_id        = config.get("client_id", f"ech-{self.name}")
+        self._topics           = config.get("topics", ["#"])
+        self._pub_topic        = config.get("publish_topic")
+        self._keepalive        = int(config.get("keepalive", 60))
+        self._qos              = int(config.get("qos", 0))
+        self._transport        = config.get("transport", "tcp")  # "tcp" or "websockets"
+        self._msg_count        = 0
         self._run_task: asyncio.Task | None = None
         self._client = None
+
+    @staticmethod
+    def _b64url(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    def _make_jwt(self, pubkey_hex: str, privkey_hex: str) -> str:
+        """Generate a meshcoretomqtt-compatible Ed25519 JWT.
+
+        Format: base64url(header).base64url(payload).HEX_SIGNATURE
+        Signed with the MeshCore device's Ed25519 private key.
+        Private key is 64 bytes: seed(32) || pubkey(32).
+        """
+        header = self._b64url(json.dumps({"alg": "Ed25519", "typ": "JWT"},
+                                         separators=(",", ":")).encode())
+        iat = int(time.time())
+        payload_obj: dict = {
+            "publicKey": pubkey_hex.upper(),
+            "iat": iat,
+            "exp": iat + self._token_ttl,
+            "aud": self._host,
+        }
+        payload = self._b64url(json.dumps(payload_obj, separators=(",", ":")).encode())
+        signing_input = f"{header}.{payload}".encode()
+
+        from Crypto.PublicKey import ECC
+        from Crypto.Signature import eddsa
+        # MeshCore private key: 64 bytes = 32-byte seed || 32-byte pubkey
+        seed = bytes.fromhex(privkey_hex)[:32]
+        key = ECC.construct(curve="Ed25519", seed=seed)
+        sig = eddsa.new(key, "rfc8032").sign(signing_input).hex().upper()
+        return f"{header}.{payload}.{sig}"
+
+    def _resolve_credentials(self) -> tuple[str | None, str | None]:
+        """Return (username, password).
+
+        When pubkey_auth is set and a private_key is configured, generates a
+        meshcoretomqtt-compatible Ed25519 JWT (same scheme as LetsMesh):
+          username = "v1_{PUBKEY_HEX}"
+          password = JWT signed with device private key
+        Falls back to username/password from config if not configured.
+        """
+        if self._pubkey_auth:
+            try:
+                from ech.adapters.meshcore import _pubkey_registry, _privkey_registry
+                pubkey  = _pubkey_registry.get(self._pubkey_auth)
+                # Auto-retrieved key (serial transport) takes priority over config value
+                privkey = _privkey_registry.get(self._pubkey_auth) or self._private_key
+                if not pubkey:
+                    log.warning("MQTT %s: pubkey not yet available from adapter %r — "
+                                "will retry on reconnect", self.name, self._pubkey_auth)
+                    return self._username, self._password
+                if not privkey:
+                    log.warning("MQTT %s: private key not available — for serial transport it is "
+                                "fetched automatically; for TCP add 'private_key: <128-hex-chars>' "
+                                "(run 'get prv.key' on the device serial console to get it)",
+                                self.name)
+                    return self._username, self._password
+                try:
+                    token = self._make_jwt(pubkey, privkey)
+                    return f"v1_{pubkey.upper()}", token
+                except Exception as exc:
+                    log.error("MQTT %s: JWT generation failed: %s", self.name, exc)
+            except ImportError:
+                log.warning("MQTT %s: pubkey_auth requires meshcore adapter", self.name)
+        return self._username, self._password
 
     async def connect(self) -> None:
         log.info("MQTT %s: connecting to %s:%d", self.name, self._host, self._port)
@@ -122,15 +207,9 @@ class MQTTAdapter(Adapter):
             return False
         try:
             import aiomqtt
-            async with aiomqtt.Client(
-                hostname=self._host,
-                port=self._port,
-                username=self._username,
-                password=self._password,
-                identifier=f"{self._client_id}-pub",
-                keepalive=self._keepalive,
-                tls_params=aiomqtt.TLSParameters() if self._tls else None,
-            ) as client:
+            username, password = self._resolve_credentials()
+            pub_kw = self._build_client_kwargs(aiomqtt, username, password, self._tls, f"{self._client_id}-pub")
+            async with aiomqtt.Client(**pub_kw) as client:
                 await client.publish(
                     self._pub_topic,
                     payload=message.body.encode(),
@@ -143,24 +222,40 @@ class MQTTAdapter(Adapter):
             log.error("MQTT %s: publish error: %s", self.name, exc)
             return False
 
+    def _build_client_kwargs(self, aiomqtt, username, password, use_tls: bool, client_id):
+        """Build aiomqtt.Client kwargs for aiomqtt >=2.3 (paho-mqtt 2.x backend)."""
+        kw = {
+            "hostname":  self._host,
+            "port":      self._port,
+            "username":  username,
+            "password":  password,
+            "identifier": client_id,
+            "keepalive": self._keepalive,
+        }
+        # TLS: aiomqtt 2.x wants an ssl.SSLContext via tls_context
+        if use_tls:
+            import ssl as _ssl
+            kw["tls_context"] = _ssl.create_default_context()
+        # WebSocket: paho-mqtt 2.x requires BOTH transport AND websocket_path
+        if self._transport == "websockets":
+            kw["transport"] = "websockets"
+            kw["websocket_path"] = "/mqtt"
+        return kw
+
     async def _run(self) -> None:
         """Main MQTT receive loop with auto-reconnect."""
         import aiomqtt
         backoff = 2.0
         while self._connected:
             try:
-                tls = aiomqtt.TLSParameters() if self._tls else None
-                async with aiomqtt.Client(
-                    hostname=self._host,
-                    port=self._port,
-                    username=self._username,
-                    password=self._password,
-                    identifier=self._client_id,
-                    keepalive=self._keepalive,
-                    tls_params=tls,
-                ) as client:
+                username, password = self._resolve_credentials()
+                if username:
+                    log.debug("MQTT %s: connecting as %s…", self.name, username[:16])
+                client_kw = self._build_client_kwargs(aiomqtt, username, password, self._tls, self._client_id)
+                async with aiomqtt.Client(**client_kw) as client:
                     self._client = client
                     backoff = 2.0
+                    token_born = time.time()
                     log.info("MQTT %s: connected, subscribing to %s", self.name, self._topics)
 
                     for topic in self._topics:
@@ -169,6 +264,13 @@ class MQTTAdapter(Adapter):
                     async for mqtt_msg in client.messages:
                         if not self._connected:
                             break
+                        # Reconnect before JWT expiry to get a fresh token
+                        if self._pubkey_auth and self._private_key:
+                            age = time.time() - token_born
+                            if age >= self._token_ttl * 0.9:
+                                log.info("MQTT %s: JWT near expiry, reconnecting for fresh token",
+                                         self.name)
+                                break
                         await self._handle_message(str(mqtt_msg.topic), mqtt_msg.payload)
 
             except asyncio.CancelledError:
@@ -330,12 +432,30 @@ class MQTTAdapter(Adapter):
         )
 
     def _health_detail(self) -> dict:
+        if self._pubkey_auth:
+            try:
+                from ech.adapters.meshcore import _pubkey_registry, _privkey_registry
+                pk  = _pubkey_registry.get(self._pubkey_auth, "")
+                prv = _privkey_registry.get(self._pubkey_auth) or self._private_key
+                auth = f"jwt:v1_{pk[:8]}…" if pk else "jwt:pubkey-pending"
+                if not prv:
+                    auth += " (no privkey — TCP: add private_key to config)"
+                else:
+                    src = "auto" if _privkey_registry.get(self._pubkey_auth) else "config"
+                    auth += f" privkey:{src}"
+            except ImportError:
+                auth = "jwt:no-meshcore"
+        elif self._username:
+            auth = f"password:{self._username}"
+        else:
+            auth = "none"
         return {
             "host": f"{self._host}:{self._port}",
             "topics": self._topics,
             "messages_received": self._msg_count,
             "tls": self._tls,
             "connected": self._client is not None,
+            "auth": auth,
         }
 
 
@@ -380,7 +500,7 @@ class MockMQTTAdapter(Adapter):
         ]
         try:
             while self._connected:
-                if getattr(self, '_paused', False):
+                if self.is_paused():
                     await asyncio.sleep(1.0)
                     continue
                 await asyncio.sleep(self._interval + random.uniform(-5, 5))

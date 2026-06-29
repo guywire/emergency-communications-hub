@@ -11,6 +11,10 @@
 :root{--bg:#0d1117;--bg2:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--green:#3fb950;--blue:#388bfd;--yellow:#d29922;--red:#f85149;--mono:'IBM Plex Mono',monospace}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--mono)}
+#sim-banner{display:none;position:fixed;top:0;left:0;right:0;height:26px;background:#431407;border-bottom:2px solid #c2410c;color:#fb923c;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-align:center;line-height:24px;z-index:2000;text-transform:uppercase}
+body.sim-mode #sim-banner{display:block}
+body.sim-mode{padding-top:26px}
+body.sim-mode #map{height:calc(100vh - 70px)}
 #header{display:flex;align-items:center;gap:16px;padding:0 16px;height:44px;background:var(--bg2);border-bottom:1px solid var(--border);z-index:1000;position:relative}
 .logo{font-size:13px;color:var(--green);letter-spacing:.08em}
 .back{font-size:11px;color:var(--blue);text-decoration:none}.back:hover{text-decoration:underline}
@@ -18,11 +22,22 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
 #controls{display:flex;gap:8px;align-items:center}
 .ctrl-btn{font-size:10px;padding:3px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer}.ctrl-btn:hover{border-color:var(--blue);color:var(--blue)}
 #map{height:calc(100vh - 44px);width:100%}
-/* Override Leaflet for dark theme */
+/* Dark tile overlay */
 .leaflet-tile{filter:brightness(0.7) invert(1) hue-rotate(180deg) saturate(0.5)}
-.node-popup{font-family:var(--mono);font-size:11px;color:#111;min-width:160px}
-.node-popup .node-name{font-weight:500;font-size:12px;margin-bottom:4px}
-.node-popup .node-stat{color:#444;line-height:1.8}
+/* Remove Leaflet divIcon default white box + margin that causes markers to jump */
+.node-dot{background:transparent!important;border:none!important}
+/* Dark popup — overrides Leaflet's white card */
+.leaflet-popup-content-wrapper{background:rgba(22,27,34,.96);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.5);color:var(--text)}
+.leaflet-popup-tip{background:rgba(22,27,34,.96)}
+.leaflet-popup-close-button{color:var(--muted)!important;font-size:16px}
+.leaflet-popup-close-button:hover{color:var(--text)!important}
+.leaflet-popup-content{margin:10px 12px}
+/* Node popup content */
+.node-popup{font-family:var(--mono);font-size:11px;color:var(--text);min-width:180px;max-width:260px}
+.node-popup .node-name{font-weight:500;font-size:12px;margin-bottom:4px;color:var(--text)}
+.node-popup .node-stat{color:var(--muted);line-height:1.8}
+.node-popup .node-last-msg{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:10px;color:var(--text);word-break:break-word;line-height:1.5}
+.node-popup .node-last-msg .msg-ts{color:var(--muted);font-size:9px;display:block;margin-bottom:2px}
 #legend{position:absolute;bottom:30px;right:10px;z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:10px;min-width:140px}
 .legend-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
 .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
@@ -30,9 +45,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
 </style>
 </head>
 <body>
+<div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY &#9888;</div>
 <div id="header">
   <a class="back" href="/">← ECH</a>
   <div class="logo">▣ ECH / Node Map</div>
+  <a href="/hamlog" title="Go to Ham Logger"
+     style="font-family:var(--mono);font-size:10px;color:var(--muted);text-decoration:none;padding:2px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg3);margin-left:6px"
+     onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">&#9783; Ham Log</a>
   <span id="node-count">Loading…</span>
   <div class="spacer"></div>
   <div id="controls">
@@ -40,6 +59,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
     <button class="ctrl-btn" id="follow-btn" onclick="toggleFollow()">📍 Follow</button>
     <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show PSKReporter callsign spots">PSK</button>
     <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">GRID</button>
+    <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">HAM LOG</button>
   </div>
 </div>
 <div id="map"></div>
@@ -51,6 +71,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
   <div class="legend-item"><div class="legend-dot" style="background:#c792ea"></div>Reticulum</div>
   <div class="legend-item"><div class="legend-dot" style="background:#e2a44f"></div>MQTT</div>
   <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Alert / WL</div>
+  <div class="legend-item" id="legend-hamlog" style="display:none"><div class="legend-dot" style="background:#ffd700;border:1px solid #997a00"></div>Ham Log QSO</div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -67,23 +88,77 @@ let followMode = false;
 
 function adapterColor(adapter) {
   const a = adapter.toLowerCase();
-  if (a.includes('meshtastic')) return '#3fb950';   // green
-  if (a.includes('meshcore'))   return '#f78c6c';   // orange - distinct from meshtastic
-  if (a.includes('aprs'))       return '#79c0ff';   // light blue
-  if (a.includes('reticulum') || a.includes('rns')) return '#c792ea';  // purple
-  if (a.includes('mqtt'))       return '#e2a44f';   // amber
-  if (a.includes('winlink') || a.includes('pat'))   return '#f85149';  // red
-  if (a.includes('js8') || a.includes('hf'))        return '#ffcb6b';  // yellow
+  if (a.includes('meshtastic')) return '#3fb950';
+  if (a.includes('meshcore'))   return '#f78c6c';
+  if (a.includes('aprs'))       return '#79c0ff';
+  if (a.includes('reticulum') || a.includes('rns')) return '#c792ea';
+  if (a.includes('mqtt'))       return '#e2a44f';
+  if (a.includes('winlink') || a.includes('pat'))   return '#f85149';
+  if (a.includes('js8') || a.includes('hf'))        return '#ffcb6b';
   return '#8b949e';
 }
 
 function makeIcon(color, size=12) {
   return L.divIcon({
-    className: '',
+    className: 'node-dot',   // clears Leaflet's default white box + margin
     html: `<div style="width:${size}px;height:${size}px;background:${color};border:2px solid rgba(255,255,255,.4);border-radius:50%;box-shadow:0 0 6px ${color}80"></div>`,
     iconSize: [size, size],
     iconAnchor: [size/2, size/2],
   });
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function popupContent(node, isAlert, lastMsg) {
+  const heard = node.last_heard ? new Date(node.last_heard).toUTCString().slice(5,22) : '--';
+  let msgBlock = '';
+  if (lastMsg) {
+    const ts = lastMsg.timestamp ? new Date(lastMsg.timestamp).toUTCString().slice(5,22) : '';
+    const body = esc(lastMsg.body || '').slice(0, 200);
+    msgBlock = `<div class="node-last-msg"><span class="msg-ts">${ts}</span>${body}</div>`;
+  } else {
+    msgBlock = `<div class="node-last-msg" id="lastmsg-${esc(node.node_id)}"><span style="color:var(--muted);font-size:9px">Loading last message…</span></div>`;
+  }
+  const isMeshCore = (node._adapter || '').toLowerCase().includes('meshcore');
+  const msgUrl = `/?to=${encodeURIComponent(node.node_id)}&adapter=${encodeURIComponent(node._adapter || '')}`;
+  const actionBtns = `<div style="display:flex;gap:5px;margin-top:8px">
+    <a href="${msgUrl}" target="_top" style="flex:1;text-align:center;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.4);color:#388bfd;border-radius:3px;text-decoration:none">📨 Message</a>
+    ${isMeshCore ? `<button onclick="mapTrace('${esc(node._adapter)}','${esc(node.node_id)}',this)" style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);color:#3fb950;border-radius:3px;cursor:pointer">📡 Trace</button>` : ''}
+  </div>`;
+  return `<div class="node-popup" data-node-id="${esc(node.node_id)}">
+    <div class="node-name">${esc(node.display_name)}</div>
+    <div class="node-stat">Adapter: ${esc(node._adapter)}</div>
+    ${node.snr  != null ? `<div class="node-stat">SNR: ${node.snr}dB</div>` : ''}
+    ${node.rssi != null ? `<div class="node-stat">RSSI: ${node.rssi}dBm</div>` : ''}
+    ${node.battery_level != null ? `<div class="node-stat">Battery: ${node.battery_level}%</div>` : ''}
+    <div class="node-stat">Last heard: ${heard}</div>
+    ${isAlert ? '<div style="color:var(--red);font-weight:500;margin-top:4px">⚠ ANOMALY ACTIVE</div>' : ''}
+    ${msgBlock}
+    ${actionBtns}
+  </div>`;
+}
+
+async function mapTrace(adapter, nodeId, btn) {
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapter)}/ping`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({node_id: nodeId}),
+    });
+    const d = await r.json();
+    if (btn) { btn.textContent = d.status === 'ok' ? '✓ Sent' : '✗ Fail'; btn.disabled = false; }
+  } catch(e) {
+    if (btn) { btn.textContent = '✗ Err'; btn.disabled = false; }
+  }
+}
+
+async function fetchLastMsg(nodeId) {
+  try {
+    const r = await fetch(`/api/messages?from_id=${encodeURIComponent(nodeId)}&limit=1`);
+    const d = await r.json();
+    return (d.messages && d.messages.length) ? d.messages[0] : null;
+  } catch(e) { return null; }
 }
 
 async function loadNodes() {
@@ -101,45 +176,33 @@ async function loadNodes() {
       } catch(e) {}
     }
 
-    // Also load anomaly positions
     const anoms = await fetch('/api/anomalies?acknowledged=false').then(r=>r.json()).catch(()=>({findings:[]}));
     const alertNodes = new Set(anoms.findings.filter(f=>f.severity==='alert').map(f=>f.node_id));
 
-    // Update/add markers
     const seen = new Set();
     allNodes.forEach(node => {
       if (node.lat == null || node.lon == null) return;
-      if (node.lat === 0 && node.lon === 0) return;   // skip 0,0 (null sentinel)
+      if (node.lat === 0 && node.lon === 0) return;
       const id = node.node_id;
       seen.add(id);
-      const color = alertNodes.has(id) ? '#f85149' : adapterColor(node._adapter);
-      const size = alertNodes.has(id) ? 16 : 12;
-
-      const heard = node.last_heard ? new Date(node.last_heard) : null;
-      const heardStr = heard ? heard.toUTCString().slice(5,22) : '--';
-      const popup = `<div class="node-popup">
-        <div class="node-name">${node.display_name}</div>
-        <div class="node-stat">ID: ${node.node_id.slice(0,16)}</div>
-        <div class="node-stat">Adapter: ${node._adapter}</div>
-        ${node.snr!=null ? `<div class="node-stat">SNR: ${node.snr}dB</div>` : ''}
-        ${node.rssi!=null ? `<div class="node-stat">RSSI: ${node.rssi}dBm</div>` : ''}
-        ${node.battery_level!=null ? `<div class="node-stat">Battery: ${node.battery_level}%</div>` : ''}
-        <div class="node-stat">Last heard: ${heardStr}</div>
-        ${alertNodes.has(id) ? '<div style="color:#f85149;font-weight:500;margin-top:4px">⚠ ANOMALY ACTIVE</div>' : ''}
-      </div>`;
+      const isAlert = alertNodes.has(id);
+      const color = isAlert ? '#f85149' : adapterColor(node._adapter);
+      const size  = isAlert ? 16 : 12;
+      const popup = popupContent(node, isAlert);
 
       if (markers[id]) {
         markers[id].setLatLng([node.lat, node.lon]);
         markers[id].setIcon(makeIcon(color, size));
         markers[id].getPopup().setContent(popup);
       } else {
-        markers[id] = L.marker([node.lat, node.lon], {icon: makeIcon(color, size)})
+        const marker = L.marker([node.lat, node.lon], {icon: makeIcon(color, size)})
           .bindPopup(popup)
           .addTo(map);
+        marker.on('popupopen', () => onPopupOpen(marker, node));
+        markers[id] = marker;
       }
     });
 
-    // Remove stale markers
     Object.keys(markers).forEach(id => {
       if (!seen.has(id)) { markers[id].remove(); delete markers[id]; }
     });
@@ -147,7 +210,6 @@ async function loadNodes() {
     const total = Object.keys(markers).length;
     document.getElementById('node-count').textContent = `${total} node${total!==1?'s':''} with position`;
 
-    // Auto-fit if first load and nodes exist
     if (total > 0 && followMode) {
       const lats = allNodes.filter(n=>n.lat!=null).map(n=>n.lat);
       const lons = allNodes.filter(n=>n.lon!=null).map(n=>n.lon);
@@ -158,35 +220,68 @@ async function loadNodes() {
   }
 }
 
+// Per-marker last message cache so popup re-opens don't re-fetch unnecessarily
+const lastMsgCache = {};
+
+async function onPopupOpen(marker, node) {
+  const nodeId = node.node_id;
+  // If we already cached it, just update; otherwise fetch
+  const cached = lastMsgCache[nodeId];
+  if (cached !== undefined) {
+    if (cached) updatePopupMsg(marker, node, cached);
+    return;
+  }
+  const msg = await fetchLastMsg(nodeId);
+  lastMsgCache[nodeId] = msg;
+  updatePopupMsg(marker, node, msg);
+}
+
+function updatePopupMsg(marker, node, msg) {
+  const el = marker.getPopup().getElement();
+  if (!el) return;
+  const slot = el.querySelector(`#lastmsg-${CSS.escape(node.node_id)}`);
+  if (!slot) return;
+  if (msg) {
+    const ts = msg.timestamp ? new Date(msg.timestamp).toUTCString().slice(5,22) : '';
+    const body = (msg.body || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').slice(0, 200);
+    slot.innerHTML = `<span class="msg-ts">${ts}</span>${body}`;
+  } else {
+    slot.innerHTML = '<span style="color:var(--muted);font-size:9px">No messages in log</span>';
+  }
+  marker.getPopup().update();
+}
+
 function toggleFollow() {
   followMode = !followMode;
   document.getElementById('follow-btn').style.color = followMode ? 'var(--green)' : '';
   if (followMode) loadNodes();
 }
 
-// WebSocket for live position updates
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${proto}//${location.host}/ws`);
   ws.onmessage = (e) => {
     const pkt = JSON.parse(e.data);
     if (pkt.type === 'message' && pkt.data.lat != null) {
-      // Partial update for this node
       const d = pkt.data;
       const color = adapterColor(d.source_adapter);
       const id = d.from_id;
+      // Invalidate last-msg cache so next popup-open re-fetches
+      delete lastMsgCache[id];
       if (markers[id]) {
         markers[id].setLatLng([d.lat, d.lon]);
       } else {
-        markers[id] = L.marker([d.lat, d.lon], {icon: makeIcon(color)})
-          .bindPopup(`<div class="node-popup"><div class="node-name">${d.from_display||d.from_id}</div></div>`)
+        const nodeStub = {node_id: id, display_name: d.from_display||id, _adapter: d.source_adapter};
+        const marker = L.marker([d.lat, d.lon], {icon: makeIcon(color)})
+          .bindPopup(popupContent(nodeStub, false, null))
           .addTo(map);
+        marker.on('popupopen', () => onPopupOpen(marker, nodeStub));
+        markers[id] = marker;
       }
     }
   };
   ws.onclose = () => setTimeout(connectWS, 3000);
 }
-
 
 // ── PSKReporter overlay ───────────────────────────────────────────────────
 let _pskEnabled = false;
@@ -211,11 +306,7 @@ function togglePSKReporter() {
 
 async function loadPSKReporter() {
   if (!_pskEnabled) return;
-  // PSKReporter public JSON API — recent spots, no API key needed
-  // Limited to last 15 minutes, filtered by callsign if operator set
   try {
-    // Use a CORS proxy since PSKReporter doesn't allow direct browser fetch
-    // For production: proxy through ECH backend
     const r = await fetch('/api/pskreporter/spots').catch(() => null);
     if (!r || !r.ok) {
       toast('PSKReporter: enable via /api/pskreporter — needs backend proxy');
@@ -241,7 +332,6 @@ async function loadPSKReporter() {
   } catch(e) {
     toast('PSKReporter fetch failed: ' + e.message);
   }
-  // Refresh every 5 minutes
   if (_pskEnabled) setTimeout(loadPSKReporter, 300000);
 }
 
@@ -259,7 +349,6 @@ function toggleGridSquares() {
 }
 
 function drawGridSquares() {
-  // Draw Maidenhead grid square overlays for the visible map area
   const bounds = map.getBounds();
   const minLon = Math.floor(bounds.getWest());
   const maxLon = Math.ceil(bounds.getEast());
@@ -269,7 +358,6 @@ function drawGridSquares() {
   _gridLayers.forEach(l => map.removeLayer(l));
   _gridLayers = [];
 
-  // Draw 2-degree x 1-degree cells (Maidenhead field + square)
   for (let lon = minLon; lon < maxLon; lon += 2) {
     for (let lat = minLat; lat < maxLat; lat += 1) {
       const grid = lonLatToMaidenhead(lon + 1, lat + 0.5);
@@ -299,8 +387,230 @@ function lonLatToMaidenhead(lon, lat) {
 
 map.on('zoomend moveend', () => { if (_gridEnabled) drawGridSquares(); });
 
+// ── Ham Log QSO layer ─────────────────────────────────────────────────────
+let _hamlogEnabled = false;
+let _hamlogMarkers = [];
+
+// Approx coordinates for callsign prefixes (used when no grid stored)
+const CALL_COORDS = (function() {
+  const c = {};
+  // USA call districts — district centre coordinates
+  const usDist = [
+    ['1',42.5,-71.5], ['2',40.7,-74.0], ['3',39.9,-75.2], ['4',33.7,-84.4],
+    ['5',32.3,-97.3], ['6',36.8,-119.4],['7',47.0,-121.0],['8',41.5,-82.0],
+    ['9',41.9,-87.6], ['0',39.7,-104.9],
+  ];
+  for (const [d,lat,lon] of usDist) {
+    for (const p of ['W','K','N']) c[p+d] = [lat,lon];
+  }
+  c['KL'] = c['AL'] = [64.2,-153.0];   // Alaska
+  c['KH'] = c['AH'] = [21.3,-157.8];   // Hawaii
+  c['KP'] = c['WP'] = [18.2,-66.5];    // Puerto Rico
+  // Canada
+  c['VE1'] = c['VA1'] = [44.6,-63.6];  // Atlantic
+  c['VE2'] = c['VA2'] = [46.8,-71.2];  // Quebec
+  c['VE3'] = c['VA3'] = [43.7,-79.4];  // Ontario
+  c['VE4'] = c['VA4'] = [49.9,-97.1];  // Manitoba
+  c['VE5'] = c['VA5'] = [50.4,-104.6]; // Saskatchewan
+  c['VE6'] = c['VA6'] = [53.5,-113.5]; // Alberta
+  c['VE7'] = c['VA7'] = [49.3,-123.1]; // BC
+  c['VE8'] = [62.4,-114.4];            // NWT
+  c['VE9'] = [46.1,-64.8];             // NB
+  c['VO']  = [47.6,-52.7];             // Newfoundland
+  c['VY']  = [60.7,-135.1];            // Yukon
+  // UK & Ireland
+  c['G']  = c['M']  = [51.5,-0.1];    // England
+  c['GM'] = c['MM'] = [55.9,-3.2];    // Scotland
+  c['GW'] = c['MW'] = [51.5,-3.2];    // Wales
+  c['GI'] = c['MI'] = [54.6,-5.9];    // N.Ireland
+  c['EI'] = [53.3,-6.3];              // Ireland
+  c['GJ'] = [49.2,-2.1];              // Jersey
+  c['GU'] = [49.5,-2.5];              // Guernsey
+  c['GD'] = [54.2,-4.5];              // Isle of Man
+  // W.Europe
+  c['DL'] = c['DJ'] = c['DK'] = [51.2,10.5];   // Germany
+  c['F']  = c['TM'] = [46.6,2.0];              // France
+  c['I']  = c['IZ'] = c['IK'] = [41.9,12.5];  // Italy
+  c['EA'] = c['EB'] = [40.4,-3.7];             // Spain
+  c['CT'] = c['CS'] = [38.7,-9.1];             // Portugal
+  c['PA'] = c['PD'] = c['PH'] = [52.4,4.9];   // Netherlands
+  c['ON'] = [50.8,4.4];   // Belgium
+  c['OZ'] = [55.7,12.6];  // Denmark
+  c['SM'] = c['SA'] = c['SK'] = [59.3,18.1]; // Sweden
+  c['OH'] = c['OF'] = [60.2,24.9]; // Finland
+  c['LA'] = c['LB'] = [59.9,10.8]; // Norway
+  c['OE'] = [48.2,16.4]; // Austria
+  c['HB9'] = [46.9,7.4]; // Switzerland
+  c['SP'] = c['SN'] = [52.2,21.0]; // Poland
+  c['OK'] = c['OL'] = [50.1,14.4]; // Czech
+  c['OM'] = [48.1,17.1]; // Slovakia
+  c['HA'] = c['HG'] = [47.5,19.1]; // Hungary
+  c['YO'] = [44.4,26.1]; // Romania
+  c['LZ'] = [42.7,23.3]; // Bulgaria
+  c['SV'] = [37.9,23.7]; // Greece
+  c['UR'] = c['UT'] = c['US'] = [50.4,30.5]; // Ukraine
+  c['UA'] = c['UB'] = [55.8,37.6]; // Russia
+  c['ES'] = [59.4,24.7]; // Estonia
+  c['YL'] = [56.9,24.1]; // Latvia
+  c['LY'] = [54.7,25.3]; // Lithuania
+  c['9A'] = [45.8,16.0]; // Croatia
+  c['S5'] = [46.1,14.5]; // Slovenia
+  c['TA'] = c['TC'] = [39.9,32.9]; // Turkey
+  // Asia/Pacific
+  c['JA'] = c['JE'] = c['JH'] = [36.2,138.3]; // Japan
+  c['BG'] = c['BY'] = c['BT'] = [39.9,116.4]; // China
+  c['VK'] = [-25.0,133.0]; // Australia
+  c['ZL'] = [-41.3,174.8]; // New Zealand
+  c['HL'] = c['DS'] = [37.5,127.0]; // S.Korea
+  c['VU'] = c['AT'] = [28.6,77.2];  // India
+  c['HS'] = c['E2'] = [13.8,100.5]; // Thailand
+  // Americas
+  c['PY'] = c['PP'] = c['PT'] = [-15.8,-47.9]; // Brazil
+  c['LU'] = c['LO'] = [-34.6,-58.4]; // Argentina
+  c['XE'] = c['XF'] = [23.6,-102.6]; // Mexico
+  c['TI'] = [9.9,-84.1];  // Costa Rica
+  c['YV'] = c['YW'] = [10.5,-66.9]; // Venezuela
+  c['CE'] = c['CA'] = [-33.5,-70.7]; // Chile
+  c['OA'] = c['OC'] = [-12.0,-77.0]; // Peru
+  c['CO'] = c['CM'] = [23.1,-82.4]; // Cuba
+  c['CX'] = [-34.9,-56.2]; // Uruguay
+  // Africa/Middle East
+  c['ZS'] = c['ZR'] = [-25.7,28.2]; // S.Africa
+  c['4X'] = c['4Z'] = [31.8,35.2]; // Israel
+  c['A4'] = [23.6,58.6]; // Oman
+  c['HZ'] = [24.7,46.7]; // Saudi Arabia
+  c['9K'] = [29.4,47.9]; // Kuwait
+  return c;
+})();
+
+// US state centroid coordinates
+const STATE_COORDS = {
+  AL:[32.78,-86.83], AK:[64.20,-153.40], AZ:[34.27,-111.66], AR:[34.75,-92.28],
+  CA:[37.27,-119.27], CO:[39.00,-105.55], CT:[41.60,-72.73], DE:[38.99,-75.51],
+  FL:[28.63,-82.35], GA:[32.69,-83.44], HI:[20.27,-156.37], ID:[44.35,-114.61],
+  IL:[40.04,-89.20], IN:[39.90,-86.28], IA:[42.08,-93.50], KS:[38.49,-98.38],
+  KY:[37.53,-85.30], LA:[31.07,-91.96], ME:[45.37,-69.24], MD:[38.81,-77.27],
+  MA:[42.27,-71.81], MI:[44.35,-85.41], MN:[46.39,-94.64], MS:[32.74,-89.67],
+  MO:[38.46,-92.29], MT:[46.88,-110.36], NE:[41.49,-99.90], NV:[39.36,-116.64],
+  NH:[43.68,-71.58], NJ:[40.19,-74.67], NM:[34.41,-106.11], NY:[42.95,-75.52],
+  NC:[35.56,-79.39], ND:[47.45,-100.47], OH:[40.29,-82.79], OK:[35.59,-97.49],
+  OR:[43.93,-120.56], PA:[40.90,-77.83], RI:[41.68,-71.55], SC:[33.92,-80.90],
+  SD:[44.44,-100.22], TN:[35.86,-86.35], TX:[31.47,-99.33], UT:[39.32,-111.09],
+  VT:[44.04,-72.71], VA:[37.77,-78.17], WA:[47.38,-120.45], WV:[38.64,-80.62],
+  WI:[44.27,-90.14], WY:[43.00,-107.55],
+};
+
+// Country centroid fallback (when no state match)
+const COUNTRY_COORDS = {
+  'USA':[37.09,-95.71], 'UNITED STATES':[37.09,-95.71], 'US':[37.09,-95.71],
+  'CANADA':[56.13,-106.35], 'AUSTRALIA':[-25.27,133.78],
+  'UNITED KINGDOM':[51.51,-0.13], 'UK':[51.51,-0.13], 'ENGLAND':[51.51,-0.13],
+  'GERMANY':[51.17,10.45], 'FRANCE':[46.23,2.21], 'ITALY':[41.87,12.57],
+  'SPAIN':[40.46,-3.75], 'JAPAN':[36.20,138.25], 'BRAZIL':[-14.24,-51.93],
+  'MEXICO':[23.63,-102.55], 'RUSSIA':[61.52,105.32], 'CHINA':[35.86,104.20],
+  'INDIA':[20.59,78.96], 'ARGENTINA':[-38.42,-63.62], 'SOUTH AFRICA':[-30.56,22.94],
+  'NEW ZEALAND':[-40.90,174.89],
+};
+
+function callToLatLon(callsign) {
+  if (!callsign) return null;
+  const cs = callsign.toUpperCase().trim();
+  for (let len = 4; len >= 1; len--) {
+    const pre = cs.slice(0, len);
+    if (CALL_COORDS[pre]) return CALL_COORDS[pre];
+  }
+  return null;
+}
+
+// Resolve lat/lon from stored country+state fields, falling back to callsign prefix
+function qsoLatLon(country, state, callsign) {
+  const c = (country || '').toUpperCase().trim();
+  const s = (state || '').toUpperCase().trim();
+  // US state centroid
+  const isUS = !c || c === 'USA' || c === 'US' || c.startsWith('UNITED STATES');
+  if (isUS && s && STATE_COORDS[s]) return STATE_COORDS[s];
+  // Country centroid
+  if (c && COUNTRY_COORDS[c]) return COUNTRY_COORDS[c];
+  // Callsign prefix fallback
+  return callToLatLon(callsign);
+}
+
+function toggleHamLog() {
+  _hamlogEnabled = !_hamlogEnabled;
+  const btn = document.getElementById('hamlog-btn');
+  const leg = document.getElementById('legend-hamlog');
+  btn.style.color = _hamlogEnabled ? '#ffd700' : '';
+  btn.style.borderColor = _hamlogEnabled ? '#ffd700' : '';
+  leg.style.display = _hamlogEnabled ? '' : 'none';
+  if (_hamlogEnabled) {
+    loadHamLog();
+    toast('Ham Log: loading worked stations…');
+  } else {
+    _hamlogMarkers.forEach(m => m.remove());
+    _hamlogMarkers = [];
+    toast('Ham Log layer off');
+  }
+}
+
+async function loadHamLog() {
+  if (!_hamlogEnabled) return;
+  try {
+    const r = await fetch('/api/hamlog/qsos?limit=2000&source=manual').catch(() => null);
+    if (!r || !r.ok) { toast('Ham Log: fetch failed'); return; }
+    const data = await r.json();
+    // Only show manually-logged contacts, not APRS/mock/adapter imports
+    const qsos = (data.qsos || []).filter(q => q.source === 'manual');
+
+    _hamlogMarkers.forEach(m => m.remove());
+    _hamlogMarkers = [];
+
+    // Group by callsign to show combined popup
+    const byCall = {};
+    for (const q of qsos) {
+      if (!byCall[q.callsign]) byCall[q.callsign] = [];
+      byCall[q.callsign].push(q);
+    }
+
+    let plotted = 0;
+    for (const [cs, qs] of Object.entries(byCall)) {
+      const country = qs[0].country || '';
+      const state   = qs[0].state   || '';
+      const latlon  = qsoLatLon(country, state, cs);
+      if (!latlon) continue;
+      // Deterministic jitter based on callsign so markers don't move on refresh
+      let _h = 0;
+      for (const c of cs) _h = (Math.imul(31, _h) + c.charCodeAt(0)) | 0;
+      const jLat = latlon[0] + ((_h & 0xFF) / 255 - 0.5) * 0.6;
+      const jLon = latlon[1] + (((_h >> 8) & 0xFF) / 255 - 0.5) * 0.6;
+      const bandList = [...new Set(qs.map(q => q.band))].join(', ');
+      const modeList = [...new Set(qs.map(q => q.mode))].join(', ');
+      const names    = [...new Set(qs.map(q => q.name).filter(Boolean))].join(', ');
+      const locLabel = state ? `${state}${country ? ', '+country : ''}` : country;
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#ffd700;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #997a00;white-space:nowrap">${cs}</div>`,
+        iconSize: [60, 16], iconAnchor: [30, 8],
+      });
+      const popup = `<div class="node-popup">
+        <div class="node-name">${cs}</div>
+        <div class="node-stat">QSOs: ${qs.length}</div>
+        <div class="node-stat">Bands: ${bandList}</div>
+        <div class="node-stat">Modes: ${modeList}</div>
+        ${locLabel ? `<div class="node-stat">Location: ${locLabel}</div>` : ''}
+        ${names ? `<div class="node-stat">Name: ${names}</div>` : ''}
+        <div class="node-stat" style="color:var(--muted);font-size:9px">Location approximate</div>
+      </div>`;
+      const m = L.marker([jLat, jLon], {icon}).bindPopup(popup).addTo(map);
+      _hamlogMarkers.push(m);
+      plotted++;
+    }
+    toast(`Ham Log: ${plotted} worked station${plotted!==1?'s':''} plotted`);
+  } catch(e) {
+    toast('Ham Log error: ' + e.message);
+  }
+}
+
 function toast(msg) {
-  // Simple map toast
   const el = document.createElement('div');
   el.style.cssText = 'position:fixed;bottom:50px;left:50%;transform:translateX(-50%);background:rgba(22,27,34,.95);border:1px solid #30363d;color:#e6edf3;font-family:monospace;font-size:11px;padding:6px 14px;border-radius:4px;z-index:2000';
   el.textContent = msg;
@@ -311,6 +621,7 @@ function toast(msg) {
 loadNodes();
 setInterval(loadNodes, 30000);
 connectWS();
+if (window.ECH_SIM) document.body.classList.add('sim-mode');
 </script>
 </body>
 </html>

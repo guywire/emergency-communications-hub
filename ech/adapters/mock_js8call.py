@@ -36,7 +36,7 @@ HF_MSGS = [
     "Battery backup on generator, 13.8V nominal SNR",
     "Mobile welfare check unit cleared sector 2, 3 assists SNR",
     "All HF nets monitoring 7.078 dial through the storm SNR",
-    "Canadian vessel activity reported near Penobscot Bay — monitoring SNR",
+    "Lobster uprising activity near Penobscot Bay — monitoring situation SNR",
     "Road crews working Cedar Lane, ETA clearance 2 hours SNR",
 ]
 
@@ -54,6 +54,8 @@ BANDS = [
 
 
 class MockJS8CallAdapter(Adapter):
+    is_mock = True
+
     """
     Mock JS8Call adapter — generates realistic HF JS8 traffic.
     Config keys:
@@ -98,7 +100,7 @@ class MockJS8CallAdapter(Adapter):
         log.debug("%s: RX loop started", self.name)
         try:
             while self._connected:
-                if getattr(self, '_paused', False):
+                if self.is_paused():
                     await asyncio.sleep(1.0)
                     continue
                 await asyncio.sleep(self._interval + random.uniform(-5, 5))

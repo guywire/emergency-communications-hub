@@ -15,6 +15,10 @@
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+#sim-banner{display:none;position:fixed;top:0;left:0;right:0;height:26px;background:#431407;border-bottom:2px solid #c2410c;color:#fb923c;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-align:center;line-height:24px;z-index:2000;text-transform:uppercase}
+body.sim-mode #sim-banner{display:block}
+body.sim-mode{padding-top:26px}
+body.sim-mode #findings-container{height:calc(100vh - 186px)}
 
 #header{display:flex;align-items:center;gap:16px;padding:0 20px;height:48px;
   background:var(--bg2);border-bottom:1px solid var(--border)}
@@ -100,6 +104,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 </style>
 </head>
 <body>
+<div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY &#9888;</div>
 <div id="header">
   <a class="back-link" href="/">← ECH</a>
   <div class="logo">▣ ECH / Anomaly Monitor</div>
@@ -110,14 +115,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 
 <div id="toolbar">
   <button class="filter-btn active" data-filter="active" onclick="setFilter('active',this)">Active</button>
-  <button class="filter-btn" data-filter="all" onclick="setFilter('all',this)">All</button>
   <button class="filter-btn" data-filter="alert" onclick="setFilter('alert',this)">ALERT</button>
   <button class="filter-btn" data-filter="warn" onclick="setFilter('warn',this)">WARN</button>
   <button class="filter-btn" data-filter="info" onclick="setFilter('info',this)">INFO</button>
   <input type="text" id="search-box" placeholder="Filter by node, rule, adapter…" oninput="renderFindings()">
   <div class="spacer"></div>
-  <button class="action-btn btn-yellow" onclick="broadcastWeather()">📡 Broadcast WX</button>
-  <button class="action-btn btn-green" onclick="timeSync()">🕐 Time Sync</button>
+  <button class="action-btn" style="border-color:var(--red);color:var(--red)" onclick="clearAllFindings()">✕ Clear all</button>
   <button class="action-btn" style="border-color:var(--border);color:var(--muted)" onclick="loadFindings()">↻ Refresh</button>
 </div>
 
@@ -153,13 +156,13 @@ setInterval(tick, 1000); tick();
 // ── Data load ──────────────────────────────────────────────────────────
 async function loadFindings() {
   try {
-    const r = await fetch('/api/anomalies?limit=500');
+    const r = await fetch('/api/anomalies?acknowledged=false&limit=500');
     const data = await r.json();
     allFindings = data.findings;
     updateSummary();
     renderFindings();
 
-    const activeCnt = data.active_count;
+    const activeCnt = allFindings.length;
     const badge = document.getElementById('active-badge');
     if (activeCnt > 0) {
       badge.textContent = `${activeCnt} ACTIVE`;
@@ -269,14 +272,16 @@ async function broadcastFinding(id, e) {
   }
 }
 
-async function broadcastWeather() {
-  const r = await fetch('/api/weather/broadcast', {method:'POST'});
-  toast(r.ok ? 'Weather summary broadcast sent' : 'Broadcast failed', r.ok ? 'ok' : 'err');
-}
-
-async function timeSync() {
-  const r = await fetch('/api/time-sync', {method:'POST'});
-  toast(r.ok ? 'Time sync broadcast sent' : 'Broadcast failed', r.ok ? 'ok' : 'err');
+async function clearAllFindings() {
+  if (!confirm('Acknowledge and clear all anomaly findings?')) return;
+  const r = await fetch('/api/anomalies/clear-all', {method:'POST'});
+  const d = await r.json();
+  if (d.status === 'ok') {
+    toast(`Cleared ${d.cleared} finding${d.cleared !== 1 ? 's' : ''}`, 'ok');
+    await loadFindings();
+  } else {
+    toast('Clear failed', 'err');
+  }
 }
 
 // ── WebSocket new anomaly feed ─────────────────────────────────────────
@@ -311,6 +316,7 @@ function toast(msg, type='') {
 loadFindings();
 setInterval(loadFindings, 15000);
 connectWS();
+if (window.ECH_SIM) document.body.classList.add('sim-mode');
 </script>
 </body>
 </html>

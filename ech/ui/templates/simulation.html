@@ -45,12 +45,16 @@ input:focus,select:focus{border-color:var(--blue)}
 </style>
 </head>
 <body>
+<div id="live-notice" style="display:none;background:#0d1e12;border-bottom:1px solid #238636;padding:8px 20px;font-family:var(--mono);font-size:11px;color:#3fb950">
+  &#9432; LIVE INSTANCE &mdash; This panel injects test messages into live adapters. For the full simulation demo (all mocks, no real hardware), open the
+  <a id="sim-link" href="#" style="color:var(--blue)" target="_blank">Simulation Instance on port 8766</a>.
+</div>
 <div id="header">
   <a class="back" href="/">← ECH</a>
   <div class="logo">&#9633; ECH / Simulation</div>
   <div class="spacer"></div>
   <span id="sim-badge" class="sim-badge sim-on">SIM ACTIVE</span>
-  <label class="toggle" title="Enable/disable mock adapter traffic" style="margin-left:8px">
+  <label class="toggle" title="Pause/resume all adapter traffic" style="margin-left:8px">
     <input type="checkbox" id="sim-toggle" checked onchange="toggleSim(this.checked)">
     <span class="slider"></span>
   </label>
@@ -147,6 +151,12 @@ const PC = ['prio-0','prio-1','prio-2'];
 let nodeEditId = '', msgEditId = '';
 
 async function init() {
+  // Show live-instance notice when this is NOT the sim instance
+  if (!window.ECH_SIM) {
+    const notice = document.getElementById('live-notice');
+    notice.style.display = '';
+    document.getElementById('sim-link').href = `${location.protocol}//${location.hostname}:8766/simulation`;
+  }
   const st = await fetch('/api/state').then(r=>r.json()).catch(()=>({}));
   const on = st.simulation_enabled !== false;
   document.getElementById('sim-toggle').checked = on;

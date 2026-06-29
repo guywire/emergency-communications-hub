@@ -24,11 +24,35 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
+# Altitude text patterns: "36k feet", "36000 feet", "FL360", "10000m", "10km alt"
+_ALT_FT_RE  = re.compile(r'\b(\d+(?:\.\d+)?)\s*k\s*f(?:eet|t)\b', re.IGNORECASE)
+_ALT_FT2_RE = re.compile(r'\b(\d{4,6})\s*f(?:eet|t)\b', re.IGNORECASE)
+_ALT_FL_RE  = re.compile(r'\bFL\s*(\d{2,3})\b', re.IGNORECASE)
+_ALT_M_RE   = re.compile(r'\b(\d{4,6})\s*m(?:eters?)?\b', re.IGNORECASE)
+
+
+def _extract_altitude_m_from_text(body: str) -> float | None:
+    """Return altitude in metres if a recognisable altitude mention is found."""
+    m = _ALT_FT_RE.search(body)
+    if m:
+        return float(m.group(1)) * 1000 * 0.3048
+    m = _ALT_FT2_RE.search(body)
+    if m:
+        return float(m.group(1)) * 0.3048
+    m = _ALT_FL_RE.search(body)
+    if m:
+        return float(m.group(1)) * 100 * 0.3048  # FL360 → 36000 ft → metres
+    m = _ALT_M_RE.search(body)
+    if m:
+        return float(m.group(1))
+    return None
 
 log = logging.getLogger(__name__)
 
@@ -99,11 +123,12 @@ class AnomalyEngine:
         self._db = db
 
         # Per-node state: keyed by (adapter, node_id)
-        self._node_last_pos: dict[tuple, dict]   = {}   # last lat/lon/alt/time
-        self._node_hop_history: dict[tuple, list] = {}   # recent hop counts
-        self._node_snr_history: dict[tuple, list] = {}   # recent SNR values
+        self._node_last_pos: dict[tuple, dict]    = {}   # last lat/lon/alt/time
+        self._node_hop_history: dict[tuple, list]  = {}   # recent hop counts
+        self._node_snr_history: dict[tuple, list]  = {}   # recent SNR values
         self._node_battery_history: dict[tuple, list] = {}
         self._node_first_seen: dict[tuple, datetime] = {}
+        self._node_path_history: dict[tuple, list] = {}   # recent relay/digipeater paths
 
         self.findings: list[AnomalyFinding] = []
         self.findings_queue: asyncio.Queue[AnomalyFinding] = asyncio.Queue()
@@ -131,7 +156,8 @@ class AnomalyEngine:
             self._node_first_seen[key] = msg.timestamp
 
         raw = msg.raw or {}
-        hop_count  = raw.get("hop_count") or raw.get("hops")
+        # Prefer top-level routing fields; fall back to raw dict for older messages
+        hop_count  = msg.hop_count if msg.hop_count is not None else (raw.get("hop_count") or raw.get("hops"))
         snr        = raw.get("snr")
         rssi       = raw.get("rssi")
         lat        = msg.lat
@@ -157,7 +183,7 @@ class AnomalyEngine:
             if len(hist) > 20:
                 hist.pop(0)
 
-        # ── RULE: high altitude ───────────────────────────────────────────
+        # ── RULE: high altitude (structured GPS field) ────────────────────
         if altitude is not None and float(altitude) > self._alt_threshold_m:
             f = self._make_finding(
                 msg, "high_altitude", Severity.WARN,
@@ -165,6 +191,18 @@ class AnomalyEngine:
                 {"altitude_m": altitude, "lat": lat, "lon": lon},
             )
             new_findings.append(f)
+
+        # ── RULE: high altitude mentioned in message text ─────────────────
+        if altitude is None and msg.body:
+            text_alt = _extract_altitude_m_from_text(msg.body)
+            if text_alt is not None and text_alt > self._alt_threshold_m:
+                f = self._make_finding(
+                    msg, "high_altitude_reported", Severity.WARN,
+                    f"Message reports ~{text_alt:.0f}m ({text_alt/0.3048:.0f}ft) — "
+                    f"above {self._alt_threshold_m:.0f}m threshold (from message text)",
+                    {"altitude_m_estimated": round(text_alt), "text_snippet": msg.body[:80]},
+                )
+                new_findings.append(f)
 
         # ── RULE: impossible position jump ────────────────────────────────
         if lat is not None and lon is not None:
@@ -213,15 +251,20 @@ class AnomalyEngine:
                 pass
 
         # ── RULE: MQTT injection heuristic ────────────────────────────────
-        # Hop count 0 means packet was received directly, but if we have
-        # no prior RF history for this node and a position is present,
-        # it may have arrived via MQTT gateway rather than RF.
-        if hop_count == 0 and lat is not None:
+        # viaMqtt flag is definitive; hop_count=0 with position is circumstantial.
+        if msg.via_mqtt and lat is not None:
+            f = self._make_finding(
+                msg, "mqtt_injection", Severity.ALERT,
+                f"Node position arrived via MQTT gateway (viaMqtt flag set) — "
+                f"not a direct RF contact",
+                {"via_mqtt": True, "lat": lat, "lon": lon, "snr": snr},
+            )
+            new_findings.append(f)
+        elif hop_count == 0 and lat is not None:
             hop_hist = self._node_hop_history.get(key, [])
-            # Only flag if we have no prior contact (new node appearing at hop 0 with position)
-            if len(hop_hist) <= 1 and key not in self._node_first_seen:
+            if len(hop_hist) <= 1:
                 f = self._make_finding(
-                    msg, "mqtt_injection", Severity.ALERT,
+                    msg, "mqtt_injection", Severity.WARN,
                     f"Node appeared at hop_count=0 with position on first contact — "
                     f"possible MQTT injection rather than direct RF",
                     {"hop_count": hop_count, "lat": lat, "lon": lon, "snr": snr},
@@ -243,6 +286,29 @@ class AnomalyEngine:
                          "snr_jump_db": round(snr_jump, 1), "rssi": rssi},
                     )
                     new_findings.append(f)
+
+        # ── RULE: relay path change ───────────────────────────────────────
+        # A node suddenly routing via a different digipeater chain may indicate
+        # a spoofed packet, a moved node, or a new/failed relay.
+        if msg.path:
+            normalized_path = re.sub(r'\*', '', msg.path).strip()
+            if normalized_path:
+                path_hist = self._node_path_history.setdefault(key, [])
+                if len(path_hist) >= 3:
+                    recent_paths = set(path_hist[-5:])
+                    if normalized_path not in recent_paths:
+                        prev = path_hist[-1]
+                        f = self._make_finding(
+                            msg, "path_change", Severity.WARN,
+                            f"Relay path changed: '{prev}' → '{normalized_path}' — "
+                            f"possible spoofing, node movement, or relay failure",
+                            {"previous_path": prev, "current_path": normalized_path,
+                             "path_history": list(path_hist[-3:])},
+                        )
+                        new_findings.append(f)
+                path_hist.append(normalized_path)
+                if len(path_hist) > 20:
+                    path_hist.pop(0)
 
         # ── RULE: abnormal hop count increase ─────────────────────────────
         if hop_count is not None:
@@ -290,6 +356,12 @@ class AnomalyEngine:
                 return True
         return False
 
+    def clear_all(self) -> int:
+        count = sum(1 for f in self.findings if not f.acknowledged)
+        for f in self.findings:
+            f.acknowledged = True
+        return count
+
     def active_findings(self) -> list[AnomalyFinding]:
         return [f for f in self.findings if not f.acknowledged]
 
@@ -298,4 +370,7 @@ class AnomalyEngine:
 
     @staticmethod
     def _is_mesh_adapter(adapter_name: str) -> bool:
-        return any(x in adapter_name for x in ("meshtastic", "meshcore", "mesh"))
+        # APRS excluded: bots and internet digipeaters generate too much positional noise
+        if "aprs" in adapter_name.lower():
+            return False
+        return any(x in adapter_name for x in ("meshtastic", "meshcore", "mesh", "reticulum"))

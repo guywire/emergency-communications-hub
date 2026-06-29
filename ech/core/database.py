@@ -54,10 +54,11 @@ CREATE TABLE IF NOT EXISTS contacts (
 );
 
 CREATE TABLE IF NOT EXISTS users (
-    username    TEXT PRIMARY KEY,
-    pw_hash     TEXT NOT NULL,
-    role        TEXT NOT NULL DEFAULT 'operator',
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    username       TEXT PRIMARY KEY,
+    pw_hash        TEXT NOT NULL,
+    role           TEXT NOT NULL DEFAULT 'operator',
+    must_change_pw INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -133,6 +134,51 @@ CREATE TABLE IF NOT EXISTS broadcast_log (
     sent_at         TEXT NOT NULL,
     delivery_json   TEXT             -- {adapter: bool, ...}
 );
+
+CREATE TABLE IF NOT EXISTS qso_log (
+    id              TEXT PRIMARY KEY,
+    station_id      TEXT NOT NULL DEFAULT '1',
+    callsign        TEXT NOT NULL,
+    band            TEXT NOT NULL,
+    mode            TEXT NOT NULL,
+    freq_mhz        REAL,
+    sent_rst        TEXT NOT NULL DEFAULT '59',
+    rcvd_rst        TEXT NOT NULL DEFAULT '59',
+    sent_exch       TEXT NOT NULL DEFAULT '',
+    rcvd_exch       TEXT NOT NULL DEFAULT '',
+    notes           TEXT NOT NULL DEFAULT '',
+    timestamp       TEXT NOT NULL,
+    source          TEXT NOT NULL DEFAULT 'manual',
+    source_adapter  TEXT,
+    contest         TEXT NOT NULL DEFAULT 'GENERAL',
+    pota_ref        TEXT NOT NULL DEFAULT '',
+    sota_ref        TEXT NOT NULL DEFAULT '',
+    uploaded_qrz    INTEGER NOT NULL DEFAULT 0,
+    uploaded_clublog INTEGER NOT NULL DEFAULT 0,
+    uploaded_lotw   INTEGER NOT NULL DEFAULT 0,
+    uploaded_pota   INTEGER NOT NULL DEFAULT 0,
+    uploaded_sota   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_qso_timestamp ON qso_log (timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_qso_contest   ON qso_log (contest, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_qso_callsign  ON qso_log (callsign);
+
+CREATE TABLE IF NOT EXISTS hamlog_stations (
+    station_id TEXT PRIMARY KEY,
+    operator TEXT NOT NULL DEFAULT '',
+    band TEXT NOT NULL DEFAULT '20M',
+    mode TEXT NOT NULL DEFAULT 'PH',
+    last_seen TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS hamlog_chat (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    station_id TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    text TEXT NOT NULL
+);
 """
 
 
@@ -146,7 +192,32 @@ class Database:
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(SCHEMA)
         await self._db.commit()
+        await self._migrate()
         log.info("Database: connected (%s)", self._path)
+
+    async def _migrate(self) -> None:
+        # Add must_change_pw to users table if upgrading from older schema
+        try:
+            await self._db.execute("ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0")
+            await self._db.commit()
+        except Exception:
+            pass  # column already exists
+
+        new_qso_cols = [
+            ("name",     "TEXT NOT NULL DEFAULT ''"),
+            ("power",    "TEXT NOT NULL DEFAULT ''"),
+            ("state",    "TEXT NOT NULL DEFAULT ''"),
+            ("country",  "TEXT NOT NULL DEFAULT ''"),
+            ("county",   "TEXT NOT NULL DEFAULT ''"),
+            ("time_off", "TEXT NOT NULL DEFAULT ''"),
+            ("grid",     "TEXT NOT NULL DEFAULT ''"),
+        ]
+        for col, defn in new_qso_cols:
+            try:
+                await self._db.execute(f"ALTER TABLE qso_log ADD COLUMN {col} {defn}")
+                await self._db.commit()
+            except Exception:
+                pass  # column already exists
 
     async def close(self) -> None:
         if self._db:
@@ -156,6 +227,18 @@ class Database:
 
     async def save_message(self, msg: NormalizedMessage) -> None:
         import json
+        # Merge routing fields into raw_json so they survive the round-trip
+        raw = dict(msg.raw or {})
+        if msg.hop_count is not None:
+            raw["_hop_count"] = msg.hop_count
+        if msg.hop_start is not None:
+            raw["_hop_start"] = msg.hop_start
+        if msg.path:
+            raw["_path"] = msg.path
+        if msg.via_mqtt:
+            raw["_via_mqtt"] = True
+        if msg.msg_type and msg.msg_type != "text":
+            raw["_msg_type"] = msg.msg_type
         await self._db.execute(
             """
             INSERT OR IGNORE INTO messages
@@ -170,7 +253,7 @@ class Database:
                 msg.timestamp.isoformat(),
                 int(msg.priority),
                 msg.lat, msg.lon,
-                json.dumps(msg.raw) if msg.raw else None,
+                json.dumps(raw) if raw else None,
             ),
         )
         await self._db.commit()
@@ -182,6 +265,7 @@ class Database:
         adapter: str | None = None,
         since: str | None = None,
         priority_min: int | None = None,
+        from_id: str | None = None,
     ) -> list[dict]:
         clauses, params = [], []
         if adapter:
@@ -193,6 +277,9 @@ class Database:
         if priority_min is not None:
             clauses.append("priority >= ?")
             params.append(priority_min)
+        if from_id:
+            clauses.append("from_id = ?")
+            params.append(from_id)
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params += [limit, offset]
@@ -202,12 +289,55 @@ class Database:
             params,
         ) as cur:
             rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        import json as _json
+        result = []
+        for r in rows:
+            row = dict(r)
+            # Extract routing fields saved by save_message
+            raw = _json.loads(row.get("raw_json") or "{}")
+            row["hop_count"]        = raw.pop("_hop_count", None)
+            row["hop_start"]        = raw.pop("_hop_start", None)
+            row["path"]             = raw.pop("_path", None)
+            row["via_mqtt"]         = bool(raw.pop("_via_mqtt", False))
+            row["delivery_status"]  = raw.pop("_delivery_status", None)
+            row["delivery_path"]    = raw.pop("_delivery_path", None)
+            row["msg_type"]         = raw.pop("_msg_type", "text")
+            result.append(row)
+        return result
+
+    async def update_delivery_status(self, msg_id: str, status: str,
+                                      path: list | None = None) -> None:
+        """Persist delivery status (and optional relay path) into raw_json."""
+        import json as _json
+        async with self._db.execute(
+            "SELECT raw_json FROM messages WHERE id = ?", (msg_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return
+        raw = _json.loads(row[0] or "{}")
+        raw["_delivery_status"] = status
+        if path is not None:
+            raw["_delivery_path"] = path
+        await self._db.execute(
+            "UPDATE messages SET raw_json = ? WHERE id = ?",
+            (_json.dumps(raw), msg_id),
+        )
+        await self._db.commit()
 
     async def message_count(self) -> int:
         async with self._db.execute("SELECT COUNT(*) FROM messages") as cur:
             row = await cur.fetchone()
         return row[0]
+
+    async def clear_messages(self) -> int:
+        async with self._db.execute("SELECT COUNT(*) FROM messages") as cur:
+            row = await cur.fetchone()
+        count = row[0]
+        await self._db.execute("DELETE FROM messages")
+        await self._db.commit()
+        log.info("Database: cleared %d messages", count)
+        return count
 
     # ── Contacts ──────────────────────────────────────────────────────────
 
@@ -326,16 +456,23 @@ class Database:
         return dict(row) if row else None
 
     async def upsert_user(self, user: dict) -> None:
-        from datetime import datetime, timezone
+        must_change = 1 if user.get("must_change_pw") else 0
         await self._db.execute(
-            "INSERT INTO users(username,pw_hash,role,created_at) VALUES(:username,:pw_hash,:role,datetime('now')) "
-            "ON CONFLICT(username) DO UPDATE SET pw_hash=excluded.pw_hash, role=excluded.role",
-            user
+            "INSERT INTO users(username,pw_hash,role,must_change_pw,created_at) "
+            "VALUES(:username,:pw_hash,:role,:must_change_pw,datetime('now')) "
+            "ON CONFLICT(username) DO UPDATE SET pw_hash=excluded.pw_hash, role=excluded.role, "
+            "must_change_pw=excluded.must_change_pw",
+            {**user, "must_change_pw": must_change},
         )
         await self._db.commit()
 
     async def update_user_password(self, username: str, pw_hash: str) -> None:
-        await self._db.execute("UPDATE users SET pw_hash=? WHERE username=?", (pw_hash, username))
+        await self._db.execute(
+            "UPDATE users SET pw_hash=?, must_change_pw=0 WHERE username=?",
+            (pw_hash, username),
+        )
+        # SEC-06: invalidate all existing sessions so old credentials stop working
+        await self._db.execute("DELETE FROM sessions WHERE username=?", (username,))
         await self._db.commit()
 
     async def delete_user(self, username: str) -> None:
@@ -359,6 +496,22 @@ class Database:
     async def delete_session(self, token: str) -> None:
         await self._db.execute("DELETE FROM sessions WHERE token=?", (token,))
         await self._db.commit()
+
+    async def delete_sessions_for_user(self, username: str) -> int:
+        """Revoke all active sessions for a user. Returns number of rows deleted."""
+        cur = await self._db.execute("DELETE FROM sessions WHERE username=?", (username,))
+        await self._db.commit()
+        return cur.rowcount
+
+    async def get_active_sessions(self) -> list[dict]:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        async with self._db.execute(
+            "SELECT username, role, expires FROM sessions WHERE expires > ? ORDER BY username",
+            (now,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
 
     # ── Simulation ────────────────────────────────────────────────────────
 
@@ -431,6 +584,152 @@ class Database:
                 rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
-    async def execute_raw(self, sql: str, params: tuple = ()) -> None:
-        await self._db.execute(sql, params)
+    async def execute_raw(self, sql: str, params: tuple = ()) -> int:
+        """Execute a raw SQL statement and return the number of rows affected."""
+        cur = await self._db.execute(sql, params)
         await self._db.commit()
+        return cur.rowcount
+
+    # ── QSO log ───────────────────────────────────────────────────────────
+
+    async def save_qso(self, qso: dict) -> None:
+        await self._db.execute(
+            """INSERT INTO qso_log
+               (id, station_id, callsign, band, mode, freq_mhz,
+                sent_rst, rcvd_rst, sent_exch, rcvd_exch, notes,
+                timestamp, source, source_adapter, contest, pota_ref, sota_ref,
+                name, power, state, country, county, time_off, grid)
+               VALUES
+               (:id, :station_id, :callsign, :band, :mode, :freq_mhz,
+                :sent_rst, :rcvd_rst, :sent_exch, :rcvd_exch, :notes,
+                :timestamp, :source, :source_adapter, :contest, :pota_ref, :sota_ref,
+                :name, :power, :state, :country, :county, :time_off, :grid)""",
+            qso,
+        )
+        await self._db.commit()
+
+    async def get_qsos(
+        self,
+        contest: str | None = None,
+        limit: int = 1000,
+        since: str | None = None,
+        source: str | None = None,
+    ) -> list[dict]:
+        clauses = []
+        params: list = []
+        if contest:
+            clauses.append("contest = ?")
+            params.append(contest)
+        if since:
+            clauses.append("timestamp >= ?")
+            params.append(since)
+        if source:
+            clauses.append("source = ?")
+            params.append(source)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        async with self._db.execute(
+            f"SELECT * FROM qso_log {where} ORDER BY timestamp DESC LIMIT ?",
+            params,
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def delete_qso(self, qso_id: str) -> bool:
+        cur = await self._db.execute("DELETE FROM qso_log WHERE id = ?", (qso_id,))
+        await self._db.commit()
+        return cur.rowcount > 0
+
+    async def update_qso(self, qso_id: str, fields: dict) -> dict | None:
+        allowed = {
+            "callsign", "band", "mode", "freq_mhz",
+            "sent_rst", "rcvd_rst", "sent_exch", "rcvd_exch",
+            "notes", "timestamp", "station_id", "pota_ref", "sota_ref",
+            "name", "power", "state", "country", "county", "time_off", "grid",
+        }
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            async with self._db.execute(
+                "SELECT * FROM qso_log WHERE id = ?", (qso_id,)
+            ) as cur:
+                row = await cur.fetchone()
+            return dict(row) if row else None
+        set_clause = ", ".join(f"{k} = :{k}" for k in updates)
+        updates["_id"] = qso_id
+        await self._db.execute(
+            f"UPDATE qso_log SET {set_clause} WHERE id = :_id", updates
+        )
+        await self._db.commit()
+        async with self._db.execute(
+            "SELECT * FROM qso_log WHERE id = ?", (qso_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def mark_qso_uploaded(self, qso_id: str, service: str) -> None:
+        col_map = {
+            "qrz": "uploaded_qrz",
+            "clublog": "uploaded_clublog",
+            "lotw": "uploaded_lotw",
+            "pota": "uploaded_pota",
+            "sota": "uploaded_sota",
+        }
+        col = col_map.get(service)
+        if col:
+            await self._db.execute(
+                f"UPDATE qso_log SET {col} = 1 WHERE id = ?", (qso_id,)
+            )
+            await self._db.commit()
+
+    async def get_qso_count(self, contest: str | None = None) -> int:
+        where = "WHERE contest = ?" if contest else ""
+        params = (contest,) if contest else ()
+        async with self._db.execute(
+            f"SELECT COUNT(*) FROM qso_log {where}", params
+        ) as cur:
+            row = await cur.fetchone()
+        return row[0] if row else 0
+
+    # ── Hamlog stations ───────────────────────────────────────────────────────
+
+    async def upsert_station(self, station_id: str, operator: str, band: str, mode: str) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        await self._db.execute(
+            """INSERT INTO hamlog_stations (station_id, operator, band, mode, last_seen)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(station_id) DO UPDATE SET
+                   operator=excluded.operator, band=excluded.band,
+                   mode=excluded.mode, last_seen=excluded.last_seen""",
+            (station_id, operator, band, mode, now),
+        )
+        await self._db.commit()
+        return {"station_id": station_id, "operator": operator, "band": band, "mode": mode, "last_seen": now}
+
+    async def get_stations(self, active_minutes: int = 5) -> list[dict]:
+        async with self._db.execute(
+            """SELECT * FROM hamlog_stations
+               WHERE last_seen >= datetime('now', ?)
+               ORDER BY last_seen DESC""",
+            (f"-{active_minutes} minutes",),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Hamlog chat ───────────────────────────────────────────────────────────
+
+    async def save_chat_msg(self, station_id: str, operator: str, text: str) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        cur = await self._db.execute(
+            "INSERT INTO hamlog_chat (timestamp, station_id, operator, text) VALUES (?, ?, ?, ?)",
+            (now, station_id, operator, text),
+        )
+        await self._db.commit()
+        return {"id": cur.lastrowid, "timestamp": now, "station_id": station_id, "operator": operator, "text": text}
+
+    async def get_chat_msgs(self, since_id: int = 0, limit: int = 200) -> list[dict]:
+        async with self._db.execute(
+            "SELECT * FROM hamlog_chat WHERE id > ? ORDER BY id ASC LIMIT ?",
+            (since_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]

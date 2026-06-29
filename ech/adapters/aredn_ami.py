@@ -54,22 +54,35 @@ DEFAULT_EVENTS = {
 class AREDNAMIAdapter(Adapter):
     """
     Asterisk AMI event monitor for AREDN mesh PBX.
-    Read-only by default — surfaces call events as messages.
+    Surfaces call events as messages and supports click-to-call / page.
     """
 
     def __init__(self, config: dict):
         super().__init__(config)
-        self.name       = config.get("name", "aredn-pbx")
-        self._host      = config["host"]
-        self._port      = int(config.get("port", 5038))
-        self._username  = config["username"]
-        self._secret    = config["secret"]
-        self._events    = set(config.get("events", DEFAULT_EVENTS))
+        self.name            = config.get("name", "aredn-pbx")
+        self._host           = config.get("host", "127.0.0.1")
+        self._port           = int(config.get("port", 5038))
+        self._username       = config.get("username", "admin")
+        self._secret         = config.get("secret", "")
+        self._events         = set(config.get("events", DEFAULT_EVENTS))
+        self._local_ext      = str(config.get("local_extension", config.get("local_ext", "101")))
+        self._page_target    = config.get("page_target", "")
+        self._page_method    = config.get("page_method", "app")
+        self._page_extension = config.get("page_extension", "")
+        self._context        = config.get("context", "from-internal")
+        self._caller_id      = config.get("caller_id", "ECH <100>")
+        self._screen_url     = config.get("screen_push_url", "")
+        self._screen_user    = config.get("screen_push_user", "")
+        self._screen_pass    = config.get("screen_push_pass", "")
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._run_task: asyncio.Task | None = None
-        self._call_count = 0
+        self._call_count  = 0
         self._pbx_version = ""
+        self._active_calls: dict[str, dict] = {}
+        self._call_log: list[dict] = []
+        self._packet_log: list[dict] = []
+        self._action_counter = 0
 
     async def connect(self) -> None:
         log.info("AREDN AMI %s: connecting to %s:%d", self.name, self._host, self._port)
@@ -158,15 +171,45 @@ class AREDNAMIAdapter(Adapter):
                 self._connected = False
 
     async def _surface_event(self, event_type: str, event: dict) -> None:
-        """Convert an AMI event to a NormalizedMessage."""
+        """Convert an AMI event to a NormalizedMessage and track active calls."""
+        import time as _time
+        # Log raw AMI event for diagnostics
+        self._packet_log.append({
+            "dir": "rx", "type": event_type,
+            "fields": dict(event), "ts": _time.time(),
+        })
+        if len(self._packet_log) > 200:
+            self._packet_log = self._packet_log[-200:]
+        import time as _time
         self._call_count += 1
-        channel   = event.get("Channel", "")
-        caller_id = event.get("CallerIDNum", "") or event.get("CallerID", "")
+        channel     = event.get("Channel", "")
+        caller_id   = event.get("CallerIDNum", "") or event.get("CallerID", "")
         caller_name = event.get("CallerIDName", caller_id)
-        exten     = event.get("Exten", "") or event.get("Extension", "")
-        context   = event.get("Context", "")
+        exten       = event.get("Exten", "") or event.get("Extension", "")
+        uid         = event.get("Uniqueid", channel)
 
-        # Build human-readable summary
+        # Track active calls
+        if event_type == "Newchannel":
+            self._active_calls[uid] = {
+                "uid": uid, "channel": channel, "callerid": caller_id,
+                "exten": exten, "direction": "inbound", "start": _time.monotonic(),
+            }
+        elif event_type == "Hangup":
+            call = self._active_calls.pop(uid, None)
+            if call:
+                duration = int(_time.monotonic() - call["start"])
+                answered = duration > 2
+                rec = {
+                    "call_uid": uid, "callerid": caller_id, "exten": exten,
+                    "direction": "inbound", "duration_s": duration,
+                    "status": "answered" if answered else "missed",
+                    "cause": event.get("Cause-txt", event.get("Cause", "")),
+                }
+                self._call_log.insert(0, rec)
+                if len(self._call_log) > 50:
+                    self._call_log = self._call_log[:50]
+
+        # Build human-readable body
         if event_type == "Newchannel":
             body = f"📞 INCOMING: {caller_name} ({caller_id}) → ext {exten}"
         elif event_type == "Answer":
@@ -189,10 +232,9 @@ class AREDNAMIAdapter(Adapter):
             body = f"PBX {event_type}: {caller_name or channel}"
 
         priority = Priority.ELEVATED if event_type == "Newchannel" else Priority.NORMAL
-
         nm = NormalizedMessage(
             source_adapter=self.name,
-            source_channel=f"AREDN PBX",
+            source_channel="AREDN PBX",
             from_id=caller_id or channel,
             from_display=caller_name or caller_id or channel,
             body=body,
@@ -206,8 +248,10 @@ class AREDNAMIAdapter(Adapter):
 
     async def _send_action(self, fields: dict) -> None:
         """Send an AMI action block."""
+        self._action_counter += 1
+        hdr   = f"ActionID: ech-{self._action_counter}\r\n"
         lines = "\r\n".join(f"{k}: {v}" for k, v in fields.items())
-        self._writer.write((lines + "\r\n\r\n").encode())
+        self._writer.write((hdr + lines + "\r\n\r\n").encode())
         await self._writer.drain()
 
     async def _read_response(self) -> dict:
@@ -223,12 +267,106 @@ class AREDNAMIAdapter(Adapter):
                 fields[key.strip()] = val.strip()
         return fields
 
+    # ── PBX actions ───────────────────────────────────────────────────────
+
+    async def originate(self, destination: str, caller_extension: str | None = None) -> bool:
+        """Click-to-call: ring local extension, then bridge to destination."""
+        if not self._connected or not self._writer:
+            return False
+        src = caller_extension or self._local_ext
+        if not destination.startswith(("SIP/", "PJSIP/")):
+            await self._send_action({
+                "Action":   "Originate",
+                "Channel":  f"SIP/{src}",
+                "Context":  self._context,
+                "Exten":    destination,
+                "Priority": "1",
+                "CallerID": self._caller_id,
+                "Timeout":  "30000",
+                "Async":    "true",
+            })
+        else:
+            await self._send_action({
+                "Action":      "Originate",
+                "Channel":     f"SIP/{src}",
+                "Application": "Dial",
+                "Data":        destination,
+                "CallerID":    self._caller_id,
+                "Timeout":     "30000",
+                "Async":       "true",
+            })
+        log.info("AMI Originate: %s → %s", src, destination)
+        return True
+
+    async def page(self, target: str | None = None) -> bool:
+        """Page / announce to one or more extensions simultaneously."""
+        if not self._connected or not self._writer:
+            return False
+        dest = target or self._page_target or f"SIP/{self._local_ext}"
+        if self._page_method == "exten" and self._page_extension:
+            await self._send_action({
+                "Action":   "Originate",
+                "Channel":  f"SIP/{self._local_ext}",
+                "Context":  self._context,
+                "Exten":    self._page_extension,
+                "Priority": "1",
+                "CallerID": self._caller_id,
+                "Timeout":  "30000",
+                "Async":    "true",
+            })
+        else:
+            await self._send_action({
+                "Action":      "Originate",
+                "Channel":     "Local/s@default",
+                "Application": "Page",
+                "Data":        dest,
+                "CallerID":    self._caller_id,
+                "Timeout":     "30000",
+                "Async":       "true",
+            })
+        log.info("AMI Page: dest=%s", dest)
+        return True
+
+    async def push_to_screen(self, text: str) -> bool:
+        if not self._screen_url:
+            return False
+        try:
+            import urllib.request, urllib.parse, base64
+            xml  = f"<YealinkIPPhoneTextScreen><Title>ECH</Title><Text>{text[:100]}</Text></YealinkIPPhoneTextScreen>"
+            data = f"XML={urllib.parse.quote(xml)}".encode()
+            req  = urllib.request.Request(self._screen_url, data=data, method="POST")
+            if self._screen_user:
+                creds = base64.b64encode(f"{self._screen_user}:{self._screen_pass}".encode()).decode()
+                req.add_header("Authorization", f"Basic {creds}")
+            urllib.request.urlopen(req, timeout=3)
+            return True
+        except Exception as exc:
+            log.debug("Screen push failed: %s", exc)
+            return False
+
+    def xml_directory(self, contacts: list[dict]) -> str:
+        items = "\n".join(
+            f'  <DirectoryEntry><Name>{c.get("display_name","")}</Name>'
+            f'<Telephone>{c.get("aprs_callsign") or c.get("node_id","")}</Telephone></DirectoryEntry>'
+            for c in contacts[:200]
+        )
+        return f'<?xml version="1.0" encoding="UTF-8"?>\n<YealinkIPPhoneDirectory>\n{items}\n</YealinkIPPhoneDirectory>'
+
+    def recent_calls(self) -> list[dict]:
+        return list(self._call_log)
+
+    def active_calls(self) -> list[dict]:
+        return list(self._active_calls.values())
+
     def _health_detail(self) -> dict:
         return {
-            "host": f"{self._host}:{self._port}",
-            "pbx_version": self._pbx_version,
-            "call_events": self._call_count,
+            "host":             f"{self._host}:{self._port}",
+            "pbx_version":      self._pbx_version,
+            "call_events":      self._call_count,
             "monitored_events": len(self._events),
+            "active_calls":     len(self._active_calls),
+            "recent_calls":     len(self._call_log),
+            "local_ext":        self._local_ext,
         }
 
 
@@ -270,7 +408,7 @@ class MockAREDNAMIAdapter(Adapter):
         ]
         try:
             while self._connected:
-                if getattr(self, '_paused', False):
+                if self.is_paused():
                     await asyncio.sleep(1.0)
                     continue
                 await asyncio.sleep(self._interval + random.uniform(-15, 15))
