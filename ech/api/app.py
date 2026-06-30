@@ -123,6 +123,19 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
 
         return await call_next(request)
 
+    @app.middleware("http")
+    async def security_headers_middleware(request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        if secure_cookies:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                "max-age=63072000; includeSubDomains"
+            )
+        return response
+
     # ── Static files ──────────────────────────────────────────────────────
     static_dir = UI_DIR / "static"
     if static_dir.exists():
