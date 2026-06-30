@@ -197,13 +197,9 @@ class MeshBot:
             return
         if self._adapter_filter and msg.source_adapter not in self._adapter_filter:
             return
-        if self._channels != ["*"]:
-            ch = (msg.source_channel or "").lower()
-            # DMs always pass through regardless of channel filter — the filter
-            # is meant to restrict which *channel broadcasts* the bot listens to,
-            # not to block messages addressed directly to this node.
-            if ch != "dm" and not any(want.lstrip("#") in ch for want in self._channels):
-                return
+        # DM-only: ignore channel broadcasts entirely
+        if (msg.source_channel or "").upper() != "DM":
+            return
 
         m = _CMD_RE.search(msg.body)
         if not m:
@@ -253,32 +249,16 @@ class MeshBot:
             return
         body = text[:self._max_len]
         from_id = msg.from_id or ""
-        is_incoming_dm = (msg.source_channel or "").upper() == "DM"
-
-        # Only DM when we have a valid hex node ID.  Polled channel messages
-        # may carry a display name (e.g. "W1ABC") instead of a pubkey hex;
-        # trying to DM those fails and we must fall back to a channel reply.
-        can_dm = bool(_HEX_NODE_RE.match(from_id))
-
-        if (self._reply_dm or is_incoming_dm) and can_dm:
-            to_id: str | None = from_id
-            raw_hint: dict = {}
-        else:
-            # Channel reply — tell the adapter which channel to use so the
-            # reply goes back to the same channel the question came from.
-            to_id = None
-            ch_idx = _parse_channel_idx(msg.source_channel)
-            raw_hint = {"channel_idx": ch_idx} if ch_idx is not None else {}
-
+        # Reply as DM back to the sender.  from_id for a real DM is always
+        # the sender's pubkey hex (set by _handle_contact_msg).
+        to_id: str | None = from_id if _HEX_NODE_RE.match(from_id) else None
         await self._router.send(
             body=body,
             adapter_names=[msg.source_adapter],
             to_id=to_id,
-            raw=raw_hint,
             priority=Priority.NORMAL,
         )
-        log.info("MeshBot: replied to %s/%s (ch=%s): %s",
-                 msg.source_adapter, from_id[:12], msg.source_channel, body[:60])
+        log.info("MeshBot: DM reply to %s/%s: %s", msg.source_adapter, from_id[:12], body[:60])
 
     # ── Command handlers ──────────────────────────────────────────────────────
 
