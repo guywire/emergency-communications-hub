@@ -51,6 +51,7 @@ class GpsReader:
         self._task: asyncio.Task | None = None
         self._last_fix_time: float = 0.0
         self._last_sync_attempt: float = 0.0   # monotonic time of last sync attempt
+        self._sync_fail_count: int = 0          # give up after 3 failures
         self._fix: dict | None = None       # most recent valid fix
         self._error: str | None = None      # last error string (for status)
         self._time_synced = False
@@ -212,11 +213,23 @@ class GpsReader:
             _, stderr = await result.communicate()
             if result.returncode == 0:
                 self._time_synced = True
+                self._sync_fail_count = 0
                 log.info("GPS: system clock synced to %s UTC", date_arg)
             else:
-                log.warning("GPS: clock sync failed: %s", stderr.decode().strip())
+                self._sync_fail_count += 1
+                msg = stderr.decode().strip()
+                if self._sync_fail_count >= 3:
+                    self._time_synced = True  # give up — system likely has NTP
+                    log.warning("GPS: clock sync failed 3 times (%s) — giving up, NTP will handle it", msg)
+                else:
+                    log.warning("GPS: clock sync failed (%d/3): %s", self._sync_fail_count, msg)
         except Exception as exc:
-            log.warning("GPS: clock sync error: %s", exc)
+            self._sync_fail_count += 1
+            if self._sync_fail_count >= 3:
+                self._time_synced = True
+                log.warning("GPS: clock sync error, giving up: %s", exc)
+            else:
+                log.warning("GPS: clock sync error (%d/3): %s", self._sync_fail_count, exc)
 
 
 # ── NMEA coordinate helpers ────────────────────────────────────────────────────

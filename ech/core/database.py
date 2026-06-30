@@ -564,12 +564,21 @@ class Database:
 
     # ── Log entries ───────────────────────────────────────────────────────
 
+    _log_insert_count: int = 0
+
     async def save_log_entry(self, level: str, logger: str, message: str) -> None:
         from datetime import datetime, timezone
         await self._db.execute(
             "INSERT INTO log_entries(timestamp,level,logger,message) VALUES(?,?,?,?)",
             (datetime.now(timezone.utc).isoformat(), level, logger, message[:1000])
         )
+        self._log_insert_count += 1
+        # Rotate every 200 inserts — keep only the newest 5000 rows
+        if self._log_insert_count % 200 == 0:
+            await self._db.execute(
+                "DELETE FROM log_entries WHERE rowid NOT IN "
+                "(SELECT rowid FROM log_entries ORDER BY rowid DESC LIMIT 5000)"
+            )
         await self._db.commit()
 
     async def get_log_entries(self, limit: int = 500, level: str | None = None) -> list[dict]:

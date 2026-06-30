@@ -296,6 +296,8 @@ class MeshCoreAdapter(Adapter):
         # 0 = device default. Set to 3 for typical local mesh (reduces network load).
         self._max_hops           = int(config.get("max_hops", 0))
         self._contacts_refresh_pending = False   # set when new nodes need name resolution
+        self._contacts_last_refresh = 0.0        # monotonic timestamp of last GET_CONTACTS
+        self._contacts_min_interval = 120.0      # min seconds between triggered refreshes
         self._transport_type = config.get("transport", "serial")
 
         self._transport: MeshCoreTransport = self._make_transport(config)
@@ -832,11 +834,16 @@ class MeshCoreAdapter(Adapter):
                     await self._send_cmd(bytes([CMD_GET_BATTERY]))
                     last_battery_poll = now
 
-                # Quick contacts refresh when a new unrecognized node was heard
-                if self._contacts_refresh_pending:
+                # Triggered contacts refresh — rate-limited to once per 2 minutes
+                import time as _time_mod
+                if (self._contacts_refresh_pending
+                        and _time_mod.monotonic() - self._contacts_last_refresh >= self._contacts_min_interval):
                     self._contacts_refresh_pending = False
+                    self._contacts_last_refresh = _time_mod.monotonic()
                     await self._send_cmd(bytes([CMD_GET_CONTACTS]))
                     await asyncio.sleep(0.2)
+                elif self._contacts_refresh_pending:
+                    pass  # too soon — wait for cooldown
 
                 # Expire stale nodes (not heard from in > 1 hour)
                 if now - last_expiry >= 300.0:
@@ -944,8 +951,8 @@ class MeshCoreAdapter(Adapter):
                         n.lat = lat
                     if lon is not None:
                         n.lon = lon
-                log.info("MeshCore %s: contact %s = %r lat=%s lon=%s",
-                         self.name, node_id, adv_name, lat, lon)
+                log.debug("MeshCore %s: contact %s = %r lat=%s lon=%s",
+                          self.name, node_id, adv_name, lat, lon)
             else:
                 log.warning("MeshCore %s: CONTACT too short (%dB, need %d)", self.name, len(data), min_len)
 
