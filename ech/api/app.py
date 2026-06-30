@@ -127,7 +127,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
     async def security_headers_middleware(request, call_next):
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'self'")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         if secure_cookies:
             response.headers.setdefault(
