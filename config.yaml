@@ -25,12 +25,15 @@ database:
 # Setup:
 #   1. Set enabled: true, restart ECH.
 #   2. Browse to http://<ip>:8765/ca.crt and trust the CA in your OS/browser.
-#   3. Connect to https://<ip>:8766 — Ham Log now shows "🔌 Connect Radio".
+#   3. Connect to https://<ip>:8443 — Ham Log now shows "🔌 Connect Radio".
 #   4. Optional: install zeroconf  (pip install zeroconf)  for ech.local mDNS.
+#
+# NOTE: port 8766 is reserved for the simulation instance (ech-sim.service).
+#       Use 8443 (or any other free port) for HTTPS.
 #
 # tls:
 #   enabled: false
-#   https_port: 8766        # HTTPS port alongside HTTP on 8765
+#   https_port: 8443        # HTTPS port alongside HTTP on 8765 (NOT 8766 — sim uses that)
 #   data_dir: "."           # where ech-ca.crt/key and ech-server.crt/key live
 
 # ── System GPS (optional) ─────────────────────────────────────────────────────

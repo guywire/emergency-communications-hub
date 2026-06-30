@@ -120,6 +120,16 @@ class AnomalyEngine:
         self._ducting_range_km     = float(cfg.get("ducting_range_km", 100))
         self._auto_broadcast       = bool(cfg.get("broadcast_on_alert", False))
 
+        # Base position for distance checks — prefer anomaly_detection.base_lat/lon,
+        # fall back to weather_service.nws_lat/lon (same coords operators already set)
+        wx = config.get("weather_service", {})
+        self._base_lat: float | None = cfg.get("base_lat") or wx.get("nws_lat")
+        self._base_lon: float | None = cfg.get("base_lon") or wx.get("nws_lon")
+        self._long_range_km = float(cfg.get("long_range_km", 300))
+        # Track which nodes have already triggered a long-range finding so we
+        # don't spam it on every position packet from the same distant node.
+        self._long_range_noted: set[tuple] = set()
+
         self._db = db
 
         # Per-node state: keyed by (adapter, node_id)
@@ -268,6 +278,33 @@ class AnomalyEngine:
                     f"Node appeared at hop_count=0 with position on first contact — "
                     f"possible MQTT injection rather than direct RF",
                     {"hop_count": hop_count, "lat": lat, "lon": lon, "snr": snr},
+                )
+                new_findings.append(f)
+
+        # ── RULE: long-range contact ──────────────────────────────────────
+        # Fire once per node when it first appears beyond the threshold.
+        # Explains why packets are arriving from hundreds of miles away:
+        # almost always MQTT bridging; occasionally extreme propagation.
+        if (lat is not None and lon is not None
+                and self._base_lat is not None and self._base_lon is not None
+                and key not in self._long_range_noted):
+            dist_km = _haversine_km(self._base_lat, self._base_lon, lat, lon)
+            if dist_km > self._long_range_km:
+                self._long_range_noted.add(key)
+                if msg.via_mqtt:
+                    reason = "confirmed MQTT-bridged (viaMqtt flag set)"
+                elif (hop_count or 0) == 0:
+                    reason = "hop_count=0 suggests MQTT bridge or direct internet relay"
+                else:
+                    reason = (f"{hop_count} RF hop{'s' if hop_count != 1 else ''} — "
+                              f"possible MQTT bridge, multi-hop relay, or exceptional propagation")
+                dist_mi = dist_km * 0.621371
+                f = self._make_finding(
+                    msg, "long_range_contact", Severity.INFO,
+                    f"Contact {dist_km:.0f}km ({dist_mi:.0f}mi) away — {reason}",
+                    {"distance_km": round(dist_km, 1), "distance_mi": round(dist_mi, 1),
+                     "lat": lat, "lon": lon, "hop_count": hop_count,
+                     "via_mqtt": msg.via_mqtt, "snr": snr},
                 )
                 new_findings.append(f)
 
