@@ -2105,7 +2105,7 @@ function _renderNodeCards(nodes, totalCount) {
   el.innerHTML = nodes.map(n => {
     const batt = (n.battery_level != null && !isNaN(n.battery_level)) ? parseInt(n.battery_level) : null;
     const battClass = batt != null ? (batt < 20 ? 'critical' : batt < 40 ? 'low' : '') : '';
-    const adapterLabel = n._adapter?.includes('meshcore') ? 'MCC' : n._adapter?.includes('aprs') ? 'APRS' : 'MESH';
+    const adapterLabel = n._adapter?.includes('meshcore') ? 'MSHC' : n._adapter?.includes('aprs') ? 'APRS' : 'MSHT';
     const adapterColor = n._adapter?.includes('meshcore') ? 'var(--meshcore)' : n._adapter?.includes('aprs') ? 'var(--aprs,#ff9900)' : 'var(--mesh)';
     const heardMs = n.last_heard ? _now - new Date(n.last_heard) : Infinity;
     const agoStr  = _agoStr(n.last_heard);
@@ -2324,8 +2324,8 @@ async function importContacts(input) {
 // Maps adapter name patterns to display config
 function adapterMeta(name) {
   const n = name.toLowerCase();
-  if (n.includes('meshtastic')) return {icon:'MESH', label:'Meshtastic', cls:'mesh', toggle:'MESH'};
-  if (n.includes('meshcore'))   return {icon:'MCC',  label:'MeshCore',   cls:'meshc',toggle:'MCC'};
+  if (n.includes('meshtastic')) return {icon:'MSHT', label:'Meshtastic', cls:'mesh', toggle:'MSHT'};
+  if (n.includes('meshcore'))   return {icon:'MSHC', label:'MeshCore',   cls:'meshc',toggle:'MSHC'};
   if (n.includes('aprs'))       return {icon:'APRS', label:'APRS',       cls:'aprs', toggle:'APRS'};
   if (n.includes('js8') || n.includes('hf')) return {icon:'HF', label:'JS8Call HF', cls:'hf', toggle:'HF'};
   if (n.includes('sms'))        return {icon:'SMS',  label:'SMS',        cls:'sms',  toggle:'SMS'};
