@@ -1256,25 +1256,22 @@ class MeshCoreAdapter(Adapter):
 
         if pkt_type == PUSH_CHANNEL_MSG:
             # Real-time push — contains sender pubkey.
-            # Wire format (v1.15 companion protocol):
-            #   byte 0:      SNR (signed int8)
-            #   bytes 1-6:   sender pubkey prefix (6 bytes)
-            #   byte 7:      channel_idx
-            #   byte 8:      txt_type
-            #   byte 9:      path_len (hop count)
-            #   bytes 10-13: timestamp (uint32le)
-            #   bytes 14+:   message text
-            if len(data) < 14:
+            # Confirmed wire format from v1.15 live captures (project_meshcore_protocol.md):
+            #   byte 0:     channel_idx
+            #   bytes 1-6:  sender pubkey prefix (6 bytes)
+            #   byte 7:     path_len (hop count; cap at 16)
+            #   byte 8:     txt_type
+            #   bytes 9-12: timestamp uint32le (device clock)
+            #   bytes 13+:  message body (may be AES-encrypted)
+            if len(data) < 13:
                 log.debug("MeshCore %s: 0x88 too short (%d bytes)", self.name, len(data))
                 return
-            snr_byte = data[0]
-            snr = (snr_byte if snr_byte < 128 else snr_byte - 256) / 4.0
+            ch_idx = data[0]
             sender_hex = data[1:7].hex().upper()
-            ch_idx = data[7]
+            path_len_raw = data[7]
             # data[8] = txt_type (unused for display)
-            path_len_raw = data[9]
-            ts_raw = struct.unpack("<I", data[10:14])[0]
-            raw_payload = data[14:]
+            ts_raw = struct.unpack("<I", data[9:13])[0]
+            raw_payload = data[13:]
             sane_hops = (path_len_raw & 0x3F) if path_len_raw != 255 else None
             if sane_hops is not None and sane_hops > 16:
                 sane_hops = None
