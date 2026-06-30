@@ -50,9 +50,9 @@ NWS_BASE       = "https://api.weather.gov"
 NOMINATIM_URL  = "https://nominatim.openstreetmap.org/search"
 HAMQSL_URL     = "https://www.hamqsl.com/solarxml.php"
 CELESTRAK_URLS = {
-    "stations": "https://celestrak.org/GROP/TLE/stations.txt",
-    "noaa":     "https://celestrak.org/GROP/TLE/noaa.txt",
-    "weather":  "https://celestrak.org/GROP/TLE/weather.txt",
+    "stations": "https://celestrak.org/GP/TLE/stations.txt",
+    "noaa":     "https://celestrak.org/GP/TLE/noaa.txt",
+    "weather":  "https://celestrak.org/GP/TLE/weather.txt",
 }
 USER_AGENT = "(ECH Emergency Communications Hub, ech@emergency.local)"
 
