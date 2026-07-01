@@ -426,7 +426,14 @@ class MeshBot:
         if lat is None or lon is None:
             return "overhead: observer position not set (set base location in Settings or mesh_bot.lat/lon in config)"
         try:
-            text = await asyncio.to_thread(self._read_dump1090)
+            if self._dump1090.startswith("http://") or self._dump1090.startswith("https://"):
+                client = self._client
+                assert client is not None
+                r = await client.get(self._dump1090, timeout=8.0)
+                r.raise_for_status()
+                text = r.text
+            else:
+                text = await asyncio.to_thread(self._read_dump1090)
         except FileNotFoundError:
             return f"overhead: {self._dump1090} not found (is dump1090 running?)"
         except Exception as exc:
