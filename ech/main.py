@@ -150,7 +150,7 @@ def build_adapter(cfg: dict):
     return instance
 
 
-async def run(config: dict) -> None:
+async def run(config: dict, config_path: str = "config.yaml") -> None:
     from ech.core.database import Database
     from ech.core.router import Router
     from ech.api.app import create_app
@@ -289,7 +289,8 @@ async def run(config: dict) -> None:
                      auth=auth, ech_state=state, mc_bridge=mc_bridge,
                      gps_reader=gps_reader, secure_cookies=secure_cookies,
                      cat_ctrl=cat_ctrl if 'cat_ctrl' in dir() else None,
-                     ca_cert_pem=_ca_cert_pem)
+                     ca_cert_pem=_ca_cert_pem,
+                     config_path=config_path)
 
     # Build server list: always HTTP, optionally HTTPS on a second port
     _servers: list[uvicorn.Server] = []
@@ -349,7 +350,7 @@ def main():
                         help="Path to config.yaml (default: ./config.yaml)")
     args = parser.parse_args()
     config = load_config(args.config)
-    asyncio.run(run(config))
+    asyncio.run(run(config, config_path=args.config))
 
 
 if __name__ == "__main__":

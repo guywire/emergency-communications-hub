@@ -301,7 +301,10 @@ Based on: `ECV_v3_fixes.txt`, `ECH ADAPTER ENHANCEMENT REQUIREMENT.txt`, real-wo
 | O22 | Mesh bot: `moon` — moon phase and rise/set via USNO or skyfield (already a dep) | P3 | Low — useful for EME, night ops |
 | O23 | Mesh bot: `dxcc <callsign>` — DXCC entity lookup (cty.dat or clublog API) | P3 | Low — DX ops and EMCOMM international contacts |
 | O24 | Mesh bot: `contest` — upcoming/active HF contest list from contest-calendar.com or HamAlert | P3 | Low |
-| O25 | Mesh bot: `anomalies` — relay active ECH anomalies to mesh via bot command | **P1** | Medium — critical for field ops; query anomaly engine, format top N alerts, push to requesting node |
+| O25 | Mesh bot: `anomalies` — relay active ECH anomalies to mesh via bot command | **DONE rc78** | queries router._anomaly_engine.active_findings(), formats top 4 by severity |
+| O26 | Mesh bot: `aprs <call>` — APRS position lookup (local adapter first, aprs.fi fallback) | **DONE rc78** | aprs_fi_key optional in mesh_bot config |
+| O27 | Settings page: mesh bot config form + bot test console | **DONE rc78** | /api/bot/config GET/POST, /api/bot/test POST |
+| O28 | Settings page: config.yaml section editor (GET /api/config, POST /api/config/section) | **DONE rc78** | reads/writes config file; config_path wired through main.py → create_app |
 
 ---
 

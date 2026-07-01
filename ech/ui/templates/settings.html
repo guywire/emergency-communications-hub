@@ -444,6 +444,103 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     </div>
   </div>
 
+  <!-- ── Mesh Bot config ─────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('bot-body')">
+      <span class="section-title">MESH BOT</span>
+      <span id="bot-header-status" style="font-family:var(--mono);font-size:10px;color:var(--muted)">Loading…</span>
+    </div>
+    <div id="bot-body" class="section-body" style="display:none">
+      <div class="row">
+        <div>
+          <label>Enabled</label>
+          <label class="toggle" style="margin-top:6px"><input type="checkbox" id="bot-enabled"><span class="toggle-slider"></span></label>
+        </div>
+        <div>
+          <label>Reply as DM to sender</label>
+          <label class="toggle" style="margin-top:6px"><input type="checkbox" id="bot-reply-dm"><span class="toggle-slider"></span></label>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Listen channels (comma-separated, * = all)</label>
+          <input type="text" id="bot-channels" placeholder="#weather, #cmd">
+        </div>
+        <div>
+          <label>Limit to adapters (blank = all)</label>
+          <input type="text" id="bot-adapters" placeholder="meshcore-1, meshtastic-1">
+        </div>
+      </div>
+      <div class="row3">
+        <div>
+          <label>Per-user cooldown (sec)</label>
+          <input type="number" id="bot-user-cd" min="0" max="3600">
+        </div>
+        <div>
+          <label>Global cooldown (sec)</label>
+          <input type="number" id="bot-global-cd" min="0" max="600">
+        </div>
+        <div>
+          <label>Max reply length (chars)</label>
+          <input type="number" id="bot-maxlen" min="60" max="500">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Observer lat (decimal, blank = use base location)</label>
+          <input type="number" id="bot-lat" step="0.0001" placeholder="leave blank to use station base">
+        </div>
+        <div>
+          <label>Observer lon</label>
+          <input type="number" id="bot-lon" step="0.0001" placeholder="leave blank to use station base">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>dump1090 aircraft.json path (for 'overhead')</label>
+          <input type="text" id="bot-dump1090" placeholder="/run/dump1090-fa/aircraft.json">
+        </div>
+        <div>
+          <label>Overhead radius (nautical miles)</label>
+          <input type="number" id="bot-radius" min="1" max="500">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Ships radius (nautical miles, for 'ships')</label>
+          <input type="number" id="bot-ships-radius" min="1" max="500">
+        </div>
+        <div>
+          <label>Solar cache (sec)</label>
+          <input type="number" id="bot-solar-cache" min="60" max="86400">
+        </div>
+      </div>
+      <div>
+        <label>TLE targets for 'satpass' (one per line)</label>
+        <textarea id="bot-tle" rows="3" placeholder="ISS (ZARYA)&#10;NOAA 19&#10;NOAA 18"></textarea>
+      </div>
+      <div>
+        <label>aprs.fi API key (for 'aprs' command remote lookup — leave blank to use local data only)</label>
+        <input type="text" id="bot-aprs-key" placeholder="optional — get free key at aprs.fi/page/api">
+      </div>
+      <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
+        <button class="btn btn-green" onclick="saveBotConfig()">Save Bot Config</button>
+        <span id="bot-save-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none">Saved (in-memory — restart to persist or use Config → Save)</span>
+      </div>
+
+      <!-- Bot test console -->
+      <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
+        <div style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--text);margin-bottom:8px">BOT TEST CONSOLE</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input type="text" id="bot-test-input" placeholder="e.g. weather Portland ME" style="flex:1"
+                 onkeydown="if(event.key==='Enter')testBot()">
+          <button class="btn btn-blue" onclick="testBot()">▶ Send</button>
+        </div>
+        <div id="bot-test-history" style="font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px;min-height:80px;max-height:300px;overflow-y:auto;white-space:pre-wrap"></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -1933,10 +2030,103 @@ function mcClearPackets(adapterName) {
   if (cnt) cnt.textContent = '';
 }
 
+// ── Mesh Bot ──────────────────────────────────────────────────────────────
+async function loadBotConfig() {
+  try {
+    const r = await fetch('/api/bot/config');
+    const d = await r.json();
+    document.getElementById('bot-enabled').checked    = !!d.enabled;
+    document.getElementById('bot-reply-dm').checked   = !!d.reply_dm;
+    document.getElementById('bot-channels').value     = (d.channels||[]).join(', ');
+    document.getElementById('bot-adapters').value     = (d.adapters||[]).join(', ');
+    document.getElementById('bot-user-cd').value      = d.per_user_cooldown_sec ?? 30;
+    document.getElementById('bot-global-cd').value    = d.global_cooldown_sec ?? 5;
+    document.getElementById('bot-maxlen').value       = d.max_reply_len ?? 200;
+    document.getElementById('bot-lat').value          = d.lat ?? '';
+    document.getElementById('bot-lon').value          = d.lon ?? '';
+    document.getElementById('bot-dump1090').value     = d.dump1090_path || '';
+    document.getElementById('bot-radius').value       = d.overhead_radius_nm ?? 20;
+    document.getElementById('bot-ships-radius').value = d.ships_radius_nm ?? 50;
+    document.getElementById('bot-solar-cache').value  = d.solar_cache_sec ?? 900;
+    document.getElementById('bot-tle').value          = (d.tle_targets||[]).join('\n');
+    document.getElementById('bot-aprs-key').value     = d.aprs_fi_key || '';
+    const st = document.getElementById('bot-header-status');
+    if (st) st.textContent = d.enabled ? 'enabled' : 'disabled';
+  } catch(e) {
+    const st = document.getElementById('bot-header-status');
+    if (st) st.textContent = 'load error';
+  }
+}
+
+async function saveBotConfig() {
+  const chStr  = document.getElementById('bot-channels').value;
+  const adStr  = document.getElementById('bot-adapters').value;
+  const tleStr = document.getElementById('bot-tle').value;
+  const latRaw = document.getElementById('bot-lat').value.trim();
+  const lonRaw = document.getElementById('bot-lon').value.trim();
+  const payload = {
+    enabled:               document.getElementById('bot-enabled').checked,
+    reply_dm:              document.getElementById('bot-reply-dm').checked,
+    channels:              chStr.split(',').map(s=>s.trim()).filter(Boolean),
+    adapters:              adStr.split(',').map(s=>s.trim()).filter(Boolean),
+    per_user_cooldown_sec: parseInt(document.getElementById('bot-user-cd').value)||30,
+    global_cooldown_sec:   parseInt(document.getElementById('bot-global-cd').value)||5,
+    max_reply_len:         parseInt(document.getElementById('bot-maxlen').value)||200,
+    lat:                   latRaw !== '' ? parseFloat(latRaw) : null,
+    lon:                   lonRaw !== '' ? parseFloat(lonRaw) : null,
+    dump1090_path:         document.getElementById('bot-dump1090').value.trim(),
+    overhead_radius_nm:    parseFloat(document.getElementById('bot-radius').value)||20,
+    ships_radius_nm:       parseFloat(document.getElementById('bot-ships-radius').value)||50,
+    solar_cache_sec:       parseInt(document.getElementById('bot-solar-cache').value)||900,
+    tle_targets:           tleStr.split('\n').map(s=>s.trim()).filter(Boolean),
+    aprs_fi_key:           document.getElementById('bot-aprs-key').value.trim(),
+  };
+  const r = await fetch('/api/bot/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  const d = await r.json();
+  const msg = document.getElementById('bot-save-msg');
+  if (d.status === 'ok') {
+    msg.style.display = 'inline';
+    msg.style.color = 'var(--green)';
+    msg.textContent = 'Saved (in-memory — restart ECH or use config save to persist)';
+    setTimeout(()=>{ msg.style.display='none'; }, 5000);
+  } else {
+    msg.style.display = 'inline';
+    msg.style.color = 'var(--red)';
+    msg.textContent = d.detail || 'Save failed';
+  }
+}
+
+const _botHistory = [];
+async function testBot() {
+  const inp = document.getElementById('bot-test-input');
+  const out = document.getElementById('bot-test-history');
+  const cmd = inp.value.trim();
+  if (!cmd) return;
+  inp.value = '';
+  _botHistory.push(`> ${cmd}`);
+  out.textContent = _botHistory.join('\n');
+  out.scrollTop = out.scrollHeight;
+  try {
+    const r = await fetch('/api/bot/test', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({command: cmd}),
+    });
+    const d = await r.json();
+    const resp = d.response || d.error || '(no response)';
+    _botHistory.push(resp);
+    _botHistory.push('');
+  } catch(e) {
+    _botHistory.push(`[network error: ${e.message}]`);
+  }
+  out.textContent = _botHistory.join('\n');
+  out.scrollTop = out.scrollHeight;
+}
+
 init();
 loadAdapterLive();
 loadMeshCoreTools();
 loadPSKStatus();
+loadBotConfig();
 </script>
 </body>
 </html>

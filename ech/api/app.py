@@ -36,10 +36,11 @@ _psk_stats: dict = {"last_success": None, "last_failure": None, "last_error": No
 UI_DIR = Path(__file__).parent.parent / "ui"
 
 
-def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None) -> FastAPI:
+def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None) -> FastAPI:
     app = FastAPI(title="Emergency Communications Hub", version=ECH_VERSION)
     app.state.cat_ctrl = cat_ctrl        # CATController instance (may be None)
     app.state.ca_cert_pem = ca_cert_pem  # CA cert PEM for /ca.crt download (may be None)
+    app.state.config_path = config_path  # Path to config.yaml (for live editing)
 
     # ── Role helpers ──────────────────────────────────────────────────────
     from fastapi import HTTPException
@@ -1160,6 +1161,146 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             "active_alerts": len(wx_service._active_alerts),
             "last_poll": wx_service._last_poll.isoformat() if wx_service._last_poll else None,
         }
+
+    # ── Mesh bot config + test ───────────────────────────────────────────────
+
+    @app.get("/api/bot/config")
+    async def get_bot_config():
+        wx_bot = getattr(router, "_weather_bot", None)
+        if not wx_bot:
+            return {"enabled": False}
+        cfg = wx_bot._config.get("mesh_bot", {})
+        return {
+            "enabled":               wx_bot.enabled,
+            "channels":              wx_bot._channels,
+            "adapters":              wx_bot._adapter_filter,
+            "reply_dm":              wx_bot._reply_dm,
+            "per_user_cooldown_sec": wx_bot._user_cooldown,
+            "global_cooldown_sec":   wx_bot._global_cooldown,
+            "max_reply_len":         wx_bot._max_len,
+            "dump1090_path":         wx_bot._dump1090,
+            "overhead_radius_nm":    wx_bot._radius_nm,
+            "ships_radius_nm":       float(cfg.get("ships_radius_nm", 50)),
+            "tle_targets":           wx_bot._tle_targets,
+            "solar_cache_sec":       wx_bot._solar_cache_sec,
+            "lat":                   wx_bot._lat,
+            "lon":                   wx_bot._lon,
+            "aprs_fi_key":           cfg.get("aprs_fi_key", ""),
+        }
+
+    @app.post("/api/bot/config")
+    async def update_bot_config(request: Request):
+        data = await request.json()
+        wx_bot = getattr(router, "_weather_bot", None)
+        if not wx_bot:
+            return {"status": "error", "detail": "Bot not running"}
+        # Apply in-memory (survives until restart; use config save to persist)
+        if "enabled" in data:             wx_bot.enabled               = bool(data["enabled"])
+        if "channels" in data:            wx_bot._channels             = [c.lower() for c in data["channels"]]
+        if "adapters" in data:            wx_bot._adapter_filter       = data["adapters"]
+        if "reply_dm" in data:            wx_bot._reply_dm             = bool(data["reply_dm"])
+        if "per_user_cooldown_sec" in data: wx_bot._user_cooldown      = int(data["per_user_cooldown_sec"])
+        if "global_cooldown_sec" in data: wx_bot._global_cooldown      = int(data["global_cooldown_sec"])
+        if "max_reply_len" in data:       wx_bot._max_len              = int(data["max_reply_len"])
+        if "dump1090_path" in data:       wx_bot._dump1090             = data["dump1090_path"]
+        if "overhead_radius_nm" in data:  wx_bot._radius_nm            = float(data["overhead_radius_nm"])
+        if "solar_cache_sec" in data:     wx_bot._solar_cache_sec      = int(data["solar_cache_sec"])
+        if "lat" in data:                 wx_bot._lat                  = float(data["lat"]) if data["lat"] not in (None, "") else None
+        if "lon" in data:                 wx_bot._lon                  = float(data["lon"]) if data["lon"] not in (None, "") else None
+        if "tle_targets" in data:         wx_bot._tle_targets          = [t.upper() for t in data["tle_targets"]]
+        if "aprs_fi_key" in data:
+            wx_bot._config.setdefault("mesh_bot", {})["aprs_fi_key"] = data["aprs_fi_key"]
+        if "ships_radius_nm" in data:
+            wx_bot._config.setdefault("mesh_bot", {})["ships_radius_nm"] = float(data["ships_radius_nm"])
+        return {"status": "ok"}
+
+    @app.post("/api/bot/test")
+    async def test_bot_command(request: Request):
+        data      = await request.json()
+        command   = (data.get("command") or "").strip()
+        if not command:
+            return {"error": "command required"}
+        wx_bot = getattr(router, "_weather_bot", None)
+        if not wx_bot:
+            return {"error": "Bot not running"}
+        if not wx_bot._client:
+            return {"error": "Bot HTTP client not started — is bot enabled?"}
+        # Parse command + args the same way the bot does
+        import re as _re
+        m = _re.match(r'^(\S+)\s*(.*)', command, _re.IGNORECASE)
+        if not m:
+            return {"error": "Could not parse command"}
+        cmd  = m.group(1).lower().rstrip("?")
+        args = m.group(2).strip()
+        try:
+            # Dispatch directly without cooldown / routing
+            if cmd == "ping":
+                from ech.core.models import NormalizedMessage
+                fake = NormalizedMessage(source_adapter="test", source_channel="test", body=command)
+                result = wx_bot._cmd_ping(fake)
+            elif cmd in ("weather", "wx"):   result = await wx_bot._cmd_weather(args)
+            elif cmd == "overhead":          result = await wx_bot._cmd_overhead()
+            elif cmd in ("satpass", "sat"):  result = await wx_bot._cmd_satpass(args)
+            elif cmd in ("solar", "space"):  result = await wx_bot._cmd_solar()
+            elif cmd == "ships":             result = await wx_bot._cmd_ships()
+            elif cmd == "fcc":               result = await wx_bot._cmd_fcc(args)
+            elif cmd == "trivia":            result = await wx_bot._cmd_trivia()
+            elif cmd == "dad":               result = await wx_bot._cmd_dad()
+            elif cmd == "alerts":            result = await wx_bot._cmd_alerts()
+            elif cmd == "metar":             result = await wx_bot._cmd_metar(args)
+            elif cmd == "sun":               result = await wx_bot._cmd_sun()
+            elif cmd == "nodes":             result = await wx_bot._cmd_nodes()
+            elif cmd == "aprs":              result = await wx_bot._cmd_aprs(args)
+            elif cmd == "anomalies":         result = await wx_bot._cmd_anomalies()
+            elif cmd == "help":              result = wx_bot._cmd_help()
+            else:                            result = f"unknown command: {cmd}"
+        except Exception as exc:
+            result = f"error: {type(exc).__name__}: {exc}"
+        return {"command": command, "response": result}
+
+    # ── Config file read / write ──────────────────────────────────────────────
+
+    @app.get("/api/config")
+    async def get_config_file():
+        """Return the parsed config.yaml as JSON (secrets like passwords redacted)."""
+        import copy, yaml
+        path = app.state.config_path
+        if not path:
+            return {"error": "config_path not set"}
+        try:
+            with open(path) as f:
+                cfg = yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            return {"error": f"config file not found: {path}"}
+        # Redact sensitive fields before sending to browser
+        safe = copy.deepcopy(cfg)
+        for adapter in safe.get("adapters", []):
+            for key in ("password", "secret", "private_key", "token"):
+                if key in adapter:
+                    adapter[key] = "••••••••"
+        return {"config": safe, "path": path}
+
+    @app.post("/api/config/section")
+    async def save_config_section(request: Request):
+        """Merge a partial config dict into the live config.yaml and reload affected services."""
+        import yaml
+        data    = await request.json()
+        section = data.get("section")   # top-level key e.g. "mesh_bot", "server", "gps"
+        values  = data.get("values", {})
+        if not section or not isinstance(values, dict):
+            return {"status": "error", "detail": "section and values required"}
+        path = app.state.config_path
+        if not path:
+            return {"status": "error", "detail": "config_path not set on server"}
+        try:
+            with open(path) as f:
+                cfg = yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            cfg = {}
+        cfg[section] = {**(cfg.get(section) or {}), **values}
+        with open(path, "w") as f:
+            yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+        return {"status": "ok", "saved": path}
 
     # ── Simulation management ─────────────────────────────────────────────
 

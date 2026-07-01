@@ -71,12 +71,13 @@ _CARD8 = ["N","NE","E","SE","S","SW","W","NW"]
 
 _CMD_RE = re.compile(
     r'(?<![a-z0-9])'
-    r'(ping|weather\??|wx|overhead|satpass|sat|solar|space|ships|fcc|trivia|dad|alerts|metar|sun|nodes|help)'
+    r'(ping|weather\??|wx|overhead|satpass|sat|solar|space|ships|fcc|trivia|dad|alerts|metar|sun|nodes|aprs|anomalies|help)'
     r'(?:\s+([^\s].{0,40}))?'
     r'(?=\s|$|[^a-z0-9])',
     re.IGNORECASE,
 )
 _ICAO_RE = re.compile(r'\b([A-Z]{4})\b', re.IGNORECASE)
+APRS_FI_URL = "https://api.aprs.fi/api/get"
 _ZIP_RE      = re.compile(r'\b(\d{5})\b')
 _CALL_RE     = re.compile(r'\b([AKNW][A-Z0-9]{1,2}\d[A-Z]{1,3})\b', re.IGNORECASE)
 
@@ -273,6 +274,10 @@ class MeshBot:
                 reply = await self._cmd_sun()
             elif cmd == "nodes":
                 reply = await self._cmd_nodes()
+            elif cmd == "aprs":
+                reply = await self._cmd_aprs(args)
+            elif cmd == "anomalies":
+                reply = await self._cmd_anomalies()
             elif cmd == "help":
                 reply = self._cmd_help()
             else:
@@ -312,7 +317,7 @@ class MeshBot:
         return " | ".join(parts)
 
     def _cmd_help(self) -> str:
-        return "Cmds: ping|wx [place]|overhead|satpass|solar|alerts|metar <ICAO>|sun|nodes|ships|fcc <call>|trivia|dad"
+        return "Cmds: ping|wx [place]|overhead|satpass|solar|alerts|metar [ICAO/place]|sun|nodes|aprs <call>|ships|fcc <call>|anomalies|trivia|dad"
 
     # ── Weather ───────────────────────────────────────────────────────────────
 
@@ -651,10 +656,9 @@ class MeshBot:
     # ── FCC callsign lookup ───────────────────────────────────────────────────
 
     async def _cmd_fcc(self, args: str) -> str:
-        m = _CALL_RE.search(args)
-        if not m:
+        call = args.strip().upper().split()[0] if args.strip() else ""
+        if not call:
             return "Usage: fcc <callsign>  e.g. fcc W1ABC"
-        call = m.group(1).upper()
         client = self._client
         assert client is not None
         try:
@@ -764,42 +768,91 @@ class MeshBot:
     # ── METAR ────────────────────────────────────────────────────────────────
 
     async def _cmd_metar(self, args: str) -> str:
-        m = _ICAO_RE.search(args.strip())
-        if not m:
-            return "Usage: metar <ICAO>  e.g. metar KPWM"
-        icao = m.group(1).upper()
+        query = args.strip()
+        if not query:
+            # Use base location
+            lat, lon = self._resolve_coords()
+            if lat is None:
+                return "Usage: metar <ICAO or city>  e.g. metar KPWM"
+            return await self._fetch_metar_nearby(lat, lon)
+        client = self._client
+        assert client is not None
+        # 4-letter all-alpha ICAO code?
+        m = _ICAO_RE.search(query)
+        if m and re.fullmatch(r'[A-Za-z]{4}', query.strip()):
+            return await self._fetch_metar_icao(m.group(1).upper())
+        # Zip code?
+        zm = _ZIP_RE.search(query)
+        if zm:
+            geo = await client.get(NOMINATIM_URL,
+                params={"postalcode": zm.group(1), "countrycodes": "us", "format": "json", "limit": "1"})
+            hits = geo.json()
+        else:
+            # Free-text place name
+            geo = await client.get(NOMINATIM_URL,
+                params={"q": query, "format": "json", "limit": "1"})
+            hits = geo.json()
+        if not hits:
+            return f"metar: location '{query}' not found"
+        lat = float(hits[0]["lat"])
+        lon = float(hits[0]["lon"])
+        return await self._fetch_metar_nearby(lat, lon)
+
+    async def _fetch_metar_icao(self, icao: str) -> str:
         client = self._client
         assert client is not None
         try:
-            r = await client.get(
-                METAR_URL,
-                params={"ids": icao, "format": "json", "taf": "false"},
-                timeout=8.0,
-            )
+            r = await client.get(METAR_URL, params={"ids": icao, "format": "json", "taf": "false"}, timeout=8.0)
             r.raise_for_status()
             data = r.json()
             if not data:
-                return f"METAR {icao}: no data (station not found or no recent report)"
-            obs = data[0]
-            raw = obs.get("rawOb") or obs.get("raw_text", "")
-            if raw:
-                return f"METAR {raw[:180]}"
-            # Fallback: build summary from decoded fields
-            tmp  = obs.get("temp")
-            dew  = obs.get("dewp")
-            wspd = obs.get("wspd")
-            wdir = obs.get("wdir")
-            vis  = obs.get("visib")
-            sky  = obs.get("skyCondition") or obs.get("clouds", "")
-            parts = [icao]
-            if tmp  is not None: parts.append(f"{tmp}C")
-            if wdir is not None and wspd is not None: parts.append(f"{wdir:03.0f}/{wspd}kt")
-            if vis  is not None: parts.append(f"vis {vis}sm")
-            if sky:              parts.append(str(sky)[:20])
-            return "METAR " + " ".join(parts)
+                return f"METAR {icao}: no recent report"
+            return self._format_metar(data[0])
         except Exception as exc:
             log.warning("MeshBot/metar error: %s", exc)
             return f"metar: fetch failed ({type(exc).__name__})"
+
+    async def _fetch_metar_nearby(self, lat: float, lon: float) -> str:
+        client = self._client
+        assert client is not None
+        try:
+            # bbox: 1.5 deg radius (~100nm)
+            r = await client.get(METAR_URL, params={
+                "bbox": f"{lat-1.5},{lon-2.5},{lat+1.5},{lon+2.5}",
+                "format": "json", "taf": "false",
+            }, timeout=8.0)
+            r.raise_for_status()
+            data = r.json()
+            if not data:
+                return "METAR: no stations found nearby"
+            # Sort by distance to query point
+            def _d(obs):
+                try:
+                    return _haversine_nm(lat, lon, float(obs["lat"]), float(obs["lon"]))
+                except Exception:
+                    return 9999.0
+            data.sort(key=_d)
+            return self._format_metar(data[0])
+        except Exception as exc:
+            log.warning("MeshBot/metar nearby error: %s", exc)
+            return f"metar: fetch failed ({type(exc).__name__})"
+
+    def _format_metar(self, obs: dict) -> str:
+        raw = obs.get("rawOb") or obs.get("raw_text", "")
+        if raw:
+            return f"METAR {raw[:180]}"
+        icao = obs.get("icaoId") or obs.get("stationId", "?")
+        tmp  = obs.get("temp")
+        wspd = obs.get("wspd")
+        wdir = obs.get("wdir")
+        vis  = obs.get("visib")
+        sky  = obs.get("skyCondition") or obs.get("clouds", "")
+        parts = [icao]
+        if tmp  is not None: parts.append(f"{tmp}C")
+        if wdir is not None and wspd is not None: parts.append(f"{wdir:03.0f}/{wspd}kt")
+        if vis  is not None: parts.append(f"vis {vis}sm")
+        if sky: parts.append(str(sky)[:20])
+        return "METAR " + " ".join(parts)
 
     # ── Sunrise / Sunset ─────────────────────────────────────────────────────
 
@@ -819,11 +872,14 @@ class MeshBot:
             )
             r.raise_for_status()
             res = r.json().get("results", {})
+            # Convert UTC → server local time; server should be co-located with the station
+            local_tz = datetime.now().astimezone().tzinfo
             def _fmt(iso: str) -> str:
                 try:
-                    from datetime import datetime, timezone
-                    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-                    return dt.strftime("%H:%Mz")
+                    from datetime import timezone as _tz
+                    dt_utc = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+                    dt_loc = dt_utc.astimezone(local_tz)
+                    return dt_loc.strftime("%-I:%M%p").lower()
                 except Exception:
                     return iso[:5]
             rise   = _fmt(res.get("sunrise", ""))
@@ -831,7 +887,8 @@ class MeshBot:
             solar  = res.get("day_length", 0)
             h, rem = divmod(int(solar), 3600)
             m2     = rem // 60
-            return f"Sun {today}: rise {rise} set {sset} ({h}h{m2:02d}m daylight)"
+            tz_abbr = datetime.now().astimezone().strftime("%Z")
+            return f"Sun {today}: rise {rise} set {sset} {tz_abbr} ({h}h{m2:02d}m daylight)"
         except Exception as exc:
             log.warning("MeshBot/sun error: %s", exc)
             return f"sun: fetch failed ({type(exc).__name__})"
@@ -882,6 +939,94 @@ class MeshBot:
             parts.append(f"{label}({age_m}m)")
 
         return f"Nodes({len(unique)}): " + " ".join(parts)
+
+    # ── APRS position lookup ──────────────────────────────────────────────────
+
+    async def _cmd_aprs(self, args: str) -> str:
+        call = args.strip().upper().split()[0] if args.strip() else ""
+        if not call:
+            return "Usage: aprs <callsign>  e.g. aprs W1ABC"
+
+        # 1. Check our own connected APRS adapter nodes first (no external API needed)
+        if self._router:
+            for adapter in self._router._adapters.values():
+                aname = adapter.name.lower()
+                if "aprs" not in aname:
+                    continue
+                if not getattr(adapter, "_connected", False):
+                    continue
+                try:
+                    nodes = await adapter.nodes()
+                    for n in nodes:
+                        nid = (n.node_id or "").upper()
+                        # APRS node IDs are typically the callsign or callsign-SSID
+                        if nid == call or nid.startswith(call + "-") or nid.startswith(call + ">"):
+                            lat_s = f"{n.lat:.4f}" if n.lat is not None else "?"
+                            lon_s = f"{n.lon:.4f}" if n.lon is not None else "?"
+                            age_m = ""
+                            if n.last_heard:
+                                from datetime import datetime, timezone
+                                age_s = int((datetime.now(timezone.utc) - n.last_heard).total_seconds())
+                                age_m = f" ({age_s//60}m ago)"
+                            comment = (n.meta or {}).get("comment", "")
+                            return f"APRS {nid}: {lat_s},{lon_s}{age_m}{' — ' + comment[:40] if comment else ''}"
+                except Exception:
+                    pass
+
+        # 2. Fall back to aprs.fi API if a key is configured
+        aprs_key = (self._config.get("mesh_bot") or {}).get("aprs_fi_key", "")
+        if not aprs_key:
+            return f"APRS {call}: not heard locally. Add aprs_fi_key to mesh_bot config for remote lookup."
+        client = self._client
+        assert client is not None
+        try:
+            r = await client.get(APRS_FI_URL, params={
+                "name": call, "what": "loc", "apikey": aprs_key, "format": "json",
+            }, timeout=8.0)
+            r.raise_for_status()
+            data = r.json()
+            if data.get("result") != "ok" or not data.get("entries"):
+                return f"APRS {call}: not found on aprs.fi"
+            e    = data["entries"][0]
+            lat_s = e.get("lat", "?")
+            lon_s = e.get("lng", "?")
+            name  = e.get("name", call)
+            lasttime = int(e.get("lasttime", 0))
+            age_m = ""
+            if lasttime:
+                import time
+                age_s = int(time.time()) - lasttime
+                age_m = f" ({age_s//60}m ago)"
+            comment = e.get("comment", "")
+            return f"APRS {name}: {lat_s},{lon_s}{age_m}{' — ' + comment[:40] if comment else ''}"
+        except Exception as exc:
+            log.warning("MeshBot/aprs error: %s", exc)
+            return f"aprs: lookup failed ({type(exc).__name__})"
+
+    # ── Anomalies ─────────────────────────────────────────────────────────────
+
+    async def _cmd_anomalies(self) -> str:
+        anomaly_engine = getattr(self._router, "_anomaly_engine", None) if self._router else None
+        if anomaly_engine is None:
+            return "anomalies: anomaly engine not available"
+        findings = anomaly_engine.active_findings()
+        if not findings:
+            return "ANOMALIES: none active"
+        # Sort by severity (highest first), then recency
+        sev_order = {"ALERT": 0, "WARN": 1, "INFO": 2}
+        findings = sorted(findings,
+            key=lambda f: (sev_order.get(f.severity.value.upper(), 9),
+                           -(f.timestamp.timestamp() if hasattr(f.timestamp, "timestamp") else 0)))
+        parts = []
+        for f in findings[:4]:
+            sev  = f.severity.value.upper()[:4]
+            rule = f.rule.replace("_", " ")[:14]
+            node = (f.node_id or f.adapter or "?")[:10]
+            summ = f.summary[:40]
+            parts.append(f"[{sev}] {node} {rule}: {summ}")
+        total = len(findings)
+        header = f"ANOMALIES({total}): " if total > 1 else "ANOMALY: "
+        return header + " | ".join(parts)
 
 
 # Backwards-compat alias so any code that imported WeatherBot still works
