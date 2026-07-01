@@ -48,13 +48,10 @@ class APRSISAdapter(Adapter):
         self._passcode = int(config.get("passcode", -1))
         self._server = config.get("server", "rotate.aprs2.net")
         self._port = int(config.get("port", 14580))
-        base_call = config.get("callsign", "N0CALL-9").upper().split("-")[0]
         _cfg_filter = config.get("filter", "r/44.1/-69.1/100")
-        # Auto-add m/CALL so directed APRS messages to this station are always delivered
-        # regardless of whether the sender's position is within the geographic filter
-        if f"m/{base_call}" not in _cfg_filter.upper():
-            _cfg_filter = f"{_cfg_filter} m/{base_call}"
         self._filter = _cfg_filter
+        # Note: APRS-IS servers automatically deliver messages addressed to the
+        # authenticated callsign regardless of filter — no extra filter needed.
         self._beacon = config.get("beacon", True)
         self._node_ttl = int(config.get("node_ttl_sec", 3600))
         # Position beacon config
