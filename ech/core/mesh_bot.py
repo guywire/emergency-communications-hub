@@ -140,7 +140,7 @@ class _TleCache:
 # ── Main bot class ────────────────────────────────────────────────────────────
 
 class MeshBot:
-    def __init__(self, config: dict, router=None):
+    def __init__(self, config: dict, router=None, state=None):
         cfg = config.get("mesh_bot", config.get("weather_bot", {}))
         self.enabled               = bool(cfg.get("enabled", False))
         self._channels             = [c.lower() for c in cfg.get("channels", ["#weather", "#cmd"])]
@@ -154,10 +154,11 @@ class MeshBot:
         self._tle_targets          = [t.upper() for t in cfg.get("tle_targets", ["ISS (ZARYA)", "NOAA 19", "NOAA 18"])]
         self._solar_cache_sec      = int(cfg.get("solar_cache_sec", 900))
 
-        # Observer coordinates — bot-specific override or fall back to weather_service lat/lon
+        # Observer coordinates — priority: mesh_bot.lat/lon → weather_service.nws_lat/lon → state.base_lat/lon
         wx_cfg = config.get("weather_service", {})
         self._lat: float | None = cfg.get("lat") or wx_cfg.get("nws_lat")
         self._lon: float | None = cfg.get("lon") or wx_cfg.get("nws_lon")
+        self._state = state   # held so _resolve_coords() can pull live base position
 
         self._router = router
         self._user_ts:  dict[str, float] = {}   # from_id → last reply time
@@ -166,6 +167,17 @@ class MeshBot:
         self._tle_cache = _TleCache()
         self._solar_cache: str = ""
         self._solar_ts: float = 0.0
+
+    def _resolve_coords(self) -> tuple[float | None, float | None]:
+        """Return best-available (lat, lon): config override → weather service → station base."""
+        if self._lat is not None and self._lon is not None:
+            return self._lat, self._lon
+        if self._state is not None:
+            slat = getattr(self._state, "_base_lat", None)
+            slon = getattr(self._state, "_base_lon", None)
+            if slat is not None and slon is not None:
+                return slat, slon
+        return None, None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -342,8 +354,9 @@ class MeshBot:
     # ── Aircraft overhead ─────────────────────────────────────────────────────
 
     async def _cmd_overhead(self) -> str:
-        if self._lat is None or self._lon is None:
-            return "overhead: observer lat/lon not configured (set mesh_bot.lat/lon in config)"
+        lat, lon = self._resolve_coords()
+        if lat is None or lon is None:
+            return "overhead: observer position not set (set base location in Settings or mesh_bot.lat/lon in config)"
         try:
             text = await asyncio.to_thread(self._read_dump1090)
         except FileNotFoundError:
@@ -368,7 +381,7 @@ class MeshBot:
             seen_ago = ac.get("seen", 999)
             if seen_ago > 60:
                 continue
-            dist = _haversine_nm(self._lat, self._lon, ac_lat, ac_lon)
+            dist = _haversine_nm(lat, lon, ac_lat, ac_lon)
             if dist <= self._radius_nm:
                 nearby.append((dist, ac))
 
@@ -382,7 +395,7 @@ class MeshBot:
         alt      = ac.get("alt_baro") or ac.get("altitude")
         speed    = ac.get("gs") or ac.get("speed")
         track    = ac.get("track")
-        bearing  = _bearing(self._lat, self._lon, ac.get("lat"), ac.get("lon"))
+        bearing  = _bearing(lat, lon, ac.get("lat"), ac.get("lon"))
         direction = _card8(bearing)
 
         parts = [callsign]
@@ -404,8 +417,9 @@ class MeshBot:
     # ── Satellite passes ──────────────────────────────────────────────────────
 
     async def _cmd_satpass(self, args: str) -> str:
-        if self._lat is None or self._lon is None:
-            return "satpass: observer lat/lon not configured"
+        lat, lon = self._resolve_coords()
+        if lat is None or lon is None:
+            return "satpass: observer position not set (set base location in Settings or mesh_bot.lat/lon in config)"
         # Determine which satellite to predict
         want = args.strip().upper() if args.strip() else None
         if self._tle_cache.expired():
@@ -444,7 +458,7 @@ class MeshBot:
 
         ts = load.timescale(builtin=True)
         sat = EarthSatellite(line1, line2, name, ts)
-        observer = wgs84.latlon(self._lat, self._lon)
+        observer = wgs84.latlon(lat, lon)
 
         t0 = ts.now()
         t1 = ts.tt_jd(t0.tt + 1.0)   # search up to 24h ahead
