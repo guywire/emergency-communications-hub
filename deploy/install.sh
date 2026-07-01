@@ -44,6 +44,9 @@ else
   echo "Existing /etc/ech/config.yaml preserved."
 fi
 
+# Always ensure config files are owned by the ech service user so the UI can save settings
+sudo chown ech:ech /etc/ech/config.yaml 2>/dev/null || true
+
 # Copy config-sim.yaml on first install only
 if [ ! -f /etc/ech/config-sim.yaml ] && [ -f "$INSTALL_DIR/config-sim.yaml" ]; then
   echo "First install: copying config-sim.yaml to /etc/ech/config-sim.yaml ..."
@@ -52,6 +55,7 @@ if [ ! -f /etc/ech/config-sim.yaml ] && [ -f "$INSTALL_DIR/config-sim.yaml" ]; t
   echo "  Simulation instance will run on port 8780."
 else
   echo "Existing /etc/ech/config-sim.yaml preserved (or not found in package)."
+  sudo chown ech:ech /etc/ech/config-sim.yaml 2>/dev/null || true
 fi
 
 # Deploy ech.service — always update so KillMode/TimeoutStopSec changes land
