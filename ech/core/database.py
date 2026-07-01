@@ -219,6 +219,9 @@ class Database:
             except Exception:
                 pass  # column already exists
 
+        # Prune expired sessions on startup
+        await self.prune_expired_sessions()
+
     async def close(self) -> None:
         if self._db:
             await self._db.close()
@@ -515,6 +518,16 @@ class Database:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+    async def prune_expired_sessions(self) -> int:
+        """Delete sessions whose expiry timestamp has passed. Returns rows deleted."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        cur = await self._db.execute("DELETE FROM sessions WHERE expires <= ?", (now,))
+        await self._db.commit()
+        if cur.rowcount:
+            log.info("Database: pruned %d expired session(s)", cur.rowcount)
+        return cur.rowcount
+
     # ── Simulation ────────────────────────────────────────────────────────
 
     async def get_sim_nodes(self) -> list[dict]:
@@ -605,7 +618,7 @@ class Database:
 
     async def save_qso(self, qso: dict) -> None:
         await self._db.execute(
-            """INSERT INTO qso_log
+            """INSERT OR IGNORE INTO qso_log
                (id, station_id, callsign, band, mode, freq_mhz,
                 sent_rst, rcvd_rst, sent_exch, rcvd_exch, notes,
                 timestamp, source, source_adapter, contest, pota_ref, sota_ref,

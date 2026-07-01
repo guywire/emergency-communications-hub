@@ -320,6 +320,53 @@ class MeshCoreAdapter(Adapter):
         self._recent_sent: dict[str, tuple[str, float]] = {}
         # Channel decryption keys: channel_idx → 32-byte secret (AES-128-ECB uses first 16 bytes)
         self._channel_keys: dict[int, bytes] = self._load_channel_keys(config)
+        self._anomaly_engine = None  # injected by router after registration
+        # RF channel health stats (reset every 5 min by _run loop)
+        self._rf_stats: dict = self._fresh_rf_stats()
+
+    @staticmethod
+    def _fresh_rf_stats() -> dict:
+        return {
+            "advert_count": 0,
+            "channel_msg_count": 0,
+            "contact_msg_count": 0,
+            "contact_count": 0,
+            "trace_count": 0,
+            "snr_samples": [],
+            "hop_samples": [],
+            "since": time.monotonic(),
+        }
+
+    def _log_rf_stats(self) -> None:
+        s = self._rf_stats
+        elapsed = max(time.monotonic() - s["since"], 1.0)
+        adv_rate = s["advert_count"] / elapsed * 60
+        msg_rate = (s["channel_msg_count"] + s["contact_msg_count"]) / elapsed * 60
+        snr_avg = (sum(s["snr_samples"]) / len(s["snr_samples"])) if s["snr_samples"] else None
+        hop_avg = (sum(s["hop_samples"]) / len(s["hop_samples"])) if s["hop_samples"] else None
+        snr_str = f"{snr_avg:+.1f}dB" if snr_avg is not None else "n/a"
+        hop_str = f"{hop_avg:.1f}" if hop_avg is not None else "n/a"
+        log.info(
+            "MeshCore %s RF summary (%.0fmin): adverts=%.1f/min msgs=%.1f/min "
+            "contacts=%d snr=%s avg_hops=%s",
+            self.name, elapsed / 60, adv_rate, msg_rate,
+            s["contact_count"], snr_str, hop_str,
+        )
+
+    def _health_rf_stats(self) -> dict:
+        s = self._rf_stats
+        elapsed = max(time.monotonic() - s["since"], 1.0)
+        return {
+            "advert_rate_per_min": round(s["advert_count"] / elapsed * 60, 1),
+            "msg_rate_per_min": round(
+                (s["channel_msg_count"] + s["contact_msg_count"]) / elapsed * 60, 1
+            ),
+            "snr_avg_db": round(sum(s["snr_samples"]) / len(s["snr_samples"]), 1)
+            if s["snr_samples"] else None,
+            "hop_avg": round(sum(s["hop_samples"]) / len(s["hop_samples"]), 1)
+            if s["hop_samples"] else None,
+            "window_min": round(elapsed / 60, 1),
+        }
 
     def _load_channel_keys(self, config: dict) -> dict[int, bytes]:
         """Load per-channel PSKs from config. Accepts base64 or hex strings."""
@@ -789,8 +836,10 @@ class MeshCoreAdapter(Adapter):
         last_expiry        = 0.0
         last_node_count    = 0
         last_battery_poll  = 0.0    # poll immediately on start
+        last_rf_stats      = now0
         _NODE_STALE_SEC  = 3600.0   # remove nodes not heard from in 1 hour
         _BATTERY_INTERVAL = 300.0   # poll battery every 5 minutes
+        _RF_STATS_INTERVAL = 300.0  # log RF health summary every 5 minutes
         try:
             while self._connected:
                 now = time.monotonic()
@@ -845,14 +894,36 @@ class MeshCoreAdapter(Adapter):
                 elif self._contacts_refresh_pending:
                     pass  # too soon — wait for cooldown
 
-                # Expire stale nodes (not heard from in > 1 hour)
+                # Periodic RF channel health summary
+                if now - last_rf_stats >= _RF_STATS_INTERVAL:
+                    self._log_rf_stats()
+                    self._rf_stats = self._fresh_rf_stats()
+                    last_rf_stats = now
+
+                # Expire stale nodes (not heard from in > 1 hour).
+                # Unresolved hex-only nodes (display_name == node_id) expire faster
+                # at 15 minutes — they clutter the node list and can't be named.
                 if now - last_expiry >= 300.0:
-                    cutoff = datetime.now(timezone.utc).timestamp() - _NODE_STALE_SEC
-                    stale = [nid for nid, n in self._nodes.items()
-                             if n.last_heard and n.last_heard.timestamp() < cutoff]
-                    for nid in stale:
-                        log.info("MeshCore %s: expiring stale node %s (last heard >1h ago)", self.name, nid)
+                    wall_now = datetime.now(timezone.utc).timestamp()
+                    cutoff_named = wall_now - _NODE_STALE_SEC       # 1 hour
+                    cutoff_hex   = wall_now - 900.0                  # 15 minutes
+                    stale = []
+                    for nid, n in self._nodes.items():
+                        if not n.last_heard:
+                            continue
+                        lh = n.last_heard.timestamp()
+                        is_hex_only = (n.display_name == nid or
+                                       n.display_name == nid.upper())
+                        if is_hex_only and lh < cutoff_hex:
+                            stale.append((nid, "hex-only, >15min"))
+                        elif not is_hex_only and lh < cutoff_named:
+                            stale.append((nid, "named, >1h"))
+                    for nid, reason in stale:
+                        log.debug("MeshCore %s: expiring node %s (%s)",
+                                  self.name, nid, reason)
                         del self._nodes[nid]
+                    if stale:
+                        log.info("MeshCore %s: expired %d stale node(s)", self.name, len(stale))
                     last_expiry = now
 
                 frame = await self._read_frame()
@@ -933,8 +1004,24 @@ class MeshCoreAdapter(Adapter):
                 lon_off = lat_off + 4
                 lat_raw = struct.unpack("<i", data[lat_off:lat_off+4])[0] if len(data) >= lat_off+4 else 0
                 lon_raw = struct.unpack("<i", data[lon_off:lon_off+4])[0] if len(data) >= lon_off+4 else 0
-                lat = lat_raw / 1e6 if lat_raw else None
-                lon = lon_raw / 1e6 if lon_raw else None
+                # 0x7FC00000 is the float32 NaN bit pattern used by MeshCore firmware as
+                # the "no GPS" sentinel — treat it and 0 as absent, not as a coordinate.
+                _NO_LOC = 0x7FC00000
+                lat = (lat_raw / 1e6) if (lat_raw and lat_raw != _NO_LOC) else None
+                lon = (lon_raw / 1e6) if (lon_raw and lon_raw != _NO_LOC) else None
+                # Check for remaining out-of-range values (genuine spoofing or firmware quirks)
+                if lat is not None and not (-90.0 <= lat <= 90.0):
+                    if self._anomaly_engine:
+                        asyncio.ensure_future(
+                            self._anomaly_engine.process_contact(self.name, node_id, lat, lon, adv_name)
+                        )
+                    lat = None
+                    lon = None
+                elif lat is not None and lon is not None and self._anomaly_engine:
+                    asyncio.ensure_future(
+                        self._anomaly_engine.process_contact(self.name, node_id, lat, lon, adv_name)
+                    )
+                self._rf_stats["contact_count"] += 1
                 now = datetime.now(timezone.utc)
                 if node_id not in self._nodes:
                     self._nodes[node_id] = MeshNode(
@@ -1167,16 +1254,21 @@ class MeshCoreAdapter(Adapter):
             #   There is NO name field — name comes from CMD_GET_CONTACTS response.
             if len(data) >= 6:
                 node_id = data[:6].hex().upper()
-                log.info("MeshCore %s: PUSH_ADVERT node=%s pubkey=%s",
-                         self.name, node_id, data.hex())
+                self._rf_stats["advert_count"] += 1
+                log.debug("MeshCore %s: PUSH_ADVERT node=%s", self.name, node_id)
+                # Rate-limit check — suppress contacts refresh on flooded nodes
+                flood = None
+                if self._anomaly_engine:
+                    flood = await self._anomaly_engine.record_packet(self.name, node_id)
                 now = datetime.now(timezone.utc)
                 if node_id not in self._nodes:
                     self._nodes[node_id] = MeshNode(
                         node_id=node_id, display_name=node_id,
                         first_seen=now, last_heard=now, name_source="advert",
                     )
-                    # Trigger a contacts refresh so the name resolves promptly
-                    self._contacts_refresh_pending = True
+                    # Only trigger contacts refresh if this node isn't flooding us
+                    if flood is None:
+                        self._contacts_refresh_pending = True
                 else:
                     self._nodes[node_id].last_heard = now
 
@@ -1310,6 +1402,14 @@ class MeshCoreAdapter(Adapter):
             ts_raw = struct.unpack("<I", data[3:7])[0]
             raw_payload = data[7:]
 
+        # Rate limit per sender for channel messages
+        if sender_hex and self._anomaly_engine:
+            flood = await self._anomaly_engine.record_packet(self.name, sender_hex)
+            if flood is not None:
+                log.warning("MeshCore %s: dropping channel msg from flooding sender %s",
+                            self.name, sender_hex[:12])
+                return
+
         # Track this channel index even if we don't know its name yet
         if ch_idx not in self._channels:
             self._channels[ch_idx] = ""
@@ -1392,6 +1492,17 @@ class MeshCoreAdapter(Adapter):
                     self._router_notify(self.name, relay_msg_id, "heard_1",
                                         relay_name, [sender_hex])
                 )
+
+        # RF stats
+        self._rf_stats["channel_msg_count"] += 1
+        if snr is not None:
+            self._rf_stats["snr_samples"].append(snr)
+            if len(self._rf_stats["snr_samples"]) > 1000:
+                self._rf_stats["snr_samples"] = self._rf_stats["snr_samples"][-500:]
+        if sane_hops is not None:
+            self._rf_stats["hop_samples"].append(sane_hops)
+            if len(self._rf_stats["hop_samples"]) > 1000:
+                self._rf_stats["hop_samples"] = self._rf_stats["hop_samples"][-500:]
 
         msg = NormalizedMessage(
             source_adapter=self.name,
@@ -1490,6 +1601,17 @@ class MeshCoreAdapter(Adapter):
             raw_data["packet_timestamp"] = ts_raw
         if snr is not None:
             raw_data["snr"] = snr
+
+        # RF stats
+        self._rf_stats["contact_msg_count"] += 1
+        if snr is not None:
+            self._rf_stats["snr_samples"].append(snr)
+            if len(self._rf_stats["snr_samples"]) > 1000:
+                self._rf_stats["snr_samples"] = self._rf_stats["snr_samples"][-500:]
+        if sane_hops is not None:
+            self._rf_stats["hop_samples"].append(sane_hops)
+            if len(self._rf_stats["hop_samples"]) > 1000:
+                self._rf_stats["hop_samples"] = self._rf_stats["hop_samples"][-500:]
 
         msg = NormalizedMessage(
             source_adapter=self.name,
@@ -1624,4 +1746,5 @@ class MeshCoreAdapter(Adapter):
         if self._battery_mv is not None:
             d["battery_mv"] = self._battery_mv
             d["battery_v"] = round(self._battery_mv / 1000.0, 2)
+        d["rf_stats"] = self._health_rf_stats()
         return d

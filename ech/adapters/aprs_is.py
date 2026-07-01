@@ -258,11 +258,18 @@ class APRSISAdapter(Adapter):
     async def _process_packet(self, packet: dict) -> None:
         self._packet_count += 1
         try:
-            fmt     = packet.get("format", "")
-            from_id = packet.get("from", "UNKNOWN")
-            lat     = packet.get("latitude")
-            lon     = packet.get("longitude")
-            now     = datetime.now(timezone.utc)
+            fmt      = packet.get("format", "")
+            gate_id  = packet.get("from", "UNKNOWN")
+            lat      = packet.get("latitude")
+            lon      = packet.get("longitude")
+            now      = datetime.now(timezone.utc)
+
+            # For object packets the position belongs to the named object, not
+            # the gate station.  Use object_name as the unique node/message ID
+            # so each vessel gets its own map marker instead of all collapsing
+            # to a single jumping marker on the gate callsign.
+            obj_name = packet.get("object_name", "").strip() if fmt == "object" else ""
+            from_id  = obj_name if obj_name else gate_id
 
             # Always update node position cache for any packet with a position
             if lat is not None and lon is not None:
@@ -289,6 +296,22 @@ class APRSISAdapter(Adapter):
             raw_path = packet.get("path", "")
             if isinstance(raw_path, list):
                 raw_path = ",".join(str(x) for x in raw_path)
+
+            raw: dict = {"format": fmt}
+            if obj_name:
+                raw["gate"] = gate_id   # preserve the gating station
+            # Tag AIS objects so the map/log can style them differently
+            mmsi = packet.get("mmsi") or (
+                next((p.split("MMSI:")[1].split()[0]
+                      for p in [packet.get("comment", "")]
+                      if "MMSI:" in p), None)
+            )
+            if mmsi:
+                raw["mmsi"] = mmsi
+                raw["msg_type"] = "ais"
+                if from_id in self._nodes:
+                    self._nodes[from_id].meta["mmsi"] = mmsi
+
             msg = NormalizedMessage(
                 source_adapter=self.name,
                 source_channel="144.390 (IS)",
@@ -296,10 +319,10 @@ class APRSISAdapter(Adapter):
                 from_display=from_id,
                 body=body,
                 priority=Priority.NORMAL,
-                lat=float(lat) if lat else None,
-                lon=float(lon) if lon else None,
+                lat=float(lat) if lat is not None else None,
+                lon=float(lon) if lon is not None else None,
                 path=raw_path or None,
-                raw={"format": fmt},
+                raw=raw,
             )
             await self._enqueue(msg)
 
@@ -343,8 +366,12 @@ class APRSISAdapter(Adapter):
 
         elif fmt == "object":
             obj_name = packet.get("object_name", "").strip()
-            comment = packet.get("comment", "").strip()
-            return f"OBJ {obj_name}: {comment}" if obj_name else ""
+            comment  = packet.get("comment", "").strip()
+            if not obj_name:
+                return ""
+            # Include gate callsign so operator knows who is reporting the object
+            via = f" via {from_id}" if obj_name != from_id else ""
+            return f"OBJ {obj_name}{via}: {comment}" if comment else f"OBJ {obj_name}{via}"
 
         elif fmt == "wx":
             temp = packet.get("wx_temp")

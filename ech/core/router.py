@@ -44,6 +44,7 @@ class Router:
         self._tasks: list[asyncio.Task] = []
         self._adapter_tasks: dict[str, asyncio.Task] = {}  # name → supervise task
         self._metrics_task: asyncio.Task | None = None
+        self._anomaly_drain_task: asyncio.Task | None = None
 
     # ── Adapter management ────────────────────────────────────────────────
 
@@ -55,6 +56,9 @@ class Router:
         adapter._router_notify_nodes = self._handle_nodes_updated
         # Generic broadcast for telemetry, topology, and other real-time events.
         adapter._router_broadcast = self.broadcast_ws_event
+        # Give mesh adapters direct access to the anomaly engine for contact/flood detection
+        if hasattr(adapter, '_anomaly_engine'):
+            adapter._anomaly_engine = self._anomaly_engine
         log.info("Router: registered adapter '%s'", adapter.name)
 
     async def start_adapter(self, adapter: Adapter) -> None:
@@ -96,11 +100,17 @@ class Router:
         self._metrics_task = asyncio.create_task(
             self._metrics_loop(), name="metrics-update"
         )
+        if self._anomaly_engine:
+            self._anomaly_drain_task = asyncio.create_task(
+                self._drain_anomaly_queue(), name="anomaly-drain"
+            )
         log.info("Router: started, supervising %d adapter(s)", len(self._adapters))
 
     async def stop(self) -> None:
         if self._metrics_task:
             self._metrics_task.cancel()
+        if self._anomaly_drain_task:
+            self._anomaly_drain_task.cancel()
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
@@ -149,21 +159,13 @@ class Router:
         # Broadcast to WebSocket clients
         await self._broadcast_ws(msg)
 
-        # Anomaly detection (mesh adapters only)
+        # Anomaly detection (mesh adapters only).
+        # process() puts findings on findings_queue; _drain_anomaly_queue handles WS broadcast
+        # for all paths (channel msgs, contacts, floods) — record metrics only here.
         if self._anomaly_engine:
             findings = await self._anomaly_engine.process(msg)
             for finding in findings:
                 M.record_anomaly(finding.adapter, finding.rule, finding.severity.value)
-                # Push anomaly event to WebSocket clients
-                import json
-                payload = json.dumps({"type": "anomaly", "data": finding.to_dict()})
-                dead = set()
-                for ws in self._ws_clients:
-                    try:
-                        await ws.send_text(payload)
-                    except Exception:
-                        dead.add(ws)
-                self._ws_clients -= dead
 
         # Apply bridge rules
         await self._apply_bridge_rules(msg)
@@ -195,9 +197,15 @@ class Router:
     async def _metrics_loop(self) -> None:
         """Periodically update Prometheus gauges from adapter/db state."""
         import os
+        _last_session_prune = 0.0
+        _SESSION_PRUNE_INTERVAL = 21600.0  # 6 hours
         while True:
             try:
                 await asyncio.sleep(15)
+                now = time.monotonic()
+                if now - _last_session_prune >= _SESSION_PRUNE_INTERVAL:
+                    await self._db.prune_expired_sessions()
+                    _last_session_prune = now
                 # Adapter health
                 for adapter in self._adapters.values():
                     h = await adapter.health()
@@ -233,6 +241,29 @@ class Router:
                 return
             except Exception as exc:
                 log.debug("Metrics loop error: %s", exc)
+
+    async def _drain_anomaly_queue(self) -> None:
+        """Consume findings queued by process_contact/record_packet and broadcast to WS."""
+        while True:
+            try:
+                finding = await asyncio.wait_for(
+                    self._anomaly_engine.findings_queue.get(), timeout=5.0
+                )
+                M.record_anomaly(finding.adapter, finding.rule, finding.severity.value)
+                payload = json.dumps({"type": "anomaly", "data": finding.to_dict()})
+                dead = set()
+                for ws in self._ws_clients:
+                    try:
+                        await ws.send_text(payload)
+                    except Exception:
+                        dead.add(ws)
+                self._ws_clients -= dead
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                log.debug("Router: anomaly drain error: %s", exc)
 
     async def broadcast_ws_event(self, event_type: str, data: dict) -> None:
         """Broadcast a typed event (non-message) to all WS clients."""

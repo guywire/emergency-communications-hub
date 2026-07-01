@@ -44,7 +44,7 @@ def main():
                     fpath = os.path.join(dirpath, fname)
                     arcname = os.path.relpath(fpath, root)
                     tar.add(fpath, arcname=arcname)
-        for extra in ('config.yaml', 'config-sim.yaml', 'VERSION', 'deploy/install.sh', 'deploy/ech-sim.service'):
+        for extra in ('config.yaml', 'config-sim.yaml', 'VERSION', 'deploy/install.sh', 'deploy/ech.service', 'deploy/ech-sim.service'):
             fpath = os.path.join(root, extra)
             if os.path.exists(fpath):
                 tar.add(fpath, arcname=extra)

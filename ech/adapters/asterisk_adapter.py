@@ -185,8 +185,8 @@ class AsteriskAdapter(Adapter):
         for k, v in fields.items():
             lines.append(f"{k}: {v}")
         lines.append(f"ActionID: ech-{self._action_counter}")
-        lines.append("")   # blank line terminates action
-        payload = "\r\n".join(lines)
+        lines.append("")   # blank line terminates action (AMI needs \r\n\r\n)
+        payload = "\r\n".join(lines) + "\r\n"
         self._writer.write(payload.encode())
         await self._writer.drain()
 

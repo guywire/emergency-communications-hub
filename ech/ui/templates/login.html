@@ -19,6 +19,9 @@ input:focus{border-color:var(--blue)}
 .login-btn:hover{opacity:.9}
 .error{font-family:var(--mono);font-size:11px;color:var(--red);margin-top:12px;display:none}
 .hint{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:16px}
+.tls-hint{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.tls-hint a{color:var(--blue);text-decoration:none}.tls-hint a:hover{text-decoration:underline}
+.cert-warn{color:#d29922}
 </style>
 </head>
 <body>
@@ -35,12 +38,26 @@ input:focus{border-color:var(--blue)}
   </form>
   <div class="error" id="error-msg" style="display:none">Invalid username or password</div>
   <div class="hint">First login will prompt you to set a new password</div>
+  <div class="tls-hint" id="tls-hint" style="display:none"></div>
 </div>
 <script>
 (function () {
   const params = new URLSearchParams(window.location.search);
   if (params.get('next')) document.getElementById('next-input').value = params.get('next');
   if (params.get('error')) document.getElementById('error-msg').style.display = 'block';
+
+  // Show HTTPS / cert guidance
+  const hint = document.getElementById('tls-hint');
+  const isHttps = window.location.protocol === 'https:';
+  if (isHttps) {
+    hint.innerHTML = '<span class="cert-warn">&#9888;</span> Browser showing a cert warning? ' +
+      '<a href="/tls-setup">HTTPS setup &amp; CA cert trust instructions</a> &mdash; ' +
+      'or <a href="/ca.crt" download>download CA cert directly</a>.';
+  } else {
+    hint.innerHTML = '&#128274; HTTPS available &mdash; ' +
+      '<a href="/tls-setup">setup instructions &amp; CA cert download</a>.';
+  }
+  hint.style.display = '';
 })();
 </script>
 </body>

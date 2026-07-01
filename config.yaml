@@ -96,12 +96,30 @@ incident:
 #
 # Real adapters (live hardware):
 #   meshtastic       aprs_kiss  aprs_is        meshcore      js8call   sms  pat_winlink
-#   mqtt             reticulum  aredn_ami       asterisk
+#   mqtt             reticulum  aredn_ami       asterisk      adsb
 
 adapters:
 
 # ── Live adapters — uncomment and fill in for your hardware ──────────────────
 # For a simulation-only demo instance, use config-sim.yaml (port 8766) instead.
+
+# ── ADS-B (FlightAware PiAware / dump1090) ───────────────────────────────────
+#   - type: adsb
+#     name: adsb
+#     host: 192.168.6.5       # FlightAware / PiAware device IP
+#     port: 80                # HTTP port (default 80)
+#     # path: /skyaware/data/aircraft.json   # auto-detected if omitted
+#     poll_interval: 10       # seconds between polls (default 10)
+#     stale_sec: 120          # remove aircraft not seen for this long (default 120)
+
+# ── AIS (AIS-catcher receiver) ───────────────────────────────────────────────
+#   - type: ais_catcher
+#     name: ais
+#     host: 192.168.6.5       # AIS-catcher device IP
+#     port: 8100              # AIS-catcher HTTP port (default 8100)
+#     # path: /vessels.json   # auto-detected if omitted
+#     poll_interval: 30       # seconds between polls (default 30)
+#     stale_sec: 300          # remove vessels not seen for this long (default 300 = 5min)
 
 # ── MeshCore (real hardware) ──────────────────────────────────────────────────
 #

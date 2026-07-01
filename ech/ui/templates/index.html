@@ -354,6 +354,13 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
   color: var(--blue);
   margin-top: 2px;
 }
+.msg-ais {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.msg-ais a { color: var(--blue); text-decoration: none; }
+.msg-ais a:hover { text-decoration: underline; }
 .msg-path-badge {
   display: inline-flex;
   align-items: center;
@@ -1329,7 +1336,26 @@ function buildMsgEl(msg) {
   const _lat = (msg.lat != null && msg.lat !== '' && !isNaN(msg.lat)) ? parseFloat(msg.lat) : null;
   const _lon = (msg.lon != null && msg.lon !== '' && !isNaN(msg.lon)) ? parseFloat(msg.lon) : null;
   const posStr = (_lat != null && _lon != null) ?
-    `<div class="msg-pos">⌖ ${_lat.toFixed(4)}, ${_lon.toFixed(4)}</div>` : '';
+    `<div class="msg-pos"><a href="/map?lat=${_lat.toFixed(6)}&lon=${_lon.toFixed(6)}&zoom=14" target="_blank" rel="noopener" title="Show on map" style="color:inherit;text-decoration:none">⌖ ${_lat.toFixed(4)}, ${_lon.toFixed(4)}</a></div>` : '';
+
+  // AIS vessel link
+  const _raw = msg._raw || {};
+  const _mmsi = _raw.mmsi;
+  const _isAton = _mmsi && String(_mmsi).startsWith('99');
+  let aisStr = '';
+  if (_mmsi) {
+    if (_isAton) {
+      // AtoN — link to ECH map if we have coords, otherwise OpenSeaMap
+      const _atonMapUrl = (_lat != null && _lon != null)
+        ? `/map?lat=${_lat.toFixed(6)}&lon=${_lon.toFixed(6)}&zoom=14`
+        : `https://map.openseamap.org/`;
+      const _atonMapLabel = (_lat != null && _lon != null) ? 'Show on map' : 'OpenSeaMap';
+      aisStr = `<div class="msg-ais">⚓ AtoN &mdash; MMSI ${escHtml(String(_mmsi))} &mdash; <a href="${_atonMapUrl}" target="_blank" rel="noopener noreferrer">${_atonMapLabel}</a></div>`;
+    } else {
+      const _vfUrl = `https://www.vesselfinder.com/vessels/details/${escHtml(String(_mmsi))}`;
+      aisStr = `<div class="msg-ais">🚢 AIS &mdash; MMSI ${escHtml(String(_mmsi))} &mdash; <a href="${_vfUrl}" target="_blank" rel="noopener noreferrer">VesselFinder</a> &bull; <a href="https://www.marinetraffic.com/en/ais/details/ships/mmsi:${escHtml(String(_mmsi))}" target="_blank" rel="noopener noreferrer">MarineTraffic</a></div>`;
+    }
+  }
 
   const isEncrypted = msg.body === '[Encrypted channel message]' || msg.body === '[Encrypted direct message]';
   const wasDecrypted = !isEncrypted && (msg._raw || {}).decrypted_with;
@@ -1414,6 +1440,7 @@ function buildMsgEl(msg) {
       </div>
       <div class="${bodyClass}">${escHtml(msg.body)}</div>
       ${posStr}
+      ${aisStr}
     </div>
   `;
   return div;
@@ -2718,13 +2745,13 @@ async function loadServicesPanel() {
       <button onclick="loadServicesPanel()" style="font-size:10px;padding:2px 6px">↻ Refresh</button>
     </div>`;
     svcs.forEach(s => {
-      const col = STATE_COLOR[s.state] || 'var(--muted)';
-      const dot = s.state === 'active' ? '●' : s.state === 'failed' ? '✗' : '○';
-      const canRestart = s.state !== 'active' || true;
+      const state = s.active || 'unknown';
+      const col = STATE_COLOR[state] || 'var(--muted)';
+      const dot = state === 'active' ? '●' : state === 'failed' ? '✗' : '○';
       html += `<div style="padding:5px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
         <span style="color:${col};font-size:13px;min-width:14px">${dot}</span>
         <span style="flex:1;font-family:var(--mono);font-size:11px">${escHtml(s.name)}</span>
-        <span style="font-size:10px;color:${col}">${escHtml(s.state||'?')}</span>
+        <span style="font-size:10px;color:${col}">${escHtml(state)}</span>
         <button onclick="restartService('${escHtml(s.name)}',this)" style="font-size:9px;padding:1px 5px" title="Restart ${escHtml(s.name)}">↺</button>
       </div>`;
     });

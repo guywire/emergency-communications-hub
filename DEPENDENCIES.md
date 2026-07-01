@@ -1,6 +1,6 @@
 # ECH — External Dependencies
 
-Last updated: 2026-06-21
+Last updated: 2026-06-30
 
 This file tracks all external Python packages, GitHub projects, and protocol references
 used by ECH. Update it whenever a new dependency is added or an existing one changes role.
@@ -69,6 +69,24 @@ used by ECH. Update it whenever a new dependency is added or an existing one cha
 
 **GitHub:** https://github.com/markqvist/Reticulum
 
+### Adapter — ADS-B (PiAware / dump1090 / tar1090 / readsb)
+
+| Package | PyPI name | Version | Purpose |
+|---------|-----------|---------|---------|
+| aiohttp | `aiohttp` | any | HTTP polling of dump1090 `aircraft.json` feed (auto-detects /skyaware, /tar1090, /dump1090 paths) |
+
+**External process:** Any dump1090-compatible receiver (PiAware, dump1090-fa, tar1090, readsb) reachable on the LAN via HTTP. ECH polls `aircraft.json` — no SDR or ADS-B decoding happens inside ECH.
+
+**Mesh bot `overhead` command:** reads `aircraft.json` from local filesystem path (`dump1090_path` in `mesh_bot:` config); does not use aiohttp. Default path: `/run/dump1090-fa/aircraft.json`.
+
+### Adapter — AIS (AIS-catcher)
+
+| Package | PyPI name | Version | Purpose |
+|---------|-----------|---------|---------|
+| aiohttp | `aiohttp` | any | HTTP polling of AIS-catcher vessel JSON API |
+
+**External process:** [AIS-catcher](https://github.com/jvde-github/AIS-catcher) with `--server` / HTTP output mode enabled (default port 8100). ECH polls `/vessels.json` (or auto-detected path). No SDR decoding happens inside ECH.
+
 ### Adapter — AREDN
 
 | Package | PyPI name | Version | Purpose |
@@ -123,6 +141,9 @@ pip install fastapi "uvicorn[standard]" pyyaml aiosqlite \
 | Pat Winlink | https://github.com/la5nta/pat | External process; ECH calls its HTTP API |
 | Direwolf | https://github.com/wb2osz/direwolf | External process; ECH connects to its KISS-over-TCP port |
 | JS8Call | https://js8call.com | External process; ECH connects to its TCP API on port 2442 |
+| AIS-catcher | https://github.com/jvde-github/AIS-catcher | External process; ECH polls its HTTP JSON API for vessel positions |
+| dump1090-fa / PiAware | https://github.com/flightaware/dump1090 | External process; ECH polls aircraft.json for ADS-B positions and mesh bot `overhead` |
+| tar1090 / readsb | https://github.com/wiedehopf/tar1090 | Alternative dump1090-compatible ADS-B feed; same aircraft.json format |
 
 ---
 

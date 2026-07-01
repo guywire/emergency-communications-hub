@@ -73,6 +73,7 @@ class NormalizedMessage:
             "msg_type": self.msg_type,
             "snr": _raw.get("snr"),
             "rssi": _raw.get("rssi"),
+            "raw_json": self.raw or {},   # JS reads msg._raw from this; must be present on WS messages
         }
 
 
@@ -119,6 +120,7 @@ class MeshNode:
     hw_model: str = ""
     lat: float | None = None
     lon: float | None = None
+    meta: dict[str, Any] = field(default_factory=dict)  # adapter-specific extras (mmsi, icao, etc.)
 
     def to_dict(self) -> dict:
         d = {
@@ -143,4 +145,5 @@ class MeshNode:
         if self.temperature is not None:     d["temperature"] = self.temperature
         if self.humidity is not None:        d["humidity"] = self.humidity
         if self.pressure is not None:        d["pressure"] = self.pressure
+        if self.meta:                        d["meta"] = self.meta
         return d

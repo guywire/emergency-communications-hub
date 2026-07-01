@@ -38,6 +38,8 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 .node-popup .node-stat{color:var(--muted);line-height:1.8}
 .node-popup .node-last-msg{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:10px;color:var(--text);word-break:break-word;line-height:1.5}
 .node-popup .node-last-msg .msg-ts{color:var(--muted);font-size:9px;display:block;margin-bottom:2px}
+.node-popup .node-ext-links{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:10px;line-height:1.8}
+.node-popup .node-ext-links a{color:var(--blue);text-decoration:none}.node-popup .node-ext-links a:hover{text-decoration:underline}
 #legend{position:absolute;bottom:30px;right:10px;z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:10px;min-width:140px}
 .legend-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
 .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
@@ -57,6 +59,8 @@ body.sim-mode #map{height:calc(100vh - 70px)}
   <div id="controls">
     <button class="ctrl-btn" onclick="loadNodes()">↻ Refresh</button>
     <button class="ctrl-btn" id="follow-btn" onclick="toggleFollow()">📍 Follow</button>
+    <button class="ctrl-btn" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADSB</button>
+    <button class="ctrl-btn" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS</button>
     <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show PSKReporter callsign spots">PSK</button>
     <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">GRID</button>
     <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">HAM LOG</button>
@@ -71,6 +75,8 @@ body.sim-mode #map{height:calc(100vh - 70px)}
   <div class="legend-item"><div class="legend-dot" style="background:#c792ea"></div>Reticulum</div>
   <div class="legend-item"><div class="legend-dot" style="background:#e2a44f"></div>MQTT</div>
   <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Alert / WL</div>
+  <div class="legend-item"><span style="color:#f0b429;font-size:13px;line-height:1;margin-right:6px">✈</span>ADS-B Aircraft</div>
+  <div class="legend-item"><span style="color:#56d3c8;font-size:13px;line-height:1;margin-right:6px">⚓</span>AIS Vessels</div>
   <div class="legend-item" id="legend-hamlog" style="display:none"><div class="legend-dot" style="background:#ffd700;border:1px solid #997a00"></div>Ham Log QSO</div>
 </div>
 
@@ -83,8 +89,26 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 18,
 }).addTo(map);
 
+// Pan to ?lat=...&lon=...&zoom=... from message coordinate links
+(function () {
+  const p = new URLSearchParams(window.location.search);
+  const lat = parseFloat(p.get('lat')), lon = parseFloat(p.get('lon'));
+  if (!isNaN(lat) && !isNaN(lon)) {
+    const zoom = parseInt(p.get('zoom') || '14', 10);
+    map.setView([lat, lon], zoom);
+    // Temporary pulsing pin that fades after 8 s
+    const pin = L.circleMarker([lat, lon], {
+      radius: 10, color: '#f0883e', fillColor: '#f0883e',
+      fillOpacity: 0.5, weight: 2,
+    }).addTo(map);
+    setTimeout(() => map.removeLayer(pin), 8000);
+  }
+})();
+
 const markers = {};
 let followMode = false;
+let _showAircraft = true;
+let _showVessels  = true;
 
 function adapterColor(adapter) {
   const a = adapter.toLowerCase();
@@ -95,7 +119,32 @@ function adapterColor(adapter) {
   if (a.includes('mqtt'))       return '#e2a44f';
   if (a.includes('winlink') || a.includes('pat'))   return '#f85149';
   if (a.includes('js8') || a.includes('hf'))        return '#ffcb6b';
+  if (a.includes('adsb') || a.includes('ads-b'))    return '#f0b429';
+  if (a.includes('ais'))                            return '#56d3c8';
   return '#8b949e';
+}
+
+function makeNodeIcon(node, color, size=12) {
+  const id = (node.node_id || '').toLowerCase();
+  if (id.startsWith('icao:')) {
+    const sz = size + 4;
+    return L.divIcon({
+      className: 'node-dot',
+      html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center;transform:rotate(-45deg)">✈</div>`,
+      iconSize: [sz, sz],
+      iconAnchor: [sz/2, sz/2],
+    });
+  }
+  if (id.startsWith('mmsi:')) {
+    const sz = size + 2;
+    return L.divIcon({
+      className: 'node-dot',
+      html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center">⚓</div>`,
+      iconSize: [sz, sz],
+      iconAnchor: [sz/2, sz/2],
+    });
+  }
+  return makeIcon(color, size);
 }
 
 function makeIcon(color, size=12) {
@@ -125,6 +174,48 @@ function popupContent(node, isAlert, lastMsg) {
     <a href="${msgUrl}" target="_top" style="flex:1;text-align:center;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.4);color:#388bfd;border-radius:3px;text-decoration:none">📨 Message</a>
     ${isMeshCore ? `<button onclick="mapTrace('${esc(node._adapter)}','${esc(node.node_id)}',this)" style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);color:#3fb950;border-radius:3px;cursor:pointer">📡 Trace</button>` : ''}
   </div>`;
+
+  // External lookup links — AIS vessels and ADS-B aircraft
+  const meta = node.meta || {};
+  let extLinks = '';
+  if (meta.mmsi) {
+    const mmsi = esc(String(meta.mmsi));
+    const isAton = String(meta.mmsi).startsWith('99');
+    const vesselName = meta.vessel_name ? ` — ${esc(meta.vessel_name)}` : '';
+    const shipType   = meta.ship_type   ? `<div class="node-stat">${esc(meta.ship_type)}</div>` : '';
+    const navStatus  = meta.nav_status  ? `<div class="node-stat">${esc(meta.nav_status)}${meta.speed_kts != null ? `, ${meta.speed_kts}kts` : ''}</div>` : (meta.speed_kts != null ? `<div class="node-stat">${meta.speed_kts}kts</div>` : '');
+    const dest       = meta.destination ? `<div class="node-stat">→ ${esc(meta.destination)}</div>` : '';
+    if (isAton) {
+      const osmUrl = (node.lat != null && node.lon != null)
+        ? `https://map.openseamap.org/?zoom=14&lat=${node.lat}&lon=${node.lon}`
+        : 'https://www.openseamap.org/';
+      const centerJs = (node.lat != null && node.lon != null)
+        ? `map.setView([${node.lat},${node.lon}],15);` : '';
+      extLinks = `<div class="node-ext-links">⚓ AtoN MMSI ${mmsi}${vesselName}<br>`
+        + (centerJs ? `<a href="javascript:void(0)" onclick="${centerJs}">Center here</a> &bull; ` : '')
+        + `<a href="${osmUrl}" target="_blank" rel="noopener">OpenSeaMap</a>`
+        + `</div>`;
+    } else {
+      extLinks = `<div class="node-ext-links">🚢 MMSI ${mmsi}${vesselName}`
+        + `${shipType}${navStatus}${dest}`
+        + `<a href="https://www.vesselfinder.com/vessels/details/${mmsi}" target="_blank" rel="noopener">VesselFinder</a>`
+        + ` &bull; <a href="https://www.marinetraffic.com/en/ais/details/ships/mmsi:${mmsi}" target="_blank" rel="noopener">MarineTraffic</a>`
+        + `</div>`;
+    }
+  } else if (meta.icao) {
+    const icao   = esc(meta.icao);
+    const flight = meta.flight ? meta.flight.trim() : '';
+    const alt    = meta.altitude_ft != null ? `${Number(meta.altitude_ft).toLocaleString()}ft` : '';
+    const spd    = meta.speed_kts   != null ? `${Math.round(meta.speed_kts)}kts` : '';
+    const sqk    = meta.squawk      ? `sqk:${esc(meta.squawk)}` : '';
+    const stats  = [alt, spd, sqk].filter(Boolean).join('  ');
+    extLinks = `<div class="node-ext-links">`
+      + `✈ ICAO: ${icao.toUpperCase()}${stats ? '  ' + stats : ''}<br>`
+      + (flight ? `<a href="https://flightaware.com/live/flight/${esc(flight)}" target="_blank" rel="noopener">FlightAware (${esc(flight)})</a> &bull; ` : '')
+      + `<a href="https://globe.adsbexchange.com/?icao=${icao}" target="_blank" rel="noopener">ADS-B Exchange</a>`
+      + `</div>`;
+  }
+
   return `<div class="node-popup" data-node-id="${esc(node.node_id)}">
     <div class="node-name">${esc(node.display_name)}</div>
     <div class="node-stat">Adapter: ${esc(node._adapter)}</div>
@@ -133,6 +224,7 @@ function popupContent(node, isAlert, lastMsg) {
     ${node.battery_level != null ? `<div class="node-stat">Battery: ${node.battery_level}%</div>` : ''}
     <div class="node-stat">Last heard: ${heard}</div>
     ${isAlert ? '<div style="color:var(--red);font-weight:500;margin-top:4px">⚠ ANOMALY ACTIVE</div>' : ''}
+    ${extLinks}
     ${msgBlock}
     ${actionBtns}
   </div>`;
@@ -183,19 +275,25 @@ async function loadNodes() {
     allNodes.forEach(node => {
       if (node.lat == null || node.lon == null) return;
       if (node.lat === 0 && node.lon === 0) return;
+      const nid = (node.node_id || '').toLowerCase();
+      const isAircraft = nid.startsWith('icao:');
+      const isVessel   = nid.startsWith('mmsi:');
+      if (!_showAircraft && isAircraft) return;
+      if (!_showVessels  && isVessel)   return;
       const id = node.node_id;
       seen.add(id);
       const isAlert = alertNodes.has(id);
       const color = isAlert ? '#f85149' : adapterColor(node._adapter);
       const size  = isAlert ? 16 : 12;
       const popup = popupContent(node, isAlert);
+      const icon  = makeNodeIcon(node, color, size);
 
       if (markers[id]) {
         markers[id].setLatLng([node.lat, node.lon]);
-        markers[id].setIcon(makeIcon(color, size));
+        markers[id].setIcon(icon);
         markers[id].getPopup().setContent(popup);
       } else {
-        const marker = L.marker([node.lat, node.lon], {icon: makeIcon(color, size)})
+        const marker = L.marker([node.lat, node.lon], {icon})
           .bindPopup(popup)
           .addTo(map);
         marker.on('popupopen', () => onPopupOpen(marker, node));
@@ -255,6 +353,22 @@ function toggleFollow() {
   followMode = !followMode;
   document.getElementById('follow-btn').style.color = followMode ? 'var(--green)' : '';
   if (followMode) loadNodes();
+}
+
+function toggleAircraft() {
+  _showAircraft = !_showAircraft;
+  const btn = document.getElementById('adsb-btn');
+  btn.style.color       = _showAircraft ? '' : 'var(--muted)';
+  btn.style.borderColor = _showAircraft ? '' : 'var(--border)';
+  loadNodes();
+}
+
+function toggleVessels() {
+  _showVessels = !_showVessels;
+  const btn = document.getElementById('ais-btn');
+  btn.style.color       = _showVessels ? '' : 'var(--muted)';
+  btn.style.borderColor = _showVessels ? '' : 'var(--border)';
+  loadNodes();
 }
 
 function connectWS() {

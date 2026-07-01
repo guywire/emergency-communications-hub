@@ -129,6 +129,28 @@ class AnomalyEngine:
         # Track which nodes have already triggered a long-range finding so we
         # don't spam it on every position packet from the same distant node.
         self._long_range_noted: set[tuple] = set()
+        self._invalid_coords_noted: set[tuple] = set()
+
+        # Per-node packet-rate tracking (sliding window)
+        self._pkt_rate:           dict[tuple, list[float]] = {}
+        self._pkt_flood_noted:    dict[tuple, float]       = {}
+        self._flood_threshold     = int(cfg.get("flood_threshold",        20))   # pkts per window
+        self._flood_window_sec    = float(cfg.get("flood_window_sec",     60.0))
+        self._flood_cooldown_sec  = float(cfg.get("flood_cooldown_sec",   300.0))
+        # Network-wide flood (all senders combined)
+        self._total_pkt_times:    list[float] = []
+        self._total_flood_threshold = int(cfg.get("total_flood_threshold", 300))
+        self._total_flood_noted:  float = 0.0
+
+        # Auto-detect base position from first adapter with beacon coords if not set above
+        if self._base_lat is None:
+            for adapter_cfg in config.get("adapters", []):
+                if adapter_cfg.get("beacon_lat") and adapter_cfg.get("beacon_lon"):
+                    self._base_lat = float(adapter_cfg["beacon_lat"])
+                    self._base_lon = float(adapter_cfg["beacon_lon"])
+                    log.info("AnomalyEngine: base position inferred from adapter %r: %.4f, %.4f",
+                             adapter_cfg.get("name", "?"), self._base_lat, self._base_lon)
+                    break
 
         self._db = db
 
@@ -143,10 +165,11 @@ class AnomalyEngine:
         self.findings: list[AnomalyFinding] = []
         self.findings_queue: asyncio.Queue[AnomalyFinding] = asyncio.Queue()
         self._finding_id = 0
+        self._finding_prefix = f"{int(time.time()):010d}"  # unique per process start
 
     def _next_id(self) -> str:
         self._finding_id += 1
-        return f"F{self._finding_id:06d}"
+        return f"F{self._finding_prefix}{self._finding_id:04d}"
 
     async def process(self, msg) -> list[AnomalyFinding]:
         """
@@ -385,6 +408,127 @@ class AnomalyEngine:
             summary=summary,
             evidence=evidence,
         )
+
+    async def process_contact(self, adapter: str, node_id: str,
+                              lat: float | None, lon: float | None,
+                              name: str = "") -> list[AnomalyFinding]:
+        """Check a contact advertisement (PUSH_ADVERT / GET_CONTACTS) for anomalies."""
+        if not self.enabled:
+            return []
+        key = (adapter, node_id)
+        new_findings: list[AnomalyFinding] = []
+
+        if lat is not None and lon is not None:
+            if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+                if key not in self._invalid_coords_noted:
+                    self._invalid_coords_noted.add(key)
+                    reasons = []
+                    if not (-90.0 <= lat <= 90.0):
+                        reasons.append(f"lat={lat:.2f} (must be ±90)")
+                    if not (-180.0 <= lon <= 180.0):
+                        reasons.append(f"lon={lon:.2f} (must be ±180)")
+                    label = name or node_id[:12]
+                    f = AnomalyFinding(
+                        id=self._next_id(), adapter=adapter, node_id=node_id,
+                        rule="invalid_coordinates", severity=Severity.ALERT,
+                        summary=f"Node {label} advertising impossible coordinates: {', '.join(reasons)}",
+                        evidence={"lat": lat, "lon": lon, "name": name},
+                    )
+                    new_findings.append(f)
+            elif (self._base_lat is not None and self._base_lon is not None
+                  and key not in self._long_range_noted):
+                dist_km = _haversine_km(self._base_lat, self._base_lon, lat, lon)
+                if dist_km > self._long_range_km:
+                    self._long_range_noted.add(key)
+                    dist_mi = dist_km * 0.621371
+                    severity = Severity.ALERT if dist_km > 2000 else Severity.WARN
+                    note = " — likely different continent" if dist_km > 5000 else ""
+                    label = name or node_id[:12]
+                    f = AnomalyFinding(
+                        id=self._next_id(), adapter=adapter, node_id=node_id,
+                        rule="long_range_contact", severity=severity,
+                        summary=f"Contact {label} is {dist_km:.0f}km ({dist_mi:.0f}mi) away{note}",
+                        evidence={"lat": lat, "lon": lon, "name": name,
+                                  "distance_km": round(dist_km, 1), "distance_mi": round(dist_mi, 1)},
+                    )
+                    new_findings.append(f)
+
+        for f in new_findings:
+            self.findings.append(f)
+            await self.findings_queue.put(f)
+            if self._db:
+                await self._db.save_anomaly(f)
+            log.info("Anomaly [%s] %s on %s:%s — %s",
+                     f.severity.value.upper(), f.rule, adapter, node_id[:12], f.summary[:80])
+        return new_findings
+
+    async def record_packet(self, adapter: str, sender_id: str) -> AnomalyFinding | None:
+        """Track packet rate per node. Returns a flood finding if threshold exceeded."""
+        if not self.enabled:
+            return None
+        now = time.monotonic()
+        key = (adapter, sender_id)
+
+        # Per-node sliding window
+        hist = self._pkt_rate.setdefault(key, [])
+        hist.append(now)
+        cutoff = now - self._flood_window_sec
+        while hist and hist[0] < cutoff:
+            hist.pop(0)
+
+        # Network-wide count
+        self._total_pkt_times.append(now)
+        while self._total_pkt_times and self._total_pkt_times[0] < cutoff:
+            self._total_pkt_times.pop(0)
+
+        finding: AnomalyFinding | None = None
+
+        # Per-node flood
+        count = len(hist)
+        if count >= self._flood_threshold:
+            last = self._pkt_flood_noted.get(key, 0.0)
+            if now - last >= self._flood_cooldown_sec:
+                self._pkt_flood_noted[key] = now
+                rate = round(count * 60 / self._flood_window_sec, 1)
+                finding = AnomalyFinding(
+                    id=self._next_id(), adapter=adapter, node_id=sender_id,
+                    rule="packet_flood", severity=Severity.ALERT,
+                    summary=f"Packet flood: {count} packets in {self._flood_window_sec:.0f}s "
+                            f"({rate}/min) from {sender_id[:12]}",
+                    evidence={"count": count, "window_sec": self._flood_window_sec,
+                              "rate_per_min": rate},
+                )
+                self.findings.append(finding)
+                await self.findings_queue.put(finding)
+                if self._db:
+                    await self._db.save_anomaly(finding)
+                log.warning("Anomaly [ALERT] packet_flood on %s:%s — %d pkts/%.0fs",
+                            adapter, sender_id[:12], count, self._flood_window_sec)
+
+        # Network-wide flood
+        total = len(self._total_pkt_times)
+        if total >= self._total_flood_threshold:
+            if now - self._total_flood_noted >= self._flood_cooldown_sec:
+                self._total_flood_noted = now
+                rate = round(total * 60 / self._flood_window_sec, 1)
+                f = AnomalyFinding(
+                    id=self._next_id(), adapter=adapter, node_id="(network)",
+                    rule="network_flood", severity=Severity.ALERT,
+                    summary=f"Network-wide packet flood: {total} packets in "
+                            f"{self._flood_window_sec:.0f}s ({rate}/min) across all nodes",
+                    evidence={"total_count": total, "window_sec": self._flood_window_sec,
+                              "rate_per_min": rate},
+                )
+                self.findings.append(f)
+                await self.findings_queue.put(f)
+                if self._db:
+                    await self._db.save_anomaly(f)
+                log.warning("Anomaly [ALERT] network_flood on %s — %d pkts/%.0fs",
+                            adapter, total, self._flood_window_sec)
+                if finding is None:
+                    finding = f
+
+        return finding
 
     def acknowledge(self, finding_id: str) -> bool:
         for f in self.findings:

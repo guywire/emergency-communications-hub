@@ -114,6 +114,8 @@ def build_adapter(cfg: dict):
         "meshcore":    ("ech.adapters.meshcore",         "MeshCoreAdapter",    "serial_asyncio"),
         "meshtastic":  ("ech.adapters.meshtastic_adapter","MeshtasticAdapter", "meshtastic"),
         "aprs_is":     ("ech.adapters.aprs_is",          "APRSISAdapter",      "aprslib"),
+        "adsb":        ("ech.adapters.adsb_adapter",     "ADSBAdapter",        "aiohttp"),
+        "ais_catcher": ("ech.adapters.ais_catcher_adapter", "AISCatcherAdapter", "aiohttp"),
         "aprs_kiss":   ("ech.adapters.aprs_kiss",        "APRSKISSAdapter",    "serial_asyncio, aprslib"),
         "js8call":     ("ech.adapters.js8call",          "JS8CallAdapter",     None),
         "sms":         ("ech.adapters.sms",              "SMSAdapter",         "serial_asyncio"),

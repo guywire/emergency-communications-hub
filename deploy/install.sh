@@ -49,23 +49,34 @@ if [ ! -f /etc/ech/config-sim.yaml ] && [ -f "$INSTALL_DIR/config-sim.yaml" ]; t
   echo "First install: copying config-sim.yaml to /etc/ech/config-sim.yaml ..."
   sudo cp "$INSTALL_DIR/config-sim.yaml" /etc/ech/config-sim.yaml
   sudo chown ech:ech /etc/ech/config-sim.yaml
-  echo "  Simulation instance will run on port 8766."
+  echo "  Simulation instance will run on port 8780."
 else
   echo "Existing /etc/ech/config-sim.yaml preserved (or not found in package)."
 fi
 
-# Install ech-sim.service if not already present
+# Deploy ech.service — always update so KillMode/TimeoutStopSec changes land
+if [ -f "$INSTALL_DIR/deploy/ech.service" ]; then
+  echo "Installing/updating ech.service ..."
+  sudo cp "$INSTALL_DIR/deploy/ech.service" /etc/systemd/system/ech.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable ech
+fi
+
+# Deploy ech-sim.service — always update for same reason
 if [ -f "$INSTALL_DIR/deploy/ech-sim.service" ]; then
-  if [ ! -f /etc/systemd/system/ech-sim.service ]; then
-    echo "Installing ech-sim.service ..."
-    sudo cp "$INSTALL_DIR/deploy/ech-sim.service" /etc/systemd/system/ech-sim.service
-    sudo systemctl daemon-reload
-    sudo systemctl enable ech-sim
+  echo "Installing/updating ech-sim.service ..."
+  sudo cp "$INSTALL_DIR/deploy/ech-sim.service" /etc/systemd/system/ech-sim.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable ech-sim
+  if ! sudo systemctl is-active --quiet ech-sim; then
     sudo systemctl start ech-sim
-    echo "  Simulation instance enabled on port 8766."
+    echo "  Simulation instance started on port 8780."
   else
     echo "Restarting ech-sim ..."
-    sudo systemctl restart ech-sim
+    sudo systemctl stop ech-sim
+    sudo pkill -9 -x ech 2>/dev/null || true
+    sleep 2
+    sudo systemctl start ech-sim
   fi
 fi
 
@@ -85,7 +96,13 @@ if [ ! -f "$SUDOERS_FILE" ]; then
 fi
 
 echo "Restarting $SERVICE ..."
-sudo systemctl restart "$SERVICE"
+sudo systemctl stop "$SERVICE" 2>/dev/null || true
+# Force-kill any survivor holding the port (systemd doesn't always wait long enough)
+sudo pkill -9 -x ech 2>/dev/null || true
+sleep 2
+# Clear stale pycache so Python picks up updated bytecode as ech user
+sudo find /opt/ech/ech -name '*.pyc' -delete 2>/dev/null || true
+sudo systemctl start "$SERVICE"
 
 sleep 3
 STATUS=$(sudo systemctl is-active "$SERVICE" 2>/dev/null || echo "unknown")

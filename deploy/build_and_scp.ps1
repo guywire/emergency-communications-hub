@@ -48,7 +48,7 @@ $sshOpts     = "-t -o StrictHostKeyChecking=no"
 
 # ── Build tarball (includes VERSION) ─────────────────────────────────────────
 Write-Host "Building tarball..." -ForegroundColor Gray
-& $gitBash -c "cd '$bashSrc' && tar -czf '$bashTar' ech/ config.yaml deploy/install.sh VERSION"
+& $gitBash -c "cd '$bashSrc' && tar -czf '$bashTar' ech/ config.yaml deploy/install.sh deploy/ech.service deploy/ech-sim.service VERSION"
 
 if (-not (Test-Path $TAR)) {
     Write-Error "Failed to create tarball. Is Git Bash installed?"

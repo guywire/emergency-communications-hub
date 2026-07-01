@@ -1,6 +1,6 @@
 # ECH — Emergency Communications Hub
 
-**Version 1.0.0-rc60**
+**Version 1.0.0-rc74**
 
 ECH is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -459,25 +459,159 @@ No inbound ports are required for most adapters (they connect outward). Exceptio
 | Reticulum / LXMF | `reticulum` | `pip install rns lxmf` |
 | AREDN mesh | `aredn_ami` | `pip install aiohttp` |
 | Asterisk / PBX | `asterisk` | Asterisk with AMI enabled; `pip install panoramisk` |
+| ADS-B / PiAware | `adsb` | dump1090, PiAware, or readsb on the LAN |
+| AIS vessels | `ais_catcher` | AIS-catcher with HTTP server enabled |
 
 All adapters also have mock equivalents (`mock_meshtastic`, `mock_aprs`, etc.) for simulation and training.
 
 ---
 
-## Mesh Bot Commands
+## ADS-B / Aircraft Tracking (PiAware / dump1090)
 
-When `mesh_bot: enabled: true` in `config.yaml`, any node on the mesh can send these commands to the ECH node:
+The `adsb` adapter polls a local [PiAware](https://www.flightaware.com/ware/piaware/), [dump1090-fa](https://github.com/flightaware/dump1090), [tar1090](https://github.com/wiedehopf/tar1090), or [readsb](https://github.com/wiedehopf/readsb) JSON feed and shows aircraft as map nodes. No messages are added to the text inbox — all entries have `msg_type=position`.
+
+### Setup
+
+PiAware / dump1090 must already be running and reachable from the ECH machine. No additional Python packages are needed.
+
+### Configuration
+
+```yaml
+adapters:
+  - type: adsb
+    name: adsb
+    host: 192.168.6.5       # IP of the PiAware / dump1090 device
+    port: 80                # HTTP port (default 80)
+    # path: /skyaware/data/aircraft.json   # auto-detected if omitted
+    poll_interval: 10       # seconds between polls (default 10)
+    stale_sec: 120          # remove aircraft not seen for this long (default 120)
+```
+
+**Auto-detection:** If `path` is omitted, ECH tries these paths in order until one responds:
+- `/skyaware/data/aircraft.json` (PiAware / dump1090-fa)
+- `/tar1090/data/aircraft.json` (tar1090)
+- `/dump1090/data/aircraft.json` (classic dump1090)
+- `/dump1090-fa/data/aircraft.json`
+
+For the **mesh bot `overhead` command**, the bot reads dump1090's JSON directly from the local filesystem (faster than HTTP). Set `dump1090_path` in the `mesh_bot:` block — see [Mesh Bot](#mesh-bot) below.
+
+---
+
+## AIS Vessel Tracking (AIS-catcher)
+
+The `ais_catcher` adapter polls a local [AIS-catcher](https://github.com/jvde-github/AIS-catcher) HTTP server and shows vessels as map nodes. No messages are added to the text inbox.
+
+### Setup
+
+Install and start AIS-catcher with its HTTP server enabled:
+
+```bash
+# Install
+sudo apt install ais-catcher          # or build from source
+
+# Start with HTTP server on port 8100
+ais-catcher -v 2 -H 0.0.0.0 8100 RTLSDR
+```
+
+To run persistently, create a systemd unit or add to `/etc/rc.local`. AIS-catcher must be reachable from the ECH machine on its HTTP port.
+
+### Configuration
+
+```yaml
+adapters:
+  - type: ais_catcher
+    name: ais
+    host: 192.168.6.5       # IP of the AIS-catcher device (or localhost)
+    port: 8100              # AIS-catcher HTTP port (default 8100)
+    # path: /vessels.json   # auto-detected if omitted
+    poll_interval: 30       # seconds between polls (default 30)
+    stale_sec: 300          # remove vessels not updated for this long (default 300 = 5 min)
+```
+
+**Auto-detection:** If `path` is omitted, ECH tries `/vessels.json`, `/ships.json`, `/json`, and `/` in order.
+
+---
+
+## Mesh Bot
+
+When `mesh_bot: enabled: true`, any node on the mesh can send text commands to the ECH node. ECH replies by DM (default) or channel broadcast.
+
+```yaml
+mesh_bot:
+  enabled: true
+  channels: ["#cmd", "#mesh"]   # channels to listen on; ["*"] = every channel
+  adapters: []                  # [] = all adapters; ["meshcore-1"] = one adapter only
+  reply_dm: true                # true = DM sender; false = reply to channel
+  per_user_cooldown_sec: 30     # rate-limit per sender (all commands share this)
+  global_cooldown_sec: 5        # minimum gap between any two bot replies (flood guard)
+  max_reply_len: 200            # hard cap — keeps reply to one LoRa payload
+```
+
+### Commands
 
 | Command | What it does |
 |---------|-------------|
 | `ping` | ECH replies with signal report (SNR, hops) |
-| `weather 04101` | Current NWS conditions + forecast for US zip code |
-| `overhead` | Closest aircraft from a local dump1090 instance |
-| `satpass` | Next ISS pass visible from base location |
-| `solar` | Current solar flux, sunspot number, K-index |
+| `weather 04101` | Current NWS conditions + forecast for a US zip code |
+| `overhead` | Closest aircraft within radius from a local dump1090 instance |
+| `satpass [name]` | Next pass of ISS or a named satellite visible from base position |
+| `solar` | Current solar flux (SFI), sunspot number, K-index from hamqsl.com |
 | `help` | Lists available commands |
 
-No API key is required. The `weather` command uses api.weather.gov (US zip codes only). `satpass` requires `pip install skyfield`.
+No API key is required for any command.
+
+### Observer position
+
+`overhead` and `satpass` both need to know where you are. Set this once in the `mesh_bot:` block. If not set here, ECH falls back to the coordinates in `weather_service:` (the NWS weather section).
+
+```yaml
+mesh_bot:
+  lat: 44.1059    # decimal degrees, positive = North
+  lon: -69.1128   # decimal degrees, negative = West
+```
+
+### `overhead` — aircraft within range
+
+Reads dump1090's aircraft JSON directly from the local filesystem (no HTTP round-trip). The default path matches a standard PiAware / dump1090-fa install:
+
+```yaml
+mesh_bot:
+  dump1090_path: "/run/dump1090-fa/aircraft.json"   # default
+  overhead_radius_nm: 20                            # search radius in nautical miles
+```
+
+Common paths by install type:
+
+| Install | aircraft.json path |
+|---------|-------------------|
+| PiAware / dump1090-fa | `/run/dump1090-fa/aircraft.json` |
+| dump1090 (classic) | `/run/dump1090/aircraft.json` |
+| readsb | `/run/readsb/aircraft.json` |
+| tar1090 | `/run/tar1090/aircraft.json` |
+
+If ECH runs on a **different machine** than dump1090, mount the path via NFS/sshfs or switch to the `adsb` adapter and let `overhead` use the same JSON over HTTP — set `dump1090_path` to a URL instead (e.g., `http://192.168.6.5/skyaware/data/aircraft.json`).
+
+### `satpass` — next satellite pass
+
+Requires `pip install skyfield`. On first use, ECH downloads TLE data from CelesTrak and caches it locally. Configure which satellites to track:
+
+```yaml
+mesh_bot:
+  tle_targets:
+    - "ISS (ZARYA)"   # default
+    - "NOAA 19"       # default
+    - "NOAA 18"       # default
+    - "NOAA 15"
+    - "ARISS"
+```
+
+Names must match the TLE catalog name (case-insensitive). Use `satpass iss`, `satpass noaa 19`, etc. to query a specific satellite. Without an argument, ECH picks the soonest pass among all configured targets.
+
+Install skyfield:
+
+```bash
+pip install skyfield
+```
 
 ---
 
