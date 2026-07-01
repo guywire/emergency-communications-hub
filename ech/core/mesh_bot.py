@@ -273,7 +273,7 @@ class MeshBot:
             elif cmd == "sun":
                 reply = await self._cmd_sun()
             elif cmd == "nodes":
-                reply = await self._cmd_nodes()
+                reply = await self._cmd_nodes(args)
             elif cmd == "aprs":
                 reply = await self._cmd_aprs(args)
             elif cmd == "anomalies":
@@ -672,7 +672,7 @@ class MeshBot:
             r = await client.get(
                 FCC_URL,
                 params={"searchvalue": call, "format": "json", "status": "A"},
-                timeout=10.0,
+                timeout=25.0,
             )
             r.raise_for_status()
             data = r.json()
@@ -752,20 +752,27 @@ class MeshBot:
                 params={"point": f"{lat:.4f},{lon:.4f}", "status": "actual", "limit": "5"},
                 timeout=10.0,
             )
+            if r.status_code >= 400:
+                try:
+                    detail = r.json().get("detail", "") or r.json().get("title", "")
+                except Exception:
+                    detail = ""
+                if r.status_code == 404 or "not covered" in detail.lower() or "outside" in detail.lower():
+                    return "alerts: location not covered by NWS (US only)"
+                return f"alerts: NWS returned HTTP {r.status_code}" + (f" — {detail[:60]}" if detail else "")
             r.raise_for_status()
             features = r.json().get("features", [])
             if not features:
                 return "ALERTS: none active for your location"
             parts = []
             for f in features[:3]:
-                props = f.get("properties", {})
+                props    = f.get("properties", {})
                 event    = props.get("event", "Alert")
                 severity = props.get("severity", "")[:3].upper()
                 headline = props.get("headline") or props.get("description", "")
-                # truncate headline to fit in LoRa payload
                 headline = headline.split("\n")[0][:60]
                 parts.append(f"[{severity}] {event}: {headline}")
-            total = len(features)
+            total  = len(features)
             header = f"ALERTS({total}): " if total > 1 else "ALERT: "
             return header + " | ".join(parts)
         except Exception as exc:
@@ -902,50 +909,68 @@ class MeshBot:
 
     # ── Active mesh nodes ────────────────────────────────────────────────────
 
-    async def _cmd_nodes(self) -> str:
+    async def _cmd_nodes(self, args: str = "") -> str:
         if not self._router:
             return "nodes: router not available"
         from datetime import datetime, timezone
-        now_ts  = datetime.now(timezone.utc).timestamp()
-        stale   = 3600.0   # show nodes heard in last hour
-        all_nodes: list = []
+        now_ts = datetime.now(timezone.utc).timestamp()
+        stale  = 3600.0
 
+        # Optional adapter-type filter keyword: "nodes meshcore", "nodes aprs", etc.
+        filt = args.strip().lower()
+
+        # Collect (node, adapter_name) pairs
+        collected: list[tuple] = []   # (node, adapter_name)
         for adapter in self._router._adapters.values():
             if not getattr(adapter, "_connected", False):
                 continue
+            aname = adapter.name.lower()
             try:
                 nodes = await adapter.nodes()
                 for n in nodes:
                     nid = n.node_id or ""
-                    # Skip ADS-B and AIS position-only nodes
+                    # Always skip ADS-B and AIS position-only nodes
                     if nid.startswith("icao:") or nid.startswith("mmsi:"):
                         continue
-                    if n.last_heard and now_ts - n.last_heard.timestamp() <= stale:
-                        all_nodes.append(n)
+                    if not (n.last_heard and now_ts - n.last_heard.timestamp() <= stale):
+                        continue
+                    collected.append((n, aname))
             except Exception:
                 pass
 
-        if not all_nodes:
+        if not collected:
             return "nodes: none heard in last hour"
 
-        # Deduplicate by node_id (same node may appear on multiple adapters)
+        # Apply filter or default behaviour
+        if filt:
+            # User asked for a specific type — match against adapter name
+            collected = [(n, a) for n, a in collected if filt in a]
+            if not collected:
+                return f"nodes: none matching '{filt}' heard in last hour"
+        else:
+            # Default: exclude APRS (floods with internet digipeaters)
+            non_aprs = [(n, a) for n, a in collected if "aprs" not in a]
+            if non_aprs:
+                collected = non_aprs
+            # else all nodes are APRS — show them anyway
+
+        # Deduplicate by node_id, keep first (most recent due to sort)
+        collected.sort(key=lambda x: x[0].last_heard.timestamp() if x[0].last_heard else 0, reverse=True)
         seen_ids: set[str] = set()
         unique = []
-        for n in all_nodes:
+        for n, a in collected:
             if n.node_id not in seen_ids:
                 seen_ids.add(n.node_id)
-                unique.append(n)
-
-        # Sort most-recently-heard first
-        unique.sort(key=lambda n: n.last_heard.timestamp() if n.last_heard else 0, reverse=True)
+                unique.append((n, a))
 
         parts = []
-        for n in unique[:8]:
+        for n, _ in unique[:8]:
             age_m = int((now_ts - n.last_heard.timestamp()) / 60) if n.last_heard else 0
             label = (n.display_name or n.node_id or "?")[:12]
             parts.append(f"{label}({age_m}m)")
 
-        return f"Nodes({len(unique)}): " + " ".join(parts)
+        label_str = f" [{filt}]" if filt else ""
+        return f"Nodes{label_str}({len(unique)}): " + " ".join(parts)
 
     # ── APRS position lookup ──────────────────────────────────────────────────
 

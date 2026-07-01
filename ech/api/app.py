@@ -1249,7 +1249,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             elif cmd == "alerts":            result = await wx_bot._cmd_alerts()
             elif cmd == "metar":             result = await wx_bot._cmd_metar(args)
             elif cmd == "sun":               result = await wx_bot._cmd_sun()
-            elif cmd == "nodes":             result = await wx_bot._cmd_nodes()
+            elif cmd == "nodes":             result = await wx_bot._cmd_nodes(args)
             elif cmd == "aprs":              result = await wx_bot._cmd_aprs(args)
             elif cmd == "anomalies":         result = await wx_bot._cmd_anomalies()
             elif cmd == "help":              result = wx_bot._cmd_help()
