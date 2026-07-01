@@ -5,11 +5,15 @@ General-purpose mesh channel bot.  Replaces weather_bot.py.
 
 Commands (case-insensitive, detected anywhere in the message body):
   ping              — round-trip echo with SNR / hop metadata
-  weather <zip5>    — current NWS conditions + forecast (US zip code)
-  wx <zip5>         — alias for weather
+  weather [place]   — NWS conditions + forecast; place = zip, city name, or blank for base location
+  wx [place]        — alias for weather
   overhead          — aircraft within radius via local dump1090 JSON
   satpass [name]    — next satellite pass (ISS, NOAA 19, …)
   solar / space     — NOAA space weather: SFI, SSN, K-index
+  ships             — nearest AIS vessels from connected AIS-catcher adapter
+  fcc <callsign>    — FCC ULS amateur license lookup
+  trivia            — random general-knowledge question (Open Trivia DB, no key)
+  dad               — dad joke (icanhazdadjoke.com)
   help              — list available commands
 
 Config block (config.yaml):
@@ -21,10 +25,11 @@ Config block (config.yaml):
     per_user_cooldown_sec: 30         # per-sender cooldown (all commands share it)
     global_cooldown_sec: 5            # minimum gap between ANY two bot replies
     max_reply_len: 200                # hard cap (one LoRa payload)
-    lat: null                         # observer lat; falls back to weather_service.nws_lat
-    lon: null                         # observer lon; falls back to weather_service.nws_lon
+    lat: null                         # observer lat; falls back to weather_service.nws_lat / state base
+    lon: null                         # observer lon; falls back to weather_service.nws_lon / state base
     dump1090_path: "/run/dump1090-fa/aircraft.json"
     overhead_radius_nm: 20            # nautical miles
+    ships_radius_nm: 50               # nautical miles for nearby ship list
     tle_targets: ["ISS (ZARYA)", "NOAA 19", "NOAA 18"]
     solar_cache_sec: 900              # re-fetch solar data after this many seconds
 """
@@ -49,6 +54,9 @@ log = logging.getLogger(__name__)
 NWS_BASE       = "https://api.weather.gov"
 NOMINATIM_URL  = "https://nominatim.openstreetmap.org/search"
 HAMQSL_URL     = "https://www.hamqsl.com/solarxml.php"
+FCC_URL        = "https://data.fcc.gov/api/license-view/basicSearch/getLicenses"
+TRIVIA_URL     = "https://opentdb.com/api.php"
+DADJOKE_URL    = "https://icanhazdadjoke.com/"
 CELESTRAK_URLS = {
     "stations": "https://celestrak.org/SOCRATES/GP.php?GROUP=stations&FORMAT=TLE",
     "noaa":     "https://celestrak.org/SOCRATES/GP.php?GROUP=noaa&FORMAT=TLE",
@@ -60,15 +68,15 @@ _WIND_DIRS = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
               "S","SSW","SW","WSW","W","WNW","NW","NNW"]
 _CARD8 = ["N","NE","E","SE","S","SW","W","NW"]
 
-# Matches: "weather? 04101", "wx 90210", "ping", "overhead", "satpass iss", "solar", "help"
 _CMD_RE = re.compile(
     r'(?<![a-z0-9])'
-    r'(ping|weather\??|wx|overhead|satpass|sat|solar|space|help)'
+    r'(ping|weather\??|wx|overhead|satpass|sat|solar|space|ships|fcc|trivia|dad|help)'
     r'(?:\s+([^\s].{0,40}))?'
     r'(?=\s|$|[^a-z0-9])',
     re.IGNORECASE,
 )
-_ZIP_RE = re.compile(r'\b(\d{5})\b')
+_ZIP_RE      = re.compile(r'\b(\d{5})\b')
+_CALL_RE     = re.compile(r'\b([AKNW][A-Z0-9]{1,2}\d[A-Z]{1,3})\b', re.IGNORECASE)
 
 _HEX_NODE_RE = re.compile(r'^[0-9a-fA-F]{8,}')
 
@@ -141,6 +149,7 @@ class _TleCache:
 
 class MeshBot:
     def __init__(self, config: dict, router=None, state=None):
+        self._config = config
         cfg = config.get("mesh_bot", config.get("weather_bot", {}))
         self.enabled               = bool(cfg.get("enabled", False))
         self._channels             = [c.lower() for c in cfg.get("channels", ["#weather", "#cmd"])]
@@ -246,6 +255,14 @@ class MeshBot:
                 reply = await self._cmd_satpass(args)
             elif cmd in ("solar", "space"):
                 reply = await self._cmd_solar()
+            elif cmd == "ships":
+                reply = await self._cmd_ships()
+            elif cmd == "fcc":
+                reply = await self._cmd_fcc(args)
+            elif cmd == "trivia":
+                reply = await self._cmd_trivia()
+            elif cmd == "dad":
+                reply = await self._cmd_dad()
             elif cmd == "help":
                 reply = self._cmd_help()
             else:
@@ -285,20 +302,29 @@ class MeshBot:
         return " | ".join(parts)
 
     def _cmd_help(self) -> str:
-        return "Cmds: ping | weather <zip> | overhead | satpass | solar"
+        return "Cmds: ping|weather [zip/city]|overhead|satpass|solar|ships|fcc <call>|trivia|dad"
 
     # ── Weather ───────────────────────────────────────────────────────────────
 
     async def _cmd_weather(self, args: str) -> str:
-        m = _ZIP_RE.search(args)
-        if not m:
-            return "Usage: weather <zip5>  e.g. weather 04101"
-        zip5 = m.group(1)
-        return await self._fetch_weather(zip5)
-
-    async def _fetch_weather(self, zip5: str) -> str:
+        args = args.strip()
         client = self._client
         assert client is not None
+
+        if not args:
+            lat, lon = self._resolve_coords()
+            if lat is None:
+                return "weather: provide a zip/city or set base location in Settings"
+            return await self._fetch_weather_coords(client, lat, lon, "base")
+
+        m = _ZIP_RE.search(args)
+        if m:
+            return await self._fetch_weather_zip(client, m.group(1))
+
+        # Free-text place name — Nominatim geocode then NWS
+        return await self._fetch_weather_place(client, args)
+
+    async def _fetch_weather_zip(self, client: Any, zip5: str) -> str:
         geo = await client.get(
             NOMINATIM_URL,
             params={"postalcode": zip5, "countrycodes": "us", "format": "json", "limit": "1"},
@@ -307,13 +333,40 @@ class MeshBot:
         hits = geo.json()
         if not hits:
             return f"zip {zip5} not found"
-        lat = float(hits[0]["lat"])
-        lon = float(hits[0]["lon"])
-        place = hits[0].get("display_name", "").split(",")[0].strip()
+        lat   = float(hits[0]["lat"])
+        lon   = float(hits[0]["lon"])
+        place = hits[0].get("display_name", zip5).split(",")[0].strip()
+        return await self._fetch_weather_coords(client, lat, lon, place or zip5)
 
-        pts = await client.get(f"{NWS_BASE}/points/{lat:.4f},{lon:.4f}")
-        pts.raise_for_status()
-        nws = pts.json()["properties"]
+    async def _fetch_weather_place(self, client: Any, query: str) -> str:
+        geo = await client.get(
+            NOMINATIM_URL,
+            params={"q": query, "countrycodes": "us", "format": "json", "limit": "1"},
+        )
+        geo.raise_for_status()
+        hits = geo.json()
+        if not hits:
+            # retry without US restriction — might be a Canadian city, etc.
+            geo2 = await client.get(
+                NOMINATIM_URL,
+                params={"q": query, "format": "json", "limit": "1"},
+            )
+            geo2.raise_for_status()
+            hits = geo2.json()
+        if not hits:
+            return f"place '{query}' not found"
+        lat   = float(hits[0]["lat"])
+        lon   = float(hits[0]["lon"])
+        place = hits[0].get("display_name", query).split(",")[0].strip()
+        return await self._fetch_weather_coords(client, lat, lon, place or query)
+
+    async def _fetch_weather_coords(self, client: Any, lat: float, lon: float, label: str) -> str:
+        try:
+            pts = await client.get(f"{NWS_BASE}/points/{lat:.4f},{lon:.4f}")
+            pts.raise_for_status()
+        except Exception:
+            return f"WX: NWS doesn't cover {label} (non-US or offshore?)"
+        nws          = pts.json()["properties"]
         forecast_url = nws["forecast"]
         stations_url = nws["observationStations"]
 
@@ -321,10 +374,10 @@ class MeshBot:
         try:
             st = await client.get(stations_url)
             st.raise_for_status()
-            sid = st.json()["features"][0]["properties"]["stationIdentifier"]
+            sid   = st.json()["features"][0]["properties"]["stationIdentifier"]
             obs_r = await client.get(f"{NWS_BASE}/stations/{sid}/observations/latest")
             obs_r.raise_for_status()
-            obs = obs_r.json()["properties"]
+            obs    = obs_r.json()["properties"]
             temp_c = (obs.get("temperature") or {}).get("value")
             temp_f = round(temp_c * 9 / 5 + 32) if temp_c is not None else None
             desc   = obs.get("textDescription", "")
@@ -344,12 +397,12 @@ class MeshBot:
         try:
             fc = await client.get(forecast_url)
             fc.raise_for_status()
-            p = fc.json()["properties"]["periods"][0]
+            p        = fc.json()["properties"]["periods"][0]
             forecast = f"{p['name']}: {p['temperature']}F {p['shortForecast']} wind {p['windSpeed']}"
         except Exception as exc:
             log.debug("MeshBot/weather fcst error: %s", exc)
 
-        return f"WX {zip5} {place}|Now:{current}|{forecast}"
+        return f"WX {label}|Now:{current}|{forecast}"
 
     # ── Aircraft overhead ─────────────────────────────────────────────────────
 
@@ -524,11 +577,12 @@ class MeshBot:
             r = await client.get(HAMQSL_URL, timeout=10.0)
             r.raise_for_status()
             root = ET.fromstring(r.text)
-            sfi  = root.findtext("solarflux") or "?"
-            ssn  = root.findtext("sunspots")  or "?"
-            ki   = root.findtext("kindex")    or "?"
-            ai   = root.findtext("aindex")    or "?"
-            upd  = root.findtext("updated")   or ""
+            # hamqsl XML nests data inside <solardata> — use XPath .//<tag>
+            sfi  = root.findtext(".//solarflux") or "?"
+            ssn  = root.findtext(".//sunspots")  or "?"
+            ki   = root.findtext(".//kindex")    or "?"
+            ai   = root.findtext(".//aindex")    or "?"
+            upd  = root.findtext(".//updated")   or ""
             result = f"Solar SFI:{sfi} SSN:{ssn} K:{ki} A:{ai}"
             if upd:
                 result += f" ({upd[:12]})"
@@ -538,6 +592,130 @@ class MeshBot:
         self._solar_cache = result
         self._solar_ts = now
         return result
+
+    # ── Nearby AIS ships ──────────────────────────────────────────────────────
+
+    async def _cmd_ships(self) -> str:
+        lat, lon = self._resolve_coords()
+        radius = float((self._config.get("mesh_bot") or {}).get("ships_radius_nm", 50))
+        vessels: list = []
+
+        if self._router:
+            for adapter in self._router._adapters.values():
+                if not getattr(adapter, "_connected", False):
+                    continue
+                try:
+                    nodes = await adapter.nodes()
+                    for n in nodes:
+                        if (n.node_id or "").startswith("mmsi:"):
+                            vessels.append(n)
+                except Exception:
+                    pass
+
+        if not vessels:
+            return "ships: no AIS vessels visible (is ais_catcher adapter connected?)"
+
+        def _dist(v) -> float:
+            if lat is None or lon is None or v.lat is None or v.lon is None:
+                return 9999.0
+            return _haversine_nm(lat, lon, v.lat, v.lon)
+
+        vessels.sort(key=_dist)
+        if lat is not None:
+            vessels = [v for v in vessels if _dist(v) <= radius]
+
+        if not vessels:
+            return f"ships: no vessels within {radius:.0f}nm"
+
+        parts = []
+        for v in vessels[:4]:
+            d     = _dist(v)
+            spd   = (v.meta or {}).get("speed_kts", "")
+            label = v.display_name[:10]
+            entry = f"{label} {d:.1f}nm"
+            if spd:
+                entry += f" {float(spd):.0f}kts"
+            parts.append(entry)
+        return f"Ships({len(vessels)}): " + " | ".join(parts)
+
+    # ── FCC callsign lookup ───────────────────────────────────────────────────
+
+    async def _cmd_fcc(self, args: str) -> str:
+        m = _CALL_RE.search(args)
+        if not m:
+            return "Usage: fcc <callsign>  e.g. fcc W1ABC"
+        call = m.group(1).upper()
+        client = self._client
+        assert client is not None
+        try:
+            r = await client.get(
+                FCC_URL,
+                params={"searchvalue": call, "format": "json", "status": "A"},
+                timeout=10.0,
+            )
+            r.raise_for_status()
+            data = r.json()
+            lic_wrap = data.get("Licenses") or {}
+            items = lic_wrap.get("License") or []
+            if isinstance(items, dict):
+                items = [items]
+            # Filter to exact callsign match and amateur service
+            hits = [
+                x for x in items
+                if x.get("callsign", "").upper() == call
+                and "amateur" in x.get("serviceDesc", "").lower()
+            ]
+            if not hits:
+                return f"FCC: {call} not found (active amateur)"
+            h = hits[0]
+            name = h.get("licName", "?")
+            exp  = (h.get("expiredDate") or "")[:10]
+            cls  = h.get("categoryDesc", "")
+            return f"FCC {call}: {name} | {cls} | exp {exp}"
+        except Exception as exc:
+            log.warning("MeshBot/fcc error: %s", exc)
+            return f"fcc: lookup failed ({type(exc).__name__})"
+
+    # ── Trivia ───────────────────────────────────────────────────────────────
+
+    async def _cmd_trivia(self) -> str:
+        client = self._client
+        assert client is not None
+        try:
+            r = await client.get(TRIVIA_URL, params={"amount": "1", "type": "multiple"}, timeout=8.0)
+            r.raise_for_status()
+            data = r.json()
+            if data.get("response_code") != 0 or not data.get("results"):
+                return "trivia: no question available, try again"
+            q    = data["results"][0]
+            # Decode HTML entities (opentdb encodes &amp; etc.)
+            import html
+            question = html.unescape(q["question"])
+            answer   = html.unescape(q["correct_answer"])
+            cat      = html.unescape(q.get("category", ""))
+            diff     = q.get("difficulty", "")
+            prefix   = f"[{cat}|{diff}] " if cat else ""
+            return f"Q: {prefix}{question[:120]} | A: {answer}"
+        except Exception as exc:
+            log.warning("MeshBot/trivia error: %s", exc)
+            return f"trivia: fetch failed ({type(exc).__name__})"
+
+    # ── Dad jokes ────────────────────────────────────────────────────────────
+
+    async def _cmd_dad(self) -> str:
+        client = self._client
+        assert client is not None
+        try:
+            r = await client.get(
+                DADJOKE_URL,
+                headers={"Accept": "application/json", "User-Agent": USER_AGENT},
+                timeout=8.0,
+            )
+            r.raise_for_status()
+            return r.json().get("joke", "I couldn't think of a joke.") [:200]
+        except Exception as exc:
+            log.warning("MeshBot/dadjoke error: %s", exc)
+            return f"dad: fetch failed ({type(exc).__name__})"
 
 
 # Backwards-compat alias so any code that imported WeatherBot still works
