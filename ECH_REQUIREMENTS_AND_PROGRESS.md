@@ -291,16 +291,17 @@ Based on: `ECV_v3_fixes.txt`, `ECH ADAPTER ENHANCEMENT REQUIREMENT.txt`, real-wo
 | O12 | MeshCore device "Potato" still deaf to RF (PUSH_ADVERT = 0) | P1 | Hardware — power-cycle USB to clear firmware state after crash-loop reconnection storm |
 | O13 | JS8Call grid/position decode | P3 | Low |
 | O14 | Pat Winlink RMS discovery and session status | P3 | Medium |
-| O15 | Mesh bot: `metar <KXXX>` — raw METAR aviation weather via aviationweather.gov API (no key) | P3 | Low — good for ARES/RACES pilots |
-| O16 | Mesh bot: `alerts` — active NWS weather alerts for station grid (polygon intersection) | P2 | Medium — high value for emergency ops; api.weather.gov/alerts?point= |
-| O17 | Mesh bot: `sun` — sunrise/sunset times for base location via USNO or sunrise-sunset.org | P3 | Low |
-| O18 | Mesh bot: `nodes` — list active mesh nodes heard in last N minutes (from router node table) | P2 | Low — no external API; reads internal state |
+| O15 | Mesh bot: `metar <KXXX>` — raw METAR aviation weather via aviationweather.gov API (no key) | **DONE rc77** | aviationweather.gov API, raw METAR string |
+| O16 | Mesh bot: `alerts` — active NWS weather alerts for station grid | **DONE rc77** | api.weather.gov/alerts/active?point= |
+| O17 | Mesh bot: `sun` — sunrise/sunset times for base location | **DONE rc77** | sunrise-sunset.org/json |
+| O18 | Mesh bot: `nodes` — list active mesh nodes heard in last hour | **DONE rc77** | reads router adapter node tables |
 | O19 | Mesh bot: `aprs <W1ABC>` — last APRS-IS position for a callsign via api.aprs.fi or findu.com | P3 | Low |
 | O20 | Mesh bot: `grid [lat lon\|callsign]` — Maidenhead grid square encode/decode | P3 | Low — pure math, no external API |
 | O21 | Mesh bot: `id` — ECH node info reply: callsign, version, uptime, base grid | P3 | Low |
 | O22 | Mesh bot: `moon` — moon phase and rise/set via USNO or skyfield (already a dep) | P3 | Low — useful for EME, night ops |
 | O23 | Mesh bot: `dxcc <callsign>` — DXCC entity lookup (cty.dat or clublog API) | P3 | Low — DX ops and EMCOMM international contacts |
 | O24 | Mesh bot: `contest` — upcoming/active HF contest list from contest-calendar.com or HamAlert | P3 | Low |
+| O25 | Mesh bot: `anomalies` — relay active ECH anomalies to mesh via bot command | **P1** | Medium — critical for field ops; query anomaly engine, format top N alerts, push to requesting node |
 
 ---
 
