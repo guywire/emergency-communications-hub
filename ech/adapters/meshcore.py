@@ -290,7 +290,7 @@ class MeshCoreAdapter(Adapter):
         # Lightweight contacts-only refresh — just CMD_GET_CONTACTS, no announce.
         # Catches nodes the device learned about via PUSH_ADVERT that haven't sent
         # a channel message yet.  Shorter than discovery_interval.
-        self._contacts_poll_interval = float(config.get("contacts_poll_interval", 30.0))
+        self._contacts_poll_interval = float(config.get("contacts_poll_interval", 300.0))
         self._app_name = config.get("app_name", "ECH")
         # Max hops for outgoing channel messages (second byte of CMD_SEND_CHANNEL_MSG).
         # 0 = device default. Set to 3 for typical local mesh (reduces network load).
@@ -298,6 +298,7 @@ class MeshCoreAdapter(Adapter):
         self._contacts_refresh_pending = False   # set when new nodes need name resolution
         self._contacts_last_refresh = 0.0        # monotonic timestamp of last GET_CONTACTS
         self._contacts_min_interval = 120.0      # min seconds between triggered refreshes
+        self._contacts_in_progress = False       # True while CONTACT_START…CONTACT_END in flight
         self._transport_type = config.get("transport", "serial")
 
         self._transport: MeshCoreTransport = self._make_transport(config)
@@ -844,8 +845,9 @@ class MeshCoreAdapter(Adapter):
             while self._connected:
                 now = time.monotonic()
 
-                # Periodic poll for queued messages
-                if now - last_poll >= self._poll_interval:
+                # Periodic poll for queued messages — skip while contacts list is streaming
+                # to avoid PACKET_ERROR from command collision on the serial bus
+                if now - last_poll >= self._poll_interval and not self._contacts_in_progress:
                     await self._send_cmd(bytes([CMD_SYNC_NEXT_MESSAGE]))
                     last_poll = now
 
@@ -974,8 +976,9 @@ class MeshCoreAdapter(Adapter):
             self._packet_log = self._packet_log[-500:]
 
         if pkt_type == PACKET_CONTACT_START:
-            # Start of GET_CONTACTS response — reset temporary accumulator
+            # Start of GET_CONTACTS response — reset temporary accumulator and block msg poll
             self._contacts_building = {}
+            self._contacts_in_progress = True
 
         elif pkt_type == PACKET_CONTACT:
             # Layout: pubkey(32) + type(1) + flags(1) + plen(1) + out_path(N) +
@@ -1048,6 +1051,7 @@ class MeshCoreAdapter(Adapter):
                 log.warning("MeshCore %s: CONTACT too short (%dB, need %d)", self.name, len(data), min_len)
 
         elif pkt_type == PACKET_CONTACT_END:
+            self._contacts_in_progress = False
             log.info("MeshCore %s: GET_CONTACTS complete, %d nodes registered",
                      self.name, len(self._nodes))
 
