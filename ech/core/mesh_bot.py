@@ -54,6 +54,7 @@ log = logging.getLogger(__name__)
 NWS_BASE       = "https://api.weather.gov"
 NOMINATIM_URL  = "https://nominatim.openstreetmap.org/search"
 HAMQSL_URL     = "https://www.hamqsl.com/solarxml.php"
+METAR_URL      = "https://aviationweather.gov/api/data/metar"
 FCC_URL        = "https://data.fcc.gov/api/license-view/basicSearch/getLicenses"
 TRIVIA_URL     = "https://opentdb.com/api.php"
 DADJOKE_URL    = "https://icanhazdadjoke.com/"
@@ -70,11 +71,12 @@ _CARD8 = ["N","NE","E","SE","S","SW","W","NW"]
 
 _CMD_RE = re.compile(
     r'(?<![a-z0-9])'
-    r'(ping|weather\??|wx|overhead|satpass|sat|solar|space|ships|fcc|trivia|dad|help)'
+    r'(ping|weather\??|wx|overhead|satpass|sat|solar|space|ships|fcc|trivia|dad|alerts|metar|sun|nodes|help)'
     r'(?:\s+([^\s].{0,40}))?'
     r'(?=\s|$|[^a-z0-9])',
     re.IGNORECASE,
 )
+_ICAO_RE = re.compile(r'\b([A-Z]{4})\b', re.IGNORECASE)
 _ZIP_RE      = re.compile(r'\b(\d{5})\b')
 _CALL_RE     = re.compile(r'\b([AKNW][A-Z0-9]{1,2}\d[A-Z]{1,3})\b', re.IGNORECASE)
 
@@ -263,6 +265,14 @@ class MeshBot:
                 reply = await self._cmd_trivia()
             elif cmd == "dad":
                 reply = await self._cmd_dad()
+            elif cmd == "alerts":
+                reply = await self._cmd_alerts()
+            elif cmd == "metar":
+                reply = await self._cmd_metar(args)
+            elif cmd == "sun":
+                reply = await self._cmd_sun()
+            elif cmd == "nodes":
+                reply = await self._cmd_nodes()
             elif cmd == "help":
                 reply = self._cmd_help()
             else:
@@ -302,7 +312,7 @@ class MeshBot:
         return " | ".join(parts)
 
     def _cmd_help(self) -> str:
-        return "Cmds: ping|weather [zip/city]|overhead|satpass|solar|ships|fcc <call>|trivia|dad"
+        return "Cmds: ping|wx [place]|overhead|satpass|solar|alerts|metar <ICAO>|sun|nodes|ships|fcc <call>|trivia|dad"
 
     # ── Weather ───────────────────────────────────────────────────────────────
 
@@ -712,10 +722,166 @@ class MeshBot:
                 timeout=8.0,
             )
             r.raise_for_status()
-            return r.json().get("joke", "I couldn't think of a joke.") [:200]
+            return r.json().get("joke", "I couldn't think of a joke.")[:200]
         except Exception as exc:
             log.warning("MeshBot/dadjoke error: %s", exc)
             return f"dad: fetch failed ({type(exc).__name__})"
+
+    # ── NWS Alerts ───────────────────────────────────────────────────────────
+
+    async def _cmd_alerts(self) -> str:
+        lat, lon = self._resolve_coords()
+        if lat is None:
+            return "alerts: set base location in Settings to receive local alerts"
+        client = self._client
+        assert client is not None
+        try:
+            r = await client.get(
+                f"{NWS_BASE}/alerts/active",
+                params={"point": f"{lat:.4f},{lon:.4f}", "status": "actual", "limit": "5"},
+                timeout=10.0,
+            )
+            r.raise_for_status()
+            features = r.json().get("features", [])
+            if not features:
+                return "ALERTS: none active for your location"
+            parts = []
+            for f in features[:3]:
+                props = f.get("properties", {})
+                event    = props.get("event", "Alert")
+                severity = props.get("severity", "")[:3].upper()
+                headline = props.get("headline") or props.get("description", "")
+                # truncate headline to fit in LoRa payload
+                headline = headline.split("\n")[0][:60]
+                parts.append(f"[{severity}] {event}: {headline}")
+            total = len(features)
+            header = f"ALERTS({total}): " if total > 1 else "ALERT: "
+            return header + " | ".join(parts)
+        except Exception as exc:
+            log.warning("MeshBot/alerts error: %s", exc)
+            return f"alerts: fetch failed ({type(exc).__name__})"
+
+    # ── METAR ────────────────────────────────────────────────────────────────
+
+    async def _cmd_metar(self, args: str) -> str:
+        m = _ICAO_RE.search(args.strip())
+        if not m:
+            return "Usage: metar <ICAO>  e.g. metar KPWM"
+        icao = m.group(1).upper()
+        client = self._client
+        assert client is not None
+        try:
+            r = await client.get(
+                METAR_URL,
+                params={"ids": icao, "format": "json", "taf": "false"},
+                timeout=8.0,
+            )
+            r.raise_for_status()
+            data = r.json()
+            if not data:
+                return f"METAR {icao}: no data (station not found or no recent report)"
+            obs = data[0]
+            raw = obs.get("rawOb") or obs.get("raw_text", "")
+            if raw:
+                return f"METAR {raw[:180]}"
+            # Fallback: build summary from decoded fields
+            tmp  = obs.get("temp")
+            dew  = obs.get("dewp")
+            wspd = obs.get("wspd")
+            wdir = obs.get("wdir")
+            vis  = obs.get("visib")
+            sky  = obs.get("skyCondition") or obs.get("clouds", "")
+            parts = [icao]
+            if tmp  is not None: parts.append(f"{tmp}C")
+            if wdir is not None and wspd is not None: parts.append(f"{wdir:03.0f}/{wspd}kt")
+            if vis  is not None: parts.append(f"vis {vis}sm")
+            if sky:              parts.append(str(sky)[:20])
+            return "METAR " + " ".join(parts)
+        except Exception as exc:
+            log.warning("MeshBot/metar error: %s", exc)
+            return f"metar: fetch failed ({type(exc).__name__})"
+
+    # ── Sunrise / Sunset ─────────────────────────────────────────────────────
+
+    async def _cmd_sun(self) -> str:
+        lat, lon = self._resolve_coords()
+        if lat is None:
+            return "sun: set base location in Settings"
+        try:
+            from datetime import date
+            today = date.today().isoformat()
+            client = self._client
+            assert client is not None
+            r = await client.get(
+                "https://api.sunrise-sunset.org/json",
+                params={"lat": lat, "lng": lon, "formatted": "0", "date": today},
+                timeout=8.0,
+            )
+            r.raise_for_status()
+            res = r.json().get("results", {})
+            def _fmt(iso: str) -> str:
+                try:
+                    from datetime import datetime, timezone
+                    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+                    return dt.strftime("%H:%Mz")
+                except Exception:
+                    return iso[:5]
+            rise   = _fmt(res.get("sunrise", ""))
+            sset   = _fmt(res.get("sunset", ""))
+            solar  = res.get("day_length", 0)
+            h, rem = divmod(int(solar), 3600)
+            m2     = rem // 60
+            return f"Sun {today}: rise {rise} set {sset} ({h}h{m2:02d}m daylight)"
+        except Exception as exc:
+            log.warning("MeshBot/sun error: %s", exc)
+            return f"sun: fetch failed ({type(exc).__name__})"
+
+    # ── Active mesh nodes ────────────────────────────────────────────────────
+
+    async def _cmd_nodes(self) -> str:
+        if not self._router:
+            return "nodes: router not available"
+        from datetime import datetime, timezone
+        now_ts  = datetime.now(timezone.utc).timestamp()
+        stale   = 3600.0   # show nodes heard in last hour
+        all_nodes: list = []
+
+        for adapter in self._router._adapters.values():
+            if not getattr(adapter, "_connected", False):
+                continue
+            try:
+                nodes = await adapter.nodes()
+                for n in nodes:
+                    nid = n.node_id or ""
+                    # Skip ADS-B and AIS position-only nodes
+                    if nid.startswith("icao:") or nid.startswith("mmsi:"):
+                        continue
+                    if n.last_heard and now_ts - n.last_heard.timestamp() <= stale:
+                        all_nodes.append(n)
+            except Exception:
+                pass
+
+        if not all_nodes:
+            return "nodes: none heard in last hour"
+
+        # Deduplicate by node_id (same node may appear on multiple adapters)
+        seen_ids: set[str] = set()
+        unique = []
+        for n in all_nodes:
+            if n.node_id not in seen_ids:
+                seen_ids.add(n.node_id)
+                unique.append(n)
+
+        # Sort most-recently-heard first
+        unique.sort(key=lambda n: n.last_heard.timestamp() if n.last_heard else 0, reverse=True)
+
+        parts = []
+        for n in unique[:8]:
+            age_m = int((now_ts - n.last_heard.timestamp()) / 60) if n.last_heard else 0
+            label = (n.display_name or n.node_id or "?")[:12]
+            parts.append(f"{label}({age_m}m)")
+
+        return f"Nodes({len(unique)}): " + " ".join(parts)
 
 
 # Backwards-compat alias so any code that imported WeatherBot still works
