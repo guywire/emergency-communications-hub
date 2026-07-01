@@ -256,7 +256,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
 
     # Mesh bot — responds to ping, weather, overhead, satpass, solar on mesh channels
     from ech.core.mesh_bot import MeshBot
-    wx_bot = MeshBot(config, router=router, state=state)
+    wx_bot = MeshBot(config, router=router, state=state, db=db)
     router._weather_bot = wx_bot
     await wx_bot.start()
 

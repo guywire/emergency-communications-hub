@@ -179,6 +179,19 @@ CREATE TABLE IF NOT EXISTS hamlog_chat (
     operator TEXT NOT NULL,
     text TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS bot_activity (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp   TEXT NOT NULL,
+    from_id     TEXT NOT NULL,
+    from_display TEXT NOT NULL,
+    command     TEXT NOT NULL,
+    args        TEXT NOT NULL DEFAULT '',
+    adapter     TEXT NOT NULL DEFAULT '',
+    response    TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_activity_ts ON bot_activity (timestamp DESC);
 """
 
 
@@ -613,6 +626,56 @@ class Database:
         cur = await self._db.execute(sql, params)
         await self._db.commit()
         return cur.rowcount
+
+    # ── Bot activity ──────────────────────────────────────────────────────
+
+    async def save_bot_activity(self, from_id: str, from_display: str,
+                                command: str, args: str,
+                                adapter: str, response: str) -> None:
+        from datetime import datetime, timezone
+        await self._db.execute(
+            """INSERT INTO bot_activity(timestamp,from_id,from_display,command,args,adapter,response)
+               VALUES(?,?,?,?,?,?,?)""",
+            (datetime.now(timezone.utc).isoformat(),
+             from_id, from_display, command, args[:200], adapter, response[:500])
+        )
+        # Keep last 2000 rows
+        await self._db.execute(
+            "DELETE FROM bot_activity WHERE id NOT IN "
+            "(SELECT id FROM bot_activity ORDER BY id DESC LIMIT 2000)"
+        )
+        await self._db.commit()
+
+    async def get_bot_activity(self, limit: int = 200, command: str | None = None) -> list[dict]:
+        if command:
+            async with self._db.execute(
+                "SELECT * FROM bot_activity WHERE command=? ORDER BY timestamp DESC LIMIT ?",
+                (command.lower(), limit)
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with self._db.execute(
+                "SELECT * FROM bot_activity ORDER BY timestamp DESC LIMIT ?", (limit,)
+            ) as cur:
+                rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_bot_stats(self) -> dict:
+        """Return total count, unique callers, and per-command counts."""
+        async with self._db.execute("SELECT COUNT(*) as total FROM bot_activity") as cur:
+            total = (await cur.fetchone())["total"]
+        async with self._db.execute("SELECT COUNT(DISTINCT from_id) as u FROM bot_activity") as cur:
+            unique = (await cur.fetchone())["u"]
+        async with self._db.execute(
+            "SELECT command, COUNT(*) as cnt FROM bot_activity GROUP BY command ORDER BY cnt DESC"
+        ) as cur:
+            by_cmd = [dict(r) for r in await cur.fetchall()]
+        async with self._db.execute(
+            "SELECT * FROM bot_activity ORDER BY timestamp DESC LIMIT 1"
+        ) as cur:
+            row = await cur.fetchone()
+            last = dict(row) if row else None
+        return {"total": total, "unique_callers": unique, "by_command": by_cmd, "last": last}
 
     # ── QSO log ───────────────────────────────────────────────────────────
 

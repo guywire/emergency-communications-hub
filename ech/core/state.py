@@ -254,9 +254,19 @@ class ECHState:
         self._wx_service._area = config.get("nws_area", self._wx_service._area)
         self._wx_service._poll_interval = int(config.get("poll_interval_sec", self._wx_service._poll_interval))
         self._wx_service._severity_filter = set(config.get("severity_filter", list(self._wx_service._severity_filter)))
-        self._wx_service._auto_broadcast = bool(config.get("auto_broadcast_extreme", self._wx_service._auto_broadcast))
+        if "auto_broadcast_severities" in config:
+            self._wx_service._auto_broadcast_severities = set(config["auto_broadcast_severities"])
+            self._wx_service._auto_broadcast = bool(self._wx_service._auto_broadcast_severities)
         if "auto_broadcast_adapters" in config:
             self._wx_service._auto_adapters = list(config["auto_broadcast_adapters"])
+        if "auto_broadcast_channel" in config:
+            self._wx_service._auto_channel = config["auto_broadcast_channel"]
+        if "auto_broadcast_min_interval_sec" in config:
+            self._wx_service._auto_min_interval = int(config["auto_broadcast_min_interval_sec"])
+        if "auto_broadcast_event_cooldown_sec" in config:
+            self._wx_service._auto_event_cooldown = int(config["auto_broadcast_event_cooldown_sec"])
+        if "auto_broadcast_max_per_hour" in config:
+            self._wx_service._auto_max_per_hour = int(config["auto_broadcast_max_per_hour"])
         lat = config.get("nws_lat")
         lon = config.get("nws_lon")
         if lat is not None: self._wx_service._lat = float(lat)

@@ -55,7 +55,7 @@ NWS_BASE       = "https://api.weather.gov"
 NOMINATIM_URL  = "https://nominatim.openstreetmap.org/search"
 HAMQSL_URL     = "https://www.hamqsl.com/solarxml.php"
 METAR_URL      = "https://aviationweather.gov/api/data/metar"
-FCC_URL        = "https://data.fcc.gov/api/license-view/basicSearch/getLicenses"
+CALLOOK_URL    = "https://callook.info/{callsign}/json"
 TRIVIA_URL     = "https://opentdb.com/api.php"
 DADJOKE_URL    = "https://icanhazdadjoke.com/"
 CELESTRAK_URLS = {
@@ -151,7 +151,8 @@ class _TleCache:
 # ── Main bot class ────────────────────────────────────────────────────────────
 
 class MeshBot:
-    def __init__(self, config: dict, router=None, state=None):
+    def __init__(self, config: dict, router=None, state=None, db=None):
+        self._db = db
         self._config = config
         cfg = config.get("mesh_bot", config.get("weather_bot", {}))
         self.enabled               = bool(cfg.get("enabled", False))
@@ -247,6 +248,8 @@ class MeshBot:
         asyncio.ensure_future(self._dispatch(msg, cmd, args))
 
     async def _dispatch(self, msg: NormalizedMessage, cmd: str, args: str) -> None:
+        from_id = (msg.from_display or msg.from_id or "?")[:20]
+        log.info("MeshBot: cmd=%s from=%s args=%r adapter=%s", cmd, from_id, args[:40], msg.source_adapter)
         try:
             if cmd == "ping":
                 reply = self._cmd_ping(msg)
@@ -287,6 +290,35 @@ class MeshBot:
             reply = f"{cmd}: error ({type(exc).__name__})"
 
         await self._send(msg, reply)
+
+        # Record activity in DB and push live WS event
+        from_display = (msg.from_display or msg.from_id or "?")
+        if self._db:
+            try:
+                await self._db.save_bot_activity(
+                    from_id=msg.from_id or "",
+                    from_display=from_display,
+                    command=cmd,
+                    args=args,
+                    adapter=msg.source_adapter or "",
+                    response=reply,
+                )
+            except Exception as exc:
+                log.debug("MeshBot: failed to save activity: %s", exc)
+        if self._router:
+            from datetime import datetime, timezone
+            try:
+                await self._router.broadcast_ws_event("bot_activity", {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "from_id": msg.from_id or "",
+                    "from_display": from_display,
+                    "command": cmd,
+                    "args": args,
+                    "adapter": msg.source_adapter or "",
+                    "response": reply,
+                })
+            except Exception:
+                pass
 
     async def _send(self, msg: NormalizedMessage, text: str) -> None:
         if not self._router:
@@ -669,30 +701,25 @@ class MeshBot:
         client = self._client
         assert client is not None
         try:
-            r = await client.get(
-                FCC_URL,
-                params={"searchvalue": call, "format": "json", "status": "A"},
-                timeout=25.0,
-            )
+            url = CALLOOK_URL.format(callsign=call)
+            r = await client.get(url, timeout=8.0)
             r.raise_for_status()
             data = r.json()
-            lic_wrap = data.get("Licenses") or {}
-            items = lic_wrap.get("License") or []
-            if isinstance(items, dict):
-                items = [items]
-            # Filter to exact callsign match and amateur service
-            hits = [
-                x for x in items
-                if x.get("callsign", "").upper() == call
-                and "amateur" in x.get("serviceDesc", "").lower()
-            ]
-            if not hits:
-                return f"FCC: {call} not found (active amateur)"
-            h = hits[0]
-            name = h.get("licName", "?")
-            exp  = (h.get("expiredDate") or "")[:10]
-            cls  = h.get("categoryDesc", "")
-            return f"FCC {call}: {name} | {cls} | exp {exp}"
+            status = data.get("status", "INVALID")
+            if status == "INVALID":
+                return f"FCC: {call} not found"
+            name    = data.get("name", "?")
+            op_cls  = (data.get("current") or {}).get("operClass", "")
+            exp     = ((data.get("otherInfo") or {}).get("expiryDate") or "")
+            addr    = (data.get("address") or {}).get("line2", "")
+            parts = [name]
+            if op_cls:
+                parts.append(op_cls)
+            if addr:
+                parts.append(addr)
+            if exp:
+                parts.append(f"exp {exp}")
+            return f"FCC {call}: " + " | ".join(parts)
         except Exception as exc:
             log.warning("MeshBot/fcc error: %s", exc)
             return f"fcc: lookup failed ({type(exc).__name__})"
@@ -742,35 +769,49 @@ class MeshBot:
 
     async def _cmd_alerts(self) -> str:
         lat, lon = self._resolve_coords()
-        if lat is None:
-            return "alerts: set base location in Settings to receive local alerts"
         client = self._client
         assert client is not None
+        wx_cfg = self._config.get("weather_service", {})
+        # Prefer the live weather service's area (updated by Settings UI) over the static config value
+        _wx_svc = getattr(getattr(self, "_state", None), "_wx_service", None)
+        area = (getattr(_wx_svc, "_area", None) or wx_cfg.get("nws_area", "")).strip().upper()
         try:
-            r = await client.get(
-                f"{NWS_BASE}/alerts/active",
-                params={"point": f"{lat:.4f},{lon:.4f}", "status": "actual", "limit": "5"},
-                timeout=10.0,
-            )
-            if r.status_code >= 400:
-                try:
-                    detail = r.json().get("detail", "") or r.json().get("title", "")
-                except Exception:
-                    detail = ""
-                if r.status_code == 404 or "not covered" in detail.lower() or "outside" in detail.lower():
-                    return "alerts: location not covered by NWS (US only)"
-                return f"alerts: NWS returned HTTP {r.status_code}" + (f" — {detail[:60]}" if detail else "")
-            r.raise_for_status()
-            features = r.json().get("features", [])
+            features = None
+            # Try point query first if coords are available (no status= filter, NWS defaults to active)
+            if lat is not None and lon is not None:
+                r = await client.get(
+                    f"{NWS_BASE}/alerts/active",
+                    params={"point": f"{lat:.4f},{lon:.4f}"},
+                    timeout=10.0,
+                )
+                if r.status_code == 200:
+                    features = r.json().get("features", [])
+                # Any non-200 → fall through to area
+            # Fall back to area/state code
+            if features is None:
+                if not area:
+                    return "alerts: no location — set nws_area (e.g. ME) or base location in Settings"
+                r2 = await client.get(
+                    f"{NWS_BASE}/alerts/active",
+                    params={"area": area},
+                    timeout=10.0,
+                )
+                if r2.status_code >= 400:
+                    try:
+                        detail = r2.json().get("detail", "")
+                    except Exception:
+                        detail = ""
+                    return f"alerts: NWS HTTP {r2.status_code}" + (f" — {detail[:60]}" if detail else "")
+                features = r2.json().get("features", [])
+
             if not features:
-                return "ALERTS: none active for your location"
+                return "ALERTS: none active"
             parts = []
             for f in features[:3]:
                 props    = f.get("properties", {})
                 event    = props.get("event", "Alert")
                 severity = props.get("severity", "")[:3].upper()
-                headline = props.get("headline") or props.get("description", "")
-                headline = headline.split("\n")[0][:60]
+                headline = (props.get("headline") or props.get("description", "")).split("\n")[0][:60]
                 parts.append(f"[{severity}] {event}: {headline}")
             total  = len(features)
             header = f"ALERTS({total}): " if total > 1 else "ALERT: "

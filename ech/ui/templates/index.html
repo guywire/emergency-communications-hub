@@ -976,6 +976,20 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
       <a href="/simulation" id="nav-sim" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Simulation">🎭</a>
       <a href="/settings"   id="nav-settings" style="display:none;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Settings (admin only)">⚙</a>
     </nav>
+    <span id="bot-stats-wrap" style="position:relative;margin-left:6px;display:none" title="Mesh bot — click for activity">
+      <button id="bot-stats-btn" onclick="toggleBotStats(event)"
+        style="font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:4px"
+        title="Mesh bot activity">
+        🤖 <span id="bot-total-count">0</span>
+      </button>
+      <div id="bot-stats-popover" style="display:none;position:absolute;right:0;top:calc(100% + 4px);min-width:220px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 0;z-index:200;box-shadow:0 4px 16px rgba(0,0,0,.5)">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--dim);padding:0 12px 6px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);margin-bottom:4px">Bot activity</div>
+        <div id="bot-stats-body" style="font-family:var(--mono);font-size:11px;color:var(--text);padding:0 12px"></div>
+        <div style="padding:6px 12px 2px;border-top:1px solid var(--border);margin-top:4px">
+          <a href="/logs" style="font-size:10px;color:var(--blue);text-decoration:none">View all →</a>
+        </div>
+      </div>
+    </span>
     <span id="who-online-wrap" style="position:relative;margin-left:6px">
       <button id="who-online-btn" onclick="toggleWhoOnline(event)"
         style="font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:4px"
@@ -1188,6 +1202,8 @@ function connectWS() {
     setInterval(pollHealth, 15000);
     pollWhoOnline();
     setInterval(pollWhoOnline, 30000);
+    loadBotStats();
+    setInterval(loadBotStats, 60000);
     applyRoleUI();
   };
 
@@ -1201,6 +1217,7 @@ function connectWS() {
     if (pkt.type === 'nodes_updated')     pollHealth();
     if (pkt.type === 'node_telemetry')    handleNodeTelemetry(pkt.data);
     if (pkt.type === 'simulation_change') updateSimBanner(pkt.data.enabled);
+    if (pkt.type === 'bot_activity')     { const c = document.getElementById('bot-total-count'); if(c){ c.textContent = parseInt(c.textContent||0)+1; document.getElementById('bot-stats-wrap').style.display=''; } }
   };
 
   ws.onclose = () => {
@@ -1295,7 +1312,6 @@ function handleInbound(msg) {
 
 function msgPassesFilter(msg) {
   if (msg.msg_type && msg.msg_type !== 'text') return false;
-  if (msg.body === '[Encrypted channel message]') return false;
   if (state.mutedAdapters.has(msg.source_adapter)) return false;
   const f = state.filter;
   if (f.adapter !== 'all' && msg.source_adapter !== f.adapter) return false;
@@ -1340,20 +1356,26 @@ function buildMsgEl(msg) {
 
   // AIS vessel link
   const _raw = msg._raw || {};
-  const _mmsi = _raw.mmsi;
-  const _isAton = _mmsi && String(_mmsi).startsWith('99');
+  const _mmsiRaw = _raw.mmsi;
+  // Strip any non-digit chars from MMSI before building links
+  const _mmsi = _mmsiRaw ? String(_mmsiRaw).replace(/\D/g, '') : null;
+  // AtoN MMSIs are exactly 9 digits starting with "99" per ITU standard
+  const _isAton = _mmsi && _mmsi.length === 9 && _mmsi.startsWith('99');
   let aisStr = '';
-  if (_mmsi) {
+  if (_mmsi && _mmsi.length >= 7) {
     if (_isAton) {
       // AtoN — link to ECH map if we have coords, otherwise OpenSeaMap
       const _atonMapUrl = (_lat != null && _lon != null)
         ? `/map?lat=${_lat.toFixed(6)}&lon=${_lon.toFixed(6)}&zoom=14`
         : `https://map.openseamap.org/`;
       const _atonMapLabel = (_lat != null && _lon != null) ? 'Show on map' : 'OpenSeaMap';
-      aisStr = `<div class="msg-ais">⚓ AtoN &mdash; MMSI ${escHtml(String(_mmsi))} &mdash; <a href="${_atonMapUrl}" target="_blank" rel="noopener noreferrer">${_atonMapLabel}</a></div>`;
+      aisStr = `<div class="msg-ais">⚓ AtoN &mdash; MMSI ${escHtml(_mmsi)} &mdash; <a href="${_atonMapUrl}" target="_blank" rel="noopener noreferrer">${_atonMapLabel}</a></div>`;
     } else {
-      const _vfUrl = `https://www.vesselfinder.com/vessels/details/${escHtml(String(_mmsi))}`;
-      aisStr = `<div class="msg-ais">🚢 AIS &mdash; MMSI ${escHtml(String(_mmsi))} &mdash; <a href="${_vfUrl}" target="_blank" rel="noopener noreferrer">VesselFinder</a> &bull; <a href="https://www.marinetraffic.com/en/ais/details/ships/mmsi:${escHtml(String(_mmsi))}" target="_blank" rel="noopener noreferrer">MarineTraffic</a></div>`;
+      const _vfUrl = `https://www.vesselfinder.com/vessels/details/${escHtml(_mmsi)}`;
+      const _mtUrl = (_lat != null && _lon != null)
+        ? `https://www.marinetraffic.com/en/ais/home/centerx:${_lon.toFixed(6)}/centery:${_lat.toFixed(6)}/zoom:14`
+        : `https://www.marinetraffic.com/en/ais/details/ships/mmsi:${escHtml(_mmsi)}`;
+      aisStr = `<div class="msg-ais">🚢 AIS &mdash; MMSI ${escHtml(_mmsi)} &mdash; <a href="${_vfUrl}" target="_blank" rel="noopener noreferrer">VesselFinder</a> &bull; <a href="${_mtUrl}" target="_blank" rel="noopener noreferrer">MarineTraffic</a></div>`;
     }
   }
 
@@ -1438,7 +1460,7 @@ function buildMsgEl(msg) {
         ${(msg.source_channel === 'DM' && msg.from_id !== 'local') ? `<span onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Reply to this DM" style="font-family:var(--mono);font-size:10px;color:var(--blue);cursor:pointer;padding:1px 5px;border:1px solid var(--border);border-radius:3px;white-space:nowrap">↩ Reply</span>` : ''}
         <span class="msg-detail-btn" onclick="openMsgDetail('${escHtml(msg.id)}')" title="Message detail">⋯</span>
       </div>
-      <div class="${bodyClass}">${escHtml(msg.body)}</div>
+      <div class="${bodyClass}">${isEncrypted ? '🔒 ' : ''}${escHtml(msg.body)}</div>
       ${posStr}
       ${aisStr}
     </div>
@@ -2058,6 +2080,48 @@ async function kickUser(username) {
     }
   } catch(e) {
     toast('Request failed', 'err');
+  }
+}
+
+// ── Bot stats chip ────────────────────────────────────────────────────────
+let _botStats = null;
+
+async function loadBotStats() {
+  try {
+    // Show widget once we know the bot config (enabled or not)
+    const cfg = await fetch('/api/bot/config').then(r => r.json()).catch(() => null);
+    if (cfg && cfg.enabled) document.getElementById('bot-stats-wrap').style.display = '';
+    const s = await fetch('/api/bot/stats').then(r => r.json());
+    _botStats = s;
+    document.getElementById('bot-total-count').textContent = s.total || 0;
+    if (s.total > 0) document.getElementById('bot-stats-wrap').style.display = '';
+    // Refresh popover if open
+    if (document.getElementById('bot-stats-popover').style.display !== 'none') renderBotStatsPopover();
+  } catch(e) {}
+}
+
+function renderBotStatsPopover() {
+  const s = _botStats;
+  if (!s) return;
+  const body = document.getElementById('bot-stats-body');
+  const last = s.last ? `<div style="color:var(--dim);margin-top:4px;font-size:10px">Last: ${s.last.from_display||s.last.from_id} · ${s.last.command} · ${(s.last.timestamp||'').slice(11,19)} UTC</div>` : '';
+  const cmds = (s.by_command||[]).slice(0,6).map(x =>
+    `<div style="display:flex;justify-content:space-between;padding:1px 0"><span>${x.command}</span><span style="color:var(--dim)">${x.cnt}</span></div>`
+  ).join('');
+  body.innerHTML = `<div style="margin-bottom:4px">Total: <strong>${s.total}</strong> · Callers: <strong>${s.unique_callers}</strong></div>${cmds}${last}`;
+}
+
+function toggleBotStats(e) {
+  e.stopPropagation();
+  const pop = document.getElementById('bot-stats-popover');
+  if (!pop) return;
+  if (pop.style.display === 'none') {
+    renderBotStatsPopover();
+    pop.style.display = '';
+    const close = ev => { if (!pop.contains(ev.target)) { pop.style.display='none'; document.removeEventListener('click',close); } };
+    document.addEventListener('click', close);
+  } else {
+    pop.style.display = 'none';
   }
 }
 

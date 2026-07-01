@@ -946,8 +946,12 @@ class MeshCoreAdapter(Adapter):
         0x0C: "BATTERY", 0x0D: "DEVICE_INFO", 0x10: "CONTACT_MSG_V3", 0x11: "CHANNEL_MSG_V3",
         0x12: "CHANNEL_INFO", 0x80: "PUSH_ADVERT", 0x81: "PATH_UPDATE",
         0x82: "ACK", 0x83: "PUSH_MSG_WAITING",
-        0x89: "TRACE_DATA",
+        # 0x84–0x87: observed in newer firmware builds; protocol not yet documented upstream
+        0x84: "PUSH_CONTACT_MSG_WAITING", 0x85: "PUSH_UNKNOWN_85",
+        0x86: "PUSH_UNKNOWN_86", 0x87: "PUSH_UNKNOWN_87",
         0x88: "PUSH_CHANNEL_MSG",
+        0x89: "TRACE_DATA",
+        0x8A: "PUSH_UNKNOWN_8A", 0x8B: "PUSH_UNKNOWN_8B",
     }
 
     async def _dispatch_frame(self, frame: bytes) -> None:
@@ -1166,6 +1170,12 @@ class MeshCoreAdapter(Adapter):
             # Unsolicited: new message queued, fetch immediately
             await self._send_cmd(bytes([CMD_SYNC_NEXT_MESSAGE]))
 
+        elif pkt_type == 0x84:
+            # 0x84 observed in newer MeshCore firmware — likely "contact/DM message waiting".
+            # Protocol not yet documented; treat same as PUSH_MSG_WAITING and poll for messages.
+            log.debug("MeshCore %s: 0x84 PUSH_CONTACT_MSG_WAITING — polling for messages", self.name)
+            await self._send_cmd(bytes([CMD_SYNC_NEXT_MESSAGE]))
+
         elif pkt_type == PUSH_PATH_UPDATED:
             # 0x81 PATH_UPDATE: routing path to a node changed.
             # Format: [pubkey:32] — identifies the node whose path was updated.
@@ -1318,8 +1328,8 @@ class MeshCoreAdapter(Adapter):
             pass  # Low-level protocol ACK, no action
 
         else:
-            log.warning("MeshCore %s: unhandled pkt_type=0x%02x len=%d raw=%s",
-                        self.name, pkt_type, len(frame), frame[:32].hex())
+            log.debug("MeshCore %s: unhandled pkt_type=0x%02x len=%d raw=%s",
+                      self.name, pkt_type, len(frame), frame[:32].hex())
 
     async def _handle_channel_msg(self, data: bytes, pkt_type: int) -> None:
         """

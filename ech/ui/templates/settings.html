@@ -185,17 +185,40 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
           </div>
         </div>
       </div>
-      <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
-        <label style="margin:0">Auto-broadcast Extreme alerts to mesh</label>
-        <label class="toggle">
-          <input type="checkbox" id="wx-auto-broadcast">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div style="margin-top:10px">
-        <label>Auto-broadcast adapters (comma-separated names, blank = all connected)</label>
-        <input type="text" id="wx-auto-adapters" placeholder="meshcore1, meshtastic1" style="font-family:var(--mono);font-size:11px">
-        <div style="font-size:10px;color:var(--muted);margin-top:3px">New NWS alert IDs are only broadcast once regardless of this setting.</div>
+      <div style="margin-top:14px;border:1px solid var(--border);border-radius:6px;padding:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Auto-broadcast to Mesh</div>
+        <div style="margin-bottom:8px">
+          <label style="font-size:11px;color:var(--muted)">Broadcast when severity is:</label>
+          <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap">
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="ab-sev-extreme"> <span style="color:#e05040">Extreme</span></label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="ab-sev-severe"> <span style="color:#c89060">Severe</span></label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="ab-sev-moderate"> <span style="color:var(--muted)">Moderate</span></label>
+          </div>
+        </div>
+        <div style="margin-bottom:8px">
+          <label>Target adapters <span style="color:var(--dim)">(comma-separated names, blank = all connected)</span></label>
+          <input type="text" id="wx-auto-adapters" placeholder="meshcore1, meshtastic1" style="font-family:var(--mono);font-size:11px">
+        </div>
+        <div style="margin-bottom:8px">
+          <label>Target channel <span style="color:var(--dim)">(channel name, blank = adapter default)</span></label>
+          <input type="text" id="wx-auto-channel" placeholder="TAC-1" style="font-family:var(--mono);font-size:11px;width:160px">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div>
+            <label>Min interval between any broadcasts <span style="color:var(--dim)">(sec)</span></label>
+            <input type="number" id="wx-ab-min-interval" min="60" step="60" value="600" style="font-family:var(--mono);font-size:11px;width:80px">
+          </div>
+          <div>
+            <label>Same event-type cooldown <span style="color:var(--dim)">(sec)</span></label>
+            <input type="number" id="wx-ab-event-cooldown" min="60" step="60" value="3600" style="font-family:var(--mono);font-size:11px;width:80px">
+          </div>
+          <div>
+            <label>Max broadcasts per hour</label>
+            <input type="number" id="wx-ab-max-per-hour" min="1" max="20" value="4" style="font-family:var(--mono);font-size:11px;width:60px">
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--dim);margin-top:6px">Each unique NWS alert ID is sent at most once. Cooldowns prevent the same event type (e.g. "Tornado Watch") from repeating within the cooldown window.</div>
+        <div id="wx-broadcast-count" style="font-size:10px;color:var(--muted);margin-top:4px"></div>
       </div>
       <button class="btn btn-green" style="margin-top:16px" onclick="saveWxConfig()">Save weather config</button>
       <button class="btn" style="margin-top:16px;margin-left:8px" onclick="pollWeatherNow()">Poll NWS now</button>
@@ -803,8 +826,16 @@ async function init() {
   document.getElementById('sev-severe').checked = sev.includes('Severe');
   document.getElementById('sev-moderate').checked = sev.includes('Moderate');
   document.getElementById('sev-minor').checked = sev.includes('Minor');
-  document.getElementById('wx-auto-broadcast').checked = wx.auto_broadcast_extreme || false;
+  const sevs = new Set(wx.auto_broadcast_severities || []);
+  document.getElementById('ab-sev-extreme').checked  = sevs.has('Extreme');
+  document.getElementById('ab-sev-severe').checked   = sevs.has('Severe');
+  document.getElementById('ab-sev-moderate').checked = sevs.has('Moderate');
   if (wx.auto_broadcast_adapters) document.getElementById('wx-auto-adapters').value = wx.auto_broadcast_adapters.join(', ');
+  if (wx.auto_broadcast_channel != null) document.getElementById('wx-auto-channel').value = wx.auto_broadcast_channel;
+  if (wx.auto_broadcast_min_interval_sec != null) document.getElementById('wx-ab-min-interval').value = wx.auto_broadcast_min_interval_sec;
+  if (wx.auto_broadcast_event_cooldown_sec != null) document.getElementById('wx-ab-event-cooldown').value = wx.auto_broadcast_event_cooldown_sec;
+  if (wx.auto_broadcast_max_per_hour != null) document.getElementById('wx-ab-max-per-hour').value = wx.auto_broadcast_max_per_hour;
+  if (wx.broadcast_count_session != null) document.getElementById('wx-broadcast-count').textContent = `Broadcasts this session: ${wx.broadcast_count_session}`;
 
   // Load adapter config
   const ac = await fetch('/api/adapter-config').then(r=>r.json());
@@ -865,8 +896,12 @@ async function saveWxConfig() {
     nws_area: document.getElementById('wx-area').value.toUpperCase(),
     poll_interval_sec: parseInt(document.getElementById('wx-poll').value) || 300,
     severity_filter: sev,
-    auto_broadcast_extreme: document.getElementById('wx-auto-broadcast').checked,
+    auto_broadcast_severities: ['Extreme','Severe','Moderate'].filter(s => document.getElementById('ab-sev-'+s.toLowerCase()).checked),
     auto_broadcast_adapters: document.getElementById('wx-auto-adapters').value.split(',').map(s=>s.trim()).filter(Boolean),
+    auto_broadcast_channel: document.getElementById('wx-auto-channel').value.trim(),
+    auto_broadcast_min_interval_sec: parseInt(document.getElementById('wx-ab-min-interval').value) || 600,
+    auto_broadcast_event_cooldown_sec: parseInt(document.getElementById('wx-ab-event-cooldown').value) || 3600,
+    auto_broadcast_max_per_hour: parseInt(document.getElementById('wx-ab-max-per-hour').value) || 4,
   };
   await fetch('/api/weather/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
   toast('Weather config saved — takes effect immediately');
@@ -2086,9 +2121,15 @@ async function saveBotConfig() {
   const msg = document.getElementById('bot-save-msg');
   if (d.status === 'ok') {
     msg.style.display = 'inline';
-    msg.style.color = 'var(--green)';
-    msg.textContent = 'Saved (in-memory — restart ECH or use config save to persist)';
-    setTimeout(()=>{ msg.style.display='none'; }, 5000);
+    if (d.warning) {
+      msg.style.color = 'var(--yellow)';
+      msg.textContent = d.warning;
+      setTimeout(()=>{ msg.style.display='none'; }, 10000);
+    } else {
+      msg.style.color = 'var(--green)';
+      msg.textContent = 'Saved to config.yaml';
+      setTimeout(()=>{ msg.style.display='none'; }, 4000);
+    }
   } else {
     msg.style.display = 'inline';
     msg.style.color = 'var(--red)';

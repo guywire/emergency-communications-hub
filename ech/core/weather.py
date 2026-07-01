@@ -57,15 +57,31 @@ class WeatherService:
         self._poll_interval    = int(wx_cfg.get("poll_interval_sec", 300))
         self._severity_filter  = set(wx_cfg.get("severity_filter",
                                                   ["Extreme", "Severe", "Moderate", "Minor"]))
-        self._auto_broadcast   = bool(wx_cfg.get("auto_broadcast_extreme", False))
-        self._auto_adapters    = wx_cfg.get("auto_broadcast_adapters", [])
 
-        self._auto_broadcast_min_interval = int(wx_cfg.get("auto_broadcast_min_interval", 600))
+        # Auto-broadcast config
+        # Severities that trigger auto-broadcast (list — or legacy bool for compat)
+        _ab = wx_cfg.get("auto_broadcast_severities", None)
+        if _ab is None:
+            # Back-compat: auto_broadcast_extreme: true → ["Extreme"]
+            _ab = ["Extreme"] if wx_cfg.get("auto_broadcast_extreme", False) else []
+        self._auto_broadcast_severities: set[str] = set(_ab)
+        self._auto_broadcast   = bool(self._auto_broadcast_severities)
+        self._auto_adapters    = wx_cfg.get("auto_broadcast_adapters", [])
+        self._auto_channel     = wx_cfg.get("auto_broadcast_channel", "")
+
+        # Rate limiting
+        self._auto_min_interval   = int(wx_cfg.get("auto_broadcast_min_interval_sec", 600))
+        self._auto_event_cooldown = int(wx_cfg.get("auto_broadcast_event_cooldown_sec", 3600))
+        self._auto_max_per_hour   = int(wx_cfg.get("auto_broadcast_max_per_hour", 4))
 
         self._router           = router
         self._seen_alert_ids: set[str] = set()
         self._active_alerts: list[dict] = []
         self._last_auto_broadcast: float = 0.0
+        # Per-event-type last broadcast time to prevent same-type spam
+        self._last_event_broadcast: dict[str, float] = {}
+        # Rolling hour broadcast timestamps for max_per_hour cap
+        self._hour_broadcast_ts: list[float] = []
         self._poll_task: asyncio.Task | None = None
         self._schedule_tasks: list[asyncio.Task] = []
         self._client: httpx.AsyncClient | None = None
@@ -198,20 +214,40 @@ class WeatherService:
                 if self._router:
                     await self._router._handle_inbound(msg)
 
-                # Auto-broadcast extreme/immediate alerts to mesh (rate-limited)
-                if self._auto_broadcast and priority == Priority.EMERGENCY and self._router:
+                # Auto-broadcast to mesh — severity-filtered and rate-limited
+                if self._auto_broadcast and self._router and severity in self._auto_broadcast_severities:
                     now_ts = time.time()
-                    if now_ts - self._last_auto_broadcast >= self._auto_broadcast_min_interval:
+                    skip_reason = None
+
+                    # 1. Global minimum interval between any broadcasts
+                    if now_ts - self._last_auto_broadcast < self._auto_min_interval:
+                        skip_reason = f"global min interval {self._auto_min_interval}s"
+
+                    # 2. Per-event-type cooldown (same event type won't spam)
+                    elif now_ts - self._last_event_broadcast.get(event, 0) < self._auto_event_cooldown:
+                        skip_reason = f"event cooldown {self._auto_event_cooldown}s for {event!r}"
+
+                    # 3. Hourly cap
+                    else:
+                        cutoff = now_ts - 3600
+                        self._hour_broadcast_ts = [t for t in self._hour_broadcast_ts if t > cutoff]
+                        if len(self._hour_broadcast_ts) >= self._auto_max_per_hour:
+                            skip_reason = f"hourly cap {self._auto_max_per_hour}/hr reached"
+
+                    if skip_reason:
+                        log.info("WeatherService: skipping auto-broadcast (%s)", skip_reason)
+                    else:
                         await self._router.send(
                             body=body[:200],
                             adapter_names=self._auto_adapters or None,
-                            priority=Priority.EMERGENCY,
+                            priority=priority,
                         )
                         self._last_auto_broadcast = now_ts
+                        self._last_event_broadcast[event] = now_ts
+                        self._hour_broadcast_ts.append(now_ts)
                         self._broadcast_count += 1
-                        log.info("WeatherService: auto-broadcast extreme alert to mesh")
-                    else:
-                        log.info("WeatherService: skipping auto-broadcast (rate limit %ds)", self._auto_broadcast_min_interval)
+                        log.info("WeatherService: auto-broadcast %s %r to mesh (%d this hour)",
+                                 severity, event, len(self._hour_broadcast_ts))
 
             if new_count:
                 log.info("WeatherService: %d new NWS alert(s) emitted", new_count)

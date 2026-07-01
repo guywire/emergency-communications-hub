@@ -95,6 +95,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
   <div class="tab active" onclick="switchTab('applogs',this)">App Logs</div>
   <div class="tab" onclick="switchTab('packets',this)">Raw Packets <span class="tab-badge" id="pkt-badge">0</span></div>
   <div class="tab" onclick="switchTab('encrypted',this)">Encrypted Traffic <span class="tab-badge" id="enc-badge">0</span></div>
+  <div class="tab" onclick="switchTab('botactivity',this)">Bot Activity <span class="tab-badge" id="bot-badge">0</span></div>
 </div>
 
 <!-- App Logs toolbar -->
@@ -106,6 +107,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
   <button class="filter-btn" onclick="setLevel('WARNING',this)">WARN</button>
   <button class="filter-btn" onclick="setLevel('ERROR',this)">ERROR</button>
   <div class="spacer"></div>
+  <button class="filter-btn" onclick="filterBotLogs()" title="Show only bot command activity">🤖 Bot</button>
   <input type="text" class="tb-search" id="log-search" placeholder="Filter…" oninput="applyLogFilter()">
   <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;cursor:pointer">
     <input type="checkbox" id="autoscroll" checked> Auto-scroll
@@ -116,9 +118,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
 <div class="toolbar" id="tb-packets" style="display:none">
   <span style="color:var(--dim);font-size:10px">Adapter:</span>
   <select class="tb-select" id="pkt-adapter" onchange="loadPackets()">
-    <option value="meshcore">meshcore</option>
-    <option value="meshtastic-usb">meshtastic-usb</option>
-    <option value="meshcore-mock">meshcore-mock (sim)</option>
+    <option value="">Loading…</option>
   </select>
   <span style="color:var(--dim);font-size:10px;margin-left:8px">Type:</span>
   <select class="tb-select" id="pkt-type-filter" onchange="renderPackets()">
@@ -130,7 +130,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
     <option value="NO_MORE_MSGS">NO_MORE_MSGS</option>
   </select>
   <div class="spacer"></div>
-  <input type="text" class="tb-search" id="pkt-search" placeholder="Filter hex…" oninput="renderPackets()">
+  <input type="text" class="tb-search" id="pkt-search" placeholder="Filter hex or type…" oninput="renderPackets()">
   <button class="tb-btn" onclick="loadPackets()">↻ Refresh</button>
   <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;cursor:pointer">
     <input type="checkbox" id="pkt-autoscroll"> Auto-scroll
@@ -142,7 +142,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
   <span style="color:var(--dim);font-size:10px">Adapter:</span>
   <select class="tb-select" id="enc-adapter" onchange="loadEncrypted()">
     <option value="">All adapters</option>
-    <option value="meshcore">meshcore</option>
   </select>
   <div class="spacer"></div>
   <input type="text" class="tb-search" id="enc-search" placeholder="Filter by sender/channel…" oninput="renderEncrypted()">
@@ -160,13 +159,64 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
   <div id="pkt-container"></div>
 </div>
 
+<!-- Bot Activity toolbar -->
+<div class="toolbar" id="tb-botactivity" style="display:none">
+  <span style="color:var(--dim);font-size:10px">Command:</span>
+  <select class="tb-select" id="bot-cmd-filter" onchange="loadBotActivity()">
+    <option value="">All commands</option>
+    <option value="ping">ping</option>
+    <option value="weather">weather</option>
+    <option value="solar">solar</option>
+    <option value="overhead">overhead</option>
+    <option value="satpass">satpass</option>
+    <option value="ships">ships</option>
+    <option value="fcc">fcc</option>
+    <option value="metar">metar</option>
+    <option value="alerts">alerts</option>
+    <option value="sun">sun</option>
+    <option value="nodes">nodes</option>
+    <option value="aprs">aprs</option>
+    <option value="anomalies">anomalies</option>
+    <option value="trivia">trivia</option>
+    <option value="dad">dad</option>
+    <option value="help">help</option>
+  </select>
+  <div class="spacer"></div>
+  <input type="text" class="tb-search" id="bot-search" placeholder="Filter caller/response…" oninput="renderBotActivity()">
+  <button class="tb-btn" onclick="loadBotActivity()">↻ Refresh</button>
+</div>
+
 <!-- Encrypted Traffic panel -->
 <div class="panel" id="panel-encrypted">
-  <div class="enc-key-note" id="enc-key-note">
-    🔒 Messages encrypted with channel PSK — ECH displays metadata only. To decrypt, add the channel key to /etc/ech/config.yaml: <code>channels: [{idx: 0, key_hex: "aabbcc…"}]</code>
+  <div class="enc-key-note" id="enc-key-note" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <span>🔒 Channel messages encrypted with PSK — metadata shown, bodies hidden without key</span>
+    <button class="tb-btn" onclick="toggleKeyForm()" id="enc-key-toggle-btn">+ Add channel key</button>
+  </div>
+  <div id="enc-key-form" style="display:none;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface2);flex-shrink:0">
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Add a PSK so ECH can decrypt messages on that channel index. Keys are stored in server config.</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:11px;color:var(--dim)">Channel idx:</label>
+      <input type="number" id="enc-key-idx" value="0" min="0" max="9" style="width:52px;background:var(--surface3);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">
+      <label style="font-size:11px;color:var(--dim)">Key (hex):</label>
+      <input type="text" id="enc-key-hex" placeholder="e.g. 1a2b3c4d…" style="width:220px;background:var(--surface3);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 8px;font-size:12px;font-family:var(--mono)">
+      <button class="tb-btn" onclick="saveChannelKey()" style="background:var(--accent)">Save key</button>
+      <span id="enc-key-status" style="font-size:11px;color:var(--green)"></span>
+    </div>
+    <div style="margin-top:6px;font-size:10px;color:var(--dim)">Key is written to server config — requires ECH restart to take effect for decryption.</div>
   </div>
   <div id="enc-count">Loading…</div>
   <div id="enc-container"></div>
+</div>
+
+<!-- Bot Activity panel -->
+<div class="panel" id="panel-botactivity">
+  <div id="bot-stats-bar" style="display:flex;gap:20px;padding:8px 14px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--muted);flex-shrink:0">
+    <span>Total: <strong id="bot-stat-total">—</strong></span>
+    <span>Unique callers: <strong id="bot-stat-callers">—</strong></span>
+    <span id="bot-stat-top"></span>
+  </div>
+  <div id="bot-act-count" style="font-size:10px;color:var(--dim);padding:4px 12px;border-bottom:1px solid var(--border);flex-shrink:0">Loading…</div>
+  <div id="bot-act-container" style="overflow-y:auto;flex:1"></div>
 </div>
 
 <script>
@@ -181,8 +231,9 @@ function switchTab(name, el) {
   document.getElementById('panel-' + name).classList.add('active');
   document.querySelectorAll('[id^="tb-"]').forEach(t => t.style.display = 'none');
   document.getElementById('tb-' + name).style.display = 'flex';
-  if (name === 'packets') loadPackets();
-  if (name === 'encrypted') loadEncrypted();
+  if (name === 'packets') { populateAdapterSelects().then(loadPackets); }
+  if (name === 'encrypted') { populateAdapterSelects().then(loadEncrypted); }
+  if (name === 'botactivity') loadBotActivity();
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────
@@ -230,6 +281,11 @@ function applyLogFilter() {
   renderLogs();
 }
 
+function filterBotLogs() {
+  document.getElementById('log-search').value = 'MeshBot: cmd=';
+  applyLogFilter();
+}
+
 // ── Raw Packets ────────────────────────────────────────────────────────────
 let allPackets = [];
 
@@ -242,8 +298,29 @@ const PKT_CLASS = {
   CONTACT_MSG: 'msg', CHANNEL_MSG: 'msg',
 };
 
+async function populateAdapterSelects() {
+  try {
+    const chs = await fetch('/api/channels').then(r => r.json());
+    const names = Object.keys(chs);
+    // Packets adapter select — only adapters with _packet_log (meshcore/meshtastic)
+    const pktSel = document.getElementById('pkt-adapter');
+    const encSel = document.getElementById('enc-adapter');
+    const pktHas = names.filter(n => /meshcore|meshtastic/i.test(n));
+    if (pktHas.length > 0) {
+      pktSel.innerHTML = pktHas.map(n => `<option value="${n}">${n}</option>`).join('');
+    } else {
+      pktSel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
+    }
+    // Encrypted adapter select
+    const encOpts = ['<option value="">All adapters</option>'];
+    pktHas.forEach(n => encOpts.push(`<option value="${n}">${n}</option>`));
+    encSel.innerHTML = encOpts.join('');
+  } catch (e) { /* keep defaults */ }
+}
+
 async function loadPackets() {
   const adapter = document.getElementById('pkt-adapter').value;
+  if (!adapter) return;
   try {
     const data = await fetch(`/api/adapters/${adapter}/packets`).then(r => r.json());
     allPackets = Array.isArray(data) ? data : (data.packets || []);
@@ -294,6 +371,42 @@ function renderPackets() {
 
 // ── Encrypted Traffic ──────────────────────────────────────────────────────
 let allEncrypted = [];
+
+function toggleKeyForm() {
+  const f = document.getElementById('enc-key-form');
+  const btn = document.getElementById('enc-key-toggle-btn');
+  const shown = f.style.display !== 'none';
+  f.style.display = shown ? 'none' : 'flex';
+  f.style.flexDirection = 'column';
+  btn.textContent = shown ? '+ Add channel key' : '✕ Close';
+  if (!shown) document.getElementById('enc-key-hex').focus();
+}
+
+async function saveChannelKey() {
+  const idx = parseInt(document.getElementById('enc-key-idx').value) || 0;
+  const hex = document.getElementById('enc-key-hex').value.trim().replace(/\s/g, '');
+  const status = document.getElementById('enc-key-status');
+  if (!hex || hex.length < 8) { status.style.color='var(--red)'; status.textContent = 'Key too short'; return; }
+  if (!/^[0-9a-fA-F]+$/.test(hex)) { status.style.color='var(--red)'; status.textContent = 'Invalid hex'; return; }
+  status.textContent = 'Saving…'; status.style.color = 'var(--muted)';
+  try {
+    const r = await fetch('/api/config/channels', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({idx, key_hex: hex.toLowerCase()})
+    });
+    if (r.ok) {
+      status.style.color = 'var(--green)';
+      status.textContent = `Saved (ch ${idx}). Restart ECH to apply.`;
+    } else {
+      const err = await r.json().catch(() => ({}));
+      status.style.color = 'var(--red)';
+      status.textContent = err.detail || `Error ${r.status}`;
+    }
+  } catch(e) {
+    status.style.color = 'var(--red)'; status.textContent = e.message;
+  }
+}
 
 async function loadEncrypted() {
   const adapter = document.getElementById('enc-adapter').value;
@@ -347,6 +460,69 @@ function renderEncrypted() {
     '<div style="color:var(--dim);padding:20px 14px">No encrypted messages found</div>';
 }
 
+// ── Bot Activity ───────────────────────────────────────────────────────────
+let allBotActivity = [];
+
+async function loadBotActivity() {
+  const cmd = document.getElementById('bot-cmd-filter').value;
+  const url = cmd ? `/api/bot/activity?limit=200&command=${encodeURIComponent(cmd)}` : '/api/bot/activity?limit=200';
+  const data = await fetch(url).then(r => r.json());
+  allBotActivity = data.activity || [];
+  document.getElementById('bot-badge').textContent = allBotActivity.length;
+  renderBotActivity();
+  // Load stats
+  const stats = await fetch('/api/bot/stats').then(r => r.json());
+  document.getElementById('bot-stat-total').textContent = stats.total || 0;
+  document.getElementById('bot-stat-callers').textContent = stats.unique_callers || 0;
+  if (stats.by_command && stats.by_command.length) {
+    const top = stats.by_command.slice(0, 3).map(x => `${x.command}(${x.cnt})`).join(' · ');
+    document.getElementById('bot-stat-top').textContent = 'Top: ' + top;
+  }
+}
+
+function renderBotActivity() {
+  const search = (document.getElementById('bot-search').value || '').toLowerCase();
+  const filtered = allBotActivity.filter(a => {
+    if (!search) return true;
+    return (a.from_display + a.from_id + a.command + a.args + a.response).toLowerCase().includes(search);
+  });
+  document.getElementById('bot-act-count').textContent =
+    `${filtered.length} command${filtered.length !== 1 ? 's' : ''}` +
+    (filtered.length < allBotActivity.length ? ` (${allBotActivity.length} total)` : '');
+
+  const CMD_COLORS = {
+    ping: '#4caf50', weather: '#79b8ff', wx: '#79b8ff', solar: '#f0b030',
+    overhead: '#d070e0', satpass: '#d070e0', ships: '#40b0c0', fcc: '#c89060',
+    metar: '#79b8ff', alerts: '#e05040', sun: '#f0b030', nodes: '#56d364',
+    aprs: '#79c0ff', anomalies: '#e05040', trivia: '#c89060', dad: '#56d364',
+    help: '#8b949e',
+  };
+
+  const rows = filtered.map(a => {
+    const ts = fmtTime(a.timestamp);
+    const color = CMD_COLORS[a.command] || 'var(--muted)';
+    const adpShort = (a.adapter || '').split('-')[0].slice(0, 10);
+    const args = a.args ? ` <span style="color:var(--dim)">${esc(a.args)}</span>` : '';
+    return `<div style="display:grid;grid-template-columns:80px 140px 90px 1fr;gap:0;padding:4px 12px;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px;font-family:var(--mono);align-items:start">
+      <span style="color:var(--dim)">${ts}</span>
+      <span style="color:var(--text)" title="${esc(a.from_id)}">${esc(a.from_display || a.from_id || '?')}</span>
+      <span><span style="color:${color};font-weight:600">${esc(a.command)}</span>${args}</span>
+      <span style="color:var(--muted)">${esc(a.response)}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('bot-act-container').innerHTML = rows ||
+    '<div style="color:var(--dim);padding:20px 14px">No bot activity recorded yet</div>';
+}
+
+function handleLiveBotActivity(a) {
+  allBotActivity.unshift(a);
+  if (allBotActivity.length > 200) allBotActivity.length = 200;
+  const badge = document.getElementById('bot-badge');
+  badge.textContent = parseInt(badge.textContent || 0) + 1;
+  if (currentTab === 'botactivity') renderBotActivity();
+}
+
 // ── Download ───────────────────────────────────────────────────────────────
 function downloadCurrent() {
   let text, filename;
@@ -372,6 +548,7 @@ function connectWS() {
   const ws = new WebSocket(`${proto}//${location.host}/ws`);
   ws.onmessage = e => {
     const pkt = JSON.parse(e.data);
+    if (pkt.type === 'bot_activity') { handleLiveBotActivity(pkt.data); return; }
     if (pkt.type === 'log') {
       const l = pkt.data;
       if (currentLevel && l.level !== currentLevel) return;
@@ -395,6 +572,7 @@ loadLogs();
 setInterval(loadLogs, 30000);
 setInterval(() => { if (currentTab === 'packets') loadPackets(); }, 15000);
 setInterval(() => { if (currentTab === 'encrypted') loadEncrypted(); }, 30000);
+setInterval(() => { if (currentTab === 'botactivity') loadBotActivity(); }, 30000);
 connectWS();
 </script>
 </body>

@@ -48,7 +48,13 @@ class APRSISAdapter(Adapter):
         self._passcode = int(config.get("passcode", -1))
         self._server = config.get("server", "rotate.aprs2.net")
         self._port = int(config.get("port", 14580))
-        self._filter = config.get("filter", "r/44.1/-69.1/100")
+        base_call = config.get("callsign", "N0CALL-9").upper().split("-")[0]
+        _cfg_filter = config.get("filter", "r/44.1/-69.1/100")
+        # Auto-add m/CALL so directed APRS messages to this station are always delivered
+        # regardless of whether the sender's position is within the geographic filter
+        if f"m/{base_call}" not in _cfg_filter.upper():
+            _cfg_filter = f"{_cfg_filter} m/{base_call}"
+        self._filter = _cfg_filter
         self._beacon = config.get("beacon", True)
         self._node_ttl = int(config.get("node_ttl_sec", 3600))
         # Position beacon config
@@ -301,12 +307,15 @@ class APRSISAdapter(Adapter):
             if obj_name:
                 raw["gate"] = gate_id   # preserve the gating station
             # Tag AIS objects so the map/log can style them differently
-            mmsi = packet.get("mmsi") or (
+            _raw_mmsi = packet.get("mmsi") or (
                 next((p.split("MMSI:")[1].split()[0]
                       for p in [packet.get("comment", "")]
                       if "MMSI:" in p), None)
             )
-            if mmsi:
+            # Strip any non-digit chars (trailing commas, spaces, etc.)
+            import re as _re
+            mmsi = _re.sub(r'\D', '', str(_raw_mmsi)) if _raw_mmsi else ""
+            if mmsi and len(mmsi) >= 7:   # sanity: real MMSIs are 7-9 digits
                 raw["mmsi"] = mmsi
                 raw["msg_type"] = "ais"
                 if from_id in self._nodes:

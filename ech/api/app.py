@@ -1062,6 +1062,42 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         except Exception as exc:
             return {"status": "error", "detail": str(exc), "yaml_snippet": yaml_snippet}
 
+    @app.post("/api/config/channels")
+    async def save_channel_key(request: Request):
+        """Add/update a channel PSK in config.yaml. Requires ECH restart to decrypt messages."""
+        import yaml, re
+        from pathlib import Path
+        from fastapi import HTTPException
+        data = await request.json()
+        idx = int(data.get("idx", 0))
+        key_hex = str(data.get("key_hex", "")).strip().lower()
+        if not re.match(r'^[0-9a-f]{8,}$', key_hex):
+            raise HTTPException(status_code=400, detail="key_hex must be a hex string (min 8 chars)")
+        config_path = Path("/etc/ech/config.yaml")
+        if not config_path.exists():
+            config_path = Path("config.yaml")
+        try:
+            with open(config_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            channels = cfg.get("channels", [])
+            if not isinstance(channels, list):
+                channels = []
+            # Update existing entry for this idx or append
+            for ch in channels:
+                if isinstance(ch, dict) and ch.get("idx") == idx:
+                    ch["key_hex"] = key_hex
+                    break
+            else:
+                channels.append({"idx": idx, "key_hex": key_hex})
+            cfg["channels"] = channels
+            with open(config_path, "w") as f:
+                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            return {"status": "ok", "note": "Restart ECH to decrypt messages with this key"}
+        except PermissionError as exc:
+            raise HTTPException(status_code=500, detail=f"Config write denied: {exc}. Run: sudo chown $(whoami) {config_path}")
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+
     @app.post("/api/bridge-rules")
     async def save_bridge_rules(request: Request):
         """Save bridge rules to config.yaml and apply them live without restart."""
@@ -1121,8 +1157,13 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             "nws_lon": wx_service._lon,
             "poll_interval_sec": wx_service._poll_interval,
             "severity_filter": list(wx_service._severity_filter),
-            "auto_broadcast_extreme": wx_service._auto_broadcast,
+            "auto_broadcast_severities": sorted(wx_service._auto_broadcast_severities),
             "auto_broadcast_adapters": wx_service._auto_adapters,
+            "auto_broadcast_channel": wx_service._auto_channel,
+            "auto_broadcast_min_interval_sec": wx_service._auto_min_interval,
+            "auto_broadcast_event_cooldown_sec": wx_service._auto_event_cooldown,
+            "auto_broadcast_max_per_hour": wx_service._auto_max_per_hour,
+            "broadcast_count_session": wx_service._broadcast_count,
         }
 
     @app.post("/api/weather/config")
@@ -1190,29 +1231,60 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
 
     @app.post("/api/bot/config")
     async def update_bot_config(request: Request):
+        import yaml
+        from pathlib import Path
         data = await request.json()
         wx_bot = getattr(router, "_weather_bot", None)
         if not wx_bot:
             return {"status": "error", "detail": "Bot not running"}
-        # Apply in-memory (survives until restart; use config save to persist)
-        if "enabled" in data:             wx_bot.enabled               = bool(data["enabled"])
-        if "channels" in data:            wx_bot._channels             = [c.lower() for c in data["channels"]]
-        if "adapters" in data:            wx_bot._adapter_filter       = data["adapters"]
-        if "reply_dm" in data:            wx_bot._reply_dm             = bool(data["reply_dm"])
-        if "per_user_cooldown_sec" in data: wx_bot._user_cooldown      = int(data["per_user_cooldown_sec"])
-        if "global_cooldown_sec" in data: wx_bot._global_cooldown      = int(data["global_cooldown_sec"])
-        if "max_reply_len" in data:       wx_bot._max_len              = int(data["max_reply_len"])
-        if "dump1090_path" in data:       wx_bot._dump1090             = data["dump1090_path"]
-        if "overhead_radius_nm" in data:  wx_bot._radius_nm            = float(data["overhead_radius_nm"])
-        if "solar_cache_sec" in data:     wx_bot._solar_cache_sec      = int(data["solar_cache_sec"])
-        if "lat" in data:                 wx_bot._lat                  = float(data["lat"]) if data["lat"] not in (None, "") else None
-        if "lon" in data:                 wx_bot._lon                  = float(data["lon"]) if data["lon"] not in (None, "") else None
-        if "tle_targets" in data:         wx_bot._tle_targets          = [t.upper() for t in data["tle_targets"]]
+        # Apply in-memory immediately
+        if "enabled" in data:               wx_bot.enabled               = bool(data["enabled"])
+        if "channels" in data:              wx_bot._channels             = [c.lower() for c in data["channels"]]
+        if "adapters" in data:              wx_bot._adapter_filter       = data["adapters"]
+        if "reply_dm" in data:              wx_bot._reply_dm             = bool(data["reply_dm"])
+        if "per_user_cooldown_sec" in data: wx_bot._user_cooldown        = int(data["per_user_cooldown_sec"])
+        if "global_cooldown_sec" in data:   wx_bot._global_cooldown      = int(data["global_cooldown_sec"])
+        if "max_reply_len" in data:         wx_bot._max_len              = int(data["max_reply_len"])
+        if "dump1090_path" in data:         wx_bot._dump1090             = data["dump1090_path"]
+        if "overhead_radius_nm" in data:    wx_bot._radius_nm            = float(data["overhead_radius_nm"])
+        if "solar_cache_sec" in data:       wx_bot._solar_cache_sec      = int(data["solar_cache_sec"])
+        if "lat" in data:                   wx_bot._lat                  = float(data["lat"]) if data["lat"] not in (None, "") else None
+        if "lon" in data:                   wx_bot._lon                  = float(data["lon"]) if data["lon"] not in (None, "") else None
+        if "tle_targets" in data:           wx_bot._tle_targets          = [t.upper() for t in data["tle_targets"]]
         if "aprs_fi_key" in data:
             wx_bot._config.setdefault("mesh_bot", {})["aprs_fi_key"] = data["aprs_fi_key"]
         if "ships_radius_nm" in data:
             wx_bot._config.setdefault("mesh_bot", {})["ships_radius_nm"] = float(data["ships_radius_nm"])
-        return {"status": "ok"}
+        # Persist to config.yaml so settings survive restart
+        config_path = Path("/etc/ech/config.yaml")
+        if not config_path.exists():
+            config_path = Path("config.yaml")
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            bot_cfg = cfg.setdefault("mesh_bot", {})
+            if "enabled" in data:               bot_cfg["enabled"]               = bool(data["enabled"])
+            if "channels" in data:              bot_cfg["channels"]              = [c.lower() for c in data["channels"]]
+            if "adapters" in data:              bot_cfg["adapters"]              = data["adapters"]
+            if "reply_dm" in data:              bot_cfg["reply_dm"]              = bool(data["reply_dm"])
+            if "per_user_cooldown_sec" in data: bot_cfg["per_user_cooldown_sec"] = int(data["per_user_cooldown_sec"])
+            if "global_cooldown_sec" in data:   bot_cfg["global_cooldown_sec"]   = int(data["global_cooldown_sec"])
+            if "max_reply_len" in data:         bot_cfg["max_reply_len"]         = int(data["max_reply_len"])
+            if "dump1090_path" in data:         bot_cfg["dump1090_path"]         = data["dump1090_path"]
+            if "overhead_radius_nm" in data:    bot_cfg["overhead_radius_nm"]    = float(data["overhead_radius_nm"])
+            if "solar_cache_sec" in data:       bot_cfg["solar_cache_sec"]       = int(data["solar_cache_sec"])
+            if "lat" in data:                   bot_cfg["lat"]                   = float(data["lat"]) if data["lat"] not in (None, "") else None
+            if "lon" in data:                   bot_cfg["lon"]                   = float(data["lon"]) if data["lon"] not in (None, "") else None
+            if "tle_targets" in data:           bot_cfg["tle_targets"]           = [t.upper() for t in data["tle_targets"]]
+            if "aprs_fi_key" in data:           bot_cfg["aprs_fi_key"]           = data["aprs_fi_key"]
+            if "ships_radius_nm" in data:       bot_cfg["ships_radius_nm"]       = float(data["ships_radius_nm"])
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            return {"status": "ok"}
+        except PermissionError as exc:
+            return {"status": "ok", "warning": f"Saved in-memory only — config write denied: {exc}. Run: sudo chown $(whoami) {config_path}"}
+        except Exception as exc:
+            return {"status": "ok", "warning": f"Saved in-memory only — config write failed: {exc}"}
 
     @app.post("/api/bot/test")
     async def test_bot_command(request: Request):
@@ -1257,6 +1329,17 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         except Exception as exc:
             result = f"error: {type(exc).__name__}: {exc}"
         return {"command": command, "response": result}
+
+    # ── Bot activity ──────────────────────────────────────────────────────────
+
+    @app.get("/api/bot/activity")
+    async def get_bot_activity(limit: int = 200, command: str | None = None):
+        rows = await db.get_bot_activity(limit=limit, command=command)
+        return {"activity": rows}
+
+    @app.get("/api/bot/stats")
+    async def get_bot_stats():
+        return await db.get_bot_stats()
 
     # ── Config file read / write ──────────────────────────────────────────────
 

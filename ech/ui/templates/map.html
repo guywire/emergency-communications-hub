@@ -124,6 +124,11 @@ function adapterColor(adapter) {
   return '#8b949e';
 }
 
+function nodeIsVessel(node) {
+  const id = (node.node_id || '').toLowerCase();
+  return id.startsWith('mmsi:') || !!(node.meta && node.meta.mmsi);
+}
+
 function makeNodeIcon(node, color, size=12) {
   const id = (node.node_id || '').toLowerCase();
   if (id.startsWith('icao:')) {
@@ -135,7 +140,7 @@ function makeNodeIcon(node, color, size=12) {
       iconAnchor: [sz/2, sz/2],
     });
   }
-  if (id.startsWith('mmsi:')) {
+  if (nodeIsVessel(node)) {
     const sz = size + 2;
     return L.divIcon({
       className: 'node-dot',
@@ -179,8 +184,8 @@ function popupContent(node, isAlert, lastMsg) {
   const meta = node.meta || {};
   let extLinks = '';
   if (meta.mmsi) {
-    const mmsi = esc(String(meta.mmsi));
-    const isAton = String(meta.mmsi).startsWith('99');
+    const mmsi = esc(String(meta.mmsi).replace(/\D/g, ''));
+    const isAton = mmsi.length === 9 && mmsi.startsWith('99');
     const vesselName = meta.vessel_name ? ` — ${esc(meta.vessel_name)}` : '';
     const shipType   = meta.ship_type   ? `<div class="node-stat">${esc(meta.ship_type)}</div>` : '';
     const navStatus  = meta.nav_status  ? `<div class="node-stat">${esc(meta.nav_status)}${meta.speed_kts != null ? `, ${meta.speed_kts}kts` : ''}</div>` : (meta.speed_kts != null ? `<div class="node-stat">${meta.speed_kts}kts</div>` : '');
@@ -196,10 +201,13 @@ function popupContent(node, isAlert, lastMsg) {
         + `<a href="${osmUrl}" target="_blank" rel="noopener">OpenSeaMap</a>`
         + `</div>`;
     } else {
+      const mtUrl = (node.lat != null && node.lon != null)
+        ? `https://www.marinetraffic.com/en/ais/home/centerx:${node.lon}/centery:${node.lat}/zoom:14`
+        : `https://www.marinetraffic.com/en/ais/details/ships/mmsi:${mmsi}`;
       extLinks = `<div class="node-ext-links">🚢 MMSI ${mmsi}${vesselName}`
         + `${shipType}${navStatus}${dest}`
         + `<a href="https://www.vesselfinder.com/vessels/details/${mmsi}" target="_blank" rel="noopener">VesselFinder</a>`
-        + ` &bull; <a href="https://www.marinetraffic.com/en/ais/details/ships/mmsi:${mmsi}" target="_blank" rel="noopener">MarineTraffic</a>`
+        + ` &bull; <a href="${mtUrl}" target="_blank" rel="noopener">MarineTraffic</a>`
         + `</div>`;
     }
   } else if (meta.icao) {
@@ -277,13 +285,13 @@ async function loadNodes() {
       if (node.lat === 0 && node.lon === 0) return;
       const nid = (node.node_id || '').toLowerCase();
       const isAircraft = nid.startsWith('icao:');
-      const isVessel   = nid.startsWith('mmsi:');
+      const isVessel   = nodeIsVessel(node);
       if (!_showAircraft && isAircraft) return;
       if (!_showVessels  && isVessel)   return;
       const id = node.node_id;
       seen.add(id);
       const isAlert = alertNodes.has(id);
-      const color = isAlert ? '#f85149' : adapterColor(node._adapter);
+      const color = isAlert ? '#f85149' : isVessel ? '#56d3c8' : adapterColor(node._adapter);
       const size  = isAlert ? 16 : 12;
       const popup = popupContent(node, isAlert);
       const icon  = makeNodeIcon(node, color, size);
