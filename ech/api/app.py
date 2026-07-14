@@ -271,15 +271,15 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
     _TOPNAV_HTML = """
 <nav id="ech-topnav" style="display:flex;gap:2px;align-items:center;margin-left:10px;padding-left:10px;border-left:1px solid rgba(139,148,158,.3);overflow-x:auto;flex-shrink:1">
   <a href="/" data-p="/" title="Messages">&#128172;</a>
-  <a href="/map" data-p="/map" title="Map">&#128506;</a>
+  <a href="/map" data-p="/map" title="Map">&#128506;&#65039;</a>
   <a href="/hamlog" data-p="/hamlog" title="Ham Log">&#128251;</a>
   <a href="/logs" data-p="/logs" title="Logs">&#128220;</a>
-  <a href="/anomalies" data-p="/anomalies" title="Anomalies">&#9888;</a>
+  <a href="/anomalies" data-p="/anomalies" title="Anomalies">&#9888;&#65039;</a>
   <a href="/analytics" data-p="/analytics" title="Analytics">&#128202;</a>
-  <a href="/skywarn" data-p="/skywarn" title="SKYWARN">&#127786;</a>
+  <a href="/skywarn" data-p="/skywarn" title="SKYWARN">&#127786;&#65039;</a>
   <a href="/remote-hw" data-p="/remote-hw" title="Remote Hardware">&#128268;</a>
   <a href="/simulation" data-p="/simulation" id="ech-topnav-sim" title="Simulation">&#129514;</a>
-  <a href="/settings" data-p="/settings" id="ech-topnav-settings" title="Settings">&#9881;</a>
+  <a href="/settings" data-p="/settings" id="ech-topnav-settings" title="Settings">&#9881;&#65039;</a>
 </nav>
 <script>
 (function(){
