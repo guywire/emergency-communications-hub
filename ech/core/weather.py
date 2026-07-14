@@ -161,6 +161,7 @@ class WeatherService:
             for feature in features:
                 props = feature.get("properties", {})
                 alert_id  = props.get("id", "")
+                status    = props.get("status", "Actual")
                 severity  = props.get("severity", "Unknown")
                 urgency   = props.get("urgency", "Unknown")
                 event     = props.get("event", "")
@@ -169,6 +170,18 @@ class WeatherService:
                 area_desc = props.get("areaDesc", "")
                 effective = props.get("effective", "")
                 expires   = props.get("expires", "")
+
+                # NWS test/exercise traffic (weekly/monthly required tests, drill
+                # exercises) commonly carries severity=Extreme + urgency=Immediate
+                # — the exact combination this code uses to force Priority.EMERGENCY.
+                # Without a status check, a routine test gets broadcast to the mesh
+                # and logged as a real emergency alert. Only "Actual" is real;
+                # Exercise/System/Test/Draft must never reach the emergency path.
+                is_test = status != "Actual" or "test" in event.lower() or "exercise" in event.lower()
+                if is_test:
+                    log.info("WeatherService: suppressing non-Actual alert %r (status=%s, event=%r)",
+                              alert_id, status, event)
+                    continue
 
                 self._active_alerts.append({
                     "id": alert_id,

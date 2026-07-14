@@ -2318,6 +2318,13 @@ class MeshBot:
                     return f"alerts: NWS HTTP {r2.status_code}" + (f" — {detail[:60]}" if detail else "")
                 features = r2.json().get("features", [])
 
+            # Exclude test/exercise traffic — NWS required weekly/monthly tests
+            # and drill exercises show up in this same feed and must never be
+            # read back to an operator as if they were real active alerts.
+            features = [f for f in features
+                        if f.get("properties", {}).get("status", "Actual") == "Actual"
+                        and "test" not in f.get("properties", {}).get("event", "").lower()
+                        and "exercise" not in f.get("properties", {}).get("event", "").lower()]
             if not features:
                 return "ALERTS: none active"
             parts = []
