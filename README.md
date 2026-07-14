@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc147** (authoritative version is always the `VERSION` file)
+**Version 1.0.0-rc170** (authoritative version is always the `VERSION` file — this banner is updated manually and can lag)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -35,27 +35,30 @@ SignalMatrix is a Python/FastAPI application that bridges multiple emergency-com
 
 ### 1. Install Python dependencies
 
-No `requirements.txt` is bundled; install the packages directly:
-
 ```bash
-pip install fastapi "uvicorn[standard]" pyyaml aiosqlite \
-    aiomqtt pyserial-asyncio-fast pycryptodome \
-    meshtastic aprslib aiohttp \
-    rns lxmf panoramisk meshcore
+git clone https://github.com/guywire/emergency-communications-hub.git
+cd emergency-communications-hub
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e .
 ```
 
-Minimum adapter-specific installs if you only need a subset:
+`pyproject.toml` declares everything the core app and every built-in adapter need
+(MeshCore, Meshtastic, APRS, Reticulum, the mesh bot's `satpass`, CW/RTTY/PSK31
+audio modes, etc.) — `pip install -e .` is the complete install; nothing else to
+pick and choose unless you're deliberately trimming it down. This also gives you
+an `ech` console command (equivalent to `python -m ech.main`).
 
-| Adapter | Extra package(s) |
-|---------|-----------------|
-| Meshtastic | `meshtastic` |
-| APRS-IS | `aprslib` |
-| MeshCore / LetsMesh | `pycryptodome pyserial-asyncio-fast aiomqtt` |
-| MQTT (generic) | `aiomqtt` |
-| Reticulum | `rns lxmf` |
-| AREDN / weather / Pat API | `aiohttp` |
-| Asterisk AMI | `panoramisk` |
-| mDNS (optional) | `zeroconf` |
+One system-level package audio modes need that pip can't provide — install it
+first if you'll use `cw_audio`/`rtty_audio`/`psk31_audio`:
+
+```bash
+# Debian/Ubuntu/Raspberry Pi OS
+sudo apt-get install -y libportaudio2
+```
+
+If you'd rather not pull in everything, the per-adapter table below lists the
+minimum package(s) each one needs — install those individually instead of running
+`pip install -e .`.
 
 ### 2. Copy and edit the config
 
@@ -70,10 +73,11 @@ Set `operator: callsign` to your callsign. All adapters are disabled by default 
 
 ```bash
 # Use local config.yaml in current directory:
-python -m ech.main
+ech
+# (equivalent to: python -m ech.main)
 
 # Or point to a specific config:
-python -m ech.main --config /etc/ech/config.yaml
+ech --config /etc/ech/config.yaml
 ```
 
 Open a browser to `http://<server-ip>:8765`. That is the dashboard.
@@ -490,7 +494,7 @@ No inbound ports are required for most adapters (they connect outward). Exceptio
 | Meshtastic USB/TCP | `meshtastic` | `pip install meshtastic` |
 | APRS Internet | `aprs_is` | `pip install aprslib` |
 | APRS KISS TNC / Direwolf | `aprs_kiss` | Direwolf or hardware TNC |
-| MeshCore serial/TCP | `meshcore` | `pip install pycryptodome pyserial-asyncio-fast` |
+| MeshCore serial/TCP | `meshcore` | `pip install pycryptodome pyserial-asyncio-fast` — custom protocol client, no `meshcore` PyPI package needed |
 | LetsMesh MQTT | `mqtt` (with `pubkey_auth`) | `pip install aiomqtt pycryptodome` |
 | MQTT generic | `mqtt` | `pip install aiomqtt` |
 | JS8Call HF | `js8call` | JS8Call app running with TCP API on port 2442 |
@@ -498,12 +502,12 @@ No inbound ports are required for most adapters (they connect outward). Exceptio
 | SMS modem | `sms` | SIM800L / SIM7600 on USB serial |
 | Reticulum / LXMF | `reticulum` | `pip install rns lxmf` |
 | AREDN mesh | `aredn_ami` | `pip install aiohttp` |
-| Asterisk / PBX | `asterisk` | Asterisk with AMI enabled; `pip install panoramisk` |
+| Asterisk / PBX | `asterisk` | Asterisk with AMI enabled — talks raw AMI over a TCP socket, no extra package needed |
 | ADS-B / PiAware | `adsb` | dump1090, PiAware, or readsb on the LAN |
 | AIS vessels (local SDR) | `ais_catcher` | AIS-catcher with HTTP server enabled |
 | AIS vessels (AISHub) | `aishub` | Free aishub.net account + API key |
 | AIS vessels (aisstream.io) | `aisstream` | Free aisstream.io API key |
-| CW / Morse over sound card | `cw_audio` | `pip install sounddevice` (+ `libportaudio2` on Linux); radio TX needs VOX or CAT PTT |
+| CW / Morse over sound card | `cw_audio` | `pip install sounddevice numpy` (+ `libportaudio2` on Linux); radio TX needs VOX or CAT PTT (`ptt: cat` uses CAT control instead) |
 | RTTY over sound card | `rtty_audio` | Same as cw_audio (45.45 Bd Baudot, 2125/2295 Hz) |
 | PSK31 over sound card | `psk31_audio` | Same as cw_audio (31.25 Bd BPSK varicode) |
 | FT8/FT4 via WSJT-X | `wsjtx` | WSJT-X with "UDP Server" pointed at ECH (port 2237); RX-only |
