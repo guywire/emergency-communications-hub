@@ -1191,9 +1191,14 @@ class MeshCoreAdapter(Adapter):
             log.error("MeshCore %s: announce error: %s", self.name, exc)
             return False
 
-    async def ping(self, node_id: str) -> dict:
+    async def ping(self, node_id: str, via: "list[str] | None" = None) -> dict:
         """Send CMD_SEND_TRACE_PATH (0x24) — broadcasts a trace packet onto the mesh.
-        Results arrive as TRACE_DATA (0x89) and appear in the message feed."""
+        Results arrive as TRACE_DATA (0x89) and appear in the message feed.
+
+        `via`, if given, is an ordered list of repeater node_ids (e.g. from an
+        operator clicking repeaters on the map) that OVERRIDES the device's
+        stored route / ECH's inferred topology route entirely — the probe is
+        built from exactly that hop sequence instead."""
         if not self._connected:
             return {"status": "error", "detail": "not connected"}
         import random as _random
@@ -1220,6 +1225,7 @@ class MeshCoreAdapter(Adapter):
         # companions/sensors typically never answer.
         path = b""
         target = None
+        path_truncated = False
         hops = 0
         route_src = ""
         node_id = (node_id or "").strip()
@@ -1236,23 +1242,39 @@ class MeshCoreAdapter(Adapter):
                 # "still only works on 0-hop nodes"). Name resolution is for
                 # display only.
                 relay_hashes: list = []
-                try:
-                    stored = bytes.fromhex((n.meta or {}).get("out_path") or "")
-                except ValueError:
-                    stored = b""
-                if 0 < len(stored) <= 16:
-                    relay_hashes = [f"{b:02x}" for b in stored]
-                    route_src = "device route"
+                if via:
+                    # Operator-drawn path: resolve each clicked node to its
+                    # hash prefix, in the order clicked. Unknown ids are
+                    # dropped with a log warning rather than aborting the
+                    # whole probe — better a shorter drawn path goes out than
+                    # nothing at all.
+                    for vid in via:
+                        vn = self._nodes.get(vid) or self._nodes.get(vid.upper())
+                        if vn is None:
+                            log.warning("MeshCore %s: manual path hop %r not a known node — skipped",
+                                        self.name, vid)
+                            continue
+                        relay_hashes.append(vn.node_id[:2].lower())
+                    route_src = "manual path"
                 else:
-                    inferred = self._infer_route(n.node_id[:2])
-                    if inferred:
-                        relay_hashes = list(inferred)
-                        route_src = "observed topology"
-                    elif inferred == []:
-                        route_src = "heard direct"
+                    try:
+                        stored = bytes.fromhex((n.meta or {}).get("out_path") or "")
+                    except ValueError:
+                        stored = b""
+                    if 0 < len(stored) <= 16:
+                        relay_hashes = [f"{b:02x}" for b in stored]
+                        route_src = "device route"
+                    else:
+                        inferred = self._infer_route(n.node_id[:2])
+                        if inferred:
+                            relay_hashes = list(inferred)
+                            route_src = "observed topology"
+                        elif inferred == []:
+                            route_src = "heard direct"
                 # Don't double the target if the chain already ends at it
                 if relay_hashes and relay_hashes[-1] == n.node_id[:2].lower():
                     relay_hashes = relay_hashes[:-1]
+                path_truncated = via is not None and len(relay_hashes) > 5
                 if hash_bytes == 1:
                     outbound = relay_hashes[:5] + [n.node_id[:2].lower()]
                 else:
@@ -1298,8 +1320,11 @@ class MeshCoreAdapter(Adapter):
             detail = (f"Trace sent via {route_names} ({route_src})" if target
                       else f"Trace probe sent (tag {tag:08x})") + \
                      " — waiting for a reply; only repeaters answer traces"
+            if path_truncated:
+                detail += " (path truncated to first 5 repeaters — protocol limit)"
             return {"status": "sent", "detail": detail, "tag": tag, "via": target,
-                    "hops": hops, "route_src": route_src, "route_points": route_points}
+                    "hops": hops, "route_src": route_src, "route_points": route_points,
+                    "path_truncated": path_truncated}
         except Exception as exc:
             log.error("MeshCore %s: SEND_TRACE_PATH error: %s", self.name, exc)
             return {"status": "error", "detail": str(exc)}

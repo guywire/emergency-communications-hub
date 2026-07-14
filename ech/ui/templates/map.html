@@ -23,6 +23,8 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 .ctrl-btn{font-size:10px;padding:3px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer}.ctrl-btn:hover{border-color:var(--blue);color:var(--blue)}
 .ctrl-btn.on{color:var(--green);border-color:var(--green);background:rgba(63,185,80,.08)}
 .ctrl-btn.on:hover{color:var(--green);border-color:var(--green)}
+.ctrl-btn:disabled{opacity:.4;cursor:default}
+.ctrl-btn:disabled:hover{border-color:var(--border);color:var(--muted)}
 #map{height:calc(100vh - 44px);width:100%}
 /* Dark tile overlay */
 .leaflet-tile{filter:brightness(0.7) invert(1) hue-rotate(180deg) saturate(0.5)}
@@ -67,9 +69,20 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show PSKReporter callsign spots">PSK</button>
     <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">GRID</button>
     <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">HAM LOG</button>
+    <button class="ctrl-btn" id="draw-btn" onclick="toggleDrawMode()" title="Draw a repeater path: click each repeater in order, then Send Trace">✏ Draw Path</button>
   </div>
 </div>
 <div id="map"></div>
+<div id="draw-panel" style="display:none;position:absolute;top:56px;left:10px;z-index:1000;background:rgba(22,27,34,.94);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:11px;min-width:200px;max-width:260px">
+  <div style="font-weight:500;margin-bottom:6px;color:var(--text)">✏ Draw Path</div>
+  <div style="color:var(--muted);margin-bottom:8px">Click repeaters in order (source → … → destination), then Send.</div>
+  <ol id="draw-path-list" style="margin:0 0 8px 16px;padding:0;color:var(--text)"></ol>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button class="ctrl-btn" onclick="undoDrawPath()">↶ Undo</button>
+    <button class="ctrl-btn" onclick="clearDrawPath()">✕ Clear</button>
+    <button class="ctrl-btn" id="draw-send-btn" onclick="sendDrawPath()" disabled>▶ Send Trace</button>
+  </div>
+</div>
 <div id="legend">
   <div style="font-weight:500;margin-bottom:6px;font-size:11px">Node Types</div>
   <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>Meshtastic</div>
@@ -295,6 +308,101 @@ function drawAttemptedRoute(routePoints) {
   return true;
 }
 
+// ── Manual path drawing (click repeaters in order, then send a directed trace) ─
+let _drawMode = false;
+let _drawPath = [];         // [{node_id, display_name, lat, lon, adapter}]
+let _drawLine = null;       // in-progress purple polyline
+let _drawDots = [];         // numbered click markers
+
+function toggleDrawMode() {
+  _drawMode = !_drawMode;
+  document.getElementById('draw-btn').classList.toggle('on', _drawMode);
+  document.getElementById('draw-panel').style.display = _drawMode ? 'block' : 'none';
+  if (!_drawMode) clearDrawPath();
+}
+
+function addDrawPathNode(node) {
+  if (!_drawMode) return;
+  if (!(node._adapter || '').toLowerCase().includes('meshcore')) {
+    toast('Only MeshCore nodes can be traced');
+    return;
+  }
+  if (node.lat == null || node.lon == null) {
+    toast(`${node.display_name} has no position — path line will skip it`);
+  }
+  const last = _drawPath[_drawPath.length - 1];
+  if (last && last.node_id === node.node_id) return;   // ignore accidental double-click
+  _drawPath.push({
+    node_id: node.node_id, display_name: node.display_name,
+    lat: node.lat, lon: node.lon, adapter: node._adapter,
+  });
+  renderDrawPath();
+}
+
+function renderDrawPath() {
+  const list = document.getElementById('draw-path-list');
+  list.innerHTML = _drawPath.map(p => `<li>${esc(p.display_name)}</li>`).join('');
+  document.getElementById('draw-send-btn').disabled = _drawPath.length < 1;
+
+  if (_drawLine) { _drawLine.remove(); _drawLine = null; }
+  _drawDots.forEach(d => d.remove());
+  _drawDots = [];
+
+  const positioned = _drawPath.filter(p => p.lat != null && p.lon != null);
+  if (positioned.length >= 2) {
+    _drawLine = L.polyline(positioned.map(p => [p.lat, p.lon]), {
+      color: '#c792ea', weight: 3, opacity: 0.85, dashArray: '4 5',
+    }).addTo(map);
+  }
+  positioned.forEach((p, i) => {
+    const dot = L.marker([p.lat, p.lon], {
+      icon: L.divIcon({
+        className: 'node-dot',
+        html: `<div style="width:18px;height:18px;background:#c792ea;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-family:monospace;box-shadow:0 0 6px #c792ea">${i + 1}</div>`,
+        iconSize: [18, 18], iconAnchor: [9, 9],
+      }),
+      interactive: false,
+    }).addTo(map);
+    _drawDots.push(dot);
+  });
+}
+
+function undoDrawPath() {
+  _drawPath.pop();
+  renderDrawPath();
+}
+
+function clearDrawPath() {
+  _drawPath = [];
+  renderDrawPath();
+}
+
+async function sendDrawPath() {
+  if (_drawPath.length < 1) return;
+  const target = _drawPath[_drawPath.length - 1];
+  const via = _drawPath.slice(0, -1).map(p => p.node_id);
+  const btn = document.getElementById('draw-send-btn');
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await fetch('/api/ping', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({adapter: target.adapter, node_id: target.node_id, via}),
+    });
+    const dir = await r.json();
+    if (dir.status === 'sent') {
+      const drawn = drawAttemptedRoute(dir.route_points);
+      toast(`Probing your drawn path (${dir.hops} hop${dir.hops === 1 ? '' : 's'})${drawn ? ' — drawn blue' : ''}; a reply draws green${dir.path_truncated ? ' (truncated to 5 repeaters)' : ''}`);
+      toggleDrawMode();
+    } else {
+      toast(`Trace failed: ${dir.detail || dir.status}`);
+    }
+  } catch(e) {
+    toast('Trace failed: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '▶ Send Trace';
+  }
+}
+
 async function mapTrace(adapter, nodeId, btn) {
   if (btn) { btn.textContent = '…'; btn.disabled = true; }
   try {
@@ -407,6 +515,11 @@ async function loadNodes() {
 const lastMsgCache = {};
 
 async function onPopupOpen(marker, node) {
+  if (_drawMode) {
+    marker.closePopup();
+    addDrawPathNode(node);
+    return;
+  }
   const nodeId = node.node_id;
   // If we already cached it, just update; otherwise fetch
   const cached = lastMsgCache[nodeId];

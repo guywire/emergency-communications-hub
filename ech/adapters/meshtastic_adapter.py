@@ -250,8 +250,10 @@ class MeshtasticAdapter(Adapter):
         log.info("Meshtastic %s: cleared %d cached nodes", self.name, count)
         return count
 
-    async def ping(self, node_id: str) -> dict:
-        """Send a traceroute to node_id. Response arrives as a TRACEROUTE message."""
+    async def ping(self, node_id: str, via: "list[str] | None" = None) -> dict:
+        """Send a traceroute to node_id. Response arrives as a TRACEROUTE message.
+        `via` (manual repeater path) isn't supported by the Meshtastic library's
+        traceroute API — the mesh always picks its own route — so it's ignored."""
         if not self._iface or not self._connected:
             return {"status": "error", "detail": "not connected"}
         try:

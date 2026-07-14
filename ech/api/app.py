@@ -1077,7 +1077,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             return {"status": "error", "detail": f"adapter '{adapter_name}' not found"}
         if not a._connected:
             return {"status": "error", "detail": "adapter not connected"}
-        result = await a.ping(node_id)
+        via = data.get("via")
+        if via is not None and not isinstance(via, list):
+            return {"status": "error", "detail": "via must be a list of node_ids"}
+        result = await a.ping(node_id, via=via)
         return result
 
     # ── Prometheus metrics ────────────────────────────────────────────────

@@ -88,8 +88,9 @@ class Adapter(ABC):
         """Broadcast node presence to the network. Override in adapters that support it."""
         return False
 
-    async def ping(self, node_id: str) -> dict:
-        """Send a traceroute/ping to a discovered node. Override in adapters that support it."""
+    async def ping(self, node_id: str, via: "list[str] | None" = None) -> dict:
+        """Send a traceroute/ping to a discovered node. Override in adapters that support it.
+        `via`, if supported, is an ordered list of repeater node_ids the probe must follow."""
         return {"status": "unsupported"}
 
     async def health(self) -> ChannelHealth:
