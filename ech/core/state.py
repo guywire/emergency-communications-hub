@@ -232,7 +232,9 @@ class ECHState:
             wx_cfg = {**self._wx_config, "nws_lat": lat, "nws_lon": lon}
             await self._db.set_kv("wx_config", json.dumps(wx_cfg))
             self._wx_config = wx_cfg
-        # Propagate to all adapters (no-op for real adapters; updates positions in mocks)
+        # Propagate to all adapters — updates positions in mocks; MeshCore also
+        # pushes this onto the radio's own advert position (CMD_SET_ADVERT_LATLON)
+        # and stamps its own map node, no-op for other real adapters
         if self._router:
             for adapter in self._router._adapters.values():
                 adapter.set_base_location(lat, lon)

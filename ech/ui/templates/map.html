@@ -391,6 +391,7 @@ async function sendDrawPath() {
     const dir = await r.json();
     if (dir.status === 'sent') {
       const drawn = drawAttemptedRoute(dir.route_points);
+      armTraceTimeout(dir.tag, target.display_name);
       toast(`Probing your drawn path (${dir.hops} hop${dir.hops === 1 ? '' : 's'})${drawn ? ' — drawn blue' : ''}; a reply draws green${dir.path_truncated ? ' (truncated to 5 repeaters)' : ''}`);
       toggleDrawMode();
     } else {
@@ -420,6 +421,7 @@ async function mapTrace(adapter, nodeId, btn) {
     if (ok) {
       const drawn = drawAttemptedRoute(dir.route_points);
       const src = dir.route_src ? ` (${dir.route_src})` : '';
+      armTraceTimeout(dir.tag, dir.via);
       toast(`Probing ${dir.hops} hop${dir.hops === 1 ? '' : 's'}${src}${drawn ? ' — attempted route drawn blue' : ''}; a reply draws green`, 'ok');
     } else {
       toast(`Trace failed: ${dir.detail || dir.status}`, 'err');
@@ -572,6 +574,27 @@ const _TRAFFIC_MAX_LINES = 30;
 const _TRAFFIC_FADE_MS = 10000;      // ordinary heard packets
 const _TRACE_FADE_MS   = 60000;      // operator-requested traces stay a full minute
 
+// ── Trace reply timeout — tell the operator when a probe never comes home ──
+let _pendingTraces = new Map();   // tag -> setTimeout id
+const _TRACE_TIMEOUT_MS = 25000;
+
+function armTraceTimeout(tag, label) {
+  if (tag == null) return;
+  const id = setTimeout(() => {
+    if (_pendingTraces.has(tag)) {
+      _pendingTraces.delete(tag);
+      toast(`✗ No reply${label ? ' for trace via ' + label : ''} within 25s — repeaters may not relay in that order, or are out of range`);
+    }
+  }, _TRACE_TIMEOUT_MS);
+  _pendingTraces.set(tag, id);
+}
+
+function clearTraceTimeout(tag) {
+  if (tag == null) return;
+  const id = _pendingTraces.get(tag);
+  if (id != null) { clearTimeout(id); _pendingTraces.delete(tag); }
+}
+
 function toggleTraffic() {
   _showTraffic = !_showTraffic;
   document.getElementById('traffic-btn').classList.toggle('on', _showTraffic);
@@ -653,8 +676,9 @@ function connectWS() {
       // A trace reply is an operator-requested measurement — announce it when
       // it actually ARRIVES (the send-toast no longer promises anything).
       if (pkt.data.ptype === 'TRACE') {
+        clearTraceTimeout(pkt.data.tag);
         const names = (pkt.data.nodes || []).map(n => n ? n.name : '?').join(' → ');
-        toast(`Trace reply: ${pkt.data.hops} hop(s)${names ? ' via ' + names : ''}`
+        toast(`✓ Trace reply: ${pkt.data.hops} hop(s)${names ? ' via ' + names : ''}`
               + (drawn ? ' — drawn on map' : ' — no positioned nodes to draw'));
       }
       return;

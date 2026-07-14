@@ -54,6 +54,7 @@ CMD_SEND_CONTACT_MSG    = 0x05   # DM to a contact: [dest_pubkey:6][max_hops:1][
 CMD_SET_DEVICE_TIME     = 0x06
 CMD_SEND_ADVERT         = 0x07   # broadcast local node advertisement to mesh channel
 CMD_SET_NAME            = 0x08   # set device name; expects PACKET_OK
+CMD_SET_ADVERT_LATLON   = 0x0E   # set device's own advert position: lat_e6(4)+lon_e6(4)+reserved(4)
 CMD_SYNC_NEXT_MESSAGE   = 0x0A
 CMD_SEND_TRACEROUTE     = 0x0D   # actually RESET_PATH; kept for backward compat
 CMD_REMOVE_CONTACT      = 0x0F   # delete a stored contact: [pubkey:32] → PACKET_CONTACT_DELETED
@@ -409,6 +410,39 @@ class MeshCoreAdapter(Adapter):
 
     def set_base_location(self, lat: float, lon: float) -> None:
         self._base_lat, self._base_lon = lat, lon
+        self._stamp_self_position()
+        if self._connected:
+            asyncio.ensure_future(self.push_advert_location(lat, lon))
+
+    def _stamp_self_position(self) -> None:
+        """Set lat/lon on our OWN node entry so this station shows up on ECH's
+        map like any other node — pushing the position to the radio (below)
+        only helps how the REST of the mesh sees us, not our own map."""
+        if self._self_node_id and self._base_lat is not None and self._self_node_id in self._nodes:
+            n = self._nodes[self._self_node_id]
+            n.lat, n.lon = self._base_lat, self._base_lon
+
+    async def push_advert_location(self, lat: float, lon: float) -> bool:
+        """Push ECH's base location onto the radio's own advert position
+        (CMD_SET_ADVERT_LATLON, 0x0E) so this station's node shows up on the
+        map like any other, instead of only ever being the (unpositioned) rx
+        end of trace/traffic lines."""
+        if not self._connected:
+            return False
+        try:
+            payload = (
+                bytes([CMD_SET_ADVERT_LATLON])
+                + int(lat * 1e6).to_bytes(4, "little", signed=True)
+                + int(lon * 1e6).to_bytes(4, "little", signed=True)
+                + (0).to_bytes(4, "little")
+            )
+            await self._send_cmd(payload)
+            log.info("MeshCore %s: pushed advert location (%.6f, %.6f) to device",
+                     self.name, lat, lon)
+            return True
+        except Exception as exc:
+            log.error("MeshCore %s: push_advert_location error: %s", self.name, exc)
+            return False
 
     # OTA wire-format names, verified against meshcore_py v2.3.7 meshcore_parser.py
     _RF_ROUTE_NAMES = ("TC_FLOOD", "FLOOD", "DIRECT", "TC_DIRECT")
@@ -577,7 +611,7 @@ class MeshCoreAdapter(Adapter):
         return d
 
     def _broadcast_traffic_event(self, route: str, ptype: str, snr, rssi,
-                                 hops: int, hashes: list, origin_id=None) -> None:
+                                 hops: int, hashes: list, origin_id=None, tag=None) -> None:
         """Resolve a relay-hash chain and push an rf_traffic WS event (map overlay).
         Used for both heard OTA packets (0x88) and our own TRACE_DATA results."""
         if self._router_broadcast is None:
@@ -604,6 +638,8 @@ class MeshCoreAdapter(Adapter):
             "origin": self._resolve_traffic_node(origin_id) if origin_id else None,
             "rx": rx,
         }
+        if tag is not None:
+            event["tag"] = tag
         asyncio.ensure_future(self._router_broadcast("rf_traffic", event))
 
     @staticmethod
@@ -926,6 +962,13 @@ class MeshCoreAdapter(Adapter):
         ts = int(time.time())
         await self._send_cmd(bytes([CMD_SET_DEVICE_TIME]) + struct.pack("<I", ts))
         await asyncio.sleep(0.1)
+
+        # 3.5 Push ECH's base location onto the device's own advert position, if
+        # already known (set_base_location() runs before connect() during startup,
+        # so self._connected was still False and couldn't push it at the time).
+        if self._base_lat is not None and self._base_lon is not None:
+            await self.push_advert_location(self._base_lat, self._base_lon)
+            await asyncio.sleep(0.1)
 
         # 4. Fetch channel 0-7 info
         for idx in range(8):
@@ -1811,6 +1854,7 @@ class MeshCoreAdapter(Adapter):
                     n.display_name = display
                 n.name_source = "self_info"
                 n.last_heard = now
+            self._stamp_self_position()
             if name:
                 log.info("MeshCore %s: self_info name=%r node=%s", self.name, name, local_pubkey)
                 if local_pubkey and local_pubkey in self._nodes:
@@ -2009,7 +2053,7 @@ class MeshCoreAdapter(Adapter):
                 # rare and operator-initiated.
                 avg_snr = (sum(snr_values) / len(snr_values)) if snr_values else None
                 self._broadcast_traffic_event("DIRECT", "TRACE", avg_snr, None,
-                                              path_len, path_nodes)
+                                              path_len, path_nodes, tag=tag)
                 trace_msg = NormalizedMessage(
                     source_adapter=self.name,
                     source_channel="traceroute",
