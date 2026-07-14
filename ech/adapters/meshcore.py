@@ -399,6 +399,12 @@ class MeshCoreAdapter(Adapter):
         # TRACE_DATA (0x89) handler so callers (anomaly verification) can await
         # a live path measurement instead of fishing it out of the message feed.
         self._trace_futures: dict[int, asyncio.Future] = {}
+        # Tags of traces WE sent, so a raw LOG_DATA sighting of a TRACE-type OTA
+        # packet can be recognized as "our probe, still in flight" instead of
+        # either being ignored or misreported as a completed reply (only the
+        # companion TRACE_DATA/0x89 event — the radio recognizing itself as the
+        # final destination — actually confirms completion).
+        self._pending_trace_tags: set = set()
         # Observed mesh topology, learned passively from the RX log and from
         # successful traces. The device itself stores no routes (all contacts
         # flood), so this is how directed traces reach repeaters beyond direct
@@ -520,7 +526,18 @@ class MeshCoreAdapter(Adapter):
         route = self._RF_ROUTE_NAMES[route_type]
         ptype = (self._RF_PAYLOAD_NAMES[payload_type]
                  if payload_type < len(self._RF_PAYLOAD_NAMES) else f"0x{payload_type:X}")
-        self._broadcast_traffic_event(route, ptype, snr, rssi, path_len, hashes, origin_id)
+        # TRACE-type OTA packets carry the sender's tag as the first 4 bytes of
+        # payload (same tag we put in our own CMD_SEND_TRACE_PATH). If it's one
+        # of ours, we can tell the operator their probe is actually moving
+        # through the mesh — NOT a completed reply (only the companion
+        # TRACE_DATA/0x89 event, the radio recognizing itself as the final
+        # destination, confirms that), just evidence it's alive in flight.
+        seen_tag = None
+        if payload_type == 9 and len(payload) >= 4:
+            candidate = int.from_bytes(payload[:4], "little")
+            if candidate in self._pending_trace_tags:
+                seen_tag = candidate
+        self._broadcast_traffic_event(route, ptype, snr, rssi, path_len, hashes, origin_id, tag=seen_tag)
 
     def _learn_topology(self, hashes: list, confirmed_from_us: bool = False) -> None:
         """Update the observed adjacency graph from a relay-hash chain.
@@ -611,7 +628,8 @@ class MeshCoreAdapter(Adapter):
         return d
 
     def _broadcast_traffic_event(self, route: str, ptype: str, snr, rssi,
-                                 hops: int, hashes: list, origin_id=None, tag=None) -> None:
+                                 hops: int, hashes: list, origin_id=None, tag=None,
+                                 confirmed: bool = False) -> None:
         """Resolve a relay-hash chain and push an rf_traffic WS event (map overlay).
         Used for both heard OTA packets (0x88) and our own TRACE_DATA results."""
         if self._router_broadcast is None:
@@ -640,6 +658,7 @@ class MeshCoreAdapter(Adapter):
         }
         if tag is not None:
             event["tag"] = tag
+        event["confirmed"] = confirmed
         asyncio.ensure_future(self._router_broadcast("rf_traffic", event))
 
     @staticmethod
@@ -1234,6 +1253,10 @@ class MeshCoreAdapter(Adapter):
             log.error("MeshCore %s: announce error: %s", self.name, exc)
             return False
 
+    async def _expire_pending_tag(self, tag: int, after: float) -> None:
+        await asyncio.sleep(after)
+        self._pending_trace_tags.discard(tag)
+
     async def ping(self, node_id: str, via: "list[str] | None" = None) -> dict:
         """Send CMD_SEND_TRACE_PATH (0x24) — broadcasts a trace packet onto the mesh.
         Results arrive as TRACE_DATA (0x89) and appear in the message feed.
@@ -1358,6 +1381,8 @@ class MeshCoreAdapter(Adapter):
         route_names = " → ".join(p["name"] for p in route_points)
         try:
             await self._send_cmd(payload)
+            self._pending_trace_tags.add(tag)
+            asyncio.ensure_future(self._expire_pending_tag(tag, 30.0))
             log.info("MeshCore %s: SEND_TRACE_PATH tag=%08x via=%s hops=%d src=%s — response arrives as TRACE_DATA (0x89)",
                      self.name, tag, route_names or "flood", hops, route_src or "-")
             detail = (f"Trace sent via {route_names} ({route_src})" if target
@@ -2052,8 +2077,9 @@ class MeshCoreAdapter(Adapter):
                 # find a line in the message feed. No rate gate: traces are
                 # rare and operator-initiated.
                 avg_snr = (sum(snr_values) / len(snr_values)) if snr_values else None
+                self._pending_trace_tags.discard(tag)
                 self._broadcast_traffic_event("DIRECT", "TRACE", avg_snr, None,
-                                              path_len, path_nodes, tag=tag)
+                                              path_len, path_nodes, tag=tag, confirmed=True)
                 trace_msg = NormalizedMessage(
                     source_adapter=self.name,
                     source_channel="traceroute",

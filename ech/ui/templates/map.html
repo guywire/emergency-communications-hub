@@ -676,10 +676,18 @@ function connectWS() {
       // A trace reply is an operator-requested measurement — announce it when
       // it actually ARRIVES (the send-toast no longer promises anything).
       if (pkt.data.ptype === 'TRACE') {
-        clearTraceTimeout(pkt.data.tag);
         const names = (pkt.data.nodes || []).map(n => n ? n.name : '?').join(' → ');
-        toast(`✓ Trace reply: ${pkt.data.hops} hop(s)${names ? ' via ' + names : ''}`
-              + (drawn ? ' — drawn on map' : ' — no positioned nodes to draw'));
+        if (pkt.data.confirmed) {
+          // The radio recognized itself as the trace's final destination —
+          // this is the authoritative "it worked" signal.
+          clearTraceTimeout(pkt.data.tag);
+          toast(`✓ Trace reply: ${pkt.data.hops} hop(s)${names ? ' via ' + names : ''}`
+                + (drawn ? ' — drawn on map' : ' — no positioned nodes to draw'));
+        } else if (pkt.data.tag != null && _pendingTraces.has(pkt.data.tag)) {
+          // Just an overheard sighting of OUR OWN probe mid-flight — real
+          // signal that it's moving, but not proof it ever got back to us.
+          toast(`📡 Your trace is in flight${names ? ' — seen via ' + names : ''}`);
+        }
       }
       return;
     }
