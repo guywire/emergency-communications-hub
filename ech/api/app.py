@@ -278,8 +278,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
   <a href="/analytics" data-p="/analytics" title="Analytics">&#128202;</a>
   <a href="/skywarn" data-p="/skywarn" title="SKYWARN">&#127786;</a>
   <a href="/remote-hw" data-p="/remote-hw" title="Remote Hardware">&#128268;</a>
-  <a href="/simulation" data-p="/simulation" title="Simulation">&#129514;</a>
-  <a href="/settings" data-p="/settings" title="Settings">&#9881;</a>
+  <a href="/simulation" data-p="/simulation" id="ech-topnav-sim" title="Simulation">&#129514;</a>
+  <a href="/settings" data-p="/settings" id="ech-topnav-settings" title="Settings">&#9881;</a>
 </nav>
 <script>
 (function(){
@@ -290,6 +290,20 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
       a.style.background = 'rgba(56,139,253,.18)';
       a.style.boxShadow = 'inset 0 0 0 1px rgba(56,139,253,.5)';
     }
+  });
+  // Settings/Simulation are admin-only — hide until we know the caller's role
+  // (matches the auth middleware's own role check, so the link never dead-ends).
+  var settingsA = document.getElementById('ech-topnav-settings');
+  var simA = document.getElementById('ech-topnav-sim');
+  if (settingsA) settingsA.style.visibility = 'hidden';
+  if (simA) simA.style.visibility = 'hidden';
+  fetch('/api/auth/me').then(function(r){ return r.ok ? r.json() : {authenticated:false}; }).then(function(d){
+    var isAdmin = !d.authenticated || d.role === 'admin';
+    if (settingsA) settingsA.style.visibility = isAdmin ? 'visible' : 'hidden';
+    if (simA) simA.style.visibility = isAdmin ? 'visible' : 'hidden';
+  }).catch(function(){
+    if (settingsA) settingsA.style.visibility = 'visible';
+    if (simA) simA.style.visibility = 'visible';
   });
 })();
 </script>"""

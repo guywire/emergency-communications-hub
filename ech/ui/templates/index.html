@@ -963,17 +963,6 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
     <span style="font-family:var(--mono);font-size:11px;color:var(--muted)" id="ws-status">connecting…</span>
     <div class="spacer"></div>
     <span id="mode-indicator" style="font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:3px;background:#122a1a;color:var(--green);margin-right:4px">STANDARD</span>
-    <nav style="display:flex;gap:0;align-items:center">
-      <a href="/map"        style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Node Map">🗺</a>
-      <a href="/anomalies"  style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Anomaly Monitor">⚠</a>
-      <a href="/skywarn"    style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="SKYWARN Reports">☁</a>
-      <a href="/analytics"  style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Analytics">📊</a>
-      <a href="/remote-hw"  style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Remote Hardware (host devices from this computer)">🔌</a>
-      <a href="/logs"       style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Log Viewer">📋</a>
-      <a href="/hamlog"     style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Ham Log">📻</a>
-      <a href="/simulation" id="nav-sim" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Simulation">🎭</a>
-      <a href="/settings"   id="nav-settings" style="display:none;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Settings (admin only)">⚙</a>
-    </nav>
     <span id="bot-stats-wrap" style="position:relative;margin-left:6px;display:none" title="Mesh bot — click for activity">
       <button id="bot-stats-btn" onclick="toggleBotStats(event)"
         style="font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:4px"
@@ -2046,13 +2035,8 @@ async function applyRoleUI() {
     const r = await fetch('/api/auth/me');
     if (!r.ok) return;
     const d = await r.json();
-    const isAdmin = d.role === 'admin';
     _myRole = d.role || '';
     _myUsername = d.username || '';
-    const settingsLink = document.getElementById('nav-settings');
-    const simLink      = document.getElementById('nav-sim');
-    if (settingsLink) settingsLink.style.display = isAdmin ? '' : 'none';
-    if (simLink)      simLink.style.display      = isAdmin ? '' : 'none';
     // Show current user + logout button when auth is active
     if (d.authenticated && d.username) {
       const wrap = document.getElementById('auth-user-wrap');
@@ -2066,11 +2050,8 @@ async function applyRoleUI() {
       history.replaceState({}, '', '/');
     }
   } catch (e) {
-    // auth disabled — show all links
-    const s = document.getElementById('nav-settings');
-    const sim = document.getElementById('nav-sim');
-    if (s)   s.style.display   = '';
-    if (sim) sim.style.display = '';
+    // auth disabled — nothing to do; the shared top-nav's own /api/auth/me
+    // check handles Settings/Simulation visibility independently.
   }
 }
 
