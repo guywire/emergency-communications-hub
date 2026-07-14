@@ -1022,6 +1022,17 @@ class MeshCoreAdapter(Adapter):
             # Apply persistent device settings via text CLI while we still own the reader.
             if self._path_hash_mode is not None:
                 await self._send_text_cmd(f"set path.hash.mode {self._path_hash_mode}")
+            # Diagnostic only: log the radio's configured TX duty cycle. Firmware
+            # enforces an airtime budget (src/Dispatcher.cpp) — a low duty cycle
+            # (common where regulation requires it, e.g. 1% in some regions) can
+            # silently DELAY sends once the budget is spent, which reads exactly
+            # like "the first trace worked, then nothing" even though the command
+            # went out fine every time — the delay just isn't visible from ECH.
+            dc_resp = await self._send_text_cmd("get dutycycle")
+            if dc_resp.strip():
+                log.info("MeshCore %s: radio TX duty cycle = %s (a low value here can silently "
+                         "delay/drop repeated sends once the airtime budget is spent)",
+                         self.name, dc_resp.strip())
         # Pre-warm node cache from DB so relay hashes can be resolved before GET_CONTACTS completes.
         await self._prewarm_nodes_from_db()
         await self._restore_topology()
