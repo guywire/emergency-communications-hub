@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ECH — Anomaly Monitor</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPgogIDxyZWN0IHg9IjE1IiB5PSI4IiB3aWR0aD0iMiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzNmYjk1MCIvPgogIDxyZWN0IHg9IjEwIiB5PSIxMiIgd2lkdGg9IjEyIiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cG9seWdvbiBwb2ludHM9IjE2LDYgMTIsMTIgMjAsMTIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cmVjdCB4PSIxMyIgeT0iMjQiIHdpZHRoPSI2IiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iMTAiIHI9IjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM4OGJmZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8Y2lyY2xlIGN4PSIyNCIgY3k9IjEwIiByPSIyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzODhiZmQiIHN0cm9rZS13aWR0aD0iMS41Ii8+Cjwvc3ZnPg==">
+<title>SM — Anomaly Monitor</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxjaXJjbGUgY3g9IjkiIGN5PSI5IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iOSIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48Y2lyY2xlIGN4PSIyMyIgY3k9IjkiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjIzIiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjIzIiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMjMiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iMjMiIGN5PSIyMyIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48cGF0aCBkPSJNNCwxNiBRNywxMCAxMCwxNiBRMTMsMjIgMTYsMTYgUTE5LDEwIDIyLDE2IFEyNSwyMiAyOCwxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjIuNSIgZmlsbD0iIzNmYjk1MCIvPjwvc3ZnPg==">
 
 <style>
 :root {
@@ -89,6 +89,9 @@ body.sim-mode #findings-container{height:calc(100vh - 186px)}
 .bcast-btn:hover{background:rgba(210,153,34,.2)}
 .expand-btn{background:var(--bg);border-color:var(--border);color:var(--muted)}
 .expand-btn:hover{border-color:var(--blue);color:var(--blue)}
+.verify-btn{background:rgba(56,139,253,.08);border-color:var(--blue);color:var(--blue)}
+.verify-btn:hover{background:rgba(56,139,253,.2)}
+.verify-btn:disabled{opacity:.6;cursor:wait}
 
 .empty-state{text-align:center;padding:60px 20px;font-family:var(--mono);
   font-size:13px;color:var(--dim)}
@@ -106,8 +109,8 @@ body.sim-mode #findings-container{height:calc(100vh - 186px)}
 <body>
 <div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY &#9888;</div>
 <div id="header">
-  <a class="back-link" href="/">← ECH</a>
-  <div class="logo">▣ ECH / Anomaly Monitor</div>
+  <a class="back-link" href="/">← SM</a>
+  <div class="logo">▣ SM / Anomaly Monitor</div>
   <div class="spacer"></div>
   <span id="active-badge" class="badge badge-alert" style="display:none">0 ACTIVE</span>
   <div id="clock"></div>
@@ -221,21 +224,53 @@ function renderFindings() {
 function buildCard(f) {
   const ts = new Date(f.timestamp).toUTCString().slice(5,25);
   const ackClass = f.acknowledged ? ' acknowledged' : '';
-  const evidenceRows = Object.entries(f.evidence||{})
+  const ev = f.evidence || {};
+  // Show tip and transport_class inline for long_range_contact findings
+  const transportBadge = ev.transport_class
+    ? `<span style="font-family:var(--mono);font-size:10px;padding:1px 6px;border-radius:3px;margin-left:6px;background:${ev.transport_class==='ducting_candidate'?'rgba(88,166,255,.15)':'rgba(210,153,34,.15)'};color:${ev.transport_class==='ducting_candidate'?'var(--blue)':'var(--yellow)'}">${esc(ev.transport_class.replace(/_/g,' '))}</span>`
+    : '';
+  const tipRow = ev.tip
+    ? `<div style="padding:6px 14px 4px;font-size:11px;font-family:var(--mono);color:var(--blue);opacity:.8">→ ${esc(ev.tip)}</div>`
+    : '';
+  const evidenceRows = Object.entries(ev)
+    .filter(([k]) => k !== 'tip')
     .map(([k,v]) => `<div><span class="evidence-key">${esc(k)}: </span><span class="evidence-val">${esc(JSON.stringify(v))}</span></div>`)
     .join('');
   const bcastLabel = f.broadcast_sent ? '✓ Broadcast sent' : '📡 Broadcast warning';
+
+  // Live-trace verification: offered on routing-related findings from MeshCore
+  // adapters; renders the stored verdict prominently once a verify has run.
+  const verifiable = ['abnormal_hops', 'path_change', 'long_range', 'long_range_contact'].includes(f.rule)
+    && (f.adapter || '').toLowerCase().includes('meshcore');
+  const ver = ev.verification;
+  const verBtn = verifiable
+    ? `<button class="action-sm verify-btn" id="verify-${f.id}" onclick="verifyFinding('${f.id}',event)">${ver ? '🔍 Re-verify' : '🔍 Verify (live trace)'}</button>`
+    : '';
+  const verdictOk = ver && (ver.verdict || '').startsWith('consistent');
+  const verBlock = ver ? `
+    <div style="margin:4px 14px 8px;padding:7px 10px;border-radius:4px;font-family:var(--mono);font-size:10px;line-height:1.7;
+                border:1px solid ${verdictOk ? 'var(--green)' : 'var(--yellow)'};
+                background:${verdictOk ? 'rgba(63,185,80,.08)' : 'rgba(210,153,34,.08)'}">
+      <b style="color:${verdictOk ? 'var(--green)' : 'var(--yellow)'}">${verdictOk ? '✓' : '⚠'} ${esc(ver.verdict || '')}</b><br>
+      <span style="color:var(--muted)">${esc(ver.comparison || '')}</span><br>
+      <span style="color:var(--dim)">verified ${esc((ver.verified_at || '').slice(0, 16).replace('T', ' '))}Z</span>
+    </div>` : '';
+
   return `<div class="finding-card severity-${f.severity}${ackClass}" id="card-${f.id}">
     <div class="finding-header" onclick="toggleEvidence('${f.id}')">
       <span class="badge badge-${f.severity}">${f.severity.toUpperCase()}</span>
       <span class="finding-rule">${esc(f.rule)}</span>
       <span class="finding-adapter">${esc(f.adapter)}</span>
       <span class="finding-node">${esc(f.node_id.slice(0,16))}</span>
+      ${transportBadge}
       <span class="finding-ts">${ts}</span>
     </div>
     <div class="finding-summary">${esc(f.summary)}</div>
+    ${tipRow}
+    ${verBlock}
     <div class="finding-actions">
       ${!f.acknowledged ? `<button class="action-sm ack-btn" onclick="acknowledge('${f.id}',event)">✓ Acknowledge</button>` : '<span style="font-family:var(--mono);font-size:10px;color:var(--dim)">✓ Acknowledged</span>'}
+      ${verBtn}
       <button class="action-sm bcast-btn" onclick="broadcastFinding('${f.id}',event)" ${f.broadcast_sent?'disabled':''} title="${bcastLabel}">${bcastLabel}</button>
       <button class="action-sm expand-btn" onclick="toggleEvidence('${f.id}')">Evidence ▾</button>
     </div>
@@ -257,6 +292,26 @@ async function acknowledge(id, e) {
     await loadFindings();
   } else {
     toast('Acknowledge failed', 'err');
+  }
+}
+
+async function verifyFinding(id, e) {
+  e.stopPropagation();
+  const btn = document.getElementById(`verify-${id}`);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Tracing… (up to 25s)'; }
+  try {
+    const r = await fetch(`/api/anomalies/${id}/verify`, {method:'POST'});
+    const d = await r.json();
+    if (r.ok && d.status === 'ok') {
+      toast(d.verification.verdict, (d.verification.verdict || '').startsWith('consistent') ? 'ok' : 'err');
+      await loadFindings();
+    } else {
+      toast('Verify failed: ' + (d.detail || r.status), 'err');
+      if (btn) { btn.disabled = false; btn.textContent = '🔍 Verify (live trace)'; }
+    }
+  } catch(err) {
+    toast('Verify failed: ' + err.message, 'err');
+    if (btn) { btn.disabled = false; btn.textContent = '🔍 Verify (live trace)'; }
   }
 }
 

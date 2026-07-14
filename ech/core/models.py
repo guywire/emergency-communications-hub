@@ -122,6 +122,14 @@ class MeshNode:
     lon: float | None = None
     meta: dict[str, Any] = field(default_factory=dict)  # adapter-specific extras (mmsi, icao, etc.)
 
+    _ONLINE_TIMEOUT_SEC: int = 900  # 15 min — node not heard → considered offline
+
+    def is_online(self) -> bool:
+        if not self.last_heard:
+            return False
+        age = (datetime.now(timezone.utc) - self.last_heard).total_seconds()
+        return age < self._ONLINE_TIMEOUT_SEC
+
     def to_dict(self) -> dict:
         d = {
             "node_id": self.node_id,
@@ -137,6 +145,7 @@ class MeshNode:
             "hw_model": self.hw_model,
             "lat": self.lat,
             "lon": self.lon,
+            "is_online": self.is_online(),
         }
         if self.battery_voltage is not None: d["battery_voltage"] = self.battery_voltage
         if self.ch_util is not None:         d["ch_util"] = self.ch_util
@@ -145,5 +154,9 @@ class MeshNode:
         if self.temperature is not None:     d["temperature"] = self.temperature
         if self.humidity is not None:        d["humidity"] = self.humidity
         if self.pressure is not None:        d["pressure"] = self.pressure
+        # Hoisted for UI convenience: node role/type ("CLI"/"REP"/"ROOM"/"SENS"
+        # for MeshCore contacts, "CLIENT"/"ROUTER"/"REPEATER" for Meshtastic).
+        # Repeater-type nodes cannot receive messages — the UI hides DM actions.
+        if self.meta.get("node_type"):       d["node_type"] = self.meta["node_type"]
         if self.meta:                        d["meta"] = self.meta
         return d

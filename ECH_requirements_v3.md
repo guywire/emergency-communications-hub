@@ -1,8 +1,10 @@
 # Emergency Communications Hub (ECH) — Requirements v3.0
 # Prepared for Claude Code handoff
 
-## Current version: v1.0.0-rc3 (local) / v1.0.0-rc2 (live server as of 2026-06-20)
-## See WORK_STATUS.md for deployment status and resume instructions
+> **HISTORICAL DOCUMENT (June 2026, rc2/rc3 era).** The architecture summary below is
+> still broadly accurate, but the adapter registry, version numbers, and statuses are
+> frozen in time. The living document is **ECH_REQUIREMENTS_AND_PROGRESS.md**.
+> (WORK_STATUS.md, referenced below, has been retired.)
 
 ---
 

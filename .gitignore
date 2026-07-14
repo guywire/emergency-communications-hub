@@ -38,6 +38,9 @@ Thumbs.db
 *.swp
 *~
 
+# Claude Code local tool state — machine-specific, not project config
+.claude/
+
 # Test caches
 .pytest_cache/
 .coverage

@@ -31,11 +31,15 @@ class Adapter(ABC):
     5. disconnect()       — clean teardown; called on shutdown or config reload
     """
 
-    is_mock: bool = False  # override to True in mock/sim adapters
+    is_mock: bool = False      # override to True in mock/sim adapters
+    send_enabled: bool = True  # override to False in receive-only adapters (AIS, ADS-B, Asterisk)
 
     def __init__(self, config: dict):
         self.config = config
         self.name: str = config.get("name", self.__class__.__name__.lower())
+        # Allow per-adapter config to override the class default
+        if "send_enabled" in config:
+            self.send_enabled = bool(config["send_enabled"])
         self._connected = False
         self._paused = False
         self._last_rx = None
@@ -46,6 +50,7 @@ class Adapter(ABC):
         self._router_notify = None                 # async callback(adapter, uuid, status, detail)
         self._router_notify_nodes = None           # async callback(adapter, node_count)
         self._router_broadcast = None              # async callback(event_type, data_dict)
+        self._db = None                            # Database — injected by Router.register()
 
     # ── Required ──────────────────────────────────────────────────────────
 

@@ -2,6 +2,14 @@
 # Prepared for Communications Director review
 # Classification: INTERNAL — Do not share publicly
 
+> **STATUS NOTE (2026-07-08):** this report is the original June 2026 findings write-up;
+> the fix descriptions below are proposals, not current state. Live per-item status
+> (several now DONE or PARTIAL — e.g. SEC-02 TLS is DONE, SEC-01 forced password change
+> is PARTIAL) is tracked in the SEC table in **ECH_REQUIREMENTS_AND_PROGRESS.md**,
+> including findings newer than this report (SEC-16: live credentials sat in a
+> plaintext local file, WORK_STATUS.md — never committed, verified — both passwords
+> rotated and the repo made private on 2026-07-08).
+
 ---
 
 ## CRITICAL

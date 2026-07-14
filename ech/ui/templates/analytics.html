@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SM — Analytics</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxyZWN0IHg9IjYiIHk9IjE4IiB3aWR0aD0iNCIgaGVpZ2h0PSI4IiBmaWxsPSIjM2ZiOTUwIi8+PHJlY3QgeD0iMTMiIHk9IjEyIiB3aWR0aD0iNCIgaGVpZ2h0PSIxNCIgZmlsbD0iIzM4OGJmZCIvPjxyZWN0IHg9IjIwIiB5PSI2IiB3aWR0aD0iNCIgaGVpZ2h0PSIyMCIgZmlsbD0iI2QyOTkyMiIvPjwvc3ZnPg==">
+
+<style>
+:root {
+  --bg:#0d1117;--bg2:#161b22;--bg3:#1c2230;--border:#30363d;--border2:#444c56;
+  --text:#e6edf3;--muted:#8b949e;--dim:#484f58;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;--purple:#c792ea;--cyan:#56d4dd;
+  --mono:'IBM Plex Mono','Cascadia Code','Consolas','Liberation Mono',monospace;--sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+#sim-banner{display:none;position:fixed;top:0;left:0;right:0;height:26px;background:#431407;border-bottom:2px solid #c2410c;color:#fb923c;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-align:center;line-height:24px;z-index:2000;text-transform:uppercase}
+body.sim-mode #sim-banner{display:block}
+body.sim-mode{padding-top:26px}
+
+#header{display:flex;align-items:center;gap:16px;padding:0 20px;height:48px;
+  background:var(--bg2);border-bottom:1px solid var(--border)}
+.logo{font-family:var(--mono);font-size:13px;color:var(--green);letter-spacing:.08em}
+.back-link{font-family:var(--mono);font-size:11px;color:var(--blue);text-decoration:none}
+.back-link:hover{text-decoration:underline}
+.spacer{flex:1}
+#clock{font-family:var(--mono);font-size:12px;color:var(--muted)}
+
+#toolbar{display:flex;align-items:center;gap:10px;padding:10px 20px;
+  border-bottom:1px solid var(--border);background:var(--bg2)}
+.range-btn{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:4px;
+  border:1px solid var(--border);background:var(--bg3);color:var(--muted);cursor:pointer}
+.range-btn.active{border-color:var(--blue);color:var(--blue)}
+.action-btn{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:4px;
+  cursor:pointer;border:1px solid var(--border);background:var(--bg3);color:var(--muted)}
+.action-btn:hover{border-color:var(--blue);color:var(--blue)}
+
+#content{padding:16px 20px;overflow-y:auto;height:calc(100vh - 100px)}
+
+.summary-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 16px}
+.stat-label{font-family:var(--mono);font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+.stat-value{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--text);margin-top:4px}
+.stat-sub{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px}
+
+.panel{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px}
+.panel-title{font-family:var(--mono);font-size:12px;color:var(--text);font-weight:600;margin-bottom:4px}
+.panel-sub{font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:12px}
+.chart-wrap{position:relative;width:100%;overflow-x:auto}
+canvas{display:block}
+.chart-tip{position:absolute;display:none;pointer-events:none;z-index:10;
+  background:var(--bg3);border:1px solid var(--border2);border-radius:4px;
+  padding:6px 9px;font-family:var(--mono);font-size:10px;color:var(--text);
+  line-height:1.7;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.chart-tip .tip-title{color:var(--muted);font-weight:600}
+.tip-swatch{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px}
+
+.legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+.legend-item{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--muted)}
+.legend-swatch{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+
+.empty-state{text-align:center;padding:40px 20px;font-family:var(--mono);
+  font-size:12px;color:var(--dim)}
+</style>
+</head>
+<body>
+<div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY &#9888;</div>
+<div id="header">
+  <a class="back-link" href="/">← SM</a>
+  <div class="logo">▣ SM / Analytics</div>
+  <div class="spacer"></div>
+  <div id="clock"></div>
+</div>
+
+<div id="toolbar">
+  <button class="range-btn" data-hours="24" onclick="setRange(24, this)">24h</button>
+  <button class="range-btn active" data-hours="48" onclick="setRange(48, this)">48h</button>
+  <button class="range-btn" data-hours="168" onclick="setRange(168, this)">7d</button>
+  <div class="spacer"></div>
+  <button class="action-btn" onclick="loadAll()">↻ Refresh</button>
+</div>
+
+<div id="content">
+  <div class="summary-row" id="summary-row"></div>
+
+  <div class="panel">
+    <div class="panel-title">Messages per hour, by adapter</div>
+    <div class="panel-sub" id="msg-chart-sub"></div>
+    <div class="chart-wrap"><canvas id="msg-chart"></canvas></div>
+    <div class="legend" id="msg-legend"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Bot command usage</div>
+    <div class="panel-sub">Commands run by the mesh bot, this range</div>
+    <div class="chart-wrap"><canvas id="cmd-chart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Anomaly findings over time, by severity</div>
+    <div class="panel-sub" id="anom-chart-sub"></div>
+    <div class="chart-wrap"><canvas id="anom-chart"></canvas></div>
+    <div class="legend" id="anom-legend"></div>
+  </div>
+</div>
+
+<script>
+let rangeHours = 48;
+const ADAPTER_COLORS = ['#3fb950','#388bfd','#d29922','#c792ea','#56d4dd','#f85149','#8db87a','#79b8ff'];
+const SEVERITY_COLORS = {alert:'#f85149', warn:'#d29922', info:'#388bfd'};
+const adapterColorMap = {};
+function colorForAdapter(name) {
+  if (!(name in adapterColorMap)) {
+    adapterColorMap[name] = ADAPTER_COLORS[Object.keys(adapterColorMap).length % ADAPTER_COLORS.length];
+  }
+  return adapterColorMap[name];
+}
+
+function tick() {
+  document.getElementById('clock').textContent = new Date().toUTCString().slice(17,25) + ' UTC';
+}
+setInterval(tick, 1000); tick();
+
+function setRange(hours, el) {
+  rangeHours = hours;
+  document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadAll();
+}
+
+async function loadAll() {
+  await Promise.all([loadMessages(), loadCommands(), loadAnomalies(), loadSummary()]);
+}
+
+function bucketLabel(iso, hours) {
+  const d = new Date(iso);
+  if (hours > 48) return d.toLocaleDateString([], {month:'short', day:'numeric'});
+  return d.toLocaleTimeString([], {hour:'2-digit'});
+}
+
+// ── Messages-by-adapter stacked bar chart ───────────────────────────────
+async function loadMessages() {
+  const r = await fetch(`/api/analytics/messages_by_adapter?hours=${rangeHours}`);
+  const data = await r.json();
+  const buckets = data.buckets || [];
+  document.getElementById('msg-chart-sub').textContent =
+    `Last ${rangeHours}h — ${buckets.reduce((s,b)=>s+b.count,0).toLocaleString()} messages`;
+
+  // Pivot into { bucket -> { adapter -> count } }, preserving bucket order
+  const order = [];
+  const byBucket = {};
+  const adapters = new Set();
+  buckets.forEach(b => {
+    if (!byBucket[b.bucket]) { byBucket[b.bucket] = {}; order.push(b.bucket); }
+    byBucket[b.bucket][b.adapter] = b.count;
+    adapters.add(b.adapter);
+  });
+  const adapterList = [...adapters].sort();
+  adapterList.forEach(colorForAdapter);
+
+  drawLineChart('msg-chart', order, byBucket, adapterList, rangeHours);
+
+  const legend = document.getElementById('msg-legend');
+  legend.innerHTML = adapterList.map(a =>
+    `<div class="legend-item"><span class="legend-swatch" style="background:${colorForAdapter(a)}"></span>${esc(a)}</div>`
+  ).join('') || '<span style="color:var(--dim);font-family:var(--mono);font-size:11px">No message data in this range</span>';
+}
+
+// ── Command usage horizontal bar chart ──────────────────────────────────
+async function loadCommands() {
+  const r = await fetch(`/api/analytics/commands?hours=${rangeHours}`);
+  const data = await r.json();
+  drawHorizontalBars('cmd-chart', (data.commands || []).slice(0, 15));
+}
+
+// ── Anomalies-over-time stacked bar chart ───────────────────────────────
+async function loadAnomalies() {
+  const r = await fetch(`/api/analytics/anomalies?hours=${rangeHours}`);
+  const data = await r.json();
+  const buckets = data.buckets || [];
+  const total = buckets.reduce((s,b)=>s+b.count,0);
+  document.getElementById('anom-chart-sub').textContent = `Last ${rangeHours}h — ${total} findings`;
+
+  const order = [];
+  const byBucket = {};
+  const severities = new Set();
+  buckets.forEach(b => {
+    if (!byBucket[b.bucket]) { byBucket[b.bucket] = {}; order.push(b.bucket); }
+    byBucket[b.bucket][b.severity] = b.count;
+    severities.add(b.severity);
+  });
+  const sevList = [...severities].sort();
+
+  drawStackedBars('anom-chart', order, byBucket, sevList, rangeHours, SEVERITY_COLORS);
+
+  const legend = document.getElementById('anom-legend');
+  legend.innerHTML = sevList.map(s =>
+    `<div class="legend-item"><span class="legend-swatch" style="background:${SEVERITY_COLORS[s] || '#8b949e'}"></span>${esc(s)}</div>`
+  ).join('') || '<span style="color:var(--dim);font-family:var(--mono);font-size:11px">No anomalies in this range</span>';
+}
+
+// ── Summary stat cards ───────────────────────────────────────────────────
+async function loadSummary() {
+  const [msgR, cmdR, anomR] = await Promise.all([
+    fetch(`/api/analytics/messages_by_adapter?hours=${rangeHours}`).then(r => r.json()),
+    fetch(`/api/analytics/commands?hours=${rangeHours}`).then(r => r.json()),
+    fetch(`/api/analytics/anomalies?hours=${rangeHours}`).then(r => r.json()),
+  ]);
+  const msgTotal = (msgR.buckets || []).reduce((s,b)=>s+b.count,0);
+  const byAdapter = {};
+  (msgR.buckets || []).forEach(b => { byAdapter[b.adapter] = (byAdapter[b.adapter]||0) + b.count; });
+  const topAdapter = Object.entries(byAdapter).sort((a,b)=>b[1]-a[1])[0];
+  const cmdTotal = (cmdR.commands || []).reduce((s,c)=>s+c.count,0);
+  const anomTotal = (anomR.buckets || []).reduce((s,b)=>s+b.count,0);
+
+  document.getElementById('summary-row').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Messages</div><div class="stat-value">${msgTotal.toLocaleString()}</div><div class="stat-sub">last ${rangeHours}h</div></div>
+    <div class="stat-card"><div class="stat-label">Top adapter</div><div class="stat-value">${topAdapter ? topAdapter[1].toLocaleString() : '—'}</div><div class="stat-sub">${topAdapter ? esc(topAdapter[0]) : 'no data'}</div></div>
+    <div class="stat-card"><div class="stat-label">Bot commands</div><div class="stat-value">${cmdTotal.toLocaleString()}</div><div class="stat-sub">run this range</div></div>
+    <div class="stat-card"><div class="stat-label">Anomaly findings</div><div class="stat-value">${anomTotal.toLocaleString()}</div><div class="stat-sub">this range</div></div>
+  `;
+}
+
+// ── Canvas chart primitives ──────────────────────────────────────────────
+function setupCanvas(id, widthHint) {
+  const canvas = document.getElementById(id);
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = Math.max(widthHint, canvas.parentElement.clientWidth);
+  const cssHeight = 220;
+  canvas.style.width = cssWidth + 'px';
+  canvas.style.height = cssHeight + 'px';
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return {ctx, w: cssWidth, h: cssHeight};
+}
+
+// Round a raw maximum up so all four y-axis divisions land on clean integers
+// (candidates are 4/8/12/20/40 × 10^n — every one divides by 4 without
+// fractions, unlike the usual 1/2/5 ladder where max=5 puts a line at 1.25).
+function niceMax(v) {
+  const pow = Math.pow(10, Math.max(Math.floor(Math.log10(v / 4)), 0));
+  for (const m of [4, 8, 12, 20, 40]) {
+    if (m * pow >= v) return m * pow;
+  }
+  return 40 * pow;
+}
+
+function fmtVal(v) {
+  return v >= 10000 ? (v/1000).toFixed(0)+'k' : v >= 1000 ? (v/1000).toFixed(1)+'k' : String(Math.round(v*10)/10);
+}
+
+// Y-axis gridlines + numeric labels, shared by both time charts.
+function drawYAxis(ctx, w, h, padLeft, padTop, chartH, maxVal) {
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 1;
+  ctx.font = '9px monospace';
+  for (let g = 0; g <= 4; g++) {
+    const gy = padTop + (chartH / 4) * g;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, gy);
+    ctx.lineTo(w - 4, gy);
+    ctx.stroke();
+    const val = maxVal * (1 - g / 4);
+    ctx.fillStyle = '#8b949e';
+    ctx.textAlign = 'right';
+    ctx.fillText(fmtVal(val), padLeft - 6, gy + 3);
+  }
+  ctx.textAlign = 'left';
+}
+
+// Hover tooltips: per-chart state registry so a shared mousemove handler can
+// map cursor x → bucket and show exact values (the axis gives scale; this
+// gives the numbers themselves).
+const _chartState = {};
+
+function attachTooltip(canvasId, getIndexAt, buildRows) {
+  const canvas = document.getElementById(canvasId);
+  const wrap = canvas.parentElement;
+  let tip = wrap.querySelector('.chart-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.className = 'chart-tip';
+    wrap.appendChild(tip);
+  }
+  canvas.onmousemove = (e) => {
+    const i = getIndexAt(e.offsetX);
+    if (i == null) { tip.style.display = 'none'; return; }
+    const html = buildRows(i);
+    if (!html) { tip.style.display = 'none'; return; }
+    tip.innerHTML = html;
+    tip.style.display = 'block';
+    // Keep the tip inside the wrap; flip to the left of the cursor near the right edge
+    const flip = e.offsetX > wrap.clientWidth - 170;
+    tip.style.left = flip ? '' : (e.offsetX - wrap.scrollLeft + 14) + 'px';
+    tip.style.right = flip ? (wrap.clientWidth - e.offsetX + wrap.scrollLeft + 14) + 'px' : '';
+    tip.style.top = Math.max(e.offsetY - 10, 4) + 'px';
+  };
+  canvas.onmouseleave = () => { tip.style.display = 'none'; };
+}
+
+function tooltipRows(bucket, hours, entries) {
+  const rows = entries.filter(([,v]) => v > 0)
+    .map(([label, v, color]) =>
+      `<span class="tip-swatch" style="background:${color}"></span>${esc(label)}: <b>${v.toLocaleString()}</b>`)
+    .join('<br>');
+  if (!rows) return null;
+  // Full local-time stamp (buckets are UTC hours; axis labels and this tip
+  // both render in the browser's local zone, so no zone suffix is claimed)
+  const when = new Date(bucket).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  return `<div class="tip-title">${esc(when)}</div>${rows}`;
+}
+
+function drawStackedBars(canvasId, order, byBucket, seriesList, hours, colorMap) {
+  const barWidth = hours > 48 ? 28 : 14;
+  const gap = 6;
+  const padBottom = 24, padTop = 8, padLeft = 44;
+  const widthHint = Math.max(order.length * (barWidth + gap) + padLeft + 20, 300);
+  const {ctx, w, h} = setupCanvas(canvasId, widthHint);
+  ctx.clearRect(0, 0, w, h);
+
+  if (order.length === 0) {
+    ctx.fillStyle = '#484f58';
+    ctx.font = '12px monospace';
+    ctx.fillText('No data in this range', 10, h / 2);
+    const c = document.getElementById(canvasId);
+    c.onmousemove = c.onmouseleave = null;
+    return;
+  }
+
+  const chartH = h - padBottom - padTop;
+  const totals = order.map(b => seriesList.reduce((s, sv) => s + (byBucket[b][sv] || 0), 0));
+  const maxTotal = niceMax(Math.max(...totals, 1));
+
+  drawYAxis(ctx, w, h, padLeft, padTop, chartH, maxTotal);
+
+  order.forEach((bucket, i) => {
+    const x = padLeft + i * (barWidth + gap);
+    let y = h - padBottom;
+    seriesList.forEach(series => {
+      const val = byBucket[bucket][series] || 0;
+      if (val === 0) return;
+      const barH = (val / maxTotal) * chartH;
+      y -= barH;
+      ctx.fillStyle = (colorMap ? colorMap[series] : colorForAdapter(series)) || '#8b949e';
+      ctx.fillRect(x, y, barWidth, barH);
+    });
+    // x-axis label every few bars to avoid crowding
+    if (i % Math.max(Math.ceil(order.length / 12), 1) === 0) {
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '9px monospace';
+      ctx.save();
+      ctx.translate(x + barWidth / 2, h - padBottom + 12);
+      ctx.textAlign = 'center';
+      ctx.fillText(bucketLabel(bucket, hours), 0, 0);
+      ctx.restore();
+    }
+  });
+
+  attachTooltip(canvasId,
+    (px) => {
+      const i = Math.floor((px - padLeft) / (barWidth + gap));
+      return (i >= 0 && i < order.length) ? i : null;
+    },
+    (i) => tooltipRows(order[i], hours, seriesList.map(sv => [
+      sv, byBucket[order[i]][sv] || 0,
+      (colorMap ? colorMap[sv] : colorForAdapter(sv)) || '#8b949e',
+    ])));
+}
+
+function drawLineChart(canvasId, order, byBucket, seriesList, hours, colorMap) {
+  const pointGap = hours > 48 ? 34 : 18;
+  const padBottom = 24, padTop = 8, padLeft = 44, padRight = 10;
+  const widthHint = Math.max(order.length * pointGap + padLeft + 20, 300);
+  const {ctx, w, h} = setupCanvas(canvasId, widthHint);
+  ctx.clearRect(0, 0, w, h);
+
+  if (order.length === 0) {
+    ctx.fillStyle = '#484f58';
+    ctx.font = '12px monospace';
+    ctx.fillText('No data in this range', 10, h / 2);
+    const c = document.getElementById(canvasId);
+    c.onmousemove = c.onmouseleave = null;
+    return;
+  }
+
+  const chartH = h - padBottom - padTop;
+  const chartW = w - padLeft - padRight;
+  const maxVal = niceMax(Math.max(
+    ...order.flatMap(b => seriesList.map(sv => byBucket[b][sv] || 0)),
+    1
+  ));
+  const xStep = order.length > 1 ? chartW / (order.length - 1) : 0;
+  const xAt = i => padLeft + i * xStep;
+  const yAt = v => padTop + chartH - (v / maxVal) * chartH;
+
+  drawYAxis(ctx, w, h, padLeft, padTop, chartH, maxVal);
+
+  seriesList.forEach(series => {
+    const color = (colorMap ? colorMap[series] : colorForAdapter(series)) || '#8b949e';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.75;
+    ctx.beginPath();
+    order.forEach((bucket, i) => {
+      const val = byBucket[bucket][series] || 0;
+      const x = xAt(i), y = yAt(val);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    order.forEach((bucket, i) => {
+      const val = byBucket[bucket][series] || 0;
+      if (val === 0) return;
+      ctx.beginPath();
+      ctx.arc(xAt(i), yAt(val), 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+
+  // x-axis labels, spaced out to avoid crowding
+  order.forEach((bucket, i) => {
+    if (i % Math.max(Math.ceil(order.length / 12), 1) !== 0) return;
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(bucketLabel(bucket, hours), xAt(i), h - padBottom + 12);
+  });
+  ctx.textAlign = 'left';
+
+  attachTooltip(canvasId,
+    (px) => {
+      if (xStep === 0) return 0;
+      const i = Math.round((px - padLeft) / xStep);
+      return (i >= 0 && i < order.length) ? i : null;
+    },
+    (i) => tooltipRows(order[i], hours, seriesList.map(sv => [
+      sv, byBucket[order[i]][sv] || 0,
+      (colorMap ? colorMap[sv] : colorForAdapter(sv)) || '#8b949e',
+    ])));
+}
+
+function drawHorizontalBars(canvasId, items) {
+  const rowH = 22;
+  const h = Math.max(items.length * rowH + 20, 60);
+  const {ctx, w} = setupCanvas(canvasId, 500);
+  const canvas = document.getElementById(canvasId);
+  canvas.style.height = h + 'px';
+  canvas.height = h * (window.devicePixelRatio || 1);
+  ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+  ctx.clearRect(0, 0, w, h);
+
+  if (items.length === 0) {
+    ctx.fillStyle = '#484f58';
+    ctx.font = '12px monospace';
+    ctx.fillText('No command activity in this range', 10, h / 2);
+    return;
+  }
+
+  const labelW = 90;
+  const maxCount = Math.max(...items.map(c => c.count), 1);
+  const barAreaW = w - labelW - 50;
+
+  items.forEach((c, i) => {
+    const y = i * rowH + 4;
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(c.command, labelW - 8, y + 13);
+    ctx.textAlign = 'left';
+
+    const barW = (c.count / maxCount) * barAreaW;
+    ctx.fillStyle = '#388bfd';
+    ctx.fillRect(labelW, y, barW, 14);
+
+    ctx.fillStyle = '#e6edf3';
+    ctx.fillText(c.count.toLocaleString(), labelW + barW + 6, y + 13);
+  });
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Init ───────────────────────────────────────────────────────────────
+loadAll();
+window.addEventListener('resize', () => loadAll());
+if (window.ECH_SIM) document.body.classList.add('sim-mode');
+</script>
+</body>
+</html>

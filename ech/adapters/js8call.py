@@ -84,6 +84,10 @@ SPEED_NAMES = {0: "Normal", 1: "Fast", 2: "Turbo", 4: "Slow"}
 EMRG_WORDS = {"mayday", "emergency", "sos", "distress", "help!", "life safety"}
 ELVT_WORDS = {"urgent", "immediate", "priority", "standby all"}
 
+# Maidenhead grid square pattern (4-char AA00 or 6-char AA00AA)
+import re as _re
+_GRID_RE = _re.compile(r'\b([A-R]{2}[0-9]{2}(?:[A-X]{2})?)\b', _re.IGNORECASE)
+
 
 class JS8CallAdapter(Adapter):
     """
@@ -113,6 +117,7 @@ class JS8CallAdapter(Adapter):
         self._rx_count = 0
         self._tx_count = 0
         self._js8_callsign = ""   # confirmed callsign from JS8Call itself
+        self._nodes: dict = {}    # callsign → MeshNode (for grid/position tracking)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -261,10 +266,22 @@ class JS8CallAdapter(Adapter):
             self._speed = int(params.get("SPEED", 0))
             log.debug("JS8Call %s: speed %s", self.name, SPEED_NAMES.get(self._speed, self._speed))
 
+        elif msg_type == "RX.CALL_ACTIVITY":
+            # Heard station activity — may carry grid square and SNR
+            call = params.get("FROM", "").upper().strip()
+            grid = params.get("GRID", "").strip()
+            snr  = params.get("SNR")
+            if call and grid:
+                await self._update_node_grid(call, grid, snr)
+
         elif msg_type == STATION_INFO:
             self._js8_callsign = params.get("CALL", self._callsign).upper()
-            grid  = params.get("GRID", "")
-            log.info("JS8Call %s: station info: %s grid %s", self.name, self._js8_callsign, grid)
+            grid  = params.get("GRID", "").strip()
+            if grid:
+                log.info("JS8Call %s: station info: %s grid %s", self.name, self._js8_callsign, grid)
+                await self._update_node_grid(self._js8_callsign, grid, snr=None)
+            else:
+                log.info("JS8Call %s: station info: %s", self.name, self._js8_callsign)
 
         elif msg_type == APP_CLOSE:
             log.warning("JS8Call %s: JS8Call is closing", self.name)
@@ -303,6 +320,17 @@ class JS8CallAdapter(Adapter):
 
         priority = self._assess_priority(text)
 
+        # Extract grid square from message body and update node position
+        grid_match = _GRID_RE.search(text)
+        grid = grid_match.group(1).upper() if grid_match else None
+        if grid:
+            await self._update_node_grid(from_id, grid, snr)
+
+        # Build lat/lon for the message if we know the sender's position
+        node = self._nodes.get(from_id)
+        lat = node.lat if node else None
+        lon = node.lon if node else None
+
         nm = NormalizedMessage(
             source_adapter=self.name,
             source_channel=ch_label,
@@ -310,6 +338,8 @@ class JS8CallAdapter(Adapter):
             from_display=from_id,
             body=("[DM] " if is_directed else "") + text,
             priority=priority,
+            lat=lat,
+            lon=lon,
             raw={
                 "snr": snr,
                 "freq_hz": self._freq_hz,
@@ -317,10 +347,12 @@ class JS8CallAdapter(Adapter):
                 "speed": SPEED_NAMES.get(self._speed, self._speed),
                 "directed": is_directed,
                 "js8_type": msg_type,
+                "grid": grid,
             },
         )
         await self._enqueue(nm)
-        log.debug("JS8Call %s: RX from %s: %s", self.name, from_id, text[:60])
+        log.debug("JS8Call %s: RX from %s%s: %s", self.name, from_id,
+                  f" grid={grid}" if grid else "", text[:60])
 
     async def _handle_inbox_msg(self, value: str, params: dict) -> None:
         """Offline inbox messages — fetched when JS8Call starts."""
@@ -384,6 +416,44 @@ class JS8CallAdapter(Adapter):
             return from_id.upper(), text
         return "", value.strip()
 
+    async def _update_node_grid(self, callsign: str, grid: str, snr) -> None:
+        """Register or update a heard station's grid square and position."""
+        from ech.core.models import MeshNode
+        lat, lon = self._grid_to_latlon(grid)
+        node = self._nodes.get(callsign)
+        if node is None:
+            node = MeshNode(
+                node_id=callsign,
+                display_name=callsign,
+                first_seen=datetime.now(timezone.utc),
+            )
+            self._nodes[callsign] = node
+        node.last_heard = datetime.now(timezone.utc)
+        node.meta["grid"] = grid.upper()
+        if lat is not None:
+            node.lat = lat
+            node.lon = lon
+        if snr is not None:
+            node.snr = float(snr)
+        if self._router_notify_nodes:
+            await self._router_notify_nodes(self.name, len(self._nodes))
+
+    @staticmethod
+    def _grid_to_latlon(grid: str) -> tuple:
+        """Convert Maidenhead grid square to (lat, lon) center of that square."""
+        grid = grid.upper().strip()
+        if len(grid) < 4:
+            return None, None
+        try:
+            lon = (ord(grid[0]) - ord('A')) * 20 - 180 + (int(grid[2])) * 2 + 1.0
+            lat = (ord(grid[1]) - ord('A')) * 10 - 90  + (int(grid[3])) * 1 + 0.5
+            if len(grid) >= 6:
+                lon += (ord(grid[4]) - ord('A')) * (2/24) - (1/24)
+                lat += (ord(grid[5]) - ord('A')) * (1/24) - (1/48)
+            return round(lat, 4), round(lon, 4)
+        except Exception:
+            return None, None
+
     def _assess_priority(self, text: str) -> Priority:
         lower = text.lower()
         if any(w in lower for w in EMRG_WORDS):
@@ -405,6 +475,9 @@ class JS8CallAdapter(Adapter):
             pass
 
     # ── Overrides ─────────────────────────────────────────────────────────
+
+    async def nodes(self) -> list:
+        return list(self._nodes.values())
 
     def _health_detail(self) -> dict:
         return {

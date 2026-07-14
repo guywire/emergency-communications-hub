@@ -67,6 +67,7 @@ class AISCatcherAdapter(Adapter):
     """Read-only AIS receiver via local AIS-catcher HTTP JSON feed."""
 
     is_mock: bool = False
+    send_enabled: bool = False
 
     def __init__(self, config: dict):
         super().__init__(config)

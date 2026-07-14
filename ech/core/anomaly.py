@@ -153,6 +153,7 @@ class AnomalyEngine:
                     break
 
         self._db = db
+        self._db_primed = False   # set True after init_from_db() loads persisted state
 
         # Per-node state: keyed by (adapter, node_id)
         self._node_last_pos: dict[tuple, dict]    = {}   # last lat/lon/alt/time
@@ -166,6 +167,28 @@ class AnomalyEngine:
         self.findings_queue: asyncio.Queue[AnomalyFinding] = asyncio.Queue()
         self._finding_id = 0
         self._finding_prefix = f"{int(time.time()):010d}"  # unique per process start
+
+    async def init_from_db(self) -> None:
+        """Load persisted anomaly history so known-bad nodes don't re-alert after restart."""
+        if not self._db or self._db_primed:
+            return
+        try:
+            async with self._db._db.execute(
+                "SELECT adapter, node_id, rule FROM anomaly_findings"
+            ) as cur:
+                rows = await cur.fetchall()
+            for r in rows:
+                key = (r[0], r[1])
+                rule = r[2]
+                if rule == "invalid_coordinates":
+                    self._invalid_coords_noted.add(key)
+                elif rule == "long_range":
+                    self._long_range_noted.add(key)
+            self._db_primed = True
+            log.info("AnomalyEngine: pre-loaded %d invalid_coord + %d long_range notes from DB",
+                     len(self._invalid_coords_noted), len(self._long_range_noted))
+        except Exception as exc:
+            log.warning("AnomalyEngine: failed to pre-load anomaly history: %s", exc)
 
     def _next_id(self) -> str:
         self._finding_id += 1
@@ -306,28 +329,48 @@ class AnomalyEngine:
 
         # ── RULE: long-range contact ──────────────────────────────────────
         # Fire once per node when it first appears beyond the threshold.
-        # Explains why packets are arriving from hundreds of miles away:
-        # almost always MQTT bridging; occasionally extreme propagation.
+        # Classifies as: confirmed internet bridge, likely internet bridge,
+        # possible ducting (RF path at plausible ducting range), or multi-hop relay.
         if (lat is not None and lon is not None
                 and self._base_lat is not None and self._base_lon is not None
                 and key not in self._long_range_noted):
             dist_km = _haversine_km(self._base_lat, self._base_lon, lat, lon)
             if dist_km > self._long_range_km:
                 self._long_range_noted.add(key)
-                if msg.via_mqtt:
-                    reason = "confirmed MQTT-bridged (viaMqtt flag set)"
-                elif (hop_count or 0) == 0:
-                    reason = "hop_count=0 suggests MQTT bridge or direct internet relay"
-                else:
-                    reason = (f"{hop_count} RF hop{'s' if hop_count != 1 else ''} — "
-                              f"possible MQTT bridge, multi-hop relay, or exceptional propagation")
                 dist_mi = dist_km * 0.621371
+                hops = hop_count or 0
+
+                if msg.via_mqtt:
+                    transport_class = "internet_bridge"
+                    reason = "confirmed internet bridge (viaMqtt flag set)"
+                    tip = "No RF contact — this node is on a connected mesh network via MQTT gateway."
+                elif hops == 0:
+                    transport_class = "internet_bridge"
+                    reason = "likely internet bridge (hop_count=0 with position — not seen over RF)"
+                    tip = "hop_count=0 at this distance means gateway injection, not direct RF."
+                elif hops <= 3 and dist_km <= 800:
+                    transport_class = "ducting_candidate"
+                    reason = (f"{hops} RF hop{'s' if hops != 1 else ''} at {dist_km:.0f}km — "
+                              f"possible tropospheric ducting or E-skip")
+                    tip = ("Ducting candidate: check propagation beacons toward this bearing. "
+                           "Use !ping to measure SNR and confirm path.")
+                elif hops <= 3 and dist_km > 800:
+                    transport_class = "internet_bridge"
+                    reason = (f"{hops} RF hop{'s' if hops != 1 else ''} at {dist_km:.0f}km — "
+                              f"too far for RF ducting; MQTT gateway on relay path likely")
+                    tip = "Distance exceeds typical ducting range (800km). Gateway bridge is most likely."
+                else:
+                    transport_class = "multi_hop_rf"
+                    reason = (f"{hops} RF hops — wide-area relay chain or internet gateway")
+                    tip = "High hop count suggests long relay chain or mesh bridge, not direct RF."
+
                 f = self._make_finding(
                     msg, "long_range_contact", Severity.INFO,
                     f"Contact {dist_km:.0f}km ({dist_mi:.0f}mi) away — {reason}",
                     {"distance_km": round(dist_km, 1), "distance_mi": round(dist_mi, 1),
                      "lat": lat, "lon": lon, "hop_count": hop_count,
-                     "via_mqtt": msg.via_mqtt, "snr": snr},
+                     "via_mqtt": msg.via_mqtt, "snr": snr,
+                     "transport_class": transport_class, "tip": tip},
                 )
                 new_findings.append(f)
 
@@ -371,18 +414,49 @@ class AnomalyEngine:
                     path_hist.pop(0)
 
         # ── RULE: abnormal hop count increase ─────────────────────────────
+        # Two stages: the cheap in-memory check trips a CANDIDATE, then the
+        # candidate is judged against persistent DB baselines (this node's own
+        # 7-day hop distribution AND the whole mesh's) so the finding states a
+        # real comparison instead of a guess from a 20-message memory window
+        # that resets on every restart. A "Verify" action on the finding can
+        # then run a live trace to cross-check (see /api/anomalies/{id}/verify).
         if hop_count is not None:
             hop_hist = self._node_hop_history.get(key, [])
             if len(hop_hist) >= 4:
                 avg_hops = sum(hop_hist[:-1]) / len(hop_hist[:-1])
                 if hop_count > 5 and avg_hops < 2.0:
-                    f = self._make_finding(
-                        msg, "abnormal_hops", Severity.WARN,
-                        f"Hop count {hop_count} is unusually high for a node "
-                        f"with average {avg_hops:.1f} hops",
-                        {"hop_count": hop_count, "avg_hops": round(avg_hops, 1)},
-                    )
-                    new_findings.append(f)
+                    node_stats = mesh_stats = None
+                    if self._db:
+                        try:
+                            node_stats = await self._db.get_hop_stats(
+                                msg.source_adapter, from_id=msg.from_id)
+                            mesh_stats = await self._db.get_hop_stats(msg.source_adapter)
+                        except Exception as exc:
+                            log.debug("Anomaly: hop baseline query failed: %s", exc)
+                    # Baseline gate: if the mesh as a whole routinely runs this
+                    # deep (p95 >= observed), it isn't anomalous — suppress the
+                    # false positive the old heuristic would have raised.
+                    if (mesh_stats and mesh_stats["count"] >= 50
+                            and mesh_stats["p95"] is not None
+                            and hop_count <= mesh_stats["p95"]):
+                        pass
+                    else:
+                        cmp_parts = []
+                        if node_stats and node_stats["count"] > 0:
+                            cmp_parts.append(f"this node median {node_stats['median']} "
+                                             f"(n={node_stats['count']}/7d)")
+                        if mesh_stats and mesh_stats["count"] > 0:
+                            cmp_parts.append(f"mesh median {mesh_stats['median']}, "
+                                             f"p95 {mesh_stats['p95']} (n={mesh_stats['count']}/7d)")
+                        cmp_str = "; ".join(cmp_parts) if cmp_parts else f"recent average {avg_hops:.1f}"
+                        f = self._make_finding(
+                            msg, "abnormal_hops", Severity.WARN,
+                            f"Hop count {hop_count} vs {cmp_str} — use Verify to "
+                            f"run a live trace and compare",
+                            {"hop_count": hop_count, "avg_hops": round(avg_hops, 1),
+                             "node_baseline_7d": node_stats, "mesh_baseline_7d": mesh_stats},
+                        )
+                        new_findings.append(f)
 
         # Enqueue and store findings
         for f in new_findings:
@@ -411,7 +485,7 @@ class AnomalyEngine:
 
     async def process_contact(self, adapter: str, node_id: str,
                               lat: float | None, lon: float | None,
-                              name: str = "") -> list[AnomalyFinding]:
+                              name: str = "", extra: dict | None = None) -> list[AnomalyFinding]:
         """Check a contact advertisement (PUSH_ADVERT / GET_CONTACTS) for anomalies."""
         if not self.enabled:
             return []
@@ -428,11 +502,14 @@ class AnomalyEngine:
                     if not (-180.0 <= lon <= 180.0):
                         reasons.append(f"lon={lon:.2f} (must be ±180)")
                     label = name or node_id[:12]
+                    ev = {"lat": lat, "lon": lon, "name": name}
+                    if extra:
+                        ev.update(extra)
                     f = AnomalyFinding(
                         id=self._next_id(), adapter=adapter, node_id=node_id,
                         rule="invalid_coordinates", severity=Severity.ALERT,
                         summary=f"Node {label} advertising impossible coordinates: {', '.join(reasons)}",
-                        evidence={"lat": lat, "lon": lon, "name": name},
+                        evidence=ev,
                     )
                     new_findings.append(f)
             elif (self._base_lat is not None and self._base_lon is not None
@@ -442,14 +519,25 @@ class AnomalyEngine:
                     self._long_range_noted.add(key)
                     dist_mi = dist_km * 0.621371
                     severity = Severity.ALERT if dist_km > 2000 else Severity.WARN
-                    note = " — likely different continent" if dist_km > 5000 else ""
                     label = name or node_id[:12]
+                    # Without hop_count/SNR from contact records, classify by distance only
+                    if dist_km > 800:
+                        transport_class = "internet_bridge"
+                        tip = "Distance exceeds RF ducting range. Likely internet-bridged via MQTT gateway."
+                    elif dist_km > self._long_range_km:
+                        transport_class = "ducting_candidate"
+                        tip = ("Could be tropospheric ducting or relay chain. "
+                               "Send a direct ping to check RF path.")
+                    else:
+                        transport_class = "unknown"
+                        tip = ""
                     f = AnomalyFinding(
                         id=self._next_id(), adapter=adapter, node_id=node_id,
                         rule="long_range_contact", severity=severity,
-                        summary=f"Contact {label} is {dist_km:.0f}km ({dist_mi:.0f}mi) away{note}",
+                        summary=f"Contact {label} is {dist_km:.0f}km ({dist_mi:.0f}mi) away",
                         evidence={"lat": lat, "lon": lon, "name": name,
-                                  "distance_km": round(dist_km, 1), "distance_mi": round(dist_mi, 1)},
+                                  "distance_km": round(dist_km, 1), "distance_mi": round(dist_mi, 1),
+                                  "transport_class": transport_class, "tip": tip},
                     )
                     new_findings.append(f)
 

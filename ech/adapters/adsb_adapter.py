@@ -39,6 +39,7 @@ class ADSBAdapter(Adapter):
     """Read-only ADS-B receiver via local dump1090 / PiAware HTTP JSON feed."""
 
     is_mock: bool = False
+    send_enabled: bool = False
 
     def __init__(self, config: dict):
         super().__init__(config)

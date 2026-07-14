@@ -83,8 +83,8 @@ def ensure_ca(data_dir: Path) -> Tuple[bytes, bytes]:
 
     ca_key = ec.generate_private_key(ec.SECP256R1())
     ca_name = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, "ECH Emergency Hub CA"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Emergency Communications Hub"),
+        x509.NameAttribute(NameOID.COMMON_NAME, "SignalMatrix CA"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "SignalMatrix"),
     ])
     now = datetime.datetime.utcnow()
     ca_cert = (
@@ -172,7 +172,7 @@ def ensure_server_cert(
     server_cert = (
         x509.CertificateBuilder()
         .subject_name(x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "ECH Emergency Hub"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "SignalMatrix"),
         ]))
         .issuer_name(ca_cert.subject)
         .public_key(server_key.public_key())
@@ -209,8 +209,8 @@ def ensure_server_cert(
 # mDNS advertisement (optional — requires zeroconf)
 # ---------------------------------------------------------------------------
 
-def start_mdns(https_port: int, service_name: str = "ECH Emergency Hub") -> object | None:
-    """Advertise ECH via mDNS as ech.local so operators can use a stable hostname.
+def start_mdns(https_port: int, service_name: str = "SignalMatrix") -> object | None:
+    """Advertise SignalMatrix via mDNS as ech.local so operators can use a stable hostname.
 
     Requires the ``zeroconf`` package.  Returns the ServiceInfo object (keep a
     reference so it isn't GC'd) or None if zeroconf is unavailable.

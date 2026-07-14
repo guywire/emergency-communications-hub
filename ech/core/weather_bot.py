@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 
 NWS_BASE = "https://api.weather.gov"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-USER_AGENT = "(ECH Emergency Communications Hub, ech@emergency.local)"
+USER_AGENT = "(SignalMatrix, sm@emergency.local)"
 
 # Matches: "weather? 04101", "weather 90210", "wx 10001-1234"
 TRIGGER_RE = re.compile(

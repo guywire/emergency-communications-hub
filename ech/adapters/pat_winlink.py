@@ -117,11 +117,15 @@ class PatWinlinkAdapter(Adapter):
         self._client: httpx.AsyncClient | None = None
         self._run_task: asyncio.Task | None = None
         self._ws_task: asyncio.Task | None = None
+        self._rms_task: asyncio.Task | None = None
         self._seen_mids: set[str] = set()    # message IDs already processed
         self._pat_version: str = ""
         self._pat_status: dict = {}
         self._rx_count = 0
         self._tx_count = 0
+        self._rms_stations: list[dict] = []  # discovered RMS gateways
+        self._session_lines: list[str] = []  # recent WS progress lines
+        self._session_status: str = ""       # last meaningful session line
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -155,13 +159,14 @@ class PatWinlinkAdapter(Adapter):
         if self._auto_connect:
             await self._trigger_connect()
 
-        # Start poll loop and WebSocket watcher
+        # Start poll loop, WebSocket watcher, and RMS discovery
         self._run_task = asyncio.create_task(self._run(), name=f"{self.name}-poll")
         self._ws_task  = asyncio.create_task(self._watch_ws(), name=f"{self.name}-ws")
+        self._rms_task = asyncio.create_task(self._rms_loop(), name=f"{self.name}-rms")
 
     async def disconnect(self) -> None:
         self._connected = False
-        for task in (self._run_task, self._ws_task):
+        for task in (self._run_task, self._ws_task, self._rms_task):
             if task:
                 task.cancel()
                 try:
@@ -282,10 +287,16 @@ class PatWinlinkAdapter(Adapter):
             await self._poll_inbox()
 
         elif "Lines" in event:
-            # Connect progress lines — surface as a status message if interesting
-            lines = event.get("Lines", [])
+            lines = [l for l in event.get("Lines", []) if l.strip()]
+            for line in lines:
+                self._session_lines.append(line)
+                if len(self._session_lines) > 20:
+                    self._session_lines.pop(0)
+                # Track meaningful status (not just empty preamble lines)
+                if any(kw in line.lower() for kw in ("connected", "session", "transfer", "complete", "error", "fail", "disconnect", "send", "receiv")):
+                    self._session_status = line
             if lines:
-                log.debug("Pat Winlink %s: connect progress: %s", self.name, lines[-1])
+                log.debug("Pat Winlink %s: session: %s", self.name, lines[-1])
 
     # ── Mailbox operations ────────────────────────────────────────────────
 
@@ -400,6 +411,71 @@ class PatWinlinkAdapter(Adapter):
         except Exception:
             pass
 
+    # ── RMS discovery ─────────────────────────────────────────────────────
+
+    async def _rms_loop(self) -> None:
+        """Fetch RMS gateway list on startup and every hour."""
+        try:
+            await self._discover_rms()
+            while self._connected:
+                await asyncio.sleep(3600)
+                if self._connected:
+                    await self._discover_rms()
+        except asyncio.CancelledError:
+            pass
+
+    async def _discover_rms(self) -> None:
+        """Fetch active Winlink RMS gateways from the public Winlink API."""
+        url = "https://api.winlink.org/rms/list"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, params={
+                    "operatingHours": 12,
+                    "format": "json",
+                })
+            resp.raise_for_status()
+            data = resp.json()
+            # Response: {"RmsGateways": [...]} or a bare list
+            gateways = data.get("RmsGateways", data) if isinstance(data, dict) else data
+            if not isinstance(gateways, list):
+                return
+            self._rms_stations = gateways
+            log.info("Pat Winlink %s: discovered %d RMS gateways", self.name, len(gateways))
+        except Exception as exc:
+            log.debug("Pat Winlink %s: RMS discovery error: %s", self.name, exc)
+
+    async def nodes(self) -> list:
+        """Return discovered RMS gateways as MeshNode objects for the map."""
+        from ech.core.models import MeshNode
+        from datetime import datetime, timezone
+        result = []
+        for gw in self._rms_stations:
+            cs  = gw.get("Callsign", gw.get("callsign", ""))
+            lat = gw.get("Latitude", gw.get("lat"))
+            lon = gw.get("Longitude", gw.get("lon"))
+            if not cs or lat is None or lon is None:
+                continue
+            grid = gw.get("Gridsquare", gw.get("gridsquare", ""))
+            freq_lo = gw.get("MHzLow", gw.get("mhz_low"))
+            mode    = gw.get("ServiceCode", gw.get("service_code", ""))
+            node = MeshNode(
+                node_id=f"wl-{cs}",
+                display_name=cs,
+                short_name="RMS",
+                lat=float(lat),
+                lon=float(lon),
+                meta={
+                    "rms": True,
+                    "callsign": cs,
+                    "grid": grid,
+                    "freq_mhz": freq_lo,
+                    "mode": mode,
+                    "winlink": True,
+                },
+            )
+            result.append(node)
+        return result
+
     # ── Required abstract stub ────────────────────────────────────────────
 
     async def _send_via_cli(self, message) -> bool:
@@ -477,4 +553,7 @@ class PatWinlinkAdapter(Adapter):
             "seen_messages": len(self._seen_mids),
             "rx_count": self._rx_count,
             "tx_count": self._tx_count,
+            "rms_gateways_known": len(self._rms_stations),
+            "session_status": self._session_status or None,
+            "session_log": self._session_lines[-5:] if self._session_lines else [],
         }

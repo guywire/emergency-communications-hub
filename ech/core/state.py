@@ -76,15 +76,28 @@ class ECHState:
 
         # Restore persisted weather configuration on startup.
         import json
+        if self._wx_service:
+            self._wx_service.set_db(self._db)
         wx_json = await self._db.get_kv("wx_config")
         if wx_json and self._wx_service:
             try:
                 cfg = json.loads(wx_json)
                 await self.update_weather_config(cfg)
                 self._wx_config = cfg
-                log.info("ECHState: restored weather configuration from database")
+                log.info("ECHState: restored weather configuration from database (channel=%r)",
+                         cfg.get("auto_broadcast_channel", "(not set)"))
             except Exception as exc:
                 log.warning("ECHState: failed to restore weather configuration: %s", exc)
+        # Restore broadcast timing state so cooldowns survive restarts.
+        wx_state_json = await self._db.get_kv("wx_broadcast_state")
+        if wx_state_json and self._wx_service:
+            try:
+                st = json.loads(wx_state_json)
+                self._wx_service._last_auto_broadcast = float(st.get("last_auto", 0.0))
+                self._wx_service._last_event_broadcast = st.get("by_event", {})
+                log.info("ECHState: restored weather broadcast state (last_auto=%.0f)", self._wx_service._last_auto_broadcast)
+            except Exception as exc:
+                log.warning("ECHState: failed to restore broadcast state: %s", exc)
 
         log.info("ECHState: mode=%s simulation=%s incident=%s base=(%.4f,%.4f)",
                  self._mode, self._simulation_enabled, self._incident_name,
@@ -275,7 +288,9 @@ class ECHState:
         import json
         await self._db.set_kv("wx_config", json.dumps(config))
         await self._broadcast("wx_config_change", config)
-        log.info("ECHState: weather config updated: area=%s", self._wx_service._area)
+        log.info("ECHState: weather config updated: area=%s auto_channel=%r severities=%s",
+                 self._wx_service._area, self._wx_service._auto_channel,
+                 sorted(self._wx_service._auto_broadcast_severities))
 
     # ── Status snapshot ───────────────────────────────────────────────────
 

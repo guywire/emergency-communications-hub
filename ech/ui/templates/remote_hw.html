@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SM — Remote Hardware</title>
+<style>
+:root {
+  --bg:#0d1117;--bg2:#161b22;--bg3:#1c2230;--border:#30363d;--border2:#444c56;
+  --text:#e6edf3;--muted:#8b949e;--dim:#484f58;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;
+  --mono:'IBM Plex Mono','Cascadia Code','Consolas',monospace;--sans:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+#header{display:flex;align-items:center;gap:16px;padding:0 20px;height:48px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.logo{font-family:var(--mono);font-size:13px;color:var(--green);letter-spacing:.08em}
+.back-link{font-family:var(--mono);font-size:11px;color:var(--blue);text-decoration:none}
+#content{max-width:760px;margin:0 auto;padding:24px 20px}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:18px;margin-bottom:16px}
+.card h2{font-size:14px;margin-bottom:6px}
+.card p{font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px}
+.card label{font-family:var(--mono);font-size:11px;color:var(--muted);display:block;margin:8px 0 3px}
+.card input{background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);
+  font-size:12px;padding:5px 10px;border-radius:4px;outline:none;width:220px}
+.btn{font-family:var(--mono);font-size:12px;padding:7px 16px;border-radius:4px;cursor:pointer;
+  border:1px solid var(--blue);background:rgba(56,139,253,.1);color:var(--blue);margin-top:12px}
+.btn:hover{background:rgba(56,139,253,.25)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.stop{border-color:var(--red);color:var(--red);background:rgba(248,81,73,.08)}
+.status{font-family:var(--mono);font-size:11px;margin-top:10px;padding:7px 10px;border-radius:4px;background:var(--bg3)}
+.status.ok{color:var(--green)}.status.err{color:var(--red)}.status.idle{color:var(--muted)}
+.warn{font-size:11px;color:var(--yellow);margin-top:10px;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="header">
+  <a class="back-link" href="/">← SM</a>
+  <div class="logo">▣ SM / Remote Hardware</div>
+</div>
+<div id="content">
+  <div class="card">
+    <h2>Host hardware from THIS computer</h2>
+    <p>Adapters normally use devices plugged into the ECH server. This page lets the
+    hardware live here instead: your browser opens the device and bridges raw
+    bytes/audio to the server over WebSocket. The matching server adapter must be
+    configured with <code>transport: browser</code> (MeshCore) or
+    <code>input_device: browser</code> (CW/RTTY/PSK31), using the adapter name you
+    enter below. Keep this tab open — closing it disconnects the adapter.</p>
+  </div>
+
+  <div class="card">
+    <h2>📡 MeshCore node via Web Serial</h2>
+    <p>A MeshCore companion radio on this computer's USB port becomes the server's
+    MeshCore adapter.</p>
+    <label>Adapter name (must match config)</label>
+    <input id="serial-adapter" value="meshcore-remote">
+    <br>
+    <button class="btn" id="serial-btn" onclick="connectSerial()">Connect serial device…</button>
+    <div class="status idle" id="serial-status">Not connected</div>
+    <div class="warn">Requires Chrome/Edge over HTTPS (Web Serial). Pick the MeshCore
+    node's port in the browser prompt (115200 baud is applied automatically).</div>
+  </div>
+
+  <div class="card">
+    <h2>🎛️ CAT radio control via Web Serial</h2>
+    <p>Read live frequency/mode from a radio connected to this computer's USB port
+    (Icom CI-V or Kenwood/Elecraft text CAT) and share it with the whole ECH
+    server — Ham Log and other pages auto-fill from it the same way they would
+    from a server-side rigctld connection. This is read-only: setting freq/mode/PTT
+    from other pages still requires rigctld on the server.</p>
+    <label>Rig / protocol</label>
+    <select id="cat-rig-type" onchange="updateCatRigRow()">
+      <option value="civ">Icom CI-V — Xiegu G90, IC-7300, IC-705, IC-9700</option>
+      <option value="kenwood">Kenwood / Elecraft — TS-590/2000, K3/K4/KX3, FT-991A</option>
+    </select>
+    <div id="cat-civ-row">
+      <label>CI-V address</label>
+      <select id="cat-civ-addr">
+        <option value="0x70">0x70 — Xiegu G90</option>
+        <option value="0x94">0x94 — IC-7300</option>
+        <option value="0x91">0x91 — IC-705</option>
+        <option value="0x98">0x98 — IC-9700</option>
+        <option value="0xA2">0xA2 — IC-7100</option>
+        <option value="0x80">0x80 — IC-7200 / IC-7000</option>
+        <option value="0x88">0x88 — IC-7600</option>
+        <option value="0x74">0x74 — IC-718</option>
+      </select>
+    </div>
+    <label>Baud rate</label>
+    <select id="cat-baud">
+      <option value="19200">19200 — Xiegu G90 default</option>
+      <option value="9600">9600 — Icom default</option>
+      <option value="38400">38400</option>
+      <option value="57600">57600 — Elecraft K3/K4</option>
+      <option value="115200">115200</option>
+    </select>
+    <br>
+    <button class="btn" id="cat-btn" onclick="catConnect()">Connect radio…</button>
+    <div class="status idle" id="cat-status">Not connected</div>
+    <div class="warn">Requires Chrome/Edge over HTTPS (Web Serial). Firefox is not supported.</div>
+  </div>
+
+  <div class="card">
+    <h2>🎧 Radio audio via Web Audio (CW / RTTY / PSK31)</h2>
+    <p>This computer's audio input (radio speaker/line-out into mic/line-in) feeds the
+    server's audio-mode decoder; decoded text lands in the message feed. TX audio from
+    the server plays out this computer's speakers/line-out into the radio (VOX or CAT
+    PTT on the radio still required).</p>
+    <label>Adapter name (must match config)</label>
+    <input id="audio-adapter" value="cw-remote">
+    <br>
+    <button class="btn" id="audio-btn" onclick="connectAudio()">Connect radio audio…</button>
+    <div class="status idle" id="audio-status">Not connected</div>
+    <div class="warn">Requires HTTPS (getUserMedia). Audio is resampled to 8 kHz mono
+    float32 in the browser before streaming.</div>
+  </div>
+</div>
+
+<script>
+function setStatus(id, text, cls) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'status ' + cls;
+}
+
+function wsUrl() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${location.host}/ws/remote-hw`;
+}
+
+// ── Web Serial bridge (MeshCore) ─────────────────────────────────────────
+let _serial = {port: null, ws: null, running: false};
+
+async function connectSerial() {
+  const btn = document.getElementById('serial-btn');
+  if (_serial.running) { stopSerial('Disconnected'); return; }
+  if (!('serial' in navigator)) {
+    setStatus('serial-status', 'Web Serial not supported — use Chrome/Edge over HTTPS', 'err');
+    return;
+  }
+  const adapter = document.getElementById('serial-adapter').value.trim();
+  try {
+    const port = await navigator.serial.requestPort();
+    await port.open({baudRate: 115200});
+    const ws = new WebSocket(wsUrl());
+    ws.binaryType = 'arraybuffer';
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    ws.send(JSON.stringify({role: 'serial', adapter}));
+    _serial = {port, ws, running: true};
+    btn.textContent = 'Disconnect';
+    btn.classList.add('stop');
+    setStatus('serial-status', `Bridging serial ↔ server as "${adapter}"`, 'ok');
+
+    // device → server
+    (async () => {
+      const reader = port.readable.getReader();
+      _serial.reader = reader;
+      try {
+        while (_serial.running) {
+          const {value, done} = await reader.read();
+          if (done) break;
+          if (value && ws.readyState === 1) ws.send(value);
+        }
+      } catch(e) { if (_serial.running) stopSerial('Serial read error: ' + e.message, true); }
+      finally { try { reader.releaseLock(); } catch(e) {} }
+    })();
+
+    // server → device
+    const writer = port.writable.getWriter();
+    _serial.writer = writer;
+    ws.onmessage = async (e) => {
+      if (e.data instanceof ArrayBuffer) {
+        try { await writer.write(new Uint8Array(e.data)); } catch(err) {}
+      }
+    };
+    ws.onclose = () => { if (_serial.running) stopSerial('Server closed the bridge', true); };
+  } catch(e) {
+    setStatus('serial-status', 'Failed: ' + e.message, 'err');
+  }
+}
+
+async function stopSerial(msg, isErr) {
+  _serial.running = false;
+  try { _serial.reader && await _serial.reader.cancel(); } catch(e) {}
+  try { _serial.writer && _serial.writer.releaseLock(); } catch(e) {}
+  try { _serial.port && await _serial.port.close(); } catch(e) {}
+  try { _serial.ws && _serial.ws.close(); } catch(e) {}
+  const btn = document.getElementById('serial-btn');
+  btn.textContent = 'Connect serial device…';
+  btn.classList.remove('stop');
+  setStatus('serial-status', msg, isErr ? 'err' : 'idle');
+}
+
+// ── Web Audio bridge (CW/RTTY/PSK31) ─────────────────────────────────────
+let _audio = {ctx: null, ws: null, running: false, stream: null};
+const TARGET_RATE = 8000;
+
+async function connectAudio() {
+  const btn = document.getElementById('audio-btn');
+  if (_audio.running) { stopAudio('Disconnected'); return; }
+  const adapter = document.getElementById('audio-adapter').value.trim();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false},
+    });
+    const ws = new WebSocket(wsUrl());
+    ws.binaryType = 'arraybuffer';
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    ws.send(JSON.stringify({role: 'audio', adapter}));
+
+    const ctx = new AudioContext();
+    const src = ctx.createMediaStreamSource(stream);
+    // ScriptProcessor is deprecated but universally available and fine at
+    // this data rate; 4096-sample buffers ≈ 85 ms at 48 kHz.
+    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    const ratio = ctx.sampleRate / TARGET_RATE;
+    src.connect(proc);
+    proc.connect(ctx.destination);   // required for the processor to run; outputs silence
+
+    proc.onaudioprocess = (e) => {
+      if (!_audio.running || ws.readyState !== 1) return;
+      const inp = e.inputBuffer.getChannelData(0);
+      const n = Math.floor(inp.length / ratio);
+      const out = new Float32Array(n);
+      for (let i = 0; i < n; i++) out[i] = inp[Math.floor(i * ratio)];
+      ws.send(out.buffer);
+      e.outputBuffer.getChannelData(0).fill(0);
+    };
+
+    // Server → speakers (TX audio, float32 @ 8 kHz)
+    ws.onmessage = (e) => {
+      if (!(e.data instanceof ArrayBuffer)) return;
+      const samples = new Float32Array(e.data);
+      const buf = ctx.createBuffer(1, Math.ceil(samples.length * ctx.sampleRate / TARGET_RATE), ctx.sampleRate);
+      const ch = buf.getChannelData(0);
+      const r = ctx.sampleRate / TARGET_RATE;
+      for (let i = 0; i < ch.length; i++) ch[i] = samples[Math.floor(i / r)] || 0;
+      const node = ctx.createBufferSource();
+      node.buffer = buf;
+      node.connect(ctx.destination);
+      node.start();
+    };
+    ws.onclose = () => { if (_audio.running) stopAudio('Server closed the bridge', true); };
+
+    _audio = {ctx, ws, running: true, stream, proc, src};
+    btn.textContent = 'Disconnect';
+    btn.classList.add('stop');
+    setStatus('audio-status', `Streaming audio ↔ server as "${adapter}" (${ctx.sampleRate} Hz → 8 kHz)`, 'ok');
+  } catch(e) {
+    setStatus('audio-status', 'Failed: ' + e.message, 'err');
+  }
+}
+
+function stopAudio(msg, isErr) {
+  _audio.running = false;
+  try { _audio.proc && _audio.proc.disconnect(); } catch(e) {}
+  try { _audio.src && _audio.src.disconnect(); } catch(e) {}
+  try { _audio.stream && _audio.stream.getTracks().forEach(t => t.stop()); } catch(e) {}
+  try { _audio.ctx && _audio.ctx.close(); } catch(e) {}
+  try { _audio.ws && _audio.ws.close(); } catch(e) {}
+  const btn = document.getElementById('audio-btn');
+  btn.textContent = 'Connect radio audio…';
+  btn.classList.remove('stop');
+  setStatus('audio-status', msg, isErr ? 'err' : 'idle');
+}
+
+// ── CAT radio control (Web Serial: CI-V / Kenwood) ───────────────────────
+let _catPort = null, _catWriter = null, _catReader = null, _catRigType = null;
+let _catCivAddr = 0x70, _catPollTimer = null, _catBuf = [];
+
+function updateCatRigRow() {
+  const type = document.getElementById('cat-rig-type').value;
+  document.getElementById('cat-civ-row').style.display = type === 'civ' ? '' : 'none';
+}
+
+async function _catReaderLoop() {
+  try {
+    while (_catPort) {
+      const {value, done} = await _catReader.read();
+      if (done) break;
+      if (value) for (const b of value) _catBuf.push(b);
+    }
+  } catch(_) {}
+}
+
+async function _catReadUntil(stopByte, timeoutMs = 600) {
+  const frame = [];
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (_catBuf.length > 0) {
+      const b = _catBuf.shift();
+      frame.push(b);
+      if (b === stopByte) return frame;
+    } else { await new Promise(r => setTimeout(r, 5)); }
+  }
+  return null;
+}
+
+async function _catReadText(terminator, timeoutMs = 600) {
+  const chars = [];
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (_catBuf.length > 0) {
+      const c = String.fromCharCode(_catBuf.shift());
+      chars.push(c);
+      if (c === terminator) return chars.join('');
+    } else { await new Promise(r => setTimeout(r, 5)); }
+  }
+  return null;
+}
+
+function civFreqBytesToHz(bytes) {
+  let hz = 0, mult = 1;
+  for (let i = 0; i < 5; i++) {
+    hz += (bytes[i] & 0x0F) * mult; mult *= 10;
+    hz += ((bytes[i] >> 4) & 0x0F) * mult; mult *= 10;
+  }
+  return hz;
+}
+const CAT_CIV_MODE = {0x00:'LSB',0x01:'USB',0x02:'AM',0x03:'CW',0x04:'DI',0x05:'FM',0x06:'CW',0x07:'DI',0x11:'USB'};
+const CAT_KW_MODE = {'1':'LSB','2':'USB','3':'CW','4':'FM','5':'AM','6':'DI','9':'DI'};
+
+async function civRead() {
+  await _catWriter.write(new Uint8Array([0xFE,0xFE,_catCivAddr,0xE0,0x03,0xFD]));
+  const fr = await _catReadUntil(0xFD, 500);
+  let freq_hz = 0;
+  if (fr && fr.length >= 11 && fr[0]===0xFE && fr[1]===0xFE && fr[2]===0xE0) freq_hz = civFreqBytesToHz(fr.slice(5,10));
+
+  await _catWriter.write(new Uint8Array([0xFE,0xFE,_catCivAddr,0xE0,0x04,0xFD]));
+  const mr = await _catReadUntil(0xFD, 500);
+  let mode = 'USB';
+  if (mr && mr.length >= 8 && mr[0]===0xFE && mr[1]===0xFE && mr[2]===0xE0) mode = CAT_CIV_MODE[mr[5]] || 'USB';
+
+  if (freq_hz > 0) pushCatUpdate(freq_hz, mode, 'Web Serial / CI-V');
+}
+
+async function kenwoodRead() {
+  await _catWriter.write(new TextEncoder().encode('FA;'));
+  const faResp = await _catReadText(';', 600);
+  let freq_hz = 0;
+  if (faResp && faResp.startsWith('FA')) freq_hz = parseInt(faResp.slice(2, 13)) || 0;
+
+  await _catWriter.write(new TextEncoder().encode('MD;'));
+  const mdResp = await _catReadText(';', 400);
+  let mode = 'USB';
+  if (mdResp && mdResp.startsWith('MD')) mode = CAT_KW_MODE[mdResp[2]] || 'USB';
+
+  if (freq_hz > 0) pushCatUpdate(freq_hz, mode, 'Web Serial / Kenwood');
+}
+
+async function pushCatUpdate(freq_hz, mode, rig_info) {
+  const payload = {connected: true, freq_hz, freq_mhz: freq_hz/1e6, mode, rig_info};
+  try {
+    await fetch('/api/cat/browser-update', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+  } catch(e) {}
+  setStatus('cat-status', `${freq_hz/1e6} MHz ${mode} — shared with ECH`, 'ok');
+}
+
+async function catPoll() {
+  if (!_catPort) return;
+  try {
+    if (_catRigType === 'civ') await civRead(); else await kenwoodRead();
+  } catch(e) {
+    setStatus('cat-status', 'Poll error: ' + e.message, 'err');
+  }
+}
+
+async function catConnect() {
+  const btn = document.getElementById('cat-btn');
+  if (_catPort) { catDisconnect(); return; }
+  if (!('serial' in navigator)) {
+    setStatus('cat-status', 'Web Serial not supported — use Chrome/Edge over HTTPS', 'err');
+    return;
+  }
+  _catRigType = document.getElementById('cat-rig-type').value;
+  _catCivAddr = parseInt(document.getElementById('cat-civ-addr').value, 16);
+  const baud = parseInt(document.getElementById('cat-baud').value);
+  try {
+    const port = await navigator.serial.requestPort();
+    await port.open({baudRate: baud, dataBits: 8, stopBits: 1, parity: 'none'});
+    _catPort = port;
+    _catWriter = port.writable.getWriter();
+    _catReader = port.readable.getReader();
+    _catBuf = [];
+    _catReaderLoop();
+    btn.textContent = 'Disconnect';
+    btn.classList.add('stop');
+    setStatus('cat-status', 'Connected — polling…', 'ok');
+    _catPollTimer = setInterval(catPoll, 2000);
+    await catPoll();
+  } catch(e) {
+    setStatus('cat-status', 'Failed: ' + e.message, 'err');
+  }
+}
+
+async function catDisconnect() {
+  clearInterval(_catPollTimer); _catPollTimer = null;
+  try { _catReader && (await _catReader.cancel(), _catReader.releaseLock()); } catch(e) {}
+  try { _catWriter && _catWriter.releaseLock(); } catch(e) {}
+  try { _catPort && await _catPort.close(); } catch(e) {}
+  _catPort = null; _catBuf = [];
+  fetch('/api/cat/browser-update', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({connected: false}),
+  }).catch(() => {});
+  const btn = document.getElementById('cat-btn');
+  btn.textContent = 'Connect radio…';
+  btn.classList.remove('stop');
+  setStatus('cat-status', 'Disconnected', 'idle');
+}
+</script>
+</body>
+</html>

@@ -1,9 +1,11 @@
 # ECH — External Dependencies
 
-Last updated: 2026-06-30
+Last updated: 2026-07-08
 
 This file tracks all external Python packages, GitHub projects, and protocol references
 used by ECH. Update it whenever a new dependency is added or an existing one changes role.
+The machine-readable authority is `pyproject.toml` `[project.dependencies]`; this file adds
+the *why* and the external-process/protocol context that pyproject can't carry.
 
 ---
 
@@ -17,6 +19,31 @@ used by ECH. Update it whenever a new dependency is added or an existing one cha
 | Uvicorn | `uvicorn[standard]` | no | ASGI server |
 | PyYAML | `pyyaml` | no | config.yaml parsing |
 | aiosqlite | `aiosqlite` | no | async SQLite (message store, key-value state) |
+| bcrypt | `bcrypt` | no | password hashing for web-UI auth |
+| httpx | `httpx` | no | async HTTP client (weather, mesh bot lookups) |
+| Jinja2 | `jinja2` | no | HTML template rendering |
+| prometheus-client | `prometheus-client` | no | `/metrics` scrape endpoint (raw counters only; the in-app `/analytics` page charts from the SQLite DB instead) |
+| psutil | `psutil` | no | disk/CPU stats for storage guard and health |
+| croniter | `croniter` | no | scheduled-task cron expressions |
+| smspdudecoder | `smspdudecoder` | no | SMS PDU decoding for the SMS adapter |
+| numpy | `numpy` | **==1.26.4 on deploy** | transitive dep; install.sh pins <2 because numpy 2.x uses AVX2 and SIGILLs on the deployment host's SSE2-only CPU |
+
+### Audio / sound card (cw_audio adapter)
+
+| Package | PyPI name | Version | Purpose |
+|---------|-----------|---------|---------|
+| sounddevice | `sounddevice` | ≥0.4 | PortAudio bindings: sound-card enumeration, capture, playback |
+
+**System dependency:** `libportaudio2` (Debian) — the Linux pip wheel does not bundle
+PortAudio; install.sh has a check-and-install block. CW DSP itself (`ech/core/cw.py`)
+is pure numpy and has no audio-device dependency.
+
+### Mesh bot features
+
+| Package | PyPI name | Version | Purpose |
+|---------|-----------|---------|---------|
+| adventure | `adventure` | ≥1.7 | Colossal Cave Adventure engine for the `mud` command (install.sh has an explicit install check — the deploy tarball doesn't carry pyproject.toml) |
+| skyfield | `skyfield` | optional | `satpass` satellite pass prediction; TLE data downloaded from CelesTrak on first use |
 
 ### Adapter — MeshCore
 
@@ -86,6 +113,14 @@ used by ECH. Update it whenever a new dependency is added or an existing one cha
 | aiohttp | `aiohttp` | any | HTTP polling of AIS-catcher vessel JSON API |
 
 **External process:** [AIS-catcher](https://github.com/jvde-github/AIS-catcher) with `--server` / HTTP output mode enabled (default port 8100). ECH polls `/vessels.json` (or auto-detected path). No SDR decoding happens inside ECH.
+
+### Adapter — AIS (internet feeds: AISHub / aisstream.io)
+
+| Package | PyPI name | Version | Purpose |
+|---------|-----------|---------|---------|
+| aiohttp | `aiohttp` | any | `aishub` adapter: REST polling of aishub.net; `aisstream` adapter: WebSocket stream from aisstream.io |
+
+**External services:** both need a free account/API key (config `api_key:`). Keep keys in `/etc/ech/config.yaml` only — never in the repo.
 
 ### Adapter — AREDN
 

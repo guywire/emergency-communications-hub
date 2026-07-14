@@ -1,12 +1,12 @@
-# ECH — Emergency Communications Hub
+# SignalMatrix
 
-**Version 1.0.0-rc74**
+**Version 1.0.0-rc147** (authoritative version is always the `VERSION` file)
 
-ECH is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
+SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
 ## Who it is for
 
-- ARES/RACES/RACES teams needing a common operating picture across Meshtastic mesh, APRS, and HF
+- ARES/RACES teams needing a common operating picture across Meshtastic mesh, APRS, and HF
 - Served agencies that want radio traffic visible in a browser without installing amateur-radio software on every workstation
 - Ham operators running ARRL Field Day, POTA, or SOTA activations who want integrated logging and CAT radio control
 - Emergency management exercises where simulated traffic needs to flow through real comms gear
@@ -18,14 +18,16 @@ ECH is a Python/FastAPI application that bridges multiple emergency-communicatio
 | Feature | Notes |
 |---------|-------|
 | **Multi-network bridging** | Meshtastic, APRS (IS + KISS TNC), MeshCore, JS8Call, Winlink/PAT, SMS (SIM7x00/SIM800L), MQTT, Reticulum/LXMF, AREDN, Asterisk/PBX |
-| **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status — all in the browser |
+| **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status, SKYWARN reports (`/skywarn`), analytics charts (`/analytics`) — all in the browser |
 | **Ham Radio Log** | Contest logging (Field Day, POTA, SOTA, General); ADIF/Cabrillo/CSV import; ADIF/Cabrillo/POTA/SOTA export |
 | **CAT radio control** | Browser Web Serial (no software install) or server-side rigctld/Hamlib |
 | **Anomaly detection** | Automatic alerts for unusual message patterns or node behaviour |
 | **Simulation mode** | Built-in mock adapters let you train operators without live hardware |
-| **Mesh bot** | On-mesh commands: `ping`, `weather <zip>`, `overhead`, `satpass`, `solar`, `help` |
+| **Mesh bot** | 24 on-mesh commands — weather/alerts/METAR/tides/solar, aircraft & ship tracking, satellite passes, FCC/DXCC lookups, SKYWARN spotter report intake, trivia with scoreboards, text-adventure games (see [Mesh Bot](#mesh-bot)) |
+| **SKYWARN reports** | Guided spotter-report intake over the mesh (DM the bot `skywarn`); reports page with edit/complete/delete; `net`/`inws`/`winlink` output formats for relaying to NWS |
+| **Analytics** | `/analytics` — messages per hour per adapter, bot command usage, anomaly trends (24h/48h/7d) |
 | **GPS time sync** | Optional NMEA receiver auto-sets system clock and base position |
-| **Storage guard** | Warns when disk free falls below 1 GB or 5% — important on thin-client SSDs |
+| **Storage guard** | Warns when disk free falls below 1 GB or 5%; automatic message retention purge (configurable per adapter family) |
 
 ---
 
@@ -64,7 +66,7 @@ nano /etc/ech/config.yaml
 
 Set `operator: callsign` to your callsign. All adapters are disabled by default — enable the ones you need (see [Configuration](#configuration) below).
 
-### 3. Start ECH
+### 3. Start SignalMatrix
 
 ```bash
 # Use local config.yaml in current directory:
@@ -132,7 +134,7 @@ HTTPS also encrypts operator credentials on the LAN, which matters at large even
 
 ### How ECH handles certificates
 
-ECH generates its own Certificate Authority (CA) the first time it starts with TLS enabled. Every subsequent start, it re-issues a server certificate that includes every IP address the server has at that moment. This means the certificate is always valid no matter which IP your contest-site DHCP assigns — you do not need to regenerate anything when you pack up and redeploy at a new site.
+SignalMatrix generates its own Certificate Authority (CA) the first time it starts with TLS enabled. Every subsequent start, it re-issues a server certificate that includes every IP address the server has at that moment. This means the certificate is always valid no matter which IP your contest-site DHCP assigns — you do not need to regenerate anything when you pack up and redeploy at a new site.
 
 You trust the CA once. After that, every ECH deployment is automatically trusted.
 
@@ -147,7 +149,7 @@ tls:
   data_dir: "."         # CA and server cert/key files are written here
 ```
 
-Restart ECH. It prints the CA cert path in the startup log:
+Restart SignalMatrix. It prints the CA cert path in the startup log:
 
 ```
 INFO  TLS  CA cert: ./ech-ca.crt   server cert: ./ech-server.crt
@@ -208,7 +210,7 @@ The padlock icon should appear with no warnings. The Ham Log page now shows the 
 
 ### Optional: mDNS (access by name instead of IP)
 
-Install `zeroconf` and ECH advertises itself on the local network as `ech.local`:
+Install `zeroconf` and SignalMatrix advertises itself on the local network as `ech.local`:
 
 ```bash
 pip install zeroconf
@@ -218,7 +220,7 @@ Then browse to `https://ech.local:8766` from any device on the same subnet, rega
 
 ### In-app TLS guide
 
-ECH includes a built-in setup page at `/tls-setup` that shows these same instructions alongside the current server's IP addresses and a direct download link for the CA cert.
+SignalMatrix includes a built-in setup page at `/tls-setup` that shows these same instructions alongside the current server's IP addresses and a direct download link for the CA cert.
 
 ---
 
@@ -384,22 +386,60 @@ hamlog:
 
 ### Target hardware
 
-ECH is designed to run on a thin client or mini PC with an 8 GB SSD. Recommended minimum: 4-core x86-64, 4 GB RAM, 8 GB storage. A Raspberry Pi 4 (4 GB) also works for most adapter combinations.
+SignalMatrix is designed to run on a thin client or mini PC with an 8 GB SSD. Recommended minimum: 4-core x86-64, 4 GB RAM, 8 GB storage. A Raspberry Pi 4 (4 GB) also works for most adapter combinations.
 
 ### Storage warnings
 
-ECH monitors free disk space and displays a banner warning when:
+SignalMatrix monitors free disk space and displays a banner warning when:
 - Free space drops below 1 GB, **or**
 - Free space drops below 5% of the partition
 
-On an 8 GB SSD with the OS already installed this threshold can be reached within a few days of heavy message traffic. To keep the database small, set a retention policy or periodically archive and vacuum `ech.db`.
+On an 8 GB SSD with the OS already installed this threshold can be reached within a few days of heavy message traffic.
 
-The database path is configurable:
+### Automatic message retention (purge)
+
+SignalMatrix runs an hourly purge that deletes messages older than a configurable threshold. Configure in `config.yaml`:
+
+```yaml
+retention:
+  enabled: true
+  aprs: 12          # purge APRS messages older than 12 hours
+  meshcore: 36      # purge MeshCore messages older than 36 hours
+```
+
+The prefix (e.g. `aprs`, `meshcore`) is matched against the `source_adapter` column. Add any adapter name prefix to the `retention:` block to cover additional adapters.
+
+Retention settings can also be adjusted live from the **Settings → Data Retention** section without restarting ECH.
+
+### Moving the database to a larger drive
+
+If the root partition is full, move the database to a USB or secondary drive:
+
+```bash
+# Stop ECH
+sudo systemctl stop ech
+
+# Move the database
+sudo mv /var/lib/ech/ech.db /mnt/usb/ech.db
+
+# Symlink it back so the existing config still works
+sudo ln -s /mnt/usb/ech.db /var/lib/ech/ech.db
+
+# Make sure the ECH service user owns the new directory
+sudo chown ech:ech /mnt/usb
+
+# Restart
+sudo systemctl start ech
+```
+
+Alternatively, update `config.yaml` to point directly to the new path:
 
 ```yaml
 database:
-  path: "/data/ech/ech.db"   # move to a larger partition if needed
+  path: "/mnt/usb/ech.db"
 ```
+
+SQLite needs to create `-wal` and `-shm` journal files alongside the database. Make sure the `ech` service user has write permission to the directory (`chown ech:ech /mnt/usb`).
 
 ### Running as a service (Linux)
 
@@ -407,7 +447,7 @@ Create `/etc/systemd/system/ech.service`:
 
 ```ini
 [Unit]
-Description=ECH Emergency Communications Hub
+Description=ECH SignalMatrix
 After=network.target
 
 [Service]
@@ -460,9 +500,26 @@ No inbound ports are required for most adapters (they connect outward). Exceptio
 | AREDN mesh | `aredn_ami` | `pip install aiohttp` |
 | Asterisk / PBX | `asterisk` | Asterisk with AMI enabled; `pip install panoramisk` |
 | ADS-B / PiAware | `adsb` | dump1090, PiAware, or readsb on the LAN |
-| AIS vessels | `ais_catcher` | AIS-catcher with HTTP server enabled |
+| AIS vessels (local SDR) | `ais_catcher` | AIS-catcher with HTTP server enabled |
+| AIS vessels (AISHub) | `aishub` | Free aishub.net account + API key |
+| AIS vessels (aisstream.io) | `aisstream` | Free aisstream.io API key |
+| CW / Morse over sound card | `cw_audio` | `pip install sounddevice` (+ `libportaudio2` on Linux); radio TX needs VOX or CAT PTT |
+| RTTY over sound card | `rtty_audio` | Same as cw_audio (45.45 Bd Baudot, 2125/2295 Hz) |
+| PSK31 over sound card | `psk31_audio` | Same as cw_audio (31.25 Bd BPSK varicode) |
+| FT8/FT4 via WSJT-X | `wsjtx` | WSJT-X with "UDP Server" pointed at ECH (port 2237); RX-only |
 
 All adapters also have mock equivalents (`mock_meshtastic`, `mock_aprs`, etc.) for simulation and training.
+
+**Browser-hosted hardware:** a MeshCore node or radio audio plugged into the *operator's*
+computer (not the server) can back an adapter remotely: open `/remote-hw` in Chrome/Edge
+over HTTPS, connect the device (Web Serial) or radio audio (Web Audio), and configure the
+matching adapter with `transport: browser` (MeshCore) or `input_device: browser`
+(CW/RTTY/PSK31). Closing the tab disconnects the adapter.
+
+**APRS-IS filter tip:** keep the radius in `filter: "r/<lat>/<lon>/<km>"` tight. A wide
+radius (e.g. 250 km) pulls in the whole region's digipeater beacons and ship-AIS objects —
+observed at 8,000+ messages/day — which bloats the database and drowns out mesh traffic.
+60 km is plenty for local situational awareness.
 
 ---
 
@@ -534,31 +591,78 @@ adapters:
 
 ## Mesh Bot
 
-When `mesh_bot: enabled: true`, any node on the mesh can send text commands to the ECH node. ECH replies by DM (default) or channel broadcast.
+When `mesh_bot: enabled: true`, any node on the mesh can send text commands to the SignalMatrix node. ECH replies by DM (default) or channel broadcast.
 
 ```yaml
 mesh_bot:
   enabled: true
-  channels: ["#cmd", "#mesh"]   # channels to listen on; ["*"] = every channel
+  channels: ["ch0", "ch2", "ch4"]  # channels to listen on ("ch2", "2", "ch2:name", or "*")
+  mention_required_channels: ["ch0", "ch4"]  # see "Mention gating" below
+  mention_name: "SM"            # name the bot answers to when @-mentioned
   adapters: []                  # [] = all adapters; ["meshcore-1"] = one adapter only
   reply_dm: true                # true = DM sender; false = reply to channel
-  per_user_cooldown_sec: 30     # rate-limit per sender (all commands share this)
-  global_cooldown_sec: 5        # minimum gap between any two bot replies (flood guard)
-  max_reply_len: 200            # hard cap — keeps reply to one LoRa payload
+  per_user_cooldown_sec: 5      # rate-limit per sender (all commands share this)
+  global_cooldown_sec: 2        # minimum gap between any two bot replies (flood guard)
+  max_reply_len: 160            # hard cap — keeps reply to one LoRa payload
 ```
+
+### Mention gating on busy channels
+
+Several command words are ordinary English (`weather`, `help`, `sun`, `ping`, …), so on a
+general-conversation channel a sentence like *"nice weather today"* would trigger the bot.
+Any channel listed in `mention_required_channels` requires an explicit `@<mention_name>`
+(e.g. `@SM weather`) before **any** command fires; channels not listed (e.g. a dedicated
+bot channel) respond to bare command words. Replies to something the bot itself just asked
+(a trivia answer, a category pick) never need the mention. DMs always work without it.
 
 ### Commands
 
 | Command | What it does |
 |---------|-------------|
-| `ping` | ECH replies with signal report (SNR, hops) |
-| `weather 04101` | Current NWS conditions + forecast for a US zip code |
+| `ping` | SignalMatrix replies with signal report (SNR, hops) |
+| `weather 04101` / `wx 04101` | Current NWS conditions + forecast for a US zip code |
 | `overhead` | Closest aircraft within radius from a local dump1090 instance |
 | `satpass [name]` | Next pass of ISS or a named satellite visible from base position |
 | `solar` | Current solar flux (SFI), sunspot number, K-index from hamqsl.com |
+| `tide` | Today's NOAA high/low tide times and heights (requires `tide_station` config) |
+| `metar [ICAO]` | METAR aviation weather for a configured or specified ICAO station |
+| `alerts` | Active NWS weather alerts for the configured area |
+| `sun` | Sunrise, sunset, and solar noon for base position |
+| `nodes` | Number of known mesh nodes and last-heard times |
+| `aprs` | Recent APRS messages from the APRS-IS adapter |
+| `anomalies` | Any active anomaly alerts |
+| `ships` | Nearby AIS vessels (requires an AIS adapter) |
+| `fcc <callsign>` | FCC license lookup |
+| `dxcc <prefix>` | DXCC entity lookup |
+| `contest` | Upcoming ham radio contests |
+| `grid [locator or lat,lon]` | Base-position grid square, or convert between grid and coordinates |
+| `moon` | Moon phase, rise and set times |
+| `id` | Bot version and identity |
+| `path` | The relay route YOUR message took to reach the bot, decoded to repeater names |
+| `dad` | A dad joke |
+| `skywarn` | SKYWARN spotter reports — see below |
+| `trivia [category]` | Multiple-choice trivia; auto-continues, `trivia stop` to end |
+| `score` / `lb` | Your trivia score / the leaderboard |
+| `mud` | Text-adventure games (TinyMUD, Colossal Cave Adventure, Derelict). DM = private game; on a dedicated bot channel = one shared game anyone can drive. Not available on mention-required channels, where it would swallow normal chat |
 | `help` | Lists available commands |
 
-No API key is required for any command.
+No API key is required for any command (except `aprs_fi_key` for some APRS features).
+
+### `skywarn` — spotter report intake
+
+DMing the bot `skywarn` starts a guided form (callsign, spotter ID, location, event type,
+temperature, wind, hail size, precipitation, notes). Reports are **logged locally only —
+never auto-submitted to NWS** (there is no public NWS submission API), and the bot's
+confirmation says so. They appear on the `/skywarn` dashboard page (live via WebSocket)
+with edit / complete / delete actions. Relay helpers:
+
+| Sub-command | Output |
+|---|---|
+| `skywarn <callsign> <report>` | One-line quick report, skips the guided form |
+| `skywarn last` | Your most recent logged report |
+| `skywarn net` | Last report phrased for reading to a SKYWARN net |
+| `skywarn inws` | Last report in NWS Local-Storm-Report style for manual iNWS entry |
+| `skywarn winlink` | Emails the last report via the Winlink adapter (`skywarn_winlink_to` config) |
 
 ### Observer position
 
@@ -591,6 +695,19 @@ Common paths by install type:
 
 If ECH runs on a **different machine** than dump1090, mount the path via NFS/sshfs or switch to the `adsb` adapter and let `overhead` use the same JSON over HTTP — set `dump1090_path` to a URL instead (e.g., `http://192.168.6.5/skyaware/data/aircraft.json`).
 
+### `tide` — NOAA tide predictions
+
+Returns today's high/low tide times and heights for a configured NOAA tide station.
+
+```yaml
+mesh_bot:
+  tide_station: "8418150"   # NOAA CO-OPS station ID (Portland ME = 8418150)
+```
+
+Find your station ID at [tidesandcurrents.noaa.gov](https://tidesandcurrents.noaa.gov). Reply format: `TIDES Portland: H06:12(10.2ft) L12:31(0.4ft) H18:45(9.8ft) L01:02(0.8ft)`
+
+No API key is required.
+
 ### `satpass` — next satellite pass
 
 Requires `pip install skyfield`. On first use, ECH downloads TLE data from CelesTrak and caches it locally. Configure which satellites to track:
@@ -605,7 +722,7 @@ mesh_bot:
     - "ARISS"
 ```
 
-Names must match the TLE catalog name (case-insensitive). Use `satpass iss`, `satpass noaa 19`, etc. to query a specific satellite. Without an argument, ECH picks the soonest pass among all configured targets.
+Names must match the TLE catalog name (case-insensitive). Use `satpass iss`, `satpass noaa 19`, etc. to query a specific satellite. Without an argument, SignalMatrix picks the soonest pass among all configured targets.
 
 Install skyfield:
 
@@ -617,4 +734,4 @@ pip install skyfield
 
 ## License
 
-ECH is provided for use by amateur radio operators and served emergency agencies. See LICENSE for terms.
+SignalMatrix is provided for use by amateur radio operators and served emergency agencies. See LICENSE for terms.

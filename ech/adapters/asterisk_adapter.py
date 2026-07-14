@@ -70,6 +70,8 @@ log = logging.getLogger(__name__)
 
 class AsteriskAdapter(Adapter):
 
+    send_enabled: bool = False
+
     def __init__(self, config: dict):
         super().__init__(config)
         self.name            = config.get("name", "pbx")

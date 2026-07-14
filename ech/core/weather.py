@@ -30,7 +30,7 @@ from ech.core.models import NormalizedMessage, Priority
 log = logging.getLogger(__name__)
 
 NWS_API_BASE = "https://api.weather.gov"
-NWS_USER_AGENT = "(ECH Emergency Communications Hub, ech@emergency.local)"
+NWS_USER_AGENT = "(SignalMatrix, sm@emergency.local)"
 
 # NWS severity → ECH priority mapping
 SEVERITY_MAP = {
@@ -75,6 +75,7 @@ class WeatherService:
         self._auto_max_per_hour   = int(wx_cfg.get("auto_broadcast_max_per_hour", 4))
 
         self._router           = router
+        self._db               = None   # set via set_db() so cooldown state can be persisted
         self._seen_alert_ids: set[str] = set()
         self._active_alerts: list[dict] = []
         self._last_auto_broadcast: float = 0.0
@@ -91,6 +92,9 @@ class WeatherService:
 
         # Scheduled broadcasts from config
         self._schedules = config.get("scheduled_broadcasts", [])
+
+    def set_db(self, db) -> None:
+        self._db = db
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -237,17 +241,33 @@ class WeatherService:
                     if skip_reason:
                         log.info("WeatherService: skipping auto-broadcast (%s)", skip_reason)
                     else:
+                        raw_hint = {"channel_name": self._auto_channel} if self._auto_channel else None
+                        if not self._auto_channel:
+                            log.warning("WeatherService: auto_broadcast_channel not set — "
+                                        "alert will go to each adapter's current default channel")
+                        ch_label = f"channel={self._auto_channel!r}" if self._auto_channel else "channel=(adapter default — NOT CONFIGURED)"
+                        log.info("WeatherService: auto-broadcasting %s %r → %s adapters=%s",
+                                 severity, event, ch_label, self._auto_adapters or "all")
                         await self._router.send(
                             body=body[:200],
                             adapter_names=self._auto_adapters or None,
                             priority=priority,
+                            raw=raw_hint,
                         )
                         self._last_auto_broadcast = now_ts
                         self._last_event_broadcast[event] = now_ts
                         self._hour_broadcast_ts.append(now_ts)
                         self._broadcast_count += 1
-                        log.info("WeatherService: auto-broadcast %s %r to mesh (%d this hour)",
-                                 severity, event, len(self._hour_broadcast_ts))
+                        log.info("WeatherService: auto-broadcast sent (%d this hour)", len(self._hour_broadcast_ts))
+                        if self._db:
+                            import json as _json
+                            try:
+                                await self._db.set_kv("wx_broadcast_state", _json.dumps({
+                                    "last_auto": self._last_auto_broadcast,
+                                    "by_event": self._last_event_broadcast,
+                                }))
+                            except Exception as _e:
+                                log.debug("WeatherService: failed to persist broadcast state: %s", _e)
 
             if new_count:
                 log.info("WeatherService: %d new NWS alert(s) emitted", new_count)

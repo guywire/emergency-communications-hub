@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPgogIDxyZWN0IHg9IjE1IiB5PSI4IiB3aWR0aD0iMiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzNmYjk1MCIvPgogIDxyZWN0IHg9IjEwIiB5PSIxMiIgd2lkdGg9IjEyIiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cG9seWdvbiBwb2ludHM9IjE2LDYgMTIsMTIgMjAsMTIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cmVjdCB4PSIxMyIgeT0iMjQiIHdpZHRoPSI2IiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iMTAiIHI9IjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM4OGJmZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8Y2lyY2xlIGN4PSIyNCIgY3k9IjEwIiByPSIyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzODhiZmQiIHN0cm9rZS13aWR0aD0iMS41Ii8+Cjwvc3ZnPg==">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxjaXJjbGUgY3g9IjkiIGN5PSI5IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iOSIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48Y2lyY2xlIGN4PSIyMyIgY3k9IjkiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjIzIiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjIzIiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMjMiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iMjMiIGN5PSIyMyIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48cGF0aCBkPSJNNCwxNiBRNywxMCAxMCwxNiBRMTMsMjIgMTYsMTYgUTE5LDEwIDIyLDE2IFEyNSwyMiAyOCwxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjIuNSIgZmlsbD0iIzNmYjk1MCIvPjwvc3ZnPg==">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ECH — Node Map</title>
+<title>SM — Node Map</title>
 <link rel="stylesheet" href="/static/leaflet/leaflet.css">
 
 <style>
@@ -21,6 +21,8 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 .spacer{flex:1}
 #controls{display:flex;gap:8px;align-items:center}
 .ctrl-btn{font-size:10px;padding:3px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer}.ctrl-btn:hover{border-color:var(--blue);color:var(--blue)}
+.ctrl-btn.on{color:var(--green);border-color:var(--green);background:rgba(63,185,80,.08)}
+.ctrl-btn.on:hover{color:var(--green);border-color:var(--green)}
 #map{height:calc(100vh - 44px);width:100%}
 /* Dark tile overlay */
 .leaflet-tile{filter:brightness(0.7) invert(1) hue-rotate(180deg) saturate(0.5)}
@@ -50,7 +52,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 <div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY &#9888;</div>
 <div id="header">
   <a class="back" href="/">← ECH</a>
-  <div class="logo">▣ ECH / Node Map</div>
+  <div class="logo">▣ SM / Node Map</div>
   <a href="/hamlog" title="Go to Ham Logger"
      style="font-family:var(--mono);font-size:10px;color:var(--muted);text-decoration:none;padding:2px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg3);margin-left:6px"
      onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">&#9783; Ham Log</a>
@@ -59,8 +61,9 @@ body.sim-mode #map{height:calc(100vh - 70px)}
   <div id="controls">
     <button class="ctrl-btn" onclick="loadNodes()">↻ Refresh</button>
     <button class="ctrl-btn" id="follow-btn" onclick="toggleFollow()">📍 Follow</button>
-    <button class="ctrl-btn" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADSB</button>
-    <button class="ctrl-btn" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS</button>
+    <button class="ctrl-btn on" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADSB</button>
+    <button class="ctrl-btn on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS</button>
+    <button class="ctrl-btn on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Traffic</button>
     <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show PSKReporter callsign spots">PSK</button>
     <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">GRID</button>
     <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">HAM LOG</button>
@@ -133,15 +136,29 @@ function makeNodeIcon(node, color, size=12) {
   const id = (node.node_id || '').toLowerCase();
   if (id.startsWith('icao:')) {
     const sz = size + 4;
+    // ✈ emoji points right (≈90° compass); rotate so it faces track_deg
+    const track = (node.meta && node.meta.track_deg != null) ? node.meta.track_deg : null;
+    const rot = track != null ? (track - 90) : -45;
     return L.divIcon({
       className: 'node-dot',
-      html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center;transform:rotate(-45deg)">✈</div>`,
+      html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center;transform:rotate(${rot}deg)">✈</div>`,
       iconSize: [sz, sz],
       iconAnchor: [sz/2, sz/2],
     });
   }
   if (nodeIsVessel(node)) {
     const sz = size + 2;
+    const course = (node.meta && node.meta.course_deg != null) ? node.meta.course_deg : null;
+    if (course != null) {
+      // Moving vessel: show directional arrow rotated by COG (▲ points North at 0°)
+      return L.divIcon({
+        className: 'node-dot',
+        html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center;transform:rotate(${course}deg)">▲</div>`,
+        iconSize: [sz, sz],
+        iconAnchor: [sz/2, sz/2],
+      });
+    }
+    // No COG (at anchor / stationary): show anchor icon
     return L.divIcon({
       className: 'node-dot',
       html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center">⚓</div>`,
@@ -163,8 +180,21 @@ function makeIcon(color, size=12) {
 
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+function _heardAgo(isoStr) {
+  if (!isoStr) return '';
+  const sec = (Date.now() - new Date(isoStr)) / 1000;
+  if (sec < 60)   return `${Math.round(sec)}s ago`;
+  if (sec < 3600) return `${Math.round(sec/60)}m ago`;
+  if (sec < 86400) return `${Math.round(sec/3600)}h ago`;
+  return `${Math.round(sec/86400)}d ago`;
+}
+
 function popupContent(node, isAlert, lastMsg) {
+  const isOnline = node.is_online !== false;
+  const heardAgo = _heardAgo(node.last_heard);
   const heard = node.last_heard ? new Date(node.last_heard).toUTCString().slice(5,22) : '--';
+  const offlineBadge = !isOnline && heardAgo
+    ? `<span style="font-family:var(--mono);font-size:9px;color:#888;margin-left:4px">(last heard ${heardAgo})</span>` : '';
   let msgBlock = '';
   if (lastMsg) {
     const ts = lastMsg.timestamp ? new Date(lastMsg.timestamp).toUTCString().slice(5,22) : '';
@@ -174,9 +204,19 @@ function popupContent(node, isAlert, lastMsg) {
     msgBlock = `<div class="node-last-msg" id="lastmsg-${esc(node.node_id)}"><span style="color:var(--muted);font-size:9px">Loading last message…</span></div>`;
   }
   const isMeshCore = (node._adapter || '').toLowerCase().includes('meshcore');
+  // Node role: repeaters/digis/WX/sensors can't receive messages — say so
+  // instead of offering a Message button that silently goes nowhere.
+  const NON_MSG = ['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT'];
+  const ntype = node.node_type || '';
+  const messageable = !NON_MSG.includes(ntype);
+  const typeBadge = ntype
+    ? `<span style="font-family:var(--mono);font-size:9px;padding:0 4px;margin-left:4px;border:1px solid ${messageable ? '#3fb950' : '#d29922'};border-radius:3px;color:${messageable ? '#3fb950' : '#d29922'}">${esc(ntype)}</span>` : '';
   const msgUrl = `/?to=${encodeURIComponent(node.node_id)}&adapter=${encodeURIComponent(node._adapter || '')}`;
+  const msgAction = messageable
+    ? `<a href="${msgUrl}" target="_top" style="flex:1;text-align:center;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.4);color:#388bfd;border-radius:3px;text-decoration:none">📨 Message</a>`
+    : `<span style="flex:1;text-align:center;font-family:var(--mono);font-size:9px;padding:4px 2px;border:1px solid var(--border);color:var(--muted);border-radius:3px" title="This node type routes packets but has no message inbox">not messageable</span>`;
   const actionBtns = `<div style="display:flex;gap:5px;margin-top:8px">
-    <a href="${msgUrl}" target="_top" style="flex:1;text-align:center;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.4);color:#388bfd;border-radius:3px;text-decoration:none">📨 Message</a>
+    ${msgAction}
     ${isMeshCore ? `<button onclick="mapTrace('${esc(node._adapter)}','${esc(node.node_id)}',this)" style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);color:#3fb950;border-radius:3px;cursor:pointer">📡 Trace</button>` : ''}
   </div>`;
 
@@ -225,7 +265,7 @@ function popupContent(node, isAlert, lastMsg) {
   }
 
   return `<div class="node-popup" data-node-id="${esc(node.node_id)}">
-    <div class="node-name">${esc(node.display_name)}</div>
+    <div class="node-name">${esc(node.display_name)}${typeBadge}${offlineBadge}</div>
     <div class="node-stat">Adapter: ${esc(node._adapter)}</div>
     ${node.snr  != null ? `<div class="node-stat">SNR: ${node.snr}dB</div>` : ''}
     ${node.rssi != null ? `<div class="node-stat">RSSI: ${node.rssi}dBm</div>` : ''}
@@ -238,18 +278,47 @@ function popupContent(node, isAlert, lastMsg) {
   </div>`;
 }
 
+// Draw the route a trace probe is ATTEMPTING (blue dashed): base → each
+// positioned relay → target. Unpositioned hops are skipped, so the line is
+// indicative. Returns true if something was drawn.
+function drawAttemptedRoute(routePoints) {
+  const chain = [];
+  if (_baseLL) chain.push(_baseLL);
+  for (const p of (routePoints || [])) {
+    if (p && p.lat != null && p.lon != null) chain.push([p.lat, p.lon]);
+  }
+  if (chain.length < 2) return false;
+  const line = L.polyline(chain, {
+    color: '#79c0ff', weight: 2.5, opacity: 0.9, dashArray: '2 7', interactive: false,
+  }).addTo(map);
+  _trafficLines.push({line, born: Date.now(), ttl: _TRACE_FADE_MS});
+  return true;
+}
+
 async function mapTrace(adapter, nodeId, btn) {
   if (btn) { btn.textContent = '…'; btn.disabled = true; }
   try {
-    const r = await fetch(`/api/adapters/${encodeURIComponent(adapter)}/ping`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({node_id: nodeId}),
+    // Probe along the best route available: the device's stored route, or a
+    // multi-hop chain ECH inferred from observed traffic when the radio holds
+    // no routes (all-flood contacts). No undirected "flood" probe — field
+    // evidence showed those can never be answered on this firmware.
+    const r = await fetch('/api/ping', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({adapter, node_id: nodeId}),
     });
-    const d = await r.json();
-    if (btn) { btn.textContent = d.status === 'ok' ? '✓ Sent' : '✗ Fail'; btn.disabled = false; }
+    const dir = await r.json();
+    const ok = dir.status === 'sent';
+    if (btn) { btn.textContent = ok ? '✓ Sent' : '✗ Fail'; btn.disabled = false; }
+    if (ok) {
+      const drawn = drawAttemptedRoute(dir.route_points);
+      const src = dir.route_src ? ` (${dir.route_src})` : '';
+      toast(`Probing ${dir.hops} hop${dir.hops === 1 ? '' : 's'}${src}${drawn ? ' — attempted route drawn blue' : ''}; a reply draws green`, 'ok');
+    } else {
+      toast(`Trace failed: ${dir.detail || dir.status}`, 'err');
+    }
   } catch(e) {
     if (btn) { btn.textContent = '✗ Err'; btn.disabled = false; }
+    toast('Trace failed: ' + e.message, 'err');
   }
 }
 
@@ -260,6 +329,8 @@ async function fetchLastMsg(nodeId) {
     return (d.messages && d.messages.length) ? d.messages[0] : null;
   } catch(e) { return null; }
 }
+
+let _baseLL = null;   // ECH base position from live state
 
 async function loadNodes() {
   try {
@@ -290,7 +361,12 @@ async function loadNodes() {
       if (!_showVessels  && isVessel)   return;
       const id = node.node_id;
       seen.add(id);
-      const isAlert = alertNodes.has(id);
+      const isAlert  = alertNodes.has(id);
+      const isOnline = node.is_online !== false;
+      // Offline/stale nodes keep their adapter color and are signalled by the
+      // reduced marker opacity below — the old grey (#555566) override erased
+      // which network a stale node belonged to and, on the dark tiles, made
+      // dimmed markers look missing entirely.
       const color = isAlert ? '#f85149' : isVessel ? '#56d3c8' : adapterColor(node._adapter);
       const size  = isAlert ? 16 : 12;
       const popup = popupContent(node, isAlert);
@@ -300,8 +376,9 @@ async function loadNodes() {
         markers[id].setLatLng([node.lat, node.lon]);
         markers[id].setIcon(icon);
         markers[id].getPopup().setContent(popup);
+        markers[id].setOpacity(isOnline ? 1.0 : 0.45);
       } else {
-        const marker = L.marker([node.lat, node.lon], {icon})
+        const marker = L.marker([node.lat, node.lon], {icon, opacity: isOnline ? 1.0 : 0.45})
           .bindPopup(popup)
           .addTo(map);
         marker.on('popupopen', () => onPopupOpen(marker, node));
@@ -365,25 +442,110 @@ function toggleFollow() {
 
 function toggleAircraft() {
   _showAircraft = !_showAircraft;
-  const btn = document.getElementById('adsb-btn');
-  btn.style.color       = _showAircraft ? '' : 'var(--muted)';
-  btn.style.borderColor = _showAircraft ? '' : 'var(--border)';
+  document.getElementById('adsb-btn').classList.toggle('on', _showAircraft);
   loadNodes();
 }
 
 function toggleVessels() {
   _showVessels = !_showVessels;
-  const btn = document.getElementById('ais-btn');
-  btn.style.color       = _showVessels ? '' : 'var(--muted)';
-  btn.style.borderColor = _showVessels ? '' : 'var(--border)';
+  document.getElementById('ais-btn').classList.toggle('on', _showVessels);
   loadNodes();
 }
+
+// ── Live RF traffic overlay (MeshCore 0x88 raw RX log → rf_traffic WS events) ─
+let _showTraffic = true;
+let _trafficLines = [];              // [{line, born, ttl}] — oldest first
+const _TRAFFIC_MAX_LINES = 30;
+const _TRAFFIC_FADE_MS = 10000;      // ordinary heard packets
+const _TRACE_FADE_MS   = 60000;      // operator-requested traces stay a full minute
+
+function toggleTraffic() {
+  _showTraffic = !_showTraffic;
+  document.getElementById('traffic-btn').classList.toggle('on', _showTraffic);
+  if (!_showTraffic) {
+    _trafficLines.forEach(t => t.line.remove());
+    _trafficLines = [];
+  }
+}
+
+function drawTraffic(d) {
+  // Chain: origin (adverts) → relay hashes in order → our receiving node.
+  // Only nodes we can place get drawn; a hop with unknown position is skipped
+  // and the line connects the known neighbours, so the path is indicative,
+  // not a claim about exact RF geometry.
+  const chain = [d.origin, ...(d.nodes || []), d.rx]
+    .filter(n => n && n.lat != null && n.lon != null);
+  // De-dup consecutive identical points (origin can also appear in path)
+  let pts = chain.filter((n, i) => i === 0 || n.id !== chain[i-1].id)
+                 .map(n => [n.lat, n.lon]);
+  // Sanity: a single LoRa hop over ~150 km is implausible — such segments are
+  // almost always 1-byte hash collisions resolving to a far-region node that
+  // shares the hash (the "lines to Boston" artifact). Drop the offending
+  // points rather than draw geography the RF can't have traversed.
+  const _segKm = (a, b) => {
+    const R = 6371, dLat = (b[0]-a[0])*Math.PI/180, dLon = (b[1]-a[1])*Math.PI/180;
+    const s = Math.sin(dLat/2)**2 + Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(s));
+  };
+  const kept = pts.length ? [pts[0]] : [];
+  for (let i = 1; i < pts.length; i++) {
+    if (_segKm(kept[kept.length - 1], pts[i]) < 150) kept.push(pts[i]);
+  }
+  pts = kept;
+  if (pts.length < 2) return false;
+
+  const isAdvert = d.ptype === 'ADVERT';
+  const isTrace  = d.ptype === 'TRACE';
+  const line = L.polyline(pts, {
+    // adverts amber, operator traces green (and heavier), other traffic orange
+    color: isTrace ? '#3fb950' : isAdvert ? '#d29922' : '#f78c6c',
+    weight: isTrace ? 3.5 : 2.5,
+    opacity: 0.9,
+    dashArray: '7 9',
+    interactive: false,
+  }).addTo(map);
+  _trafficLines.push({line, born: Date.now(), ttl: isTrace ? _TRACE_FADE_MS : _TRAFFIC_FADE_MS});
+  while (_trafficLines.length > _TRAFFIC_MAX_LINES) {
+    _trafficLines.shift().line.remove();
+  }
+  return true;
+}
+
+// One shared ticker animates the march + fade of every live line
+setInterval(() => {
+  if (_trafficLines.length === 0) return;
+  const now = Date.now();
+  _trafficLines = _trafficLines.filter(t => {
+    const age = now - t.born;
+    const ttl = t.ttl || _TRAFFIC_FADE_MS;
+    if (age > ttl) { t.line.remove(); return false; }
+    const el = t.line.getElement();
+    if (el) el.style.strokeDashoffset = String(-(age / 40));
+    // Hold full opacity for the first 75% of life, fade over the last 25% —
+    // a long-lived trace shouldn't spend most of its minute half-invisible.
+    const fadeStart = ttl * 0.75;
+    const op = age < fadeStart ? 0.9 : 0.9 * (1 - (age - fadeStart) / (ttl - fadeStart));
+    t.line.setStyle({opacity: op});
+    return true;
+  });
+}, 120);
 
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${proto}//${location.host}/ws`);
   ws.onmessage = (e) => {
     const pkt = JSON.parse(e.data);
+    if (pkt.type === 'rf_traffic') {
+      const drawn = _showTraffic ? drawTraffic(pkt.data) : false;
+      // A trace reply is an operator-requested measurement — announce it when
+      // it actually ARRIVES (the send-toast no longer promises anything).
+      if (pkt.data.ptype === 'TRACE') {
+        const names = (pkt.data.nodes || []).map(n => n ? n.name : '?').join(' → ');
+        toast(`Trace reply: ${pkt.data.hops} hop(s)${names ? ' via ' + names : ''}`
+              + (drawn ? ' — drawn on map' : ' — no positioned nodes to draw'));
+      }
+      return;
+    }
     if (pkt.type === 'message' && pkt.data.lat != null) {
       const d = pkt.data;
       const color = adapterColor(d.source_adapter);
@@ -429,7 +591,11 @@ function togglePSKReporter() {
 async function loadPSKReporter() {
   if (!_pskEnabled) return;
   try {
-    const r = await fetch('/api/pskreporter/spots').catch(() => null);
+    // Use the operator callsign (injected at page render) so the map and the
+    // settings-page test share the same cache key and never double-hit PSKReporter.
+    const call = (window.ECH_CALLSIGN || '').replace(/-\d+$/, '');  // strip SSID
+    const url = '/api/pskreporter/spots' + (call ? `?callsign=${encodeURIComponent(call)}` : '');
+    const r = await fetch(url).catch(() => null);
     if (!r || !r.ok) {
       toast('PSKReporter: enable via /api/pskreporter — needs backend proxy');
       return;
@@ -743,6 +909,10 @@ function toast(msg) {
 loadNodes();
 setInterval(loadNodes, 30000);
 connectWS();
+// Base position for the rx end of stored-route lines
+fetch('/api/state').then(r => r.json()).then(st => {
+  if (st.base_lat != null && st.base_lon != null) _baseLL = [st.base_lat, st.base_lon];
+}).catch(() => {});
 if (window.ECH_SIM) document.body.classList.add('sim-mode');
 </script>
 </body>

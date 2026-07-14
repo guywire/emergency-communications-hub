@@ -52,6 +52,7 @@ PORTNUM_NODEINFO     = 4
 PORTNUM_ROUTING      = 5
 PORTNUM_TELEMETRY    = 67
 PORTNUM_TRACEROUTE   = 70
+PORTNUM_NEIGHBORINFO = 71
 
 
 class MeshtasticAdapter(Adapter):
@@ -113,6 +114,9 @@ class MeshtasticAdapter(Adapter):
             import meshtastic.tcp_interface
             import meshtastic.ble_interface
             from pubsub import pub
+
+            # Clear so reconnects actually wait for the new interface to signal ready
+            self._connect_event.clear()
 
             # Register callbacks before creating interface
             pub.subscribe(self._on_receive,    "meshtastic.receive")
@@ -348,10 +352,11 @@ class MeshtasticAdapter(Adapter):
             rx_snr    = packet.get("rxSnr")
             rx_rssi   = packet.get("rxRssi")
 
-            # Filter by monitored channels — NODEINFO/TELEMETRY always pass through
+            # Filter by monitored channels — NODEINFO/TELEMETRY/NEIGHBORINFO always pass through
             if (self._monitored_channels is not None
                     and portnum not in ("NODEINFO_APP", str(PORTNUM_NODEINFO),
-                                        "TELEMETRY_APP", str(PORTNUM_TELEMETRY))
+                                        "TELEMETRY_APP", str(PORTNUM_TELEMETRY),
+                                        "NEIGHBORINFO_APP", str(PORTNUM_NEIGHBORINFO))
                     and channel not in self._monitored_channels):
                 return
 
@@ -381,6 +386,9 @@ class MeshtasticAdapter(Adapter):
 
             elif portnum in ("TRACEROUTE_APP", str(PORTNUM_TRACEROUTE)):
                 await self._handle_traceroute(packet, decoded, from_id)
+
+            elif portnum in ("NEIGHBORINFO_APP", str(PORTNUM_NEIGHBORINFO)):
+                await self._handle_neighborinfo(decoded, from_id)
 
         except Exception as exc:
             log.debug("Meshtastic %s: packet dispatch error: %s", self.name, exc)
@@ -489,6 +497,11 @@ class MeshtasticAdapter(Adapter):
         long_name  = user.get("longName", from_id)
         short_name = user.get("shortName", "")
         hw_model   = user.get("hwModel", "")
+        # Device role from NodeInfo (newer firmware): CLIENT / CLIENT_MUTE /
+        # ROUTER / REPEATER / TRACKER / SENSOR ... — repeaters/routers exist in
+        # Meshtastic too, and knowing the role tells the operator whether a DM
+        # will ever be read by a human.
+        role = str(user.get("role", "") or "").upper() or None
 
         node = self._nodes.get(from_id)
         if node:
@@ -497,6 +510,7 @@ class MeshtasticAdapter(Adapter):
             node.last_heard   = datetime.now(timezone.utc)
             if snr:  node.snr  = float(snr)
             if rssi: node.rssi = int(rssi)
+            if role: node.meta["node_type"] = role
         else:
             self._nodes[from_id] = MeshNode(
                 node_id=from_id,
@@ -507,7 +521,9 @@ class MeshtasticAdapter(Adapter):
                 rssi=int(rssi) if rssi else None,
                 firmware_version=hw_model,
             )
-        log.debug("Meshtastic %s: nodeinfo %s = %r", self.name, from_id, long_name)
+            if role:
+                self._nodes[from_id].meta["node_type"] = role
+        log.debug("Meshtastic %s: nodeinfo %s = %r role=%s", self.name, from_id, long_name, role)
 
     async def _handle_routing(self, packet, decoded, from_id) -> None:
         """Handle ROUTING_APP ACK/NACK — correlate with pending DM sends."""
@@ -546,6 +562,54 @@ class MeshtasticAdapter(Adapter):
         )
         await self._enqueue(msg)
         log.info("Meshtastic %s: traceroute from %s: %s", self.name, from_id, path_str)
+
+    async def _handle_neighborinfo(self, decoded, from_id) -> None:
+        """Decode NEIGHBORINFO_APP — update mesh topology and emit a WS event."""
+        ni = decoded.get("neighborinfo", {})
+        raw_neighbors = ni.get("neighbors", [])
+
+        # Ensure the reporting node exists
+        node = self._nodes.get(from_id)
+        if node is None:
+            return
+
+        neighbors_out = []
+        for nb in raw_neighbors:
+            nb_id  = str(nb.get("nodeId", nb.get("node_id", "")))
+            nb_snr = nb.get("snr")
+            if not nb_id:
+                continue
+            # Auto-register unknown neighbors so they appear in the node list
+            if nb_id not in self._nodes:
+                from ech.core.models import MeshNode
+                from datetime import datetime, timezone
+                self._nodes[nb_id] = MeshNode(
+                    node_id=nb_id,
+                    display_name=nb_id,
+                    name_source="neighbor",
+                )
+            # Update SNR on the neighbor from this reporter's perspective
+            if nb_snr is not None:
+                self._nodes[nb_id].snr = float(nb_snr)
+            neighbors_out.append({"node_id": nb_id, "snr": nb_snr})
+
+        # Store on the reporting node so map/UI can draw edges
+        node.meta["neighbors"] = neighbors_out
+        node.meta["neighbor_broadcast_interval_secs"] = ni.get("nodeBroadcastIntervalSecs")
+
+        log.debug("Meshtastic %s: neighbor_info from %s: %d neighbors", self.name, from_id, len(neighbors_out))
+
+        notify = getattr(self, '_router_broadcast', None)
+        if notify:
+            try:
+                await notify("neighbor_info", {
+                    "adapter": self.name,
+                    "node_id": from_id,
+                    "display_name": node.display_name,
+                    "neighbors": neighbors_out,
+                })
+            except Exception:
+                pass
 
     def _handle_telemetry(self, decoded, from_id) -> None:
         telem   = decoded.get("telemetry", {})

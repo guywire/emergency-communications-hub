@@ -114,8 +114,14 @@ def build_adapter(cfg: dict):
         "meshcore":    ("ech.adapters.meshcore",         "MeshCoreAdapter",    "serial_asyncio"),
         "meshtastic":  ("ech.adapters.meshtastic_adapter","MeshtasticAdapter", "meshtastic"),
         "aprs_is":     ("ech.adapters.aprs_is",          "APRSISAdapter",      "aprslib"),
-        "adsb":        ("ech.adapters.adsb_adapter",     "ADSBAdapter",        "aiohttp"),
+        "adsb":        ("ech.adapters.adsb_adapter",       "ADSBAdapter",        "aiohttp"),
         "ais_catcher": ("ech.adapters.ais_catcher_adapter", "AISCatcherAdapter", "aiohttp"),
+        "aisstream":   ("ech.adapters.aisstream_adapter",   "AISStreamAdapter",  "aiohttp"),
+        "aishub":      ("ech.adapters.aishub_adapter",      "AISHubAdapter",     "aiohttp"),
+        "cw_audio":    ("ech.adapters.cw_audio",            "CWAudioAdapter",    "sounddevice"),
+        "rtty_audio":  ("ech.adapters.rtty_audio",          "RTTYAudioAdapter",  "sounddevice"),
+        "psk31_audio": ("ech.adapters.rtty_audio",          "PSK31AudioAdapter", "sounddevice"),
+        "wsjtx":       ("ech.adapters.wsjtx_adapter",       "WSJTXAdapter",      None),
         "aprs_kiss":   ("ech.adapters.aprs_kiss",        "APRSKISSAdapter",    "serial_asyncio, aprslib"),
         "js8call":     ("ech.adapters.js8call",          "JS8CallAdapter",     None),
         "sms":         ("ech.adapters.sms",              "SMSAdapter",         "serial_asyncio"),
@@ -199,12 +205,17 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     # Anomaly engine
     from ech.core.anomaly import AnomalyEngine
     anomaly_engine = AnomalyEngine(config, db)
+    await anomaly_engine.init_from_db()   # suppress re-alerts for already-seen nodes
 
     # Router — register adapters but don't start yet
     router = Router(db, anomaly_engine=anomaly_engine)
     adapter_cfgs = config.get("adapters", [])
     log.info("Router: %d adapter config(s) found in config", len(adapter_cfgs))
     for adapter_cfg in adapter_cfgs:
+        if not adapter_cfg.get("enabled", True):
+            log.info("Router: skipping disabled adapter '%s' (enabled: false in config)",
+                     adapter_cfg.get("name", "?"))
+            continue
         try:
             adapter = build_adapter(adapter_cfg)
             router.register(adapter)
@@ -230,6 +241,13 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     if router._bridge_rules:
         log.info("Router: %d bridge rule(s) loaded from config", len(router._bridge_rules))
 
+    # Message retention
+    retention_cfg = config.get("retention", {})
+    router._msg_retention = {
+        k: int(v) for k, v in retention_cfg.items()
+        if k not in ("enabled",) and int(v) > 0
+    } if retention_cfg.get("enabled", True) else {}
+
     # Now start router (adapters already have correct pause state)
     await router.start()
 
@@ -253,6 +271,16 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     from ech.core.cat_rigctld import CATController
     cat_ctrl = CATController(config, router=router)
     await cat_ctrl.start()
+
+    # Wire CAT into any audio-mode adapter configured with `ptt: cat` (CW/RTTY/
+    # PSK31 share this hook via CWAudioAdapter) so their TX keys the rig itself
+    # instead of relying on VOX.
+    for _adapter in router._adapters.values():
+        if getattr(_adapter, "_ptt_via_cat", False):
+            _adapter._cat_ctrl = cat_ctrl
+            if not cat_ctrl.enabled:
+                log.warning("Adapter '%s' has ptt: cat but CAT control is disabled in config "
+                            "— add a 'cat:' section with enabled: true", _adapter.name)
 
     # Mesh bot — responds to ping, weather, overhead, satpass, solar on mesh channels
     from ech.core.mesh_bot import MeshBot
@@ -345,7 +373,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Emergency Communications Hub")
+    parser = argparse.ArgumentParser(description="SignalMatrix")
     parser.add_argument("--config", default="config.yaml",
                         help="Path to config.yaml (default: ./config.yaml)")
     args = parser.parse_args()

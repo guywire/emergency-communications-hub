@@ -28,16 +28,44 @@ from ech import __version__ as ECH_VERSION
 
 log = logging.getLogger(__name__)
 
-# PSKReporter rate-limit: 1 upstream request per 5 minutes per IP.
+# PSKReporter rate-limit: 1 upstream request per 5 minutes per IP (their TOS).
+# _psk_last_upstream is a GLOBAL gate — regardless of cache key, we never fire
+# more than one real HTTP request to PSKReporter per _PSK_CACHE_TTL window.
+# Without this, multiple cache keys (map=no-callsign, settings=KN0O|20m) each
+# get their own 5-min timer and together exceed the rate limit.
 _psk_cache: dict = {}          # key → (timestamp, payload)
 _PSK_CACHE_TTL = 300           # seconds
+_psk_last_upstream: float = 0.0     # monotonic timestamp of last real upstream request
+_psk_contact: str = "(SignalMatrix, contact@example.com)"  # set from config on startup
+_psk_default_callsign: str = ""    # operator callsign — used when API caller omits callsign
 _psk_stats: dict = {"last_success": None, "last_failure": None, "last_error": None, "total_fetches": 0}
 
 UI_DIR = Path(__file__).parent.parent / "ui"
 
 
 def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None) -> FastAPI:
-    app = FastAPI(title="Emergency Communications Hub", version=ECH_VERSION)
+    global _psk_contact, _psk_default_callsign
+    _op_callsign = "N0CALL"   # injected into pages as window.ECH_CALLSIGN
+    # Build PSKReporter User-Agent from config: PSKReporter TOS requires a real
+    # contact email so they can reach the app author if needed. A fake .local
+    # address causes 503s from their infrastructure.
+    if config_path:
+        try:
+            import yaml as _yaml
+            _cfg = _yaml.safe_load(open(config_path))
+            _psk_email    = (_cfg.get("pskreporter", {}) or {}).get("contact_email", "")
+            _op_callsign  = (_cfg.get("operator", {}) or {}).get("callsign", "N0CALL")
+            _psk_default_callsign = _op_callsign.split("-")[0]  # strip SSID
+            if _psk_email:
+                _psk_contact = f"(SignalMatrix, {_psk_email})"
+            else:
+                log.warning("PSKReporter: 'pskreporter.contact_email' not set in config — "
+                            "add a real email to avoid 503 rate-limit blocks")
+                _psk_contact = f"(SignalMatrix/{_op_callsign}, configure pskreporter.contact_email)"
+        except Exception:
+            pass
+
+    app = FastAPI(title="SignalMatrix", version=ECH_VERSION)
     app.state.cat_ctrl = cat_ctrl        # CATController instance (may be None)
     app.state.ca_cert_pem = ca_cert_pem  # CA cert PEM for /ca.crt download (may be None)
     app.state.config_path = config_path  # Path to config.yaml (for live editing)
@@ -168,13 +196,112 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             router.remove_ws_client(ws)
             log.info("WS client disconnected: %s", ws.client)
 
+    @app.websocket("/ws/remote-hw")
+    async def remote_hw_endpoint(ws: WebSocket):
+        """Browser-hosted hardware bridge: the operator's browser opens a
+        device (Web Serial → MeshCore node, Web Audio → radio audio) and pumps
+        raw bytes here; server adapters with a browser transport read/write
+        through ech.core.remote_hw.registry. See remote_hw.py for the framing."""
+        from ech.core.remote_hw import registry as hw_registry
+        import json as _json
+        if auth:
+            from ech.core.auth import SESSION_COOKIE
+            token = ws.cookies.get(SESSION_COOKIE, "")
+            session = await auth.get_session(token)
+            if not session:
+                await ws.close(code=4401)
+                return
+        await ws.accept()
+        try:
+            hello = _json.loads(await ws.receive_text())
+            role = hello.get("role")
+            adapter_name = str(hello.get("adapter", "")).strip()
+            if role not in ("serial", "audio") or not adapter_name:
+                await ws.send_text(_json.dumps({"type": "error", "detail": "bad hello"}))
+                await ws.close(code=4400)
+                return
+            try:
+                sess = hw_registry.register(role, adapter_name)
+            except ValueError as exc:
+                await ws.send_text(_json.dumps({"type": "error", "detail": str(exc)}))
+                await ws.close(code=4409)
+                return
+        except Exception:
+            await ws.close(code=4400)
+            return
+
+        await ws.send_text(_json.dumps({"type": "ready", "adapter": adapter_name, "role": role}))
+
+        async def _pump_tx():
+            while True:
+                data = await sess.next_tx()
+                await ws.send_bytes(data)
+
+        tx_task = asyncio.ensure_future(_pump_tx())
+        try:
+            while True:
+                msg = await ws.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                if msg.get("bytes") is not None:
+                    sess.feed(msg["bytes"])
+                elif msg.get("text"):
+                    log.debug("RemoteHW %s: status %s", adapter_name, msg["text"][:120])
+        except WebSocketDisconnect:
+            pass
+        finally:
+            tx_task.cancel()
+            hw_registry.unregister(sess)
+
+    @app.get("/api/remote-hw")
+    async def remote_hw_status():
+        from ech.core.remote_hw import registry as hw_registry
+        return {"sessions": hw_registry.status()}
+
+    @app.get("/remote-hw", response_class=HTMLResponse)
+    async def remote_hw_page():
+        template = UI_DIR / "templates" / "remote_hw.html"
+        if template.exists():
+            return HTMLResponse(content=_render_template("remote_hw.html"), headers=_NO_CACHE)
+        return HTMLResponse(content="<h1>Remote hardware page not found</h1>")
+
     # ── UI ────────────────────────────────────────────────────────────────
     _NO_CACHE = {"Cache-Control": "no-store"}
 
+    _TOPNAV_HTML = """
+<nav id="ech-topnav" style="display:flex;gap:2px;align-items:center;margin-left:10px;padding-left:10px;border-left:1px solid rgba(139,148,158,.3);overflow-x:auto;flex-shrink:1">
+  <a href="/" data-p="/" title="Messages">&#128172;</a>
+  <a href="/map" data-p="/map" title="Map">&#128506;</a>
+  <a href="/hamlog" data-p="/hamlog" title="Ham Log">&#128251;</a>
+  <a href="/logs" data-p="/logs" title="Logs">&#128220;</a>
+  <a href="/anomalies" data-p="/anomalies" title="Anomalies">&#9888;</a>
+  <a href="/analytics" data-p="/analytics" title="Analytics">&#128202;</a>
+  <a href="/skywarn" data-p="/skywarn" title="SKYWARN">&#127786;</a>
+  <a href="/remote-hw" data-p="/remote-hw" title="Remote Hardware">&#128268;</a>
+  <a href="/simulation" data-p="/simulation" title="Simulation">&#129514;</a>
+  <a href="/settings" data-p="/settings" title="Settings">&#9881;</a>
+</nav>
+<script>
+(function(){
+  document.querySelectorAll('#ech-topnav a').forEach(function(a){
+    a.style.cssText = 'display:flex;align-items:center;justify-content:center;width:26px;height:26px;'
+      + 'border-radius:5px;font-size:14px;text-decoration:none;flex-shrink:0;line-height:1';
+    if (a.dataset.p === location.pathname) {
+      a.style.background = 'rgba(56,139,253,.18)';
+      a.style.boxShadow = 'inset 0 0 0 1px rgba(56,139,253,.5)';
+    }
+  });
+})();
+</script>"""
+
     def _render_template(name: str) -> str:
         content = (UI_DIR / "templates" / name).read_text()
+        injections = [f"window.ECH_CALLSIGN={repr(_op_callsign)};"]
         if ech_state and ech_state.simulation_enabled:
-            content = content.replace("</head>", "<script>window.ECH_SIM=true;</script></head>", 1)
+            injections.append("window.ECH_SIM=true;")
+        content = content.replace("</head>",
+            f"<script>{''.join(injections)}</script></head>", 1)
+        content = content.replace('id="header">', 'id="header">' + _TOPNAV_HTML, 1)
         return content
 
     @app.get("/", response_class=HTMLResponse)
@@ -199,18 +326,20 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
 
     @app.get("/api/messages")
     async def get_messages(
-        limit: int = Query(100, le=500),
+        limit: int = Query(100, le=5000),
         offset: int = 0,
         adapter: str | None = None,
         since: str | None = None,
         priority_min: int | None = None,
         from_id: str | None = None,
+        per_adapter_limit: int | None = Query(None, le=2000),
     ):
         msgs = await db.get_messages(
             limit=limit, offset=offset,
             adapter=adapter, since=since,
             priority_min=priority_min,
             from_id=from_id,
+            per_adapter_limit=per_adapter_limit,
         )
         total = await db.message_count()
         return {"total": total, "messages": msgs}
@@ -273,24 +402,58 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
 
     @app.post("/api/adapters/{adapter_name}/enabled")
     async def set_adapter_enabled(adapter_name: str, request: Request):
+        import yaml
+        from pathlib import Path
         data = await request.json()
         enabled = bool(data.get("enabled", True))
+        persist = bool(data.get("persist", False))
+
+        # Runtime pause/resume
         adapter = router._adapters.get(adapter_name)
+        if adapter:
+            if enabled:
+                adapter.resume()
+            else:
+                adapter.pause()
+                if persist and hasattr(adapter, 'disconnect'):
+                    try:
+                        await adapter.disconnect()
+                    except Exception:
+                        pass
+
+        # Persist to config.yaml if requested (survives restart)
+        if persist:
+            config_path = Path("/etc/ech/config.yaml")
+            if not config_path.exists():
+                config_path = Path("config.yaml")
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                for a in cfg.get("adapters", []):
+                    if a.get("name") == adapter_name:
+                        a["enabled"] = enabled
+                        break
+                with open(config_path, "w", encoding="utf-8") as f:
+                    yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+                return {"status": "ok", "adapter": adapter_name, "enabled": enabled, "persisted": True}
+            except Exception as exc:
+                return {"status": "ok", "adapter": adapter_name, "enabled": enabled,
+                        "persisted": False, "warning": str(exc)}
+
         if not adapter:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail=f"Adapter '{adapter_name}' not found")
-        if enabled:
-            adapter.resume()
-        else:
-            adapter.pause()
-        return {"status": "ok", "adapter": adapter_name, "enabled": enabled}
+        return {"status": "ok", "adapter": adapter_name, "enabled": enabled, "persisted": False}
 
     # ── MeshCore channel switch ───────────────────────────────────────────
 
     @app.post("/api/adapters/{adapter_name}/channel")
     async def set_adapter_channel(adapter_name: str, request: Request):
+        import yaml as _yaml
+        from pathlib import Path as _Path
         data = await request.json()
         channel = data.get("channel")  # name like "#testing", "LongFast", or index int
+        persist = bool(data.get("persist", False))
         adapter = router._adapters.get(adapter_name)
         if not adapter:
             from fastapi import HTTPException
@@ -319,14 +482,35 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         # MeshCoreAdapter channel switching
         if not hasattr(adapter, '_channels'):
             return {"status": "error", "detail": "Adapter does not support channel switching"}
+
+        def _persist_channel(idx: int, name: str) -> bool:
+            """Write channel_idx + channel_name back to config.yaml."""
+            try:
+                cp = _Path("/etc/ech/config.yaml")
+                if not cp.exists():
+                    cp = _Path("config.yaml")
+                with open(cp, encoding="utf-8") as f:
+                    cfg = _yaml.safe_load(f) or {}
+                for a in cfg.get("adapters", []):
+                    if a.get("name") == adapter_name:
+                        a["channel_idx"] = idx
+                        a["channel_name"] = name
+                        break
+                with open(cp, "w", encoding="utf-8") as f:
+                    _yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+                return True
+            except Exception as exc:
+                log.warning("Channel persist to config failed: %s", exc)
+                return False
+
         if isinstance(channel, int):
             adapter._channel_idx = channel
             adapter._channel_name_resolved = True
             ch_name = adapter._channels.get(channel, "")
-            return {"status": "ok", "channel_idx": channel, "channel_name": ch_name}
+            persisted = _persist_channel(channel, ch_name) if persist else False
+            return {"status": "ok", "channel_idx": channel, "channel_name": ch_name, "persisted": persisted}
         elif isinstance(channel, str):
             want = channel.lstrip('#').lower()
-            # Try as integer index first (user typed "0", "1", etc.)
             try:
                 idx = int(want)
                 if 0 <= idx <= 7:
@@ -334,16 +518,17 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
                     adapter._channel_name_resolved = True
                     ch_name = adapter._channels.get(idx, "")
                     log.info("Channel switch: %s → ch%d (%s)", adapter_name, idx, ch_name)
-                    return {"status": "ok", "channel_idx": idx, "channel_name": ch_name}
+                    persisted = _persist_channel(idx, ch_name) if persist else False
+                    return {"status": "ok", "channel_idx": idx, "channel_name": ch_name, "persisted": persisted}
             except ValueError:
                 pass
-            # Try by name
             for idx, name in adapter._channels.items():
                 if name.lower() == want or name.lower() == channel.lower():
                     adapter._channel_idx = idx
                     adapter._channel_name_resolved = True
                     log.info("Channel switch: %s → ch%d (%s)", adapter_name, idx, name)
-                    return {"status": "ok", "channel_idx": idx, "channel_name": name}
+                    persisted = _persist_channel(idx, name) if persist else False
+                    return {"status": "ok", "channel_idx": idx, "channel_name": name, "persisted": persisted}
             known = list(adapter._channels.values()) or ["(none yet — init in progress)"]
             return {"status": "error", "detail": f"Channel '{channel}' not found. Known names: {known}. Or enter index 0–7."}
         return {"status": "error", "detail": "Provide channel name or index"}
@@ -573,6 +758,36 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         all_packets.sort(key=lambda p: p.get("ts", 0), reverse=True)
         return {"count": len(all_packets[:limit]), "packets": all_packets[:limit]}
 
+    @app.post("/api/adapters/{adapter_name}/reconnect")
+    async def reconnect_adapter(adapter_name: str):
+        """Stop and restart the adapter's supervise task (full disconnect + reconnect)."""
+        if adapter_name not in router._adapters:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Adapter '{adapter_name}' not found")
+        try:
+            await router.stop_adapter(adapter_name)
+            await asyncio.sleep(1.0)
+            # Re-read adapter config from disk to pick up any changes
+            import yaml
+            from pathlib import Path
+            cfg_path = Path("/etc/ech/config.yaml")
+            if not cfg_path.exists():
+                cfg_path = Path("config.yaml")
+            with open(cfg_path) as f:
+                full_cfg = yaml.safe_load(f) or {}
+            adapter_cfgs = full_cfg.get("adapters", [])
+            adapter_cfg = next((a for a in adapter_cfgs if a.get("name") == adapter_name), None)
+            if adapter_cfg is None:
+                return {"status": "error", "detail": f"Adapter '{adapter_name}' not found in config.yaml"}
+            # Re-instantiate using the same factory logic as main.py
+            from ech.main import build_adapter
+            new_adapter = build_adapter(adapter_cfg)
+            await router.start_adapter(new_adapter)
+            return {"status": "ok", "adapter": adapter_name}
+        except Exception as exc:
+            log.error("reconnect_adapter %s: %s", adapter_name, exc)
+            return {"status": "error", "detail": str(exc)}
+
     @app.post("/api/adapters/{adapter_name}/discover")
     async def trigger_discovery(adapter_name: str):
         """Immediately send a discovery pulse (APP_START + DEVICE_QUERY) to solicit node adverts."""
@@ -684,6 +899,72 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         await db.acknowledge_anomaly(finding_id)
         return {"status": "ok"}
 
+    @app.post("/api/anomalies/{finding_id}/verify")
+    async def verify_anomaly(finding_id: str):
+        """Actively verify a routing-related finding: run a live mesh trace and
+        compare (a) the flagged hop count, (b) the device's stored route to the
+        node (expected_hops from its contact record), and (c) the live measured
+        trace depth. Results are merged into the finding's evidence so the
+        comparison is preserved."""
+        import json as _json
+        from datetime import datetime, timezone
+        from fastapi import HTTPException
+        finding = await db.get_anomaly(finding_id)
+        if finding is None:
+            raise HTTPException(status_code=404, detail="finding not found")
+        adapter = router._adapters.get(finding["adapter"])
+        if adapter is None or not hasattr(adapter, "trace_and_wait"):
+            raise HTTPException(status_code=400,
+                                detail=f"adapter {finding['adapter']!r} does not support live trace verification")
+
+        try:
+            evidence = _json.loads(finding.get("evidence_json") or "{}")
+        except Exception:
+            evidence = {}
+        flagged_hops = evidence.get("hop_count")
+
+        # The device's own routing table: expected hops to this node
+        expected_hops = None
+        node_name = finding["node_id"]
+        node = getattr(adapter, "_nodes", {}).get(finding["node_id"])
+        if node is not None:
+            expected_hops = (node.meta or {}).get("expected_hops")
+            node_name = node.display_name or node_name
+
+        trace = await adapter.trace_and_wait(timeout=25.0)
+
+        # Build a plain-language verdict from the three numbers we now have
+        parts, verdict = [], "inconclusive"
+        if flagged_hops is not None:
+            parts.append(f"flagged {flagged_hops} hops")
+        if expected_hops is not None:
+            parts.append(f"device's stored route to {node_name}: {expected_hops} hops")
+        if trace.get("status") == "ok":
+            parts.append(f"live trace measured {trace['hops']} hops"
+                         + (f" via {' → '.join(trace['named'])}" if trace.get("named") else " (direct)"))
+        else:
+            parts.append(f"live trace: {trace.get('status')} ({trace.get('detail', '')})")
+
+        if flagged_hops is not None:
+            if expected_hops is not None and flagged_hops <= expected_hops + 1:
+                verdict = "consistent — matches the device's stored route; not suspicious"
+            elif trace.get("status") == "ok" and flagged_hops <= trace["hops"] + 1:
+                verdict = "consistent — matches current live mesh depth; not suspicious"
+            elif expected_hops is not None or trace.get("status") == "ok":
+                verdict = ("inconsistent — flagged hops exceed both the stored route and the live "
+                           "trace; possible relay loop, flood re-broadcast, or spoofed origin")
+
+        verification = {
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "flagged_hops": flagged_hops,
+            "expected_hops": expected_hops,
+            "live_trace": trace,
+            "comparison": "; ".join(parts),
+            "verdict": verdict,
+        }
+        updated = await db.merge_anomaly_evidence(finding_id, {"verification": verification})
+        return {"status": "ok", "verification": verification, "finding": updated}
+
     @app.post("/api/anomalies/clear-all")
     async def clear_all_anomalies():
         if anomaly_engine:
@@ -702,7 +983,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             raise HTTPException(status_code=404, detail="Finding not found")
         body = (f"NOTICE: Node {finding['node_id'][:12]} on {finding['adapter']} "
                 f"flagged for {finding['rule']} — {finding['summary'][:80]}")
-        results = await router.send(body=body[:200], priority=1)
+        results = await router.send(body=body[:200], adapter_names=[finding['adapter']], priority=1)
         await db.execute_raw(
             "UPDATE anomaly_findings SET broadcast_sent=1 WHERE id=?", (finding_id,)
         )
@@ -768,8 +1049,15 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         data = await request.json()
         adapter_name = data.get("adapter")
         node_id      = data.get("node_id", "").strip()
-        if not adapter_name or not node_id:
+        # flood=true sends an UNDIRECTED trace probe (the mesh picks the path)
+        # — used alongside a directed trace to compare the stored route
+        # against whatever route the mesh actually answers by.
+        if data.get("flood"):
+            node_id = ""
+        elif not node_id:
             return {"status": "error", "detail": "adapter and node_id required"}
+        if not adapter_name:
+            return {"status": "error", "detail": "adapter required"}
         a = router._adapters.get(adapter_name)
         if not a:
             return {"status": "error", "detail": f"adapter '{adapter_name}' not found"}
@@ -786,6 +1074,37 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         body, content_type = get_metrics_output()
         return Response(content=body, media_type=content_type)
 
+    # ── Audio devices (sound card enumeration for cw_audio etc.) ──────────
+
+    @app.get("/api/audio/devices")
+    async def audio_devices():
+        from ech.adapters.cw_audio import list_audio_devices
+        return list_audio_devices()
+
+    # ── Analytics ──────────────────────────────────────────────────────────
+
+    @app.get("/api/analytics/messages_by_adapter")
+    async def analytics_messages_by_adapter(hours: int = Query(48, le=24 * 14)):
+        buckets = await db.get_message_time_buckets(hours=hours)
+        return {"hours": hours, "buckets": buckets}
+
+    @app.get("/api/analytics/commands")
+    async def analytics_commands(hours: int | None = Query(None, le=24 * 30)):
+        stats = await db.get_command_usage_stats(hours=hours)
+        return {"hours": hours, "commands": stats}
+
+    @app.get("/api/analytics/anomalies")
+    async def analytics_anomalies(hours: int = Query(48, le=24 * 14)):
+        buckets = await db.get_anomaly_time_buckets(hours=hours)
+        return {"hours": hours, "buckets": buckets}
+
+    @app.get("/analytics", response_class=HTMLResponse)
+    async def analytics_page():
+        template = UI_DIR / "templates" / "analytics.html"
+        if template.exists():
+            return HTMLResponse(content=_render_template("analytics.html"), headers=_NO_CACHE)
+        return HTMLResponse(content="<h1>Analytics page not found</h1>")
+
     # ── Anomaly dashboard page ────────────────────────────────────────────
 
     @app.get("/anomalies", response_class=HTMLResponse)
@@ -794,6 +1113,47 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         if template.exists():
             return HTMLResponse(content=_render_template("anomalies.html"), headers=_NO_CACHE)
         return HTMLResponse(content="<h1>Anomaly dashboard not found</h1>")
+
+    # ── SKYWARN reports ───────────────────────────────────────────────────
+
+    @app.get("/api/skywarn")
+    async def get_skywarn_reports_api(limit: int = 200):
+        reports = await db.get_skywarn_reports(limit=limit)
+        return {"reports": reports, "total": len(reports)}
+
+    @app.post("/api/skywarn/{report_id}")
+    async def update_skywarn_report_api(report_id: int, request: Request):
+        from fastapi import HTTPException
+        fields = await request.json()
+        updated = await db.update_skywarn_report(report_id, fields)
+        if not updated:
+            raise HTTPException(status_code=404, detail="report not found")
+        return {"status": "ok", "report": updated}
+
+    @app.post("/api/skywarn/{report_id}/complete")
+    async def complete_skywarn_report_api(report_id: int, request: Request):
+        from fastapi import HTTPException
+        data = await request.json() if await request.body() else {}
+        completed = bool(data.get("completed", True))
+        updated = await db.set_skywarn_completed(report_id, completed)
+        if not updated:
+            raise HTTPException(status_code=404, detail="report not found")
+        return {"status": "ok", "report": updated}
+
+    @app.delete("/api/skywarn/{report_id}")
+    async def delete_skywarn_report_api(report_id: int):
+        from fastapi import HTTPException
+        ok = await db.delete_skywarn_report(report_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="report not found")
+        return {"status": "ok"}
+
+    @app.get("/skywarn", response_class=HTMLResponse)
+    async def skywarn_page():
+        template = UI_DIR / "templates" / "skywarn.html"
+        if template.exists():
+            return HTMLResponse(content=_render_template("skywarn.html"), headers=_NO_CACHE)
+        return HTMLResponse(content="<h1>SKYWARN reports not found</h1>")
 
     # ── Auth ──────────────────────────────────────────────────────────────
 
@@ -1211,9 +1571,19 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         if not wx_bot:
             return {"enabled": False}
         cfg = wx_bot._config.get("mesh_bot", {})
+        # Collect channel names from all connected MeshCore/Meshtastic adapters
+        known_ch: list[str] = []
+        for a in router._adapters.values():
+            ch_dict = getattr(a, "_channels", {})
+            if isinstance(ch_dict, dict):
+                for idx, name in sorted(ch_dict.items()):
+                    entry = f"ch{idx}" + (f":{name}" if name else "")
+                    if entry not in known_ch:
+                        known_ch.append(entry)
         return {
             "enabled":               wx_bot.enabled,
             "channels":              wx_bot._channels,
+            "known_channels":        known_ch,
             "adapters":              wx_bot._adapter_filter,
             "reply_dm":              wx_bot._reply_dm,
             "per_user_cooldown_sec": wx_bot._user_cooldown,
@@ -1227,6 +1597,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             "lat":                   wx_bot._lat,
             "lon":                   wx_bot._lon,
             "aprs_fi_key":           cfg.get("aprs_fi_key", ""),
+            "tide_station":          wx_bot._tide_station,
+            "mention_name":          wx_bot._mention_name,
         }
 
     @app.post("/api/bot/config")
@@ -1255,6 +1627,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             wx_bot._config.setdefault("mesh_bot", {})["aprs_fi_key"] = data["aprs_fi_key"]
         if "ships_radius_nm" in data:
             wx_bot._config.setdefault("mesh_bot", {})["ships_radius_nm"] = float(data["ships_radius_nm"])
+        if "mention_name" in data:          wx_bot._mention_name         = str(data["mention_name"]).strip()
         # Persist to config.yaml so settings survive restart
         config_path = Path("/etc/ech/config.yaml")
         if not config_path.exists():
@@ -1278,6 +1651,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             if "tle_targets" in data:           bot_cfg["tle_targets"]           = [t.upper() for t in data["tle_targets"]]
             if "aprs_fi_key" in data:           bot_cfg["aprs_fi_key"]           = data["aprs_fi_key"]
             if "ships_radius_nm" in data:       bot_cfg["ships_radius_nm"]       = float(data["ships_radius_nm"])
+            if "tide_station" in data:          bot_cfg["tide_station"]          = str(data["tide_station"]).strip()
+            if "mention_name" in data:          bot_cfg["mention_name"]          = str(data["mention_name"]).strip()
             with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
             return {"status": "ok"}
@@ -1316,7 +1691,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             elif cmd in ("solar", "space"):  result = await wx_bot._cmd_solar()
             elif cmd == "ships":             result = await wx_bot._cmd_ships()
             elif cmd == "fcc":               result = await wx_bot._cmd_fcc(args)
-            elif cmd == "trivia":            result = await wx_bot._cmd_trivia()
+            elif cmd == "trivia":
+                from ech.core.models import NormalizedMessage
+                fake = NormalizedMessage(source_adapter="test", source_channel="DM", from_id="test-console", body=command)
+                result = await wx_bot._cmd_trivia(fake)
             elif cmd == "dad":               result = await wx_bot._cmd_dad()
             elif cmd == "alerts":            result = await wx_bot._cmd_alerts()
             elif cmd == "metar":             result = await wx_bot._cmd_metar(args)
@@ -1324,6 +1702,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             elif cmd == "nodes":             result = await wx_bot._cmd_nodes(args)
             elif cmd == "aprs":              result = await wx_bot._cmd_aprs(args)
             elif cmd == "anomalies":         result = await wx_bot._cmd_anomalies()
+            elif cmd in ("tide", "tides"):   result = await wx_bot._cmd_tide()
+            elif cmd == "grid":              result = wx_bot._cmd_grid(args)
+            elif cmd == "id":                result = wx_bot._cmd_id()
+            elif cmd == "moon":              result = wx_bot._cmd_moon()
+            elif cmd == "dxcc":              result = await wx_bot._cmd_dxcc(args)
+            elif cmd == "contest":           result = await wx_bot._cmd_contest()
             elif cmd == "help":              result = wx_bot._cmd_help()
             else:                            result = f"unknown command: {cmd}"
         except Exception as exc:
@@ -1384,6 +1768,65 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         with open(path, "w") as f:
             yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
         return {"status": "ok", "saved": path}
+
+    # ── Retention / purge settings ────────────────────────────────────────
+
+    @app.get("/api/retention")
+    async def get_retention():
+        ret = dict(router._msg_retention)
+        # Also read node_ttl from the first meshcore adapter
+        node_ttl = 0
+        for adp in router._adapters.values():
+            if hasattr(adp, "_node_ttl_sec"):
+                node_ttl = int(adp._node_ttl_sec / 3600) if adp._node_ttl_sec else 0
+                break
+        return {"retention": ret, "node_ttl_hours": node_ttl}
+
+    @app.post("/api/retention")
+    async def save_retention(request: Request):
+        import yaml
+        data = await request.json()
+        # Validate
+        new_ret: dict[str, int] = {}
+        for k, v in data.get("retention", {}).items():
+            hours = int(v)
+            if hours > 0:
+                new_ret[k] = hours
+        node_ttl = int(data.get("node_ttl_hours", 0))
+
+        # Apply live
+        router._msg_retention = new_ret
+
+        # Update node TTL on all meshcore adapters (takes effect on next expiry cycle)
+        for adp in router._adapters.values():
+            if hasattr(adp, "_node_ttl_sec"):
+                adp._node_ttl_sec = float(node_ttl * 3600) if node_ttl > 0 else 0.0
+
+        # Persist to config.yaml
+        path = app.state.config_path
+        if path:
+            try:
+                with open(path) as f:
+                    cfg = yaml.safe_load(f) or {}
+                ret_section = {"enabled": True, **{k: v for k, v in new_ret.items()}}
+                cfg["retention"] = ret_section
+                # Save node_ttl_hours into each meshcore adapter config
+                for adp_cfg in cfg.get("adapters", []):
+                    if str(adp_cfg.get("type", "")).lower() in ("meshcore", "meshcore_adapter"):
+                        adp_cfg["node_ttl_hours"] = node_ttl
+                with open(path, "w") as f:
+                    yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            except PermissionError:
+                return {"status": "ok", "warning": "settings applied but could not write config.yaml"}
+        return {"status": "ok"}
+
+    @app.post("/api/retention/purge")
+    async def run_purge_now():
+        """Immediately run a message purge using the current retention settings."""
+        if not router._msg_retention:
+            return {"status": "ok", "deleted": 0, "note": "no retention rules configured"}
+        deleted = await db.purge_old_messages(router._msg_retention)
+        return {"status": "ok", "deleted": deleted}
 
     # ── Simulation management ─────────────────────────────────────────────
 
@@ -1604,7 +2047,11 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         Rate limited to 1 upstream request per 5 minutes (PSKReporter TOS).
         """
         import time as _time
-        cache_key = f"{callsign.upper()}|{band}"
+        global _psk_last_upstream
+        # Fall back to the configured operator callsign so a missing callsign parameter
+        # never causes PSKReporter to return all-band spots instead of yours.
+        effective_call = callsign.strip().upper() or _psk_default_callsign.upper()
+        cache_key = f"{effective_call}|{band}"
         cached = _psk_cache.get(cache_key)
         if cached:
             age = _time.monotonic() - cached[0]
@@ -1613,38 +2060,55 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
                 return {"spots": payload["spots"][:limit], "total": payload["total"],
                         "cached": True, "cache_age_sec": round(age)}
 
+        # Global rate gate: PSKReporter TOS allows 1 upstream request per 5 min per IP.
+        # Different cache keys (map=no-callsign vs settings=KN0O|20m) each had their own
+        # timers, collectively exceeding the limit.  Now one global timestamp enforces it.
+        now_mono = _time.monotonic()
+        global_age = now_mono - _psk_last_upstream
+        if _psk_last_upstream > 0 and global_age < _PSK_CACHE_TTL:
+            # Find any cached payload to return rather than an empty error
+            best = max(_psk_cache.values(), key=lambda x: x[0]) if _psk_cache else None
+            wait = int(_PSK_CACHE_TTL - global_age)
+            if best:
+                payload = best[1]
+                return {"spots": payload["spots"][:limit], "total": payload["total"],
+                        "cached": True, "cache_age_sec": round(now_mono - best[0]),
+                        "warning": f"Rate limit: next upstream fetch in {wait}s"}
+            return {"spots": [], "error": f"Rate limited — retry in {wait}s", "cached": False}
+
         try:
             import httpx as _httpx
             import xml.etree.ElementTree as _ET
+            # Do NOT include statistics=1 — it changes the XML schema to <activeReceiver>
+            # elements and suppresses <receptionReport> entirely, returning 0 spots.
+            # Do NOT include lastSequence — it's for incremental polling; on first call
+            # with -1 the server may return nothing depending on its sequence state.
             params = {
                 "active": "1",
                 "flowStartSeconds": "-900",
-                "statistics": "1",
-                "lastSequence": "-1",
-                "mode": "0",
             }
-            if callsign:
-                params["senderCallsign"] = callsign.upper()
+            if effective_call:
+                params["senderCallsign"] = effective_call
             if band:
                 params["band"] = band
-            async with _httpx.AsyncClient(timeout=10.0) as client:
+            async with _httpx.AsyncClient(timeout=15.0) as client:
                 r = await client.get(
                     "https://retrieve.pskreporter.info/query",
                     params=params,
-                    headers={"User-Agent": "(ECH Emergency Communications Hub, ech@emergency.local)"},
+                    headers={"User-Agent": _psk_contact},
                 )
                 r.raise_for_status()
                 root = _ET.fromstring(r.text)
                 spots = []
                 for rx in root.findall(".//receptionReport"):
                     grid = rx.get("receiverLocator", "")
-                    if len(grid) < 4:
-                        continue
-                    lat, lon = _grid_to_latlon(grid)
+                    lat, lon = _grid_to_latlon(grid) if len(grid) >= 4 else (None, None)
                     spots.append({
                         "senderCallsign": rx.get("senderCallsign", ""),
+                        "senderLocator": rx.get("senderLocator", ""),
                         "receiverCallsign": rx.get("receiverCallsign", ""),
                         "mode": rx.get("mode", ""),
+                        "frequency": int(rx.get("frequency", 0)),
                         "band": int(rx.get("frequency", 0)),
                         "sNR": int(rx.get("sNR", 0)),
                         "rxLat": lat,
@@ -1654,14 +2118,31 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
                     })
                 payload = {"spots": spots, "total": len(spots)}
                 _psk_cache[cache_key] = (_time.monotonic(), payload)
+                _psk_last_upstream = _time.monotonic()
                 _psk_stats["last_success"] = __import__("datetime").datetime.utcnow().isoformat() + "Z"
                 _psk_stats["total_fetches"] = _psk_stats.get("total_fetches", 0) + 1
                 return {"spots": spots[:limit], "total": len(spots), "cached": False,
                         "cache_age_sec": 0}
         except Exception as exc:
             _psk_stats["last_failure"] = __import__("datetime").datetime.utcnow().isoformat() + "Z"
-            _psk_stats["last_error"] = str(exc)
-            return {"spots": [], "error": str(exc), "cached": False}
+            # Produce a concise human-readable message instead of the full httpx exception
+            err_str = str(exc)
+            if "503" in err_str:
+                friendly = "PSKReporter is temporarily unavailable (503). Try again in a few minutes."
+            elif "timeout" in err_str.lower() or "connect" in err_str.lower():
+                friendly = "PSKReporter request timed out. Check your internet connection."
+            else:
+                friendly = f"PSKReporter fetch failed: {exc.__class__.__name__}"
+            _psk_stats["last_error"] = friendly
+            # Serve stale cache rather than an empty error response if we have any data at all
+            stale = _psk_cache.get(cache_key)
+            if stale:
+                age = _time.monotonic() - stale[0]
+                payload = stale[1]
+                return {"spots": payload["spots"][:limit], "total": payload["total"],
+                        "cached": True, "cache_age_sec": round(age),
+                        "warning": friendly}
+            return {"spots": [], "error": friendly, "cached": False}
 
     @app.get("/api/pskreporter/status")
     async def pskreporter_status():
@@ -1758,6 +2239,33 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         ok = await a.page(target)
         return {"status": "ok" if ok else "error"}
 
+    @app.get("/api/winlink/rms")
+    async def winlink_rms_list():
+        """Return list of known Winlink RMS gateways from the Pat adapter."""
+        for adapter in router._adapters.values():
+            if hasattr(adapter, "_rms_stations"):
+                stations = adapter._rms_stations
+                return {
+                    "count": len(stations),
+                    "session_status": getattr(adapter, "_session_status", ""),
+                    "session_log": getattr(adapter, "_session_lines", [])[-10:],
+                    "gateways": stations[:200],  # cap response size
+                }
+        return {"count": 0, "gateways": [], "session_status": "", "session_log": []}
+
+    @app.post("/api/winlink/connect")
+    async def winlink_connect(request: Request):
+        """Trigger a Pat connect session."""
+        data = await request.json()
+        alias = data.get("alias")
+        for adapter in router._adapters.values():
+            if hasattr(adapter, "_trigger_connect"):
+                if alias:
+                    adapter._connect_alias = alias
+                await adapter._trigger_connect()
+                return {"status": "ok", "alias": adapter._connect_alias}
+        return {"status": "error", "detail": "No Winlink adapter configured"}
+
     @app.post("/api/phone/push")
     async def phone_push(request: Request):
         """Push a short text notification to the screen phone display."""
@@ -1799,14 +2307,14 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         free_pct = usage.free / usage.total * 100
         # Thresholds sized for a small SSD (8 GB thin-client target).
         # Warning  : < 1 GB free  OR  < 10 % free (whichever triggers first)
-        # Critical : < 300 MB free
+        # Critical : < 250 MB free
         return {
             "free_gb":  round(free_gb,  1),
             "used_gb":  round(usage.used / (1024 ** 3), 1),
             "total_gb": round(total_gb, 1),
             "free_pct": round(free_pct, 1),
             "warning":  free_gb < 1.0 or free_pct < 10,
-            "critical": free_gb < 0.3,
+            "critical": free_gb < 0.25,
         }
 
     # ── TLS / HTTPS support ───────────────────────────────────────────────
@@ -1835,11 +2343,11 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         status_text = "HTTPS is active on this server" if tls_enabled else "HTTPS is not enabled — TLS is disabled in config.yaml"
         dl_section = (
             '<p><a href="/ca.crt" style="color:#388bfd;font-weight:600">'
-            '⬇ Download ECH CA Certificate (ech-ca.crt)</a></p>'
+            '⬇ Download SignalMatrix CA Certificate (ech-ca.crt)</a></p>'
         ) if tls_enabled else '<p style="color:#d29922">Enable TLS first, then reload this page.</p>'
         return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ECH HTTPS Setup</title>
+<title>SignalMatrix HTTPS Setup</title>
 <style>
 body{{font-family:'IBM Plex Sans',sans-serif;background:#0d1117;color:#e6edf3;max-width:700px;margin:40px auto;padding:20px;line-height:1.6}}
 h1{{color:#3fb950;font-size:1.4rem}}h2{{color:#8b949e;font-size:1rem;text-transform:uppercase;letter-spacing:.08em;margin-top:2rem}}
@@ -1848,16 +2356,16 @@ code{{background:#161b22;padding:2px 6px;border-radius:4px;font-family:'IBM Plex
 ol li{{margin-bottom:.5rem}}a{{color:#388bfd}}
 .box{{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:16px;margin:12px 0}}
 </style></head><body>
-<h1>ECH HTTPS / Web Serial Setup</h1>
+<h1>SignalMatrix HTTPS / Web Serial Setup</h1>
 <div class="status">{status_text}</div>
 {dl_section}
 <p>Web Serial API (used for browser-side CAT radio control) requires HTTPS.
-ECH uses a self-signed CA so the cert works on any IP address — operators trust the CA once
+SignalMatrix uses a self-signed CA so the cert works on any IP address — operators trust the CA once
 and every future deployment is trusted automatically.</p>
 
 <h2>Step 1 — Enable TLS in config.yaml</h2>
 <div class="box"><code>tls:<br>&nbsp;&nbsp;enabled: true<br>&nbsp;&nbsp;https_port: 8766&nbsp;&nbsp;&nbsp;# HTTPS port (keep 8765 for HTTP)<br>&nbsp;&nbsp;data_dir: "."&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# where ech-ca.crt is stored</code></div>
-<p>Restart ECH. The CA cert is generated once and reused across deployments.</p>
+<p>Restart SignalMatrix. The CA cert is generated once and reused across deployments.</p>
 
 <h2>Step 2 — Trust the CA cert (one-time per device)</h2>
 <ol>
@@ -1878,13 +2386,53 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
 <strong>Kenwood text CAT</strong> — Elecraft K3/K4/KX3, TS-590/2000, Yaesu FT-991A (Kenwood emulation)
 </div>
 
-<p><a href="/">← Back to ECH</a></p>
+<p><a href="/">← Back to SM</a></p>
 </body></html>"""
 
     # ── CAT radio control (rigctld / Hamlib) ──────────────────────────────
 
     def _get_cat() -> "CATController | None":
         return getattr(app.state, "cat_ctrl", None)
+
+    @app.get("/api/cat/config")
+    async def get_cat_config():
+        cfg = _load_raw_config()
+        cc = cfg.get("cat", {})
+        return {
+            "enabled":          bool(cc.get("enabled", False)),
+            "rigctld_host":     cc.get("rigctld_host", "localhost"),
+            "rigctld_port":     int(cc.get("rigctld_port", 4532)),
+            "poll_interval":    float(cc.get("poll_interval", 2.0)),
+            "auto_fill_hamlog": bool(cc.get("auto_fill_hamlog", True)),
+            "max_ptt_seconds":  float(cc.get("max_ptt_seconds", 120)),
+        }
+
+    @app.patch("/api/cat/config")
+    async def patch_cat_config(request: Request):
+        import yaml
+        from pathlib import Path
+        body = await request.json()
+        allowed = {"enabled", "rigctld_host", "rigctld_port", "poll_interval",
+                   "auto_fill_hamlog", "max_ptt_seconds"}
+        updates = {k: v for k, v in body.items() if k in allowed}
+        if not updates:
+            return {"status": "ok", "updated": []}
+        config_path = Path("/etc/ech/config.yaml")
+        if not config_path.exists():
+            config_path = Path("config.yaml")
+        try:
+            with open(config_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            cfg.setdefault("cat", {}).update(updates)
+            with open(config_path, "w") as f:
+                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            return {"status": "ok", "updated": list(updates.keys()),
+                    "note": "Restart ECH to apply CAT connection changes"}
+        except PermissionError as exc:
+            return {"status": "error", "detail": str(exc),
+                    "fix_hint": f"sudo chown $(whoami) {config_path}"}
+        except Exception as exc:
+            return {"status": "error", "detail": str(exc)}
 
     @app.get("/api/cat/status")
     async def cat_status():
@@ -1918,6 +2466,29 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
             return {"status": "error", "detail": "mode required"}
         ok = await cat.set_mode(mode, bw)
         return {"status": "ok" if ok else "error", "mode": mode}
+
+    @app.post("/api/cat/browser-update")
+    async def cat_browser_update(request: Request):
+        """Freq/mode push from a browser-side Web Serial CAT connection (e.g. the
+        Remote Hardware page). Broadcasts the same cat_update/cat_status WS events
+        the rigctld poll loop uses, so ham log and other pages auto-fill from it too.
+        This is read-only from the server's perspective — set_freq/set_mode/PTT still
+        require rigctld; the browser owns the serial port directly."""
+        data = await request.json()
+        event = "cat_status" if "connected" in data and not data.get("freq_hz") else "cat_update"
+        await router.broadcast_ws_event(event, data)
+        return {"status": "ok"}
+
+    @app.post("/api/cat/ptt")
+    async def cat_set_ptt(request: Request):
+        """Key/unkey the transmitter via rigctld. Body: {"on": true|false}."""
+        cat = _get_cat()
+        if cat is None:
+            return {"status": "error", "detail": "CAT not configured"}
+        data = await request.json()
+        on = bool(data.get("on"))
+        ok = await cat.set_ptt(on)
+        return {"status": "ok" if ok else "error", "ptt": on if ok else await cat.get_ptt()}
 
     @app.post("/api/cat/set")
     async def cat_set_both(request: Request):
@@ -2298,7 +2869,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
             url += f"&band={band.lower().replace('m','m')}"
         try:
             async with _hx.AsyncClient(timeout=10) as client:
-                r = await client.get(url, headers={"User-Agent": "ECH/1.0"})
+                r = await client.get(url, headers={"User-Agent": "SM/1.0"})
             remote = r.json() if r.status_code == 200 else []
         except Exception as e:
             remote = []
@@ -2352,7 +2923,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
         async def try_callook(call):
             async with _hx.AsyncClient(timeout=8) as client:
                 r = await client.get(f"https://callook.info/api/{call}/json",
-                                     headers={"User-Agent": "ECH/1.0"})
+                                     headers={"User-Agent": "SM/1.0"})
             if r.status_code != 200:
                 return None
             d = r.json()
@@ -2391,7 +2962,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
         async def try_hamdb(call):
             async with _hx.AsyncClient(timeout=8) as client:
                 r = await client.get(f"https://api.hamdb.org/v1/{call}/json/ech-logger",
-                                     headers={"User-Agent": "ECH/1.0"})
+                                     headers={"User-Agent": "SM/1.0"})
             if r.status_code != 200:
                 return None
             d = r.json().get("hamdb", {}).get("callsign", {})
@@ -2434,7 +3005,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
         try:
             async with _hx.AsyncClient(timeout=12) as client:
                 r = await client.get("https://www.hamqsl.com/solarxml.php",
-                                     headers={"User-Agent": "ECH/1.0"})
+                                     headers={"User-Agent": "SM/1.0"})
             text = r.text
 
             def tag(*names, default=""):

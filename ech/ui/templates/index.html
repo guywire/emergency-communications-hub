@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ECH — Emergency Communications Hub</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPgogIDxyZWN0IHg9IjE1IiB5PSI4IiB3aWR0aD0iMiIgaGVpZ2h0PSIxNiIgZmlsbD0iIzNmYjk1MCIvPgogIDxyZWN0IHg9IjEwIiB5PSIxMiIgd2lkdGg9IjEyIiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cG9seWdvbiBwb2ludHM9IjE2LDYgMTIsMTIgMjAsMTIiIGZpbGw9IiMzZmI5NTAiLz4KICA8cmVjdCB4PSIxMyIgeT0iMjQiIHdpZHRoPSI2IiBoZWlnaHQ9IjIiIGZpbGw9IiMzZmI5NTAiLz4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iMTAiIHI9IjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM4OGJmZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8Y2lyY2xlIGN4PSIyNCIgY3k9IjEwIiByPSIyIiBmaWxsPSJub25lIiBzdHJva2U9IiMzODhiZmQiIHN0cm9rZS13aWR0aD0iMS41Ii8+Cjwvc3ZnPg==">
+<title>SignalMatrix</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxjaXJjbGUgY3g9IjkiIGN5PSI5IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iOSIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48Y2lyY2xlIGN4PSIyMyIgY3k9IjkiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjIzIiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjIzIiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMjMiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iMjMiIGN5PSIyMyIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48cGF0aCBkPSJNNCwxNiBRNywxMCAxMCwxNiBRMTMsMjIgMTYsMTYgUTE5LDEwIDIyLDE2IFEyNSwyMiAyOCwxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjIuNSIgZmlsbD0iIzNmYjk1MCIvPjwvc3ZnPg==">
 
 
 <style>
@@ -934,34 +934,29 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
   <!-- ── Header ───────────────────────────────────────── -->
   <header id="header">
     <button class="mob-btn" onclick="mobileToggleSidebar()" title="Channels">☰</button>
-    <div class="logo">▣ ECH</div>
-    <svg width="54" height="34" viewBox="0 0 54 36" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;margin:0 2px" aria-hidden="true">
-      <!-- mast -->
-      <line x1="27" y1="14" x2="27" y2="31" stroke="#3fb950" stroke-width="2" stroke-linecap="round"/>
-      <!-- base -->
-      <line x1="21" y1="31" x2="33" y2="31" stroke="#3fb950" stroke-width="2" stroke-linecap="round"/>
-      <!-- dipole arms -->
-      <line x1="27" y1="14" x2="23" y2="9" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round"/>
-      <line x1="27" y1="14" x2="31" y2="9" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round"/>
-      <!-- signal arc 1 (closest) -->
-      <path d="M 23 15 A 4 4 0 0 1 31 15" stroke="#3fb950" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-      <!-- signal arc 2 -->
-      <path d="M 18 17 A 9 9 0 0 1 36 17" stroke="#3fb950" stroke-width="1.2" fill="none" stroke-linecap="round" opacity="0.65"/>
-      <!-- signal arc 3 (farthest) -->
-      <path d="M 13 19 A 14 14 0 0 1 41 19" stroke="#3fb950" stroke-width="0.9" fill="none" stroke-linecap="round" opacity="0.35"/>
-      <!-- left mesh node (green = local / MeshCore) -->
-      <circle cx="5" cy="24" r="3.2" fill="none" stroke="#3fb950" stroke-width="1.5" opacity="0.8"/>
-      <circle cx="5" cy="24" r="1.3" fill="#3fb950" opacity="0.7"/>
-      <line x1="8.2" y1="23" x2="16" y2="20" stroke="#3fb950" stroke-width="0.9" stroke-dasharray="2.5 2" opacity="0.5"/>
-      <!-- right mesh node (blue = remote / IP-linked) -->
-      <circle cx="49" cy="24" r="3.2" fill="none" stroke="#388bfd" stroke-width="1.5" opacity="0.8"/>
-      <circle cx="49" cy="24" r="1.3" fill="#388bfd" opacity="0.7"/>
-      <line x1="45.8" y1="23" x2="38" y2="20" stroke="#388bfd" stroke-width="0.9" stroke-dasharray="2.5 2" opacity="0.5"/>
-      <!-- secondary nodes -->
-      <circle cx="7" cy="32" r="2.2" fill="none" stroke="#3fb950" stroke-width="1" opacity="0.45"/>
-      <line x1="7" y1="29.8" x2="5" y2="27.2" stroke="#3fb950" stroke-width="0.7" opacity="0.3"/>
-      <circle cx="47" cy="32" r="2.2" fill="none" stroke="#388bfd" stroke-width="1" opacity="0.45"/>
-      <line x1="47" y1="29.8" x2="49" y2="27.2" stroke="#388bfd" stroke-width="0.7" opacity="0.3"/>
+    <div class="logo">▣ SM</div>
+    <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;margin:0 4px" aria-hidden="true">
+      <rect width="32" height="32" rx="6" fill="#0d1117"/>
+      <!-- Signal arcs radiating from antenna tip -->
+      <path d="M13,14 Q16,9 19,14"  fill="none" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M10,17 Q16,7 22,17"  fill="none" stroke="#3fb950" stroke-width="1.1" stroke-linecap="round" opacity="0.65"/>
+      <path d="M7,20  Q16,5 25,20"  fill="none" stroke="#3fb950" stroke-width="0.8" stroke-linecap="round" opacity="0.35"/>
+      <!-- Antenna mast -->
+      <line x1="16" y1="13" x2="16" y2="24" stroke="#f0a500" stroke-width="2"   stroke-linecap="round"/>
+      <line x1="11" y1="17" x2="21" y2="17" stroke="#f0a500" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="13" y1="21" x2="19" y2="21" stroke="#f0a500" stroke-width="1.2" stroke-linecap="round"/>
+      <!-- Base legs -->
+      <line x1="16" y1="24" x2="11" y2="29" stroke="#f0a500" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="16" y1="24" x2="21" y2="29" stroke="#f0a500" stroke-width="1.5" stroke-linecap="round"/>
+      <!-- Mesh nodes at base and flanks -->
+      <circle cx="11" cy="29" r="2"   fill="#388bfd"/>
+      <circle cx="21" cy="29" r="2"   fill="#388bfd"/>
+      <circle cx="4"  cy="22" r="1.5" fill="#388bfd" opacity="0.7"/>
+      <circle cx="28" cy="22" r="1.5" fill="#388bfd" opacity="0.7"/>
+      <!-- Mesh connections -->
+      <line x1="11" y1="29" x2="21" y2="29" stroke="#388bfd" stroke-width="0.7" opacity="0.5"/>
+      <line x1="4"  y1="22" x2="11" y2="29" stroke="#388bfd" stroke-width="0.7" opacity="0.4"/>
+      <line x1="28" y1="22" x2="21" y2="29" stroke="#388bfd" stroke-width="0.7" opacity="0.4"/>
     </svg>
     <div class="incident-badge" id="incident-name">EXERCISE MODE</div>
     <span class="conn-dot" id="ws-dot"></span>
@@ -971,6 +966,9 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
     <nav style="display:flex;gap:0;align-items:center">
       <a href="/map"        style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Node Map">🗺</a>
       <a href="/anomalies"  style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Anomaly Monitor">⚠</a>
+      <a href="/skywarn"    style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="SKYWARN Reports">☁</a>
+      <a href="/analytics"  style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Analytics">📊</a>
+      <a href="/remote-hw"  style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Remote Hardware (host devices from this computer)">🔌</a>
       <a href="/logs"       style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Log Viewer">📋</a>
       <a href="/hamlog"     style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Ham Log">📻</a>
       <a href="/simulation" id="nav-sim" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:3px" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted)'" title="Simulation">🎭</a>
@@ -1073,8 +1071,8 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
     </div>
 
     <div class="sidebar-footer">
-      <button onclick="timeSyncBroadcast()">🕐 Time sync</button>
-      <button onclick="nodeAnnounce()">📡 Announce</button>
+      <button onclick="timeSyncBroadcast()" title="Sends a readable time message to the channel and sets THIS station's own radio clock — the mesh protocol has no way to set other nodes' clocks remotely">🕐 Time sync</button>
+      <button onclick="nodeAnnounce()" title="Broadcast this station's presence (advert + discovery pulse) to all connected mesh adapters">📡 Announce</button>
       <button onclick="wxBroadcast()">🌩 WX alerts</button>
       <button onclick="wxShare()">🌤 Share weather</button>
       <label style="display:block;margin-top:4px">
@@ -1681,21 +1679,45 @@ function escHtml(s) {
 
 // ── History load ─────────────────────────────────────────────────────────
 async function loadHistory() {
-  const r = await fetch('/api/messages?limit=200');
-  const data = await r.json();
-  // Messages come newest-first from DB already
-  const existingIds = new Set(state.messages.map(m => m.id));
-  data.messages.forEach(m => {
-    if (existingIds.has(m.id)) return;
-    if (m.raw_json && typeof m.raw_json === 'string') {
-      try { m._raw = JSON.parse(m.raw_json); } catch(e) { m._raw = {}; }
-    } else { m._raw = m.raw_json || {}; }
-    // Map persisted delivery fields to the runtime underscore-prefixed properties
-    if (m.delivery_status) { m._status = m.delivery_status; }
-    if (m.delivery_path)   { m._delivery_path = m.delivery_path; }
-    state.messages.push(m);
-  });
-  renderAll();
+  try {
+    // A flat "most recent 500 across all adapters" silently loses everything
+    // else when one high-volume adapter dominates — an internet APRS-IS
+    // gateway can run 8000+/day, meaning the last 500 rows can be 100% APRS
+    // beacons from the last hour, with meshcore/weather/etc. from the rest of
+    // the day invisible even though they're still in the database (confirmed
+    // directly against a live deployment: 8026 of 8172 messages in a 24h
+    // window were a single adapter). per_adapter_limit guarantees every
+    // adapter gets representation regardless of relative volume; since=24h
+    // scopes it to what was actually asked for ("the past day").
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const r = await fetch(`/api/messages?limit=3000&per_adapter_limit=300&since=${encodeURIComponent(since)}`);
+    if (!r.ok) {
+      toast(`Message history load failed (HTTP ${r.status})`, 'err');
+      return;
+    }
+    const data = await r.json();
+    const existingIds = new Set(state.messages.map(m => m.id));
+    let added = 0;
+    (data.messages || []).forEach(m => {
+      if (existingIds.has(m.id)) return;
+      if (m.raw_json && typeof m.raw_json === 'string') {
+        try { m._raw = JSON.parse(m.raw_json); } catch(e) { m._raw = {}; }
+      } else { m._raw = m.raw_json || {}; }
+      // Skip non-text messages saved before the text-only DB filter was active
+      if (m._raw._msg_type && m._raw._msg_type !== 'text') return;
+      if (m.delivery_status) { m._status = m.delivery_status; }
+      if (m.delivery_path)   { m._delivery_path = m.delivery_path; }
+      state.messages.push(m);
+      added++;
+    });
+    renderAll();
+    if (added === 0 && (data.total || 0) === 0) {
+      console.info('loadHistory: database is empty');
+    }
+  } catch(e) {
+    console.error('loadHistory failed:', e);
+    toast('Failed to load message history — see console', 'err');
+  }
 }
 
 function renderAll() {
@@ -1818,7 +1840,7 @@ async function sendMessage() {
         const sentMsg = {
           id: msgId, source_adapter: adapter,
           source_channel: toId ? 'DM' : (state.adapterChannels[adapter] || 'outbound'),
-          from_id: 'local', from_display: 'ECH Operator',
+          from_id: 'local', from_display: 'SM Operator',
           to_id: toId, body, timestamp: now, priority,
           lat: null, lon: null, hop_count: null, hop_start: null,
           path: null, via_mqtt: false,
@@ -1911,9 +1933,38 @@ async function broadcastAll() {
   if (!body) { toast('Enter message before broadcast', 'err'); return; }
   document.querySelectorAll('.adapter-toggle').forEach(el => {
     const m = adapterMeta(el.dataset.adapter);
-    if (!m.voice) el.classList.add('on');
+    if (!m.voice && !m.rxOnly) el.classList.add('on');
   });
   await sendMessage();
+}
+
+// Node role/type helpers — repeater-class nodes route packets but have no
+// message queue, so a DM to them silently goes nowhere; the UI says so.
+const _NODE_TYPE_LABELS = {
+  CLI: ['CLI', 'Companion — messageable', 'var(--green)'],
+  ROOM: ['ROOM', 'Room server — messageable', 'var(--green)'],
+  REP: ['RPT', 'Repeater — routes only, cannot receive messages', 'var(--yellow)'],
+  SENS: ['SENS', 'Sensor node — not messageable', 'var(--yellow)'],
+  ROUTER: ['RTR', 'Meshtastic router — usually unattended', 'var(--yellow)'],
+  REPEATER: ['RPT', 'Meshtastic repeater — routes only', 'var(--yellow)'],
+  DIGI: ['DIGI', 'APRS digipeater — autonomous', 'var(--yellow)'],
+  WX: ['WX', 'Weather station — autonomous', 'var(--yellow)'],
+  IGATE: ['IGATE', 'Internet gateway — autonomous', 'var(--yellow)'],
+  RPTR: ['RPT', 'Repeater — autonomous', 'var(--yellow)'],
+  OBJECT: ['OBJ', 'APRS object — rebroadcast by a gate, unattended', 'var(--muted)'],
+  MOBILE: ['MOB', 'Mobile station — likely operator', 'var(--green)'],
+  FIXED: ['FIX', 'Fixed station — likely operator', 'var(--green)'],
+};
+
+function nodeTypeBadge(n) {
+  const t = _NODE_TYPE_LABELS[n.node_type];
+  if (!t) return '';
+  return ` <span style="font-size:8px;padding:0 4px;border:1px solid ${t[2]};border-radius:3px;color:${t[2]}" title="${t[1]}">${t[0]}</span>`;
+}
+
+function nodeMessageable(n) {
+  // Unknown type → assume messageable (don't hide functionality on missing data)
+  return !['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT'].includes(n.node_type);
 }
 
 function fillTo(callsign) {
@@ -2189,9 +2240,11 @@ function _renderNodeCards(nodes, totalCount) {
   function _agoStr(isoStr) {
     if (!isoStr) return '--';
     const sec = Math.floor((_now - new Date(isoStr)) / 1000);
+    if (isNaN(sec) || sec < 0) return 'future?';   // corrupted RTC on remote node
     if (sec < 60)   return `${sec}s ago`;
     if (sec < 3600) return `${Math.floor(sec/60)}m ago`;
-    return `${Math.floor(sec/3600)}h ago`;
+    if (sec < 86400) return `${Math.floor(sec/3600)}h ago`;
+    return `${Math.floor(sec/86400)}d ago`;         // cap at days; hours gets unreadable
   }
   el.innerHTML = nodes.map(n => {
     const batt = (n.battery_level != null && !isNaN(n.battery_level)) ? parseInt(n.battery_level) : null;
@@ -2205,9 +2258,9 @@ function _renderNodeCards(nodes, totalCount) {
     const staleTag = isStale ? '<span style="font-size:8px;color:var(--muted);margin-left:3px" title="Not heard in >15 minutes">stale</span>' : '';
     return `<div class="node-card" style="${staleStyle}">
       <div class="node-name" style="display:flex;align-items:center;gap:4px">
-        <span onclick="fillTo('${escHtml(n.node_id)}')" title="Click to fill compose-to with this node ID" style="cursor:pointer;flex:1">${escHtml(n.display_name)}${staleTag}</span>
+        <span onclick="fillTo('${escHtml(n.node_id)}')" title="Click to fill compose-to with this node ID" style="cursor:pointer;flex:1">${escHtml(n.display_name)}${nodeTypeBadge(n)}${staleTag}</span>
         <span style="font-size:9px;color:${adapterColor}">${adapterLabel}</span>
-        ${n._adapter?.includes('meshcore') ? `<button class="node-ping-btn" style="margin-left:2px" onclick="fillTo('${escHtml(n.node_id)}')" title="Direct message this node (fills compose To: field)">✉ DM</button><button class="node-ping-btn" onclick="pingNode('${escHtml(n._adapter)}','${escHtml(n.node_id)}',this)" title="Send traceroute (MeshCore CMD_SEND_TRACEROUTE — response appears in message feed)">📡 Trace</button>` : ''}
+        ${n._adapter?.includes('meshcore') ? `${nodeMessageable(n) ? `<button class="node-ping-btn" style="margin-left:2px" onclick="fillTo('${escHtml(n.node_id)}')" title="Direct message this node (fills compose To: field)">✉ DM</button>` : ''}<button class="node-ping-btn" onclick="pingNode('${escHtml(n._adapter)}','${escHtml(n.node_id)}',this)" title="Send a directed trace via this node (probe routed through it; result appears in the feed and as a green path on the map)">📡 Trace</button>` : ''}
       </div>
       <div class="node-id">${escHtml(n.node_id)}${n.name_source ? ` <span style="font-size:8px;color:var(--muted)">[${escHtml(n.name_source)}]</span>` : ''}</div>
       <div class="node-stats">
@@ -2424,6 +2477,8 @@ function adapterMeta(name) {
   if (n.includes('reticulum') || n.includes('rns')) return {icon:'RNS', label:'Reticulum', cls:'rns', toggle:'RNS'};
   if (n.includes('aredn') || n.includes('asterisk') || n.includes('ami') || n.includes('pbx'))
     return {icon:'PBX', label:'AREDN/PBX', cls:'pbx', toggle:'PBX', voice:true};
+  if (n.includes('adsb') || n.includes('ais'))
+    return {icon:n.includes('adsb')?'ADSB':(n.includes('aishub')?'AISH':(n.includes('aisstream')?'AISS':'AIS')), label:n.includes('adsb')?'ADS-B':(n.includes('aishub')?'AISHub':(n.includes('aisstream')?'AISstream':'AIS')), cls:'', toggle:'', rxOnly:true};
   return {icon:name.slice(0,4).toUpperCase(), label:name, cls:'', toggle:name.slice(0,4).toUpperCase()};
 }
 
@@ -2450,11 +2505,16 @@ async function buildDynamicUI() {
       </div>`;
     }).join('');
 
-    // Build compose adapter toggles
+    // Build compose adapter toggles — preserve existing on/off state if already built
     const compose = document.getElementById('compose-adapters');
-    compose.innerHTML = knownAdapters.map(name => {
+    const prevState = {};
+    compose.querySelectorAll('.adapter-toggle').forEach(el => {
+      prevState[el.dataset.adapter] = el.classList.contains('on');
+    });
+    compose.innerHTML = knownAdapters.filter(name => !adapterMeta(name).rxOnly).map(name => {
       const m = adapterMeta(name);
-      const startOn = !m.voice;
+      // Preserve user's toggle state; new adapters start off
+      const startOn = name in prevState ? prevState[name] : false;
       return `<div class="adapter-toggle ${startOn ? 'on' : ''} ${m.cls}" data-adapter="${name}" onclick="toggleAdapter(this)">${m.toggle}</div>`;
     }).join('');
 
@@ -2688,7 +2748,7 @@ async function timeSyncBroadcast() {
   const r = await fetch(url, {method:'POST'});
   const d = r.ok ? await r.json() : null;
   const synced = d ? Object.keys(d.synced || {}).filter(k => d.synced[k]) : [];
-  toast(r.ok ? `Time sync sent${synced.length ? ' · protocol sync: ' + synced.join(', ') : ''}` : 'Failed', r.ok ? 'ok' : 'err');
+  toast(r.ok ? `Time message sent${synced.length ? ' · own radio clock set: ' + synced.join(', ') : ''} (mesh protocols can't set other nodes' clocks remotely)` : 'Failed', r.ok ? 'ok' : 'err');
 }
 async function pingNode(adapter, nodeId, btn) {
   if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
@@ -2700,7 +2760,7 @@ async function pingNode(adapter, nodeId, btn) {
     });
     const d = await r.json();
     if (d.status === 'sent') {
-      toast(`Traceroute sent to ${nodeId} — path will appear in 📦 packet log`, 'ok');
+      toast(d.detail || `Trace probe sent — replies appear in the feed and as green paths on the map`, 'ok');
     } else {
       toast(`Traceroute failed: ${d.detail || d.status}`, 'err');
     }

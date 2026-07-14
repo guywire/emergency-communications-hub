@@ -58,7 +58,7 @@ class APRSISAdapter(Adapter):
         self._beacon_lat: float | None = config.get("beacon_lat") or config.get("base_lat") or None
         self._beacon_lon: float | None = config.get("beacon_lon") or config.get("base_lon") or None
         self._beacon_symbol = config.get("beacon_symbol", "/-")   # /- = house
-        self._beacon_comment = config.get("beacon_comment", "ECH Emergency Hub")
+        self._beacon_comment = config.get("beacon_comment", "SignalMatrix")
         self._beacon_interval = int(config.get("beacon_interval_sec", 0))  # 0 = disabled
         self._ais: aprslib.IS | None = None
         self._thread: threading.Thread | None = None
@@ -75,6 +75,11 @@ class APRSISAdapter(Adapter):
         self._loop = asyncio.get_running_loop()
         log.info("APRS-IS %s: connecting to %s:%d as %s",
                  self.name, self._server, self._port, self._callsign)
+
+        # Suppress aprslib's own verbose parse-error logging — it logs individual
+        # packet decode failures at WARNING which floods journalctl on busy IS feeds.
+        logging.getLogger("aprslib").setLevel(logging.ERROR)
+        logging.getLogger("aprslib.parsing").setLevel(logging.ERROR)
 
         self._ais = aprslib.IS(
             self._callsign,
@@ -258,6 +263,29 @@ class APRSISAdapter(Adapter):
             self._process_packet(packet),
         )
 
+    @staticmethod
+    def _classify_station(packet: dict, fmt: str) -> str | None:
+        """APRS device-type heuristic from the position symbol + packet format.
+        Autonomous: DIGI (#), WX (_ or weather packets), IGATE (& = gateway
+        diamond), RPTR (r), OBJECT (rebroadcast by a gate). Human-likely:
+        MOBILE (car/van/truck/boat/person symbols), FIXED (house symbols)."""
+        if fmt == "object":
+            return "OBJECT"
+        sym = str(packet.get("symbol", "") or "")
+        if fmt in ("wx", "weather") or sym == "_":
+            return "WX"
+        if sym == "#":
+            return "DIGI"
+        if sym == "&":
+            return "IGATE"
+        if sym == "r":
+            return "RPTR"
+        if sym in (">", "<", "[", "b", "k", "v", "j", "u", "R", "Y", "s", "=", "O", "'"):
+            return "MOBILE"
+        if sym in ("-", "y", "x"):
+            return "FIXED"
+        return None
+
     async def _process_packet(self, packet: dict) -> None:
         self._packet_count += 1
         try:
@@ -287,6 +315,14 @@ class APRSISAdapter(Adapter):
                 node.last_heard = now
                 node.lat = float(lat)
                 node.lon = float(lon)
+                # Classify the station from its APRS symbol so the operator can
+                # tell autonomous infrastructure (digis, WX stations, iGates —
+                # nobody reads messages sent there) from stations likely to
+                # have a human behind them. Objects are rebroadcasts by a gate,
+                # inherently unattended.
+                st = self._classify_station(packet, fmt)
+                if st:
+                    node.meta["node_type"] = st
 
             # Position-only beacons → node cache only, not message stream
             if fmt in self._POS_FORMATS:
@@ -345,7 +381,12 @@ class APRSISAdapter(Adapter):
             text = packet.get("message_text", "").strip()
             if not text:
                 return ""
-            if addresse and addresse.upper() != self._callsign.upper().split("-")[0]:
+            # Check if addressed to any of our SSIDs (base call or full callsign with SSID)
+            own_base = self._callsign.upper().split("-")[0]
+            own_full = self._callsign.upper()
+            addr_upper = addresse.upper()
+            is_for_us = addr_upper in (own_base, own_full)
+            if addresse and not is_for_us:
                 return f"MSG {from_id}→{addresse}: {text}"
             return f"MSG {from_id}: {text}"
 
@@ -388,6 +429,28 @@ class APRSISAdapter(Adapter):
             if wind_speed is not None:
                 wx_parts.append(f"wind {wind_speed:.0f}mph")
             return f"WX {from_id}: " + " ".join(wx_parts) if wx_parts else ""
+
+        elif fmt == "telemetry":
+            telem = packet.get("telem", {})
+            seq   = telem.get("seq", "?")
+            vals  = telem.get("vals", [])
+            bits  = telem.get("bits", "")
+            parts = [f"#{seq}"]
+            for i, v in enumerate(vals[:5], start=1):
+                if v not in (None, ""):
+                    parts.append(f"A{i}={v}")
+            if bits and bits != "00000000":
+                parts.append(f"D={bits}")
+            return f"TELEM {from_id}: " + " ".join(parts)
+
+        elif fmt == "telemetry-message":
+            # Parameter/unit/eqns/bits configuration frames — log as status
+            parm = packet.get("parm", {})
+            unit = packet.get("unit", {})
+            if parm:
+                labels = ",".join(str(v) for v in list(parm.values())[:5])
+                return f"TELEM-CFG {from_id}: params={labels}"
+            return ""
 
         elif fmt == "bulletin":
             text = packet.get("message_text", "").strip()

@@ -44,6 +44,7 @@ Config (config.yaml)
     rigctld_port: 4532
     poll_interval: 2.0       # seconds between freq/mode polls
     auto_fill_hamlog: true   # push updates to ham log via WS
+    max_ptt_seconds: 120     # auto-unkey safety timeout while transmitting
 """
 from __future__ import annotations
 
@@ -120,7 +121,12 @@ class CATController:
         self._port            = int(cat_cfg.get("rigctld_port", 4532))
         self._poll_interval   = float(cat_cfg.get("poll_interval", 2.0))
         self._auto_fill       = bool(cat_cfg.get("auto_fill_hamlog", True))
+        # Safety: rigctld has no hardware VOX/timeout of its own, so an app crash or
+        # dropped WS mid-transmission could leave the rig keyed indefinitely. Auto-unkey
+        # after this many seconds unless the caller re-keys.
+        self._max_ptt_seconds = float(cat_cfg.get("max_ptt_seconds", 120))
         self._router          = router
+        self._ptt_watchdog: asyncio.Task | None = None
 
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
@@ -132,6 +138,7 @@ class CATController:
         self._poll_task: asyncio.Task | None = None
         self._last_update: float = 0.0
         self._error: str       = ""
+        self._ptt: bool        = False
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -150,6 +157,10 @@ class CATController:
                 await self._poll_task
             except asyncio.CancelledError:
                 pass
+        if self._ptt_watchdog:
+            self._ptt_watchdog.cancel()
+        if self._ptt:
+            await self.set_ptt(False)
         await self._disconnect()
 
     # ── Connection ────────────────────────────────────────────────────────────
@@ -313,6 +324,51 @@ class CATController:
             self._error = str(exc)
             return False
 
+    async def get_ptt(self) -> bool:
+        """Query current PTT state directly from the rig (not just cached)."""
+        if not self._connected:
+            return False
+        try:
+            resp = await self._cmd("t")
+            self._ptt = resp.strip() == "1"
+        except Exception as exc:
+            log.debug("CAT: get_ptt error: %s", exc)
+        return self._ptt
+
+    async def set_ptt(self, on: bool) -> bool:
+        """Key (True) or unkey (False) the transmitter via rigctld.
+
+        Keying arms an auto-unkey watchdog (max_ptt_seconds) so a lost
+        connection or forgotten unkey never leaves the rig transmitting.
+        """
+        if not self._connected:
+            return False
+        try:
+            await self._cmd(f"T {1 if on else 0}")
+            self._ptt = on
+            if self._ptt_watchdog:
+                self._ptt_watchdog.cancel()
+                self._ptt_watchdog = None
+            if on:
+                self._ptt_watchdog = asyncio.create_task(self._ptt_timeout_guard())
+            if self._router:
+                await self._router.broadcast_ws_event("cat_update", self._payload())
+            log.info("CAT: PTT %s", "ON" if on else "OFF")
+            return True
+        except Exception as exc:
+            log.warning("CAT: set_ptt error: %s", exc)
+            self._error = str(exc)
+            return False
+
+    async def _ptt_timeout_guard(self) -> None:
+        try:
+            await asyncio.sleep(self._max_ptt_seconds)
+            log.warning("CAT: PTT held for %.0fs — auto-unkeying (safety timeout)",
+                        self._max_ptt_seconds)
+            await self.set_ptt(False)
+        except asyncio.CancelledError:
+            pass
+
     # ── Status / payload ──────────────────────────────────────────────────────
 
     def _payload(self) -> dict[str, Any]:
@@ -329,6 +385,7 @@ class CATController:
             "mode":      ech_mode,
             "bw":        self._bw,
             "rig_info":  self._rig_info,
+            "ptt":       self._ptt,
         }
 
     def status(self) -> dict[str, Any]:

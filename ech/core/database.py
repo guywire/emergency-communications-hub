@@ -40,6 +40,18 @@ CREATE INDEX IF NOT EXISTS idx_messages_timestamp
 CREATE INDEX IF NOT EXISTS idx_messages_adapter
     ON messages (source_adapter, timestamp DESC);
 
+-- Hourly message-count rollup, written alongside every save_message() insert.
+-- Survives purge_old_messages() deleting the raw rows, so analytics (message
+-- volume by adapter) still has history well past each adapter's retention
+-- window — e.g. "100 APRS messages yesterday" even though APRS bodies are
+-- purged after 12h.
+CREATE TABLE IF NOT EXISTS message_stats_hourly (
+    bucket   TEXT NOT NULL,   -- '2026-07-13T14:00:00Z'
+    adapter  TEXT NOT NULL,
+    count    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (bucket, adapter)
+);
+
 CREATE TABLE IF NOT EXISTS contacts (
     id              TEXT PRIMARY KEY,
     display_name    TEXT NOT NULL,
@@ -106,6 +118,17 @@ CREATE TABLE IF NOT EXISTS log_entries (
 
 CREATE INDEX IF NOT EXISTS idx_log_timestamp ON log_entries (timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token);
+
+CREATE TABLE IF NOT EXISTS mesh_nodes (
+    node_id      TEXT NOT NULL,
+    adapter      TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    lat          REAL,
+    lon          REAL,
+    last_heard   TEXT,
+    meta_json    TEXT,
+    PRIMARY KEY (node_id, adapter)
+);
 
 CREATE TABLE IF NOT EXISTS anomaly_findings (
     id              TEXT PRIMARY KEY,
@@ -192,6 +215,29 @@ CREATE TABLE IF NOT EXISTS bot_activity (
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_activity_ts ON bot_activity (timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS skywarn_reports (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp      TEXT NOT NULL,
+    from_id        TEXT NOT NULL,
+    from_display   TEXT NOT NULL,
+    callsign       TEXT NOT NULL,
+    adapter        TEXT NOT NULL DEFAULT '',
+    source_channel TEXT NOT NULL DEFAULT '',
+    spotter_id     TEXT,
+    location       TEXT,
+    event_type     TEXT,
+    temp_f         TEXT,
+    wind_mph       TEXT,
+    wind_dir       TEXT,
+    hail_size      TEXT,
+    precip         TEXT,
+    notes          TEXT,
+    completed      INTEGER NOT NULL DEFAULT 0,
+    raw_text       TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_skywarn_ts ON skywarn_reports (timestamp DESC);
 """
 
 
@@ -203,6 +249,8 @@ class Database:
     async def connect(self) -> None:
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         await self._db.executescript(SCHEMA)
         await self._db.commit()
         await self._migrate()
@@ -232,6 +280,19 @@ class Database:
             except Exception:
                 pass  # column already exists
 
+        # Add newer skywarn_reports columns if upgrading from an older schema
+        for col in ("spotter_id", "location", "event_type", "hail_size"):
+            try:
+                await self._db.execute(f"ALTER TABLE skywarn_reports ADD COLUMN {col} TEXT")
+                await self._db.commit()
+            except Exception:
+                pass  # column already exists (or table doesn't exist yet — CREATE below adds it)
+        try:
+            await self._db.execute("ALTER TABLE skywarn_reports ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")
+            await self._db.commit()
+        except Exception:
+            pass  # column already exists
+
         # Prune expired sessions on startup
         await self.prune_expired_sessions()
 
@@ -255,7 +316,7 @@ class Database:
             raw["_via_mqtt"] = True
         if msg.msg_type and msg.msg_type != "text":
             raw["_msg_type"] = msg.msg_type
-        await self._db.execute(
+        cur = await self._db.execute(
             """
             INSERT OR IGNORE INTO messages
                 (id, source_adapter, source_channel, from_id, from_display,
@@ -272,6 +333,18 @@ class Database:
                 json.dumps(raw) if raw else None,
             ),
         )
+        # Only bump the rollup when this id wasn't already stored — the id-based
+        # dedup above (belt-and-suspenders behind Router._is_duplicate) would
+        # otherwise let a retried/duplicate save double-count the same message.
+        if cur.rowcount:
+            bucket = msg.timestamp.strftime("%Y-%m-%dT%H:00:00Z")
+            await self._db.execute(
+                """
+                INSERT INTO message_stats_hourly (bucket, adapter, count) VALUES (?, ?, 1)
+                ON CONFLICT(bucket, adapter) DO UPDATE SET count = count + 1
+                """,
+                (bucket, msg.source_adapter),
+            )
         await self._db.commit()
 
     async def get_messages(
@@ -282,6 +355,7 @@ class Database:
         since: str | None = None,
         priority_min: int | None = None,
         from_id: str | None = None,
+        per_adapter_limit: int | None = None,
     ) -> list[dict]:
         clauses, params = [], []
         if adapter:
@@ -298,17 +372,34 @@ class Database:
             params.append(from_id)
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        params += [limit, offset]
 
-        async with self._db.execute(
-            f"SELECT * FROM messages {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-            params,
-        ) as cur:
+        if per_adapter_limit and not adapter:
+            # A flat ORDER BY timestamp DESC LIMIT lets one high-volume adapter
+            # (an internet APRS-IS gateway can run 8000+/day) crowd every other
+            # adapter's messages out of the window entirely — the "most recent
+            # N" can silently be 100% one adapter's noise. Cap each adapter's
+            # contribution first (window function), so every adapter is
+            # guaranteed representation regardless of relative volume, then
+            # take the most recent `limit` of that balanced set.
+            query = (
+                f"SELECT * FROM ("
+                f"  SELECT *, ROW_NUMBER() OVER ("
+                f"    PARTITION BY source_adapter ORDER BY timestamp DESC"
+                f"  ) AS _rn FROM messages {where}"
+                f") WHERE _rn <= ? ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+            )
+            run_params = params + [per_adapter_limit, limit, offset]
+        else:
+            query = f"SELECT * FROM messages {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+            run_params = params + [limit, offset]
+
+        async with self._db.execute(query, run_params) as cur:
             rows = await cur.fetchall()
         import json as _json
         result = []
         for r in rows:
             row = dict(r)
+            row.pop("_rn", None)  # window-function ordinal from the per-adapter-fairness query; not real data
             # Extract routing fields saved by save_message
             raw = _json.loads(row.get("raw_json") or "{}")
             row["hop_count"]        = raw.pop("_hop_count", None)
@@ -347,6 +438,64 @@ class Database:
         async with self._db.execute("SELECT COUNT(*) FROM messages") as cur:
             row = await cur.fetchone()
         return row[0]
+
+    # ── Analytics ────────────────────────────────────────────────────────────
+
+    async def get_message_time_buckets(self, hours: int = 48) -> list[dict]:
+        """Message counts per hour per adapter, from the message_stats_hourly
+        rollup rather than the raw messages table — this survives per-adapter
+        retention purging, so a 7-day view still shows e.g. APRS volume even
+        though APRS bodies are purged after 12h."""
+        from datetime import datetime, timedelta, timezone
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:00:00Z")
+        async with self._db.execute(
+            """
+            SELECT bucket, adapter, count
+            FROM message_stats_hourly
+            WHERE bucket >= ?
+            ORDER BY bucket ASC
+            """,
+            (since,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_command_usage_stats(self, hours: int | None = None) -> list[dict]:
+        clause, params = "", []
+        if hours is not None:
+            from datetime import datetime, timedelta, timezone
+            since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+            clause = "WHERE timestamp >= ?"
+            params.append(since)
+        async with self._db.execute(
+            f"""
+            SELECT command, COUNT(*) AS count
+            FROM bot_activity
+            {clause}
+            GROUP BY command
+            ORDER BY count DESC
+            """,
+            params,
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_anomaly_time_buckets(self, hours: int = 48) -> list[dict]:
+        from datetime import datetime, timedelta, timezone
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        async with self._db.execute(
+            """
+            SELECT strftime('%Y-%m-%dT%H:00:00Z', timestamp) AS bucket,
+                   severity, COUNT(*) AS count
+            FROM anomaly_findings
+            WHERE timestamp >= ?
+            GROUP BY bucket, severity
+            ORDER BY bucket ASC
+            """,
+            (since,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
 
     async def clear_messages(self) -> int:
         async with self._db.execute("SELECT COUNT(*) FROM messages") as cur:
@@ -436,7 +585,17 @@ class Database:
             (limit,),
         ) as cur:
             rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        import json as _json
+        results = []
+        for r in rows:
+            d = dict(r)
+            raw = d.pop("evidence_json", None)
+            try:
+                d["evidence"] = _json.loads(raw) if raw else {}
+            except Exception:
+                d["evidence"] = {}
+            results.append(d)
+        return results
 
     async def acknowledge_anomaly(self, finding_id: str) -> None:
         await self._db.execute(
@@ -444,6 +603,62 @@ class Database:
             (finding_id,),
         )
         await self._db.commit()
+
+    async def get_anomaly(self, finding_id: str) -> dict | None:
+        async with self._db.execute(
+            "SELECT * FROM anomaly_findings WHERE id = ?", (finding_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def merge_anomaly_evidence(self, finding_id: str, extra: dict) -> dict | None:
+        """Merge keys into a finding's evidence_json (used by anomaly verification
+        to attach live-trace results to an existing finding)."""
+        import json as _json
+        row = await self.get_anomaly(finding_id)
+        if row is None:
+            return None
+        try:
+            evidence = _json.loads(row.get("evidence_json") or "{}")
+        except Exception:
+            evidence = {}
+        evidence.update(extra)
+        await self._db.execute(
+            "UPDATE anomaly_findings SET evidence_json = ? WHERE id = ?",
+            (_json.dumps(evidence), finding_id),
+        )
+        await self._db.commit()
+        row["evidence_json"] = _json.dumps(evidence)
+        return row
+
+    async def get_hop_stats(self, adapter: str, from_id: str | None = None,
+                            hours: int = 168) -> dict:
+        """Hop-count distribution from persisted messages (raw_json $._hop_count) —
+        the durable baseline the anomaly engine compares against, instead of its
+        20-message in-memory window that resets on every restart."""
+        from datetime import datetime, timedelta, timezone
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        clauses = ["source_adapter = ?", "timestamp >= ?",
+                   "json_extract(raw_json, '$._hop_count') IS NOT NULL"]
+        params: list = [adapter, since]
+        if from_id:
+            clauses.append("from_id = ?")
+            params.append(from_id)
+        async with self._db.execute(
+            f"SELECT CAST(json_extract(raw_json, '$._hop_count') AS INTEGER) AS hc "
+            f"FROM messages WHERE {' AND '.join(clauses)} ORDER BY hc",
+            params,
+        ) as cur:
+            rows = await cur.fetchall()
+        hops = [r["hc"] for r in rows if r["hc"] is not None and 0 <= r["hc"] <= 64]
+        if not hops:
+            return {"count": 0, "median": None, "p95": None, "max": None}
+        return {
+            "count": len(hops),
+            "median": hops[len(hops) // 2],
+            "p95": hops[min(int(len(hops) * 0.95), len(hops) - 1)],
+            "max": hops[-1],
+        }
 
     # ── KV store ─────────────────────────────────────────────────────────
 
@@ -541,7 +756,74 @@ class Database:
             log.info("Database: pruned %d expired session(s)", cur.rowcount)
         return cur.rowcount
 
+    async def purge_old_messages(self, retention: dict[str, int]) -> int:
+        """Delete messages older than per-adapter retention windows.
+
+        retention: {adapter_pattern: hours}  e.g. {"aprs": 12, "meshcore": 36}
+        Patterns are prefix-matched against source_adapter (case-insensitive).
+        Returns total rows deleted.
+        """
+        from datetime import datetime, timezone, timedelta
+        total = 0
+        for pattern, hours in retention.items():
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+            cur = await self._db.execute(
+                "DELETE FROM messages WHERE LOWER(source_adapter) LIKE ? AND timestamp < ?",
+                (f"{pattern.lower()}%", cutoff),
+            )
+            if cur.rowcount:
+                log.info("Database: purged %d messages from %s* (>%dh)", cur.rowcount, pattern, hours)
+            total += cur.rowcount
+        if total:
+            await self._db.commit()
+            await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return total
+
+    async def purge_old_stats(self, days: int = 90) -> int:
+        """Trim message_stats_hourly beyond `days`. Independent of (and much
+        longer-lived than) per-adapter message retention — one row per
+        adapter per hour is negligible, so history is kept far longer than
+        the raw message bodies it summarizes."""
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:00:00Z")
+        cur = await self._db.execute(
+            "DELETE FROM message_stats_hourly WHERE bucket < ?", (cutoff,)
+        )
+        if cur.rowcount:
+            await self._db.commit()
+            log.info("Database: purged %d old message_stats_hourly row(s) (>%dd)", cur.rowcount, days)
+        return cur.rowcount
+
     # ── Simulation ────────────────────────────────────────────────────────
+
+    async def upsert_mesh_node(self, adapter: str, node) -> None:
+        """Persist a MeshNode to the mesh_nodes table."""
+        import json as _json
+        meta = _json.dumps(node.meta) if getattr(node, "meta", None) else None
+        lh = node.last_heard.isoformat() if getattr(node, "last_heard", None) else None
+        await self._db.execute(
+            """INSERT INTO mesh_nodes(node_id, adapter, display_name, lat, lon, last_heard, meta_json)
+               VALUES(?,?,?,?,?,?,?)
+               ON CONFLICT(node_id, adapter) DO UPDATE SET
+                 display_name = excluded.display_name,
+                 lat          = COALESCE(excluded.lat, lat),
+                 lon          = COALESCE(excluded.lon, lon),
+                 last_heard   = COALESCE(excluded.last_heard, last_heard),
+                 meta_json    = COALESCE(excluded.meta_json, meta_json)""",
+            (node.node_id, adapter, node.display_name,
+             getattr(node, "lat", None), getattr(node, "lon", None), lh, meta),
+        )
+        await self._db.commit()
+
+    async def get_mesh_nodes(self, adapter: str) -> list[dict]:
+        """Return all persisted nodes for a given adapter."""
+        async with self._db.execute(
+            "SELECT node_id, display_name, lat, lon, last_heard, meta_json "
+            "FROM mesh_nodes WHERE adapter=?", (adapter,)
+        ) as cur:
+            rows = await cur.fetchall()
+            cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
 
     async def get_sim_nodes(self) -> list[dict]:
         async with self._db.execute("SELECT * FROM sim_nodes ORDER BY adapter,display_name") as cur:
@@ -676,6 +958,75 @@ class Database:
             row = await cur.fetchone()
             last = dict(row) if row else None
         return {"total": total, "unique_callers": unique, "by_command": by_cmd, "last": last}
+
+    # ── SKYWARN spotter reports ─────────────────────────────────────────────
+
+    async def save_skywarn_report(self, from_id: str, from_display: str, callsign: str,
+                                  adapter: str, source_channel: str, raw_text: str,
+                                  spotter_id: str | None = None, location: str | None = None,
+                                  event_type: str | None = None,
+                                  temp_f: str | None = None, wind_mph: str | None = None,
+                                  wind_dir: str | None = None, hail_size: str | None = None,
+                                  precip: str | None = None, notes: str | None = None) -> None:
+        from datetime import datetime, timezone
+        await self._db.execute(
+            """INSERT INTO skywarn_reports(timestamp,from_id,from_display,callsign,adapter,
+               source_channel,spotter_id,location,event_type,temp_f,wind_mph,wind_dir,hail_size,precip,notes,raw_text)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (datetime.now(timezone.utc).isoformat(), from_id, from_display, callsign.upper(),
+             adapter, source_channel, spotter_id, location, event_type, temp_f, wind_mph,
+             wind_dir, hail_size, precip, notes, raw_text[:500])
+        )
+        await self._db.commit()
+
+    async def update_skywarn_report(self, report_id: int, fields: dict) -> dict | None:
+        allowed = {
+            "callsign", "spotter_id", "location", "event_type", "temp_f",
+            "wind_mph", "wind_dir", "hail_size", "precip", "notes", "raw_text",
+        }
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if updates:
+            set_clause = ", ".join(f"{k} = :{k}" for k in updates)
+            updates["_id"] = report_id
+            await self._db.execute(
+                f"UPDATE skywarn_reports SET {set_clause} WHERE id = :_id", updates
+            )
+            await self._db.commit()
+        async with self._db.execute(
+            "SELECT * FROM skywarn_reports WHERE id = ?", (report_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def set_skywarn_completed(self, report_id: int, completed: bool) -> dict | None:
+        await self._db.execute(
+            "UPDATE skywarn_reports SET completed = ? WHERE id = ?", (int(completed), report_id)
+        )
+        await self._db.commit()
+        async with self._db.execute(
+            "SELECT * FROM skywarn_reports WHERE id = ?", (report_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def delete_skywarn_report(self, report_id: int) -> bool:
+        cur = await self._db.execute("DELETE FROM skywarn_reports WHERE id = ?", (report_id,))
+        await self._db.commit()
+        return cur.rowcount > 0
+
+    async def get_skywarn_reports(self, limit: int = 200, from_id: str | None = None) -> list[dict]:
+        if from_id:
+            async with self._db.execute(
+                "SELECT * FROM skywarn_reports WHERE from_id=? ORDER BY timestamp DESC LIMIT ?",
+                (from_id, limit)
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with self._db.execute(
+                "SELECT * FROM skywarn_reports ORDER BY timestamp DESC LIMIT ?", (limit,)
+            ) as cur:
+                rows = await cur.fetchall()
+        return [dict(r) for r in rows]
 
     # ── QSO log ───────────────────────────────────────────────────────────
 

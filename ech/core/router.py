@@ -45,11 +45,15 @@ class Router:
         self._adapter_tasks: dict[str, asyncio.Task] = {}  # name → supervise task
         self._metrics_task: asyncio.Task | None = None
         self._anomaly_drain_task: asyncio.Task | None = None
+        self._purge_task: asyncio.Task | None = None
+        # Message retention: {adapter_prefix: hours}; populated by load_config()
+        self._msg_retention: dict[str, int] = {}
 
     # ── Adapter management ────────────────────────────────────────────────
 
     def register(self, adapter: Adapter) -> None:
         self._adapters[adapter.name] = adapter
+        adapter._db = self._db
         adapter._router_notify = self._handle_delivery_status
         # Let mesh adapters push a lightweight "nodes_updated" WS event when their
         # node count changes so the UI refreshes the node panel without polling.
@@ -104,6 +108,9 @@ class Router:
             self._anomaly_drain_task = asyncio.create_task(
                 self._drain_anomaly_queue(), name="anomaly-drain"
             )
+        self._purge_task = asyncio.create_task(
+            self._purge_loop(), name="purge-loop"
+        )
         log.info("Router: started, supervising %d adapter(s)", len(self._adapters))
 
     async def stop(self) -> None:
@@ -111,6 +118,8 @@ class Router:
             self._metrics_task.cancel()
         if self._anomaly_drain_task:
             self._anomaly_drain_task.cancel()
+        if self._purge_task:
+            self._purge_task.cancel()
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
@@ -150,8 +159,9 @@ class Router:
             M.record_message_dropped(msg.source_adapter, "dedup")
             return
 
-        # Persist
-        await self._db.save_message(msg)
+        # Only persist text messages — position/telemetry flow to WS only (map/anomaly)
+        if msg.msg_type == "text":
+            await self._db.save_message(msg)
 
         # Update metrics
         M.record_message_received(msg.source_adapter, int(msg.priority))
@@ -241,6 +251,21 @@ class Router:
                 return
             except Exception as exc:
                 log.debug("Metrics loop error: %s", exc)
+
+    async def _purge_loop(self) -> None:
+        """Hourly: delete messages past their retention window."""
+        _PURGE_INTERVAL = 3600.0
+        await asyncio.sleep(300)  # wait 5 min after startup before first run
+        while True:
+            try:
+                if self._msg_retention:
+                    await self._db.purge_old_messages(self._msg_retention)
+                await self._db.purge_old_stats()
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                log.warning("Purge loop error: %s", exc)
+            await asyncio.sleep(_PURGE_INTERVAL)
 
     async def _drain_anomaly_queue(self) -> None:
         """Consume findings queued by process_contact/record_packet and broadcast to WS."""
@@ -357,7 +382,10 @@ class Router:
         NormalizedMessage.raw.  MeshCore uses ``raw["channel_idx"]`` to route
         a reply back to the originating channel instead of the adapter default.
         """
-        targets = adapter_names or list(self._adapters.keys())
+        if adapter_names is None:
+            targets = [n for n, a in self._adapters.items() if getattr(a, "send_enabled", True)]
+        else:
+            targets = adapter_names
         results = {}
         for name in targets:
             adapter = self._adapters.get(name)
@@ -366,9 +394,13 @@ class Router:
                 continue
             msg = NormalizedMessage(
                 source_adapter=name,
-                source_channel="outbound",
+                # Adapters that resolve a specific TX channel (e.g. MeshCore honouring
+                # a channel_name/channel_idx hint) overwrite this in-place during
+                # send() with the channel actually used; this is just the fallback
+                # for adapters that don't track a channel concept.
+                source_channel=getattr(adapter, "tx_channel", None) or "outbound",
                 from_id="local",
-                from_display="ECH Operator",
+                from_display="SM Operator",
                 to_id=to_id,
                 body=body,
                 priority=priority,
@@ -392,7 +424,10 @@ class Router:
         Like send() but returns {adapter: {"ok": bool, "msg_id": str}} so the
         UI can track each message and update its status when ACKs arrive.
         """
-        targets = adapter_names or list(self._adapters.keys())
+        if adapter_names is None:
+            targets = [n for n, a in self._adapters.items() if getattr(a, "send_enabled", True)]
+        else:
+            targets = adapter_names
         results = {}
         for name in targets:
             adapter = self._adapters.get(name)
@@ -407,7 +442,7 @@ class Router:
                 source_adapter=name,
                 source_channel=source_channel,
                 from_id="local",
-                from_display="ECH Operator",
+                from_display="SM Operator",
                 to_id=to_id,
                 body=body,
                 priority=priority,
@@ -446,4 +481,6 @@ class Router:
         adapter = self._adapters.get(adapter_name)
         if not adapter:
             return []
-        return [(n.to_dict()) for n in await adapter.nodes()]
+        nodes = await adapter.nodes()
+        nodes.sort(key=lambda n: n.last_heard.timestamp() if n.last_heard else 0, reverse=True)
+        return [n.to_dict() for n in nodes]

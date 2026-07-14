@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ECH — Settings</title>
+<title>SM — Settings</title>
 
 <style>
 :root{--bg:#0d1117;--bg2:#161b22;--bg3:#1c2230;--border:#30363d;--border2:#444c56;--text:#e6edf3;--muted:#8b949e;--dim:#484f58;--green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;--mono:'IBM Plex Mono','Cascadia Code','Consolas','Liberation Mono',monospace;--sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif}
@@ -52,7 +52,7 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
 .severity-checks{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
 .severity-checks label{display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text)}
 .severity-checks input[type=checkbox]{width:auto;margin:0}
-#save-toast{font-family:var(--mono);font-size:11px;color:var(--green);display:none;margin-left:8px}
+#save-toast{font-family:var(--mono);font-size:12px;color:#111;background:var(--green);padding:6px 14px;border-radius:4px;display:none;position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,.4)}
 
 .svc-row { display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border) }
 .svc-row:last-child { border-bottom:none }
@@ -68,8 +68,8 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
 </head>
 <body>
 <div id="header">
-  <a class="back" href="/">← ECH</a>
-  <div class="logo">▣ ECH / Settings</div>
+  <a class="back" href="/">← SM</a>
+  <div class="logo">▣ SM / Settings</div>
   <div class="spacer"></div>
   <span id="user-display" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></span>
 </div>
@@ -108,7 +108,7 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
         <button class="btn btn-green" onclick="saveBaseLocation()">Save location</button>
         <button class="btn btn-blue" onclick="detectLocation()">Use my GPS</button>
-        <span id="loc-save-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none">Saved — restart ECH to apply to mock adapters</span>
+        <span id="loc-save-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none">Saved — restart SM to apply to mock adapters</span>
       </div>
       <div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--muted)">
         Affects: map default center, mock node positions, APRS beacon position. Requires ECH restart to reposition mock nodes.
@@ -447,6 +447,65 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     </div>
   </div>
 
+  <!-- ── CAT radio control ────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('cat-body'); loadCatConfig()">
+      <span class="section-title">CAT RADIO CONTROL</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">rigctld / Hamlib — freq, mode, PTT</span>
+    </div>
+    <div id="cat-body" class="section-body" style="display:none">
+      <div id="cat-status-panel" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:12px">Loading…</div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <label style="margin:0">Enable CAT control</label>
+        <label class="toggle">
+          <input type="checkbox" id="cat-enabled">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="row3">
+        <div>
+          <label>rigctld host</label>
+          <input type="text" id="cat-host" placeholder="localhost">
+        </div>
+        <div>
+          <label>rigctld port</label>
+          <input type="number" id="cat-port" placeholder="4532">
+        </div>
+        <div>
+          <label>Poll interval (sec)</label>
+          <input type="number" id="cat-poll" min="0.5" step="0.5" placeholder="2.0">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>Max PTT hold (sec) <span style="color:var(--dim)">— auto-unkey safety timeout</span></label>
+          <input type="number" id="cat-max-ptt" min="5" step="5" placeholder="120">
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <label style="margin:0">Auto-fill Ham Log from radio</label>
+          <label class="toggle">
+            <input type="checkbox" id="cat-autofill" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <button class="btn btn-green" style="margin-top:16px" onclick="saveCatConfig()">Save CAT config</button>
+      <span id="cat-save-toast" style="display:none;color:var(--green);font-size:11px;margin-left:8px">✓ Saved — restart ECH to apply connection changes</span>
+
+      <div style="margin-top:18px;border:1px solid var(--border);border-radius:6px;padding:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">PTT Test</div>
+        <div style="font-size:11px;color:var(--yellow);margin-bottom:10px">⚠ This keys the actual transmitter. Confirm the antenna/dummy load is connected before testing.</div>
+        <button class="btn btn-red" id="cat-ptt-btn" onclick="toggleCatPtt()" disabled>🔴 Key PTT</button>
+        <span id="cat-ptt-status" style="font-size:11px;color:var(--muted);margin-left:10px">PTT unknown</span>
+      </div>
+
+      <div style="margin-top:14px;font-family:var(--mono);font-size:10px;color:var(--muted)">
+        rigctld must be running separately, connected to the radio via USB/serial. See config examples in
+        <code style="background:var(--bg2);padding:1px 4px;border-radius:2px">ech/core/cat_rigctld.py</code>.
+      </div>
+    </div>
+  </div>
+
   <!-- ── System stats bar ─────────────────────────────────────── -->
   <div class="section">
     <div class="section-header" onclick="toggle('sysbar-body')">
@@ -463,6 +522,40 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
       </div>
       <div id="live-stats" style="font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:10px 14px;line-height:2">
         Loading…
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Data Retention ───────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('retention-body'); loadRetention()">
+      <span class="section-title">DATA RETENTION &amp; DISK</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Auto-purge old messages · DB on USB</span>
+    </div>
+    <div id="retention-body" class="section-body" style="display:none">
+      <p style="color:var(--muted);font-size:12px;margin:0 0 14px">Messages older than the configured thresholds are deleted hourly. The DB is stored at the path set in <code>database.path</code> in config.yaml — move it to /mnt/usb by updating that path.</p>
+      <p style="color:var(--muted);font-size:12px;margin:0 0 14px">Hourly message-count-per-adapter is kept separately in a lightweight rollup (90 days) so <a href="/analytics" style="color:var(--blue)">Analytics</a> volume charts still show history — e.g. yesterday's APRS message count — after the raw message bodies above are purged.</p>
+      <div class="row" style="gap:16px;flex-wrap:wrap">
+        <div style="flex:1;min-width:160px">
+          <label>APRS/AIS retention (hours)</label>
+          <input type="number" id="ret-aprs" min="1" max="8760" value="12" style="width:100px">
+        </div>
+        <div style="flex:1;min-width:160px">
+          <label>MeshCore retention (hours)</label>
+          <input type="number" id="ret-meshcore" min="1" max="8760" value="36" style="width:100px">
+        </div>
+        <div style="flex:1;min-width:160px">
+          <label>MeshCore node TTL (hours, 0=use adapter default)</label>
+          <input type="number" id="ret-node-ttl" min="0" max="720" value="18" style="width:100px">
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
+        <button class="btn btn-green" onclick="saveRetention()">Save Retention</button>
+        <button class="btn" onclick="purgeNow()" style="background:var(--bg3);border-color:var(--border)">Purge Now</button>
+        <span id="ret-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none"></span>
+      </div>
+      <div style="margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--muted)">
+        <strong>DB location tip:</strong> Set <code>database.path: /mnt/usb/ech.db</code> in /etc/ech/config.yaml to move the DB to the USB drive, then restart ECH. A symlink also works: <code>sudo mv /var/lib/ech/ech.db /mnt/usb/ech.db &amp;&amp; sudo ln -s /mnt/usb/ech.db /var/lib/ech/ech.db</code>
       </div>
     </div>
   </div>
@@ -488,10 +581,19 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
         <div>
           <label>Listen channels (comma-separated, * = all)</label>
           <input type="text" id="bot-channels" placeholder="#weather, #cmd">
+          <small id="bot-known-channels" style="color:var(--muted,#888);font-size:0.82em;display:none">
+            Device channels: <span id="bot-known-ch-list"></span>
+          </small>
         </div>
         <div>
           <label>Limit to adapters (blank = all)</label>
           <input type="text" id="bot-adapters" placeholder="meshcore-1, meshtastic-1">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Channel mention name (@name triggers an error reply on unrecognized channel messages)</label>
+          <input type="text" id="bot-mention-name" placeholder="SM">
         </div>
       </div>
       <div class="row3">
@@ -545,6 +647,10 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
       <div>
         <label>aprs.fi API key (for 'aprs' command remote lookup — leave blank to use local data only)</label>
         <input type="text" id="bot-aprs-key" placeholder="optional — get free key at aprs.fi/page/api">
+      </div>
+      <div>
+        <label>NOAA Tide Station ID (for <code>!tide</code> command — find at <a href="https://tidesandcurrents.noaa.gov/tide_predictions.html" target="_blank" style="color:var(--blue)">tidesandcurrents.noaa.gov</a>)</label>
+        <input type="text" id="bot-tide-station" placeholder="e.g. 8418150 (Portland ME)">
       </div>
       <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
         <button class="btn btn-green" onclick="saveBotConfig()">Save Bot Config</button>
@@ -730,7 +836,22 @@ async function saveBaseLocation() {
     alert('Enter valid decimal coordinates (lat -90..90, lon -180..180)');
     return;
   }
-  // Read current adapter config and patch base_lat/base_lon for all mock adapters
+  // THE authoritative store: ECHState (persists base_lat/base_lon kv, live-updates
+  // weather coords, pushes to every adapter, broadcasts the change). This call was
+  // missing entirely — the save used to patch only mock-adapter config below, so
+  // the map/weather/traffic kept using a stale kv value while Settings displayed
+  // the new one.
+  const r = await fetch('/api/base-location', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lat, lon }),
+  });
+  if (!r.ok || (await r.json()).status !== 'ok') {
+    alert('Failed to save base location to live state');
+    return;
+  }
+  // Also patch base_lat/base_lon into mock-adapter CONFIG so simulated node
+  // positions survive a restart (state's live push only updates running mocks).
   const ac = await fetch('/api/adapter-config').then(r => r.json());
   const adapters = (ac.adapters || []).map(a => {
     if (a.type && a.type.startsWith('mock_')) {
@@ -842,11 +963,19 @@ async function init() {
   if (ac.adapters) {
     document.getElementById('adapter-yaml').value = JSON.stringify(ac.adapters, null, 2);
     renderAdapterList(ac.adapters);
-    // Pre-fill base location from first mock adapter that has it set
-    const mockWithLoc = ac.adapters.find(a => a.type && a.type.startsWith('mock_') && a.base_lat);
-    if (mockWithLoc) {
-      document.getElementById('base-lat').value = mockWithLoc.base_lat;
-      document.getElementById('base-lon').value = mockWithLoc.base_lon;
+    // Pre-fill base location from LIVE STATE (the value the map/weather/traffic
+    // actually use) — falling back to mock-adapter config only if state has none.
+    // Pre-filling from mocks first was how Settings ended up displaying a
+    // different value than the rest of the app was running on.
+    if (st.base_lat != null && st.base_lon != null) {
+      document.getElementById('base-lat').value = st.base_lat;
+      document.getElementById('base-lon').value = st.base_lon;
+    } else {
+      const mockWithLoc = ac.adapters.find(a => a.type && a.type.startsWith('mock_') && a.base_lat);
+      if (mockWithLoc) {
+        document.getElementById('base-lat').value = mockWithLoc.base_lat;
+        document.getElementById('base-lon').value = mockWithLoc.base_lon;
+      }
     }
   }
   bridgeRules = ac.bridge_rules || [];
@@ -1224,7 +1353,9 @@ async function loadAdapterLive() {
         <span class="adapter-name" style="flex:1">${esc(a.adapter)}${chStr}${hwStr}${fwStr}${battStr}</span>
         <span class="adapter-type">${esc(a.state)}</span>
         ${chSwitcher}
-        <button class="btn ${paused?'btn-green':'btn-yellow'}" style="padding:3px 10px;font-size:10px" onclick="toggleAdapter('${aEsc}', ${!paused})">${paused?'Resume':'Pause'}</button>
+        <button class="btn ${paused?'btn-green':'btn-yellow'}" style="padding:3px 10px;font-size:10px" onclick="toggleAdapter('${aEsc}', ${paused})">${paused?'Resume':'Pause'}</button>
+        <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" title="Disconnect and reconnect this adapter" onclick="reconnectAdapter('${aEsc}')">Reconnect</button>
+        <button class="btn btn-red" style="padding:3px 8px;font-size:10px" title="Disable adapter — writes enabled:false to config, persists on restart" onclick="disableAdapter('${aEsc}')">Disable</button>
         ${meshtasticControls}
       </div>`;
     }).join('');
@@ -1372,12 +1503,13 @@ async function switchChannel(adapterName) {
   const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/channel`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({channel}),
+    body: JSON.stringify({channel, persist: true}),
   });
   const d = await r.json();
   if (d.status === 'ok') {
     const label = d.channel_name ? `${d.channel_name} (ch${d.channel_idx})` : `ch${d.channel_idx}`;
-    toast(`${adapterName}: TX → ${label}`);
+    const note = d.persisted ? ' — saved to config' : '';
+    toast(`${adapterName}: TX → ${label}${note}`);
     setTimeout(loadAdapterLive, 600);
   } else {
     toast(`Channel switch failed: ${d.detail}`);
@@ -1493,6 +1625,26 @@ async function toggleAdapter(name, enable) {
   toast(`${name}: ${enable ? 'resumed' : 'paused'}`);
 }
 
+async function reconnectAdapter(name) {
+  toast(`${name}: reconnecting…`);
+  const r = await fetch(`/api/adapters/${encodeURIComponent(name)}/reconnect`, {method: 'POST'});
+  const d = await r.json().catch(() => ({}));
+  setTimeout(loadAdapterLive, 3000);
+  toast(d.status === 'ok' ? `${name}: reconnected` : `${name}: reconnect failed — ${d.detail || 'unknown error'}`);
+}
+
+async function disableAdapter(name) {
+  if (!confirm(`Disable "${name}"?\n\nThis writes enabled: false to config.yaml so the adapter won't start on restart.\n\nUse Pause instead to stop it temporarily without persisting.`)) return;
+  const r = await fetch(`/api/adapters/${encodeURIComponent(name)}/enabled`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enabled: false, persist: true})
+  });
+  const d = await r.json().catch(() => ({}));
+  setTimeout(loadAdapterLive, 500);
+  if (d.persisted) toast(`${name}: disabled and written to config.yaml — won't reconnect on restart`);
+  else toast(`${name}: paused now (config write failed: ${d.warning || 'unknown error'})`);
+}
+
 // ── PSKReporter ──────────────────────────────────────────────────────────
 async function loadPSKStatus() {
   const el = document.getElementById('psk-status-panel');
@@ -1525,8 +1677,9 @@ async function fetchPSK() {
     if (callsign) params.append('callsign', callsign);
     if (band) params.append('band', band);
     const d = await fetch(`/api/pskreporter/spots?${params}`).then(r=>r.json());
-    if (d.error) { el.innerHTML = `<span style="color:var(--red)">Error: ${esc(d.error)}</span>`; return; }
-    el.innerHTML = `<div style="color:var(--muted);margin-bottom:6px">${d.total} spots${d.cached ? ` (cached ${d.cache_age_sec}s ago)` : ' (live)'}</div>` +
+    if (d.error) { el.innerHTML = `<span style="color:var(--red)">${esc(d.error)}</span>`; return; }
+    const warnRow = d.warning ? `<div style="color:var(--yellow);margin-bottom:4px">⚠ ${esc(d.warning)} Showing stale cache.</div>` : '';
+    el.innerHTML = warnRow + `<div style="color:var(--muted);margin-bottom:6px">${d.total} spots${d.cached ? ` (cached ${d.cache_age_sec}s ago)` : ' (live)'}</div>` +
       (d.spots.slice(0,20).map(s => `<div>${esc(s.senderCallsign)} → ${esc(s.receiverCallsign)} ${esc(s.mode)} ${s.sNR>0?'+':''}${s.sNR}dB ${esc(s.receiverLocator)}</div>`).join('') || '<div style="color:var(--dim)">No spots found</div>');
     loadPSKStatus();
   } catch(e) {
@@ -1574,6 +1727,93 @@ async function settingsPbxPage() {
   });
   const d = await r.json();
   alert(d.status === 'ok' ? 'Page sent to all extensions' : `Error: ${d.detail || d.status}`);
+}
+
+// ── CAT radio control ────────────────────────────────────────
+let _catPttOn = false;
+
+async function loadCatConfig() {
+  try {
+    const cfg = await fetch('/api/cat/config').then(r => r.json());
+    document.getElementById('cat-enabled').checked = !!cfg.enabled;
+    document.getElementById('cat-host').value = cfg.rigctld_host;
+    document.getElementById('cat-port').value = cfg.rigctld_port;
+    document.getElementById('cat-poll').value = cfg.poll_interval;
+    document.getElementById('cat-max-ptt').value = cfg.max_ptt_seconds;
+    document.getElementById('cat-autofill').checked = !!cfg.auto_fill_hamlog;
+  } catch(e) {}
+  await refreshCatStatus();
+}
+
+async function refreshCatStatus() {
+  const el = document.getElementById('cat-status-panel');
+  const pttBtn = document.getElementById('cat-ptt-btn');
+  const pttStatus = document.getElementById('cat-ptt-status');
+  try {
+    const d = await fetch('/api/cat/status').then(r => r.json());
+    if (!d.enabled && d.enabled !== undefined) {
+      el.innerHTML = '<span style="color:var(--muted)">CAT control disabled — enable above and set rigctld host/port.</span>';
+      pttBtn.disabled = true;
+      return;
+    }
+    const conn = d.connected ? '<span style="color:var(--green)">● connected</span>' : '<span style="color:var(--red)">● offline</span>';
+    el.innerHTML = `${conn} ${esc(d.rig_info || '')} — ${esc(d.host)}:${d.port}` +
+      (d.freq_mhz ? ` · ${d.freq_mhz} MHz ${esc(d.mode||'')}` : '') +
+      (d.error ? `<br><span style="color:var(--red)">${esc(d.error)}</span>` : '');
+    pttBtn.disabled = !d.connected;
+    _catPttOn = !!d.ptt;
+    setPttButton(_catPttOn);
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--red)">CAT error: ${esc(e.message)}</span>`;
+    pttBtn.disabled = true;
+  }
+}
+
+function setPttButton(on) {
+  const btn = document.getElementById('cat-ptt-btn');
+  const status = document.getElementById('cat-ptt-status');
+  btn.textContent = on ? '⏹ Unkey PTT' : '🔴 Key PTT';
+  status.textContent = on ? 'PTT: TRANSMITTING' : 'PTT: receive';
+  status.style.color = on ? 'var(--red)' : 'var(--muted)';
+}
+
+async function toggleCatPtt() {
+  const next = !_catPttOn;
+  if (next && !confirm('Key the transmitter now? Make sure the antenna or a dummy load is connected.')) return;
+  const r = await fetch('/api/cat/ptt', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({on: next}),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    _catPttOn = d.ptt;
+    setPttButton(_catPttOn);
+  } else {
+    alert(`PTT error: ${d.detail || 'unknown'}`);
+  }
+}
+
+async function saveCatConfig() {
+  const payload = {
+    enabled: document.getElementById('cat-enabled').checked,
+    rigctld_host: document.getElementById('cat-host').value.trim() || 'localhost',
+    rigctld_port: parseInt(document.getElementById('cat-port').value) || 4532,
+    poll_interval: parseFloat(document.getElementById('cat-poll').value) || 2.0,
+    max_ptt_seconds: parseFloat(document.getElementById('cat-max-ptt').value) || 120,
+    auto_fill_hamlog: document.getElementById('cat-autofill').checked,
+  };
+  const r = await fetch('/api/cat/config', {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+  const d = await r.json();
+  const toast = document.getElementById('cat-save-toast');
+  if (d.status === 'ok') {
+    toast.style.display = 'inline';
+    setTimeout(() => toast.style.display = 'none', 6000);
+  } else {
+    alert(`Save failed: ${d.detail || 'unknown error'}`);
+  }
 }
 
 // ── MQTT presets ─────────────────────────────────────────────────────────
@@ -2073,7 +2313,12 @@ async function loadBotConfig() {
     document.getElementById('bot-enabled').checked    = !!d.enabled;
     document.getElementById('bot-reply-dm').checked   = !!d.reply_dm;
     document.getElementById('bot-channels').value     = (d.channels||[]).join(', ');
+    if (d.known_channels && d.known_channels.length) {
+      document.getElementById('bot-known-ch-list').textContent = d.known_channels.join(', ');
+      document.getElementById('bot-known-channels').style.display = '';
+    }
     document.getElementById('bot-adapters').value     = (d.adapters||[]).join(', ');
+    document.getElementById('bot-mention-name').value = d.mention_name || '';
     document.getElementById('bot-user-cd').value      = d.per_user_cooldown_sec ?? 30;
     document.getElementById('bot-global-cd').value    = d.global_cooldown_sec ?? 5;
     document.getElementById('bot-maxlen').value       = d.max_reply_len ?? 200;
@@ -2085,6 +2330,7 @@ async function loadBotConfig() {
     document.getElementById('bot-solar-cache').value  = d.solar_cache_sec ?? 900;
     document.getElementById('bot-tle').value          = (d.tle_targets||[]).join('\n');
     document.getElementById('bot-aprs-key').value     = d.aprs_fi_key || '';
+    document.getElementById('bot-tide-station').value = d.tide_station || '';
     const st = document.getElementById('bot-header-status');
     if (st) st.textContent = d.enabled ? 'enabled' : 'disabled';
   } catch(e) {
@@ -2104,6 +2350,7 @@ async function saveBotConfig() {
     reply_dm:              document.getElementById('bot-reply-dm').checked,
     channels:              chStr.split(',').map(s=>s.trim()).filter(Boolean),
     adapters:              adStr.split(',').map(s=>s.trim()).filter(Boolean),
+    mention_name:          document.getElementById('bot-mention-name').value.trim(),
     per_user_cooldown_sec: parseInt(document.getElementById('bot-user-cd').value)||30,
     global_cooldown_sec:   parseInt(document.getElementById('bot-global-cd').value)||5,
     max_reply_len:         parseInt(document.getElementById('bot-maxlen').value)||200,
@@ -2115,25 +2362,32 @@ async function saveBotConfig() {
     solar_cache_sec:       parseInt(document.getElementById('bot-solar-cache').value)||900,
     tle_targets:           tleStr.split('\n').map(s=>s.trim()).filter(Boolean),
     aprs_fi_key:           document.getElementById('bot-aprs-key').value.trim(),
+    tide_station:          document.getElementById('bot-tide-station').value.trim(),
   };
-  const r = await fetch('/api/bot/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-  const d = await r.json();
   const msg = document.getElementById('bot-save-msg');
-  if (d.status === 'ok') {
-    msg.style.display = 'inline';
-    if (d.warning) {
-      msg.style.color = 'var(--yellow)';
-      msg.textContent = d.warning;
-      setTimeout(()=>{ msg.style.display='none'; }, 10000);
+  msg.style.display = 'inline';
+  msg.style.color = 'var(--muted)';
+  msg.textContent = 'Saving…';
+  try {
+    const r = await fetch('/api/bot/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    const d = await r.json();
+    if (d.status === 'ok') {
+      if (d.warning) {
+        msg.style.color = '#f0a830';
+        msg.textContent = d.warning;
+        setTimeout(()=>{ msg.style.display='none'; }, 12000);
+      } else {
+        msg.style.color = 'var(--green)';
+        msg.textContent = '✓ Saved to config.yaml';
+        setTimeout(()=>{ msg.style.display='none'; }, 6000);
+      }
     } else {
-      msg.style.color = 'var(--green)';
-      msg.textContent = 'Saved to config.yaml';
-      setTimeout(()=>{ msg.style.display='none'; }, 4000);
+      msg.style.color = 'var(--red)';
+      msg.textContent = 'Error: ' + (d.detail || JSON.stringify(d));
     }
-  } else {
-    msg.style.display = 'inline';
+  } catch(e) {
     msg.style.color = 'var(--red)';
-    msg.textContent = d.detail || 'Save failed';
+    msg.textContent = 'Network error: ' + e.message;
   }
 }
 
@@ -2168,6 +2422,58 @@ loadAdapterLive();
 loadMeshCoreTools();
 loadPSKStatus();
 loadBotConfig();
+// Pre-fill PSK callsign with configured operator callsign
+(function() {
+  const inp = document.getElementById('psk-callsign');
+  if (inp && window.ECH_CALLSIGN) inp.value = window.ECH_CALLSIGN.replace(/-\d+$/, '');
+})();
+
+async function loadRetention() {
+  try {
+    const d = await fetch('/api/retention').then(r => r.json());
+    const ret = d.retention || {};
+    document.getElementById('ret-aprs').value     = ret.aprs     ?? 12;
+    document.getElementById('ret-meshcore').value = ret.meshcore ?? 36;
+    document.getElementById('ret-node-ttl').value = d.node_ttl_hours ?? 18;
+  } catch(e) { console.warn('loadRetention:', e); }
+}
+
+async function saveRetention() {
+  const msg = document.getElementById('ret-msg');
+  const payload = {
+    retention: {
+      aprs:      parseInt(document.getElementById('ret-aprs').value) || 12,
+      meshcore:  parseInt(document.getElementById('ret-meshcore').value) || 36,
+    },
+    node_ttl_hours: parseInt(document.getElementById('ret-node-ttl').value) || 0,
+  };
+  try {
+    const d = await fetch('/api/retention', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(r => r.json());
+    msg.textContent = d.warning || 'Saved';
+    msg.style.color = d.warning ? '#f0a830' : 'var(--green)';
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display='none', 4000);
+  } catch(e) { msg.textContent='Error: '+e.message; msg.style.display='inline'; }
+}
+
+async function purgeNow() {
+  const msg = document.getElementById('ret-msg');
+  try {
+    const payload = {
+      retention: {
+        aprs:     parseInt(document.getElementById('ret-aprs').value) || 12,
+        meshcore: parseInt(document.getElementById('ret-meshcore').value) || 36,
+      },
+      node_ttl_hours: parseInt(document.getElementById('ret-node-ttl').value) || 0,
+    };
+    await fetch('/api/retention', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    const d = await fetch('/api/retention/purge', {method:'POST'}).then(r => r.json());
+    msg.textContent = `Purged ${d.deleted ?? '?'} messages`;
+    msg.style.color = 'var(--green)';
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display='none', 5000);
+  } catch(e) { msg.textContent='Error: '+e.message; msg.style.display='inline'; }
+}
 </script>
 </body>
 </html>

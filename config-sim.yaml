@@ -20,7 +20,7 @@ logging:
 
 operator:
   callsign: "N0CALL"
-  name: "ECH Operator"
+  name: "SM Operator"
 
 incident:
   name: "SIMULATION EXERCISE"

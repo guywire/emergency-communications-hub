@@ -435,7 +435,7 @@ def format_adif(qsos: list[dict], config: dict) -> str:
     from ech import __version__ as V
     lines = [
         _adif_field("ADIF_VER", "3.1.4"),
-        _adif_field("PROGRAMID", "ECH"),
+        _adif_field("PROGRAMID", "SignalMatrix"),
         _adif_field("PROGRAMVERSION", V),
         "<EOH>",
         "",
@@ -541,7 +541,7 @@ def format_cabrillo(qsos: list[dict], config: dict, bonuses: dict | None = None)
         "CATEGORY-STATION: FIXED",
         f"OPERATORS: {ops}",
         f"CLAIMED-SCORE: {qso_pts}",
-        f"SOAPBOX: Logged with ECH Emergency Communications Hub",
+        f"SOAPBOX: Logged with SignalMatrix",
     ]
     if grid:
         lines.append(f"GRID-LOCATOR: {grid}")
@@ -779,7 +779,7 @@ def import_from_messages(messages: list[dict], config: dict) -> list[dict]:
         channel = m.get("source_channel", "")
 
         # Skip outbound / our own messages
-        if from_id in ("local", callsign, "ECH Operator"):
+        if from_id in ("local", callsign, "SM Operator"):
             continue
         if channel == "outbound":
             continue

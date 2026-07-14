@@ -1,4 +1,4 @@
-# ECH — Emergency Communications Hub
+# SignalMatrix
 # Reference configuration file.
 #
 # Deployment:
@@ -14,6 +14,15 @@ server:
 
 database:
   path: "ech.db"
+
+# ── Message retention ────────────────────────────────────────────────────────
+# Delete messages from the DB older than the specified hours per adapter prefix.
+# Key is matched as a prefix against source_adapter (case-insensitive).
+# Set enabled: false to disable all automatic purging.
+retention:
+  enabled: true
+  aprs: 12          # APRS/AIS messages older than 12 hours
+  meshcore: 36      # MeshCore messages older than 36 hours
 
 # ── TLS / HTTPS (optional) ────────────────────────────────────────────────────
 # Enables HTTPS so Web Serial CAT works from any browser on the LAN.
@@ -55,6 +64,12 @@ logging:
 operator:
   callsign: "N0CALL"          # replace with your callsign on the server
 
+# ── PSKReporter ───────────────────────────────────────────────────────────────
+# PSKReporter's API TOS requires a real contact email in the User-Agent header.
+# Without it their infrastructure returns 503.  Set this to your email address.
+pskreporter:
+  contact_email: ""           # e.g. "you@example.com" — required for API access
+
 # ── Ham Radio Log ─────────────────────────────────────────────────────────────
 # Multi-station contest logging with ADIF/Cabrillo/POTA/SOTA export and
 # live upload to QRZ.com, Club Log, POTA, and SOTA.
@@ -84,7 +99,7 @@ operator:
 #   pota_password: ""             # pota.app password
 #   sota_username: ""             # sota.org username
 #   sota_password: ""             # sota.org password
-  name: "ECH Operator"
+  name: "SM Operator"
 
 incident:
   name: "EXERCISE"
@@ -112,6 +127,24 @@ adapters:
 #     poll_interval: 10       # seconds between polls (default 10)
 #     stale_sec: 120          # remove aircraft not seen for this long (default 120)
 
+# ── AISstream.io (global AIS via WebSocket — supplements local AIS-catcher) ──
+#   Free API key: https://aisstream.io/authenticate
+#   - type: aisstream
+#     name: aisstream
+#     api_key: "YOUR_API_KEY"
+#     bounding_box: [[43.0, -72.0], [47.0, -65.0]]   # [min_lat, min_lon], [max_lat, max_lon]
+#     stale_sec: 600       # drop vessels not heard for 10 min (default)
+#     reconnect_delay: 10  # seconds before reconnecting on drop
+
+# ── AISHub (global AIS via REST poll — free account at aishub.net) ──────────
+#   Polls once per poll_interval (minimum 300s on free tier).
+#   - type: aishub
+#     name: aishub
+#     username: "YOUR_AISHUB_USERNAME"
+#     bounding_box: [[43.0, -72.0], [47.0, -65.0]]   # [min_lat, min_lon], [max_lat, max_lon]
+#     poll_interval: 300   # seconds between polls (default 300)
+#     stale_sec: 900       # drop vessels not heard for 15 min (default)
+
 # ── AIS (AIS-catcher receiver) ───────────────────────────────────────────────
 #   - type: ais_catcher
 #     name: ais
@@ -132,7 +165,17 @@ adapters:
 #     channel_idx: 0           # 0 = public/default channel
 #     channel_name: "TAC-1"    # optional: switch to named channel at startup
 #     poll_interval: 2.0
-#     app_name: ECH
+#     app_name: SM
+#     node_ttl_hours: 48       # keep named nodes on the map/node list this long after
+#                              # last heard (default 24h; hex-only unnamed nodes always
+#                              # expire after 15 min)
+#     online_window_min: 120   # node shows as "online" (full-opacity marker) if heard
+#                              # within this window (default 120; MeshCore adverts are
+#                              # infrequent, so the 15-min default used for Meshtastic
+#                              # would render nearly every node as stale)
+#     trace_hash_bytes: 1      # hash width for OUR trace probes (1/2/4; default 1 =
+#                              # the ecosystem convention — collisions are handled at
+#                              # name-resolution time by recency weighting)
 #     max_hops: 0              # outgoing message hop limit (0 = device default; 3 = local mesh).
 #     channel_keys:            # optional: per-channel PSKs for decrypting received messages.
 #       - idx: 0               #   channel index (0 = Public)
@@ -259,7 +302,53 @@ adapters:
 #     callsign: N0CALL-9
 #     passcode: 12345            # -1 for receive-only
 #     server: rotate.aprs2.net
-#     filter: "r/44.1/-69.1/100"
+#     filter: "r/44.1/-69.1/60"   # radius in km — keep this tight; a wide radius (e.g. 250km)
+#                                  # pulls in the whole region's ship-AIS/digipeater/beacon
+#                                  # firehose (observed: 8000+ msgs/day at 250km vs local need)
+#
+# CW / Morse code over a sound card (built-in, USB, or a rig's USB audio codec):
+#   RX decodes transmissions into inbox messages (adaptive speed/pitch/threshold);
+#   TX keys text as sidetone audio out the output device — the radio needs VOX
+#   (or CAT PTT via rigctld) since this adapter does not key PTT itself.
+#   - type: cw_audio
+#     name: cw-audio
+#     input_device: "USB Audio"  # name substring, device index, or null = default
+#     output_device: null        # null with no match = RX only
+#     freq: 600                  # expected CW pitch Hz (auto-tunes 300-1200 Hz)
+#     auto_tune: true
+#     wpm: 20                    # TX keying speed
+#
+# BROWSER-HOSTED hardware (remote adapters): the device lives on the OPERATOR'S
+# computer; the /remote-hw page bridges it to the server over WebSocket.
+#   MeshCore node on the operator's USB port:
+#   - type: meshcore
+#     name: meshcore-remote      # must match the name entered on /remote-hw
+#     transport: browser
+#   CW decoded from the operator's radio audio:
+#   - type: cw_audio
+#     name: cw-remote            # must match the name entered on /remote-hw
+#     input_device: browser
+#
+# RTTY over a sound card (45.45 baud Baudot, 2125/2295 Hz, same VOX/PTT note):
+#   - type: rtty_audio
+#     name: rtty
+#     input_device: "USB Audio"
+#     freq: 2125                 # mark; space = freq + shift
+#     shift: 170
+#     baud: 45.45
+#
+# PSK31 over a sound card (31.25 baud BPSK varicode, same VOX/PTT note):
+#   - type: psk31_audio
+#     name: psk31
+#     input_device: "USB Audio"
+#     freq: 1000                 # carrier
+#
+# FT8/FT4 via WSJT-X (no soundcard needed here — WSJT-X does the DSP and sends
+# decodes over UDP; set WSJT-X Settings→Reporting→"UDP Server" to this machine):
+#   - type: wsjtx
+#     name: ft8
+#     host: 0.0.0.0
+#     port: 2237                 # WSJT-X default; RX-only
 #
 # KISS TNC serial (hardware TNC or Direwolf serial):
 #   - type: aprs_kiss
@@ -376,12 +465,18 @@ meshcore_bridge:
 #   help              — list commands
 mesh_bot:
   enabled: true
-  channels: ["#weather", "#cmd", "#mesh"]  # ["*"] = every channel
+  channels: ["ch0", "ch2", "ch4"] # ch0=Public, ch2=#echbot (bot test channel), ch4=MaineNet
+  mention_required_channels: ["ch0", "ch4"] # even a real command word needs @mention here — ch2/#echbot is exempt (dedicated bot-test channel)
   adapters: []                  # [] = all adapters; e.g. ["meshcore-1"]
   reply_dm: true                # true = DM sender; false = channel broadcast
-  per_user_cooldown_sec: 30     # per-sender cooldown shared across all commands
-  global_cooldown_sec: 5        # minimum gap between any two bot replies (flood guard)
-  max_reply_len: 200            # hard cap — keeps reply to one LoRa payload
+  per_user_cooldown_sec: 5      # per-sender cooldown shared across all commands
+  global_cooldown_sec: 2        # minimum gap between any two bot replies (flood guard)
+  max_reply_len: 160            # hard cap — keeps reply within one LoRa payload
+  mention_name: "[ECH Bot]"     # @name that triggers an "unrecognized command" reply on channels (DMs always get one) — matches "@[ECH Bot]"
+  # skywarn_winlink_to: ""      # email or Winlink callsign "skywarn winlink" sends the last report to
+                                 # (a served agency/EOC/liaison you've actually arranged — never a
+                                 # hardcoded NWS address, since no verified official inbox exists).
+                                 # Requires a connected pat_winlink adapter. Unset = command disabled.
 
   # Observer coordinates — used by overhead, satpass, and weather without a zip.
   # Falls back to weather_service.nws_lat / nws_lon if not set here.
