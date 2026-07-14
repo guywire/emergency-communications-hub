@@ -506,6 +506,15 @@ class MeshCoreAdapter(Adapter):
         # direct probe. Direct reception now wins.
         origin_hash = origin_id[:2].lower() if origin_id else None
         self._learn_topology(([origin_hash] if origin_hash else []) + hashes)
+        # Any node we hear as a relay in someone else's traffic is proof it's
+        # still on the mesh RIGHT NOW — just as much as a PUSH_ADVERT is, which
+        # was previously the ONLY thing that refreshed last_heard. A repeater
+        # that relays plenty of traffic but adverts infrequently (or whose
+        # adverts we happen to miss) was expiring out of the node list — and
+        # off the map — while still very much alive and reachable, which read
+        # exactly like "not getting their adverts" even when RF was fine.
+        for h in ([origin_hash] if origin_hash else []) + hashes:
+            self._touch_heard_node(h)
         # Stamp the path onto the just-cached RF sample so the poll-correlation
         # (which already attaches SNR/RSSI to the decrypted copy of this same
         # packet) can attach the relay path too — polled messages carry only a
@@ -626,6 +635,19 @@ class MeshCoreAdapter(Adapter):
         if len(matches) > 1:
             d["ambiguous"] = len(matches)
         return d
+
+    def _touch_heard_node(self, prefix_hex: str) -> None:
+        """Refresh last_heard for a node resolved from an overheard hash, but
+        only when the resolution is UNAMBIGUOUS (single match) — display can
+        tolerate a recency-weighted guess among colliding hashes, but survival
+        (stale-node expiry) deserves a higher bar, or a hash collision could
+        keep the WRONG node alive indefinitely off someone else's traffic."""
+        if not prefix_hex:
+            return
+        p = prefix_hex.lower()
+        matches = [nid for nid in self._nodes if nid.lower().startswith(p)]
+        if len(matches) == 1:
+            self._nodes[matches[0]].last_heard = datetime.now(timezone.utc)
 
     def _broadcast_traffic_event(self, route: str, ptype: str, snr, rssi,
                                  hops: int, hashes: list, origin_id=None, tag=None,
@@ -2077,6 +2099,8 @@ class MeshCoreAdapter(Adapter):
                          self.name, tag, path_len, named_nodes)
                 # A successful trace CONFIRMS the chain outward from us
                 self._learn_topology(path_nodes, confirmed_from_us=True)
+                for h in path_nodes:
+                    self._touch_heard_node(h)
                 # Resolve an awaiting trace_and_wait() caller (anomaly verification)
                 fut = self._trace_futures.get(tag)
                 if fut is not None and not fut.done():
@@ -2291,6 +2315,11 @@ class MeshCoreAdapter(Adapter):
         # comes from the "name: body" prefix in the decrypted text.
         display = extracted_name or "unknown"
         from_id = self._resolve_sender_node_id(display)
+        if from_id in self._nodes:
+            # A decrypted channel message from a resolvable sender is direct
+            # proof they're active right now — same "still alive" signal a
+            # PUSH_ADVERT gives, just via chat instead of an advert.
+            self._nodes[from_id].last_heard = datetime.now(timezone.utc)
         log.debug("MeshCore %s: polled ch%d msg sender=%r", self.name, ch_idx, display)
 
         if not decrypted_ok and _is_likely_encrypted(body_text):
