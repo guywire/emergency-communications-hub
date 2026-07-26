@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc170** (authoritative version is always the `VERSION` file — this banner is updated manually and can lag)
+**Version 1.0.0-rc185** (authoritative version is always the `VERSION` file — this banner is updated manually and can lag)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -18,13 +18,13 @@ SignalMatrix is a Python/FastAPI application that bridges multiple emergency-com
 | Feature | Notes |
 |---------|-------|
 | **Multi-network bridging** | Meshtastic, APRS (IS + KISS TNC), MeshCore, JS8Call, Winlink/PAT, SMS (SIM7x00/SIM800L), MQTT, Reticulum/LXMF, AREDN, Asterisk/PBX |
-| **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status, SKYWARN reports (`/skywarn`), analytics charts (`/analytics`) — all in the browser |
+| **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status, SKYWARN + strip reports (`/reports`), analytics charts (`/analytics`) — all in the browser |
 | **Ham Radio Log** | Contest logging (Field Day, POTA, SOTA, General); ADIF/Cabrillo/CSV import; ADIF/Cabrillo/POTA/SOTA export |
 | **CAT radio control** | Browser Web Serial (no software install) or server-side rigctld/Hamlib |
 | **Anomaly detection** | Automatic alerts for unusual message patterns or node behaviour |
 | **Simulation mode** | Built-in mock adapters let you train operators without live hardware |
-| **Mesh bot** | 24 on-mesh commands — weather/alerts/METAR/tides/solar, aircraft & ship tracking, satellite passes, FCC/DXCC lookups, SKYWARN spotter report intake, trivia with scoreboards, text-adventure games (see [Mesh Bot](#mesh-bot)) |
-| **SKYWARN reports** | Guided spotter-report intake over the mesh (DM the bot `skywarn`); reports page with edit/complete/delete; `net`/`inws`/`winlink` output formats for relaying to NWS |
+| **Mesh bot** | 25 on-mesh commands — weather/alerts/METAR/tides/solar, aircraft & ship tracking, satellite passes, FCC/DXCC lookups, SKYWARN spotter report intake, SHARES Region 1 strip-report intake, trivia with scoreboards, text-adventure games (see [Mesh Bot](#mesh-bot)) |
+| **SKYWARN & strip reports** | Guided report intake over the mesh (DM the bot `skywarn` or `strip`), auto-prefilled from the sending node's known position/callsign/temperature when available; combined `/reports` review page with map plotting, edit/complete/delete, and `net`/`inws`/`winlink` output formats for relaying to NWS |
 | **Analytics** | `/analytics` — messages per hour per adapter, bot command usage, anomaly trends (24h/48h/7d) |
 | **GPS time sync** | Optional NMEA receiver auto-sets system clock and base position |
 | **Storage guard** | Warns when disk free falls below 1 GB or 5%; automatic message retention purge (configurable per adapter family) |
@@ -645,6 +645,7 @@ bot channel) respond to bare command words. Replies to something the bot itself 
 | `path` | The relay route YOUR message took to reach the bot, decoded to repeater names |
 | `dad` | A dad joke |
 | `skywarn` | SKYWARN spotter reports — see below |
+| `strip` | SHARES Region 1 "Response Creator" strip reports — see below |
 | `trivia [category]` | Multiple-choice trivia; auto-continues, `trivia stop` to end |
 | `score` / `lb` | Your trivia score / the leaderboard |
 | `mud` | Text-adventure games (TinyMUD, Colossal Cave Adventure, Derelict). DM = private game; on a dedicated bot channel = one shared game anyone can drive. Not available on mention-required channels, where it would swallow normal chat |
@@ -657,7 +658,7 @@ No API key is required for any command (except `aprs_fi_key` for some APRS featu
 DMing the bot `skywarn` starts a guided form (callsign, spotter ID, location, event type,
 temperature, wind, hail size, precipitation, notes). Reports are **logged locally only —
 never auto-submitted to NWS** (there is no public NWS submission API), and the bot's
-confirmation says so. They appear on the `/skywarn` dashboard page (live via WebSocket)
+confirmation says so. They appear on the `/reports` dashboard page (live via WebSocket)
 with edit / complete / delete actions. Relay helpers:
 
 | Sub-command | Output |
@@ -667,6 +668,26 @@ with edit / complete / delete actions. Relay helpers:
 | `skywarn net` | Last report phrased for reading to a SKYWARN net |
 | `skywarn inws` | Last report in NWS Local-Storm-Report style for manual iNWS entry |
 | `skywarn winlink` | Emails the last report via the Winlink adapter (`skywarn_winlink_to` config) |
+
+### `strip` — SHARES Region 1 strip reports
+
+DMing the bot `strip` (or naming a template directly, e.g. `strip skywarn`) starts a
+guided form built from the SHARES Region 1 "Response Creator" RI strip templates: GYX CAR
+SKYWARN, LOCALWX, SITREP, HURRICANE REPORT, and WXOBS. You can also paste a complete
+slash-delimited strip in one message instead of stepping through the guided form.
+
+Fields the bot can determine from the sending node's own shared position/telemetry —
+call sign, MGRS grid, and temperature — are pre-filled automatically and skipped in the
+guided flow; everything else is asked one field at a time. To keep the guided back-and-forth
+out of the main message feed, session prompts and answers are tagged as bot-session traffic
+and shown instead as a live "active" indicator in the dashboard header's bot-status
+popover (`/api/bot/sessions`).
+
+On completion the bot logs a plain-language summary (all answered fields) to the message
+log, saves the report (WXOBS reports are additionally radiogram/MARS-encoded), and — if the
+report includes MGRS or lat/lon — plots it on the map (purple = pending, green = sent).
+Ask to relay it via Winlink or skip. Reports appear on the same `/reports` dashboard page as
+SKYWARN reports, filterable by kind and status.
 
 ### Observer position
 
