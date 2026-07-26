@@ -2877,9 +2877,38 @@ async function loadCallLog() {
       html += '<div style="padding:12px;font-size:11px;color:var(--dim)">No calls yet</div>';
     }
     el.innerHTML = html;
+    loadVoicemailSection(el);
   } catch(e) {
     el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red)">Error loading call log</div>';
   }
+}
+
+async function loadVoicemailSection(el) {
+  try {
+    const r = await fetch('/api/pbx/voicemail');
+    if (!r.ok) return;
+    const d = await r.json();
+    const boxes = Object.entries(d.mailboxes || {});
+    if (!boxes.length) return;
+    let vmHtml = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--yellow)">📧 VOICEMAIL</div>`;
+    for (const [mailbox, count] of boxes) {
+      const msgs = await fetch(`/api/pbx/voicemail/${encodeURIComponent(mailbox)}`)
+        .then(r => r.json()).then(d => d.messages || []).catch(() => []);
+      vmHtml += `<div style="padding:4px 10px;font-size:10px;color:var(--muted);font-weight:600">ext ${escHtml(mailbox)} (${count})</div>`;
+      msgs.forEach(m => {
+        const ts  = m.origtime ? new Date(m.origtime * 1000).toUTCString().slice(5, 22) : '';
+        const dur = m.duration ? `${m.duration}s` : '';
+        const audio = m.has_audio
+          ? `<audio controls preload="none" style="display:block;width:100%;height:26px;margin-top:3px" src="/api/pbx/voicemail/${encodeURIComponent(mailbox)}/${encodeURIComponent(m.id)}/audio"></audio>`
+          : '';
+        vmHtml += `<div style="padding:4px 10px;font-size:11px;border-bottom:1px solid var(--border)">
+          📧 ${escHtml(m.callerid || 'unknown')} <span style="color:var(--muted)">${escHtml(ts)} · ${dur}</span>
+          ${audio}
+        </div>`;
+      });
+    }
+    el.insertAdjacentHTML('beforeend', vmHtml);
+  } catch(e) {}
 }
 
 async function loadServicesPanel() {

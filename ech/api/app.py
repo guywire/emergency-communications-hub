@@ -2422,6 +2422,34 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         ok = await a.page(target)
         return {"status": "ok" if ok else "error"}
 
+    @app.get("/api/pbx/voicemail")
+    async def pbx_voicemail_mailboxes():
+        """Mailboxes with waiting messages: {mailbox: count}."""
+        a = _find_pbx_adapter()
+        if not a or not hasattr(a, "list_voicemail_mailboxes"):
+            return {"mailboxes": {}}
+        return {"mailboxes": a.list_voicemail_mailboxes()}
+
+    @app.get("/api/pbx/voicemail/{mailbox}")
+    async def pbx_voicemail_list(mailbox: str):
+        """Message metadata (caller ID, duration, time) for one mailbox."""
+        a = _find_pbx_adapter()
+        if not a or not hasattr(a, "list_voicemail"):
+            return {"messages": []}
+        return {"messages": a.list_voicemail(mailbox)}
+
+    @app.get("/api/pbx/voicemail/{mailbox}/{msg_id}/audio")
+    async def pbx_voicemail_audio(mailbox: str, msg_id: str):
+        """Stream one voicemail's audio as WAV."""
+        from fastapi import HTTPException
+        a = _find_pbx_adapter()
+        if not a or not hasattr(a, "voicemail_audio_path"):
+            raise HTTPException(status_code=404, detail="No PBX adapter configured")
+        path = a.voicemail_audio_path(mailbox, msg_id)
+        if not path:
+            raise HTTPException(status_code=404, detail="Voicemail not found")
+        return Response(content=path.read_bytes(), media_type="audio/wav")
+
     @app.get("/api/winlink/rms")
     async def winlink_rms_list():
         """Return list of known Winlink RMS gateways from the Pat adapter."""

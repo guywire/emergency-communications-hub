@@ -25,7 +25,9 @@ Config keys (under adapters: in config.yaml)
   ami_username    str     AMI username            (default: admin)
   ami_secret      str     AMI secret/password
   local_extension str     ATA/phone extension for click-to-call source  (default: 101)
-  page_target     str     Channels to page, e.g. "SIP/101&SIP/102"
+  channel_driver  str     Channel technology prefix for originate/page — "PJSIP" or "SIP"
+                          (default: PJSIP; use "SIP" only if this box still runs chan_sip)
+  page_target     str     Channels to page, e.g. "PJSIP/101&PJSIP/102"
                           or a Page group name.  If blank, pages local_extension only.
   page_method     str     "app" = AMI Originate + Page app
                           "exten" = dial page_extension in context (default: app)
@@ -34,6 +36,12 @@ Config keys (under adapters: in config.yaml)
   caller_id       str     Outbound caller ID      (default: ECH <100>)
   log_inbound     bool    Log inbound calls       (default: true)
   log_outbound    bool    Log ECH-originated calls (default: true)
+  vm_context      str     Voicemail context (mailboxes are "{ext}@{vm_context}")
+                          (default: default)
+  vm_spool_dir    str     Voicemail spool directory override — defaults to
+                          /var/spool/asterisk/voicemail/{vm_context}. ECH reads
+                          this directly (no AMI equivalent exists) to list and
+                          play back messages; the ech user needs read access.
 
   # Screen phone — leave blank until you add one
   screen_extension  str   IP phone extension number
@@ -59,18 +67,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from ech.adapters.base import Adapter
 from ech.core.models import NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
 
+_MAILBOX_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_MSGID_RE   = re.compile(r"^msg\d{4}$")
+
 
 class AsteriskAdapter(Adapter):
 
-    send_enabled: bool = False
+    # Overridden below (True) — this box can send real SIP MESSAGE text to
+    # endpoints whose client supports it, in addition to voice.
+    send_enabled: bool = True
 
     def __init__(self, config: dict):
         super().__init__(config)
@@ -80,6 +95,7 @@ class AsteriskAdapter(Adapter):
         self._username       = config.get("ami_username", "admin")
         self._secret         = config.get("ami_secret", "")
         self._local_ext      = str(config.get("local_extension", "101"))
+        self._channel_driver = config.get("channel_driver", "PJSIP").strip().upper()
         self._page_target    = config.get("page_target", "")
         self._page_method    = config.get("page_method", "app")
         self._page_extension = config.get("page_extension", "")
@@ -87,6 +103,9 @@ class AsteriskAdapter(Adapter):
         self._caller_id      = config.get("caller_id", "ECH <100>")
         self._log_inbound    = bool(config.get("log_inbound", True))
         self._log_outbound   = bool(config.get("log_outbound", True))
+        self._vm_context     = config.get("vm_context", "default")
+        self._vm_spool_dir   = config.get("vm_spool_dir") or f"/var/spool/asterisk/voicemail/{self._vm_context}"
+        self._vm_counts: dict[str, tuple[int, int]] = {}   # mailbox -> (new, old)
 
         # Screen phone stubs
         self._screen_ext     = config.get("screen_extension", "")
@@ -140,8 +159,29 @@ class AsteriskAdapter(Adapter):
         log.info("Asterisk AMI: disconnected")
 
     async def send(self, message: NormalizedMessage) -> bool:
-        # Sending a text message via AMI is not standard; treat as originate to body
-        return False
+        """Send a real SIP MESSAGE (RFC 3428) to a PJSIP endpoint via AMI.
+
+        Delivery depends on the far-end SIP client supporting instant
+        messaging (most modern softphones do — Zoiper, Linphone, Grandstream
+        Wave, Bria). AMI accepts the action without a synchronous
+        confirmation (same limitation as originate()/page() below — reading
+        a response here would race the event-loop's own packet reads on
+        this single AMI connection), so a True return means "handed to
+        Asterisk", not "received by the phone".
+        """
+        if not self._connected or not message.to_id:
+            return False
+        to_ext = message.to_id.strip()
+        if not to_ext:
+            return False
+        await self._send_action({
+            "Action": "MessageSend",
+            "To":     f"pjsip:{to_ext}",
+            "From":   f"pjsip:{self._local_ext}",
+            "Body":   message.body,
+        })
+        log.info("AMI MessageSend: %s -> %s", self._local_ext, to_ext)
+        return True
 
     async def _run(self) -> None:
         log.debug("Asterisk AMI: event loop started")
@@ -155,6 +195,8 @@ class AsteriskAdapter(Adapter):
                     self._on_new_channel(pkt)
                 elif event == "Hangup":
                     await self._on_hangup(pkt)
+                elif event == "MessageWaiting":
+                    await self._on_message_waiting(pkt)
         except ConnectionError as exc:
             log.error("Asterisk AMI: connection lost: %s", exc)
             self._connected = False
@@ -260,6 +302,34 @@ class AsteriskAdapter(Adapter):
             self._call_log = self._call_log[:50]
         log.info("AMI Hangup: %s from %s duration=%s", status, call["callerid"], dur_str)
 
+    async def _on_message_waiting(self, pkt: dict) -> None:
+        mailbox_full = pkt.get("Mailbox", "")   # e.g. "101@default"
+        mailbox = mailbox_full.split("@")[0].strip()
+        if not mailbox:
+            return
+        try:
+            new_count = int(pkt.get("New", 0))
+        except ValueError:
+            new_count = 0
+        try:
+            old_count = int(pkt.get("Old", 0))
+        except ValueError:
+            old_count = 0
+        prev_new, _ = self._vm_counts.get(mailbox, (0, 0))
+        self._vm_counts[mailbox] = (new_count, old_count)
+        if new_count > prev_new:
+            msg = NormalizedMessage(
+                source_adapter=self.name,
+                source_channel="voicemail",
+                from_id=f"vm:{mailbox}",
+                from_display=f"Voicemail {mailbox}",
+                body=f"📧 New voicemail on ext {mailbox} ({new_count} new)",
+                priority=Priority.NORMAL,
+                raw={"mailbox": mailbox, "new_count": new_count, "old_count": old_count},
+            )
+            await self._enqueue(msg)
+            log.info("AMI MessageWaiting: mailbox=%s new=%d old=%d", mailbox, new_count, old_count)
+
     # ── Public PBX actions ────────────────────────────────────────────────
 
     async def originate(self, destination: str, caller_extension: str | None = None) -> bool:
@@ -276,7 +346,7 @@ class AsteriskAdapter(Adapter):
         if not destination.startswith("SIP/") and not destination.startswith("PJSIP/"):
             await self._send_action({
                 "Action":   "Originate",
-                "Channel":  f"SIP/{src}",
+                "Channel":  f"{self._channel_driver}/{src}",
                 "Context":  self._context,
                 "Exten":    destination,
                 "Priority": "1",
@@ -288,7 +358,7 @@ class AsteriskAdapter(Adapter):
             # Direct SIP channel bridge
             await self._send_action({
                 "Action":      "Originate",
-                "Channel":     f"SIP/{src}",
+                "Channel":     f"{self._channel_driver}/{src}",
                 "Application": "Dial",
                 "Data":        destination,
                 "CallerID":    self._caller_id,
@@ -301,17 +371,17 @@ class AsteriskAdapter(Adapter):
     async def page(self, target: str | None = None) -> bool:
         """
         Page / announce: simultaneously ring one or more extensions.
-        target overrides config page_target (e.g. "SIP/101&SIP/102").
+        target overrides config page_target (e.g. "PJSIP/101&PJSIP/102").
         """
         if not self._connected:
             return False
-        dest = target or self._page_target or f"SIP/{self._local_ext}"
+        dest = target or self._page_target or f"{self._channel_driver}/{self._local_ext}"
 
         if self._page_method == "exten" and self._page_extension:
             # Dial a page extension in the dialplan (FreePBX page groups, etc.)
             await self._send_action({
                 "Action":   "Originate",
-                "Channel":  f"SIP/{self._local_ext}",
+                "Channel":  f"{self._channel_driver}/{self._local_ext}",
                 "Context":  self._context,
                 "Exten":    self._page_extension,
                 "Priority": "1",
@@ -332,6 +402,60 @@ class AsteriskAdapter(Adapter):
             })
         log.info("AMI Page: dest=%s method=%s", dest, self._page_method)
         return True
+
+    # ── Voicemail (read directly from the spool — AMI has no listing action) ─
+
+    def list_voicemail_mailboxes(self) -> dict[str, int]:
+        """Return {mailbox: message_count} for every mailbox with mail waiting."""
+        root = Path(self._vm_spool_dir)
+        if not root.is_dir():
+            return {}
+        out: dict[str, int] = {}
+        for sub in sorted(root.iterdir()):
+            if not sub.is_dir():
+                continue
+            inbox = sub / "INBOX"
+            if not inbox.is_dir():
+                continue
+            n = len(list(inbox.glob("msg*.txt")))
+            if n:
+                out[sub.name] = n
+        return out
+
+    def list_voicemail(self, mailbox: str) -> list[dict]:
+        """Return message metadata (caller ID, duration, time) for one mailbox."""
+        if not _MAILBOX_RE.match(mailbox):
+            return []
+        inbox = Path(self._vm_spool_dir) / mailbox / "INBOX"
+        if not inbox.is_dir():
+            return []
+        out = []
+        for txt in sorted(inbox.glob("msg*.txt")):
+            msg_id = txt.stem
+            info: dict[str, str] = {}
+            try:
+                for line in txt.read_text(errors="replace").splitlines():
+                    if "=" in line:
+                        k, _, v = line.partition("=")
+                        info[k.strip()] = v.strip()
+            except OSError:
+                pass
+            wav = inbox / f"{msg_id}.wav"
+            out.append({
+                "id":        msg_id,
+                "callerid":  info.get("callerid", ""),
+                "duration":  int(info.get("duration") or 0),
+                "origtime":  int(info.get("origtime") or 0),
+                "has_audio": wav.is_file(),
+            })
+        return out
+
+    def voicemail_audio_path(self, mailbox: str, msg_id: str) -> Path | None:
+        """Path to a message's playable .wav, or None if invalid/missing."""
+        if not _MAILBOX_RE.match(mailbox) or not _MSGID_RE.match(msg_id):
+            return None
+        p = Path(self._vm_spool_dir) / mailbox / "INBOX" / f"{msg_id}.wav"
+        return p if p.is_file() else None
 
     # ── Screen phone stubs (no-op until screen_push_url is set) ──────────
 

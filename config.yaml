@@ -434,8 +434,10 @@ adapters:
 #     ami_username: ech
 #     ami_secret: changeme
 #     local_extension: "101"       # ATA/phone extension for click-to-call source
+#     channel_driver: PJSIP        # "PJSIP" (modern default) or "SIP" if this box still runs chan_sip
 #     context: from-internal
 #     caller_id: "ECH <100>"
+#     vm_context: default          # voicemail context; mailboxes are "{ext}@{vm_context}"
 
 # ── AREDN (real) ─────────────────────────────────────────────────────────────
 #   Polls AREDN mesh node API for topology and device info.
