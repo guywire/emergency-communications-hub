@@ -159,7 +159,7 @@ function adapterColor(adapter) {
   if (a.includes('mqtt'))       return '#e2a44f';
   if (a.includes('winlink') || a.includes('pat'))   return '#f85149';
   if (a.includes('js8') || a.includes('hf'))        return '#ffcb6b';
-  if (a.includes('adsb') || a.includes('ads-b'))    return '#f0b429';
+  if (a.includes('adsb') || a.includes('ads-b') || a.includes('opensky')) return '#f0b429';
   if (a.includes('ais'))                            return '#56d3c8';
   return '#8b949e';
 }
@@ -484,8 +484,25 @@ async function loadNodes() {
     const anoms = await fetch('/api/anomalies?acknowledged=false').then(r=>r.json()).catch(()=>({findings:[]}));
     const alertNodes = new Set(anoms.findings.filter(f=>f.severity==='alert').map(f=>f.node_id));
 
-    const seen = new Set();
+    // Merge duplicate reports of the same real-world node/aircraft across
+    // adapters (e.g. local ADS-B + OpenSky both seeing the same overlapping
+    // aircraft) into a single marker — keep whichever adapter's report is
+    // freshest, rather than letting whichever happens to be processed last
+    // in the loop silently overwrite the other every refresh.
+    const byId = new Map();
     allNodes.forEach(node => {
+      const id = node.node_id;
+      if (!id) return;
+      const existing = byId.get(id);
+      if (!existing) { byId.set(id, node); return; }
+      const tNew = node.last_heard ? new Date(node.last_heard).getTime() : 0;
+      const tOld = existing.last_heard ? new Date(existing.last_heard).getTime() : 0;
+      if (tNew >= tOld) byId.set(id, node);
+    });
+    const dedupedNodes = [...byId.values()];
+
+    const seen = new Set();
+    dedupedNodes.forEach(node => {
       if (node.lat == null || node.lon == null) return;
       if (node.lat === 0 && node.lon === 0) return;
       const nid = (node.node_id || '').toLowerCase();
