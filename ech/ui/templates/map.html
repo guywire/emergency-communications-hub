@@ -74,6 +74,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI</button>
     <button class="ctrl-btn" id="water-btn" onclick="toggleWaterBodies()" title="Water body quality + boating/kayak conditions (EPA ATTAINS + NDBC buoys)">🌊 WATER</button>
     <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">HAM LOG</button>
+    <button class="ctrl-btn" id="strips-btn" onclick="toggleStripReports()" title="Strip reports with a known MGRS or LAT/LON field (mesh bot 'strip' command)">📋 STRIPS</button>
     <button class="ctrl-btn" id="draw-btn" onclick="toggleDrawMode()" title="Draw a repeater path: click each repeater in order, then Send Trace">✏ Draw Path</button>
   </div>
 </div>
@@ -733,6 +734,10 @@ function connectWS() {
       }
       return;
     }
+    if (pkt.type === 'strip_report' && _stripReportsEnabled && pkt.data.lat != null) {
+      addStripMarker(pkt.data);
+      return;
+    }
     if (pkt.type === 'message' && pkt.data.lat != null) {
       const d = pkt.data;
       const color = adapterColor(d.source_adapter);
@@ -808,6 +813,59 @@ async function loadPSKReporter() {
     toast('PSKReporter fetch failed: ' + e.message);
   }
   if (_pskEnabled) setTimeout(loadPSKReporter, 300000);
+}
+
+// ── Strip reports (mesh bot "strip" command, only those with a real coordinate) ─
+let _stripReportsEnabled = false;
+let _stripMarkers = [];
+
+function toggleStripReports() {
+  _stripReportsEnabled = !_stripReportsEnabled;
+  const btn = document.getElementById('strips-btn');
+  btn.classList.toggle('on', _stripReportsEnabled);
+  if (_stripReportsEnabled) {
+    loadStripReports();
+    toast('Strip reports on');
+  } else {
+    _stripMarkers.forEach(m => m.remove());
+    _stripMarkers = [];
+    toast('Strip reports off');
+  }
+}
+
+async function loadStripReports() {
+  if (!_stripReportsEnabled) return;
+  try {
+    const r = await fetch('/api/strip_reports?limit=200').catch(() => null);
+    if (!r || !r.ok) return;
+    const data = await r.json();
+    _stripMarkers.forEach(m => m.remove());
+    _stripMarkers = [];
+    (data.reports || []).forEach(addStripMarker);
+  } catch(e) {}
+}
+
+function addStripMarker(rep) {
+  if (rep.lat == null || rep.lon == null) return;
+  const color = rep.sent ? '#3fb950' : '#a371f7';
+  const icon = L.divIcon({
+    className: 'node-dot',
+    html: `<div style="font-size:14px;line-height:1;color:${color};text-shadow:0 0 5px ${color}">📋</div>`,
+    iconSize: [16, 16], iconAnchor: [8, 8],
+  });
+  const answers = rep.answers || {};
+  const fieldLines = Object.entries(answers).slice(0, 8)
+    .map(([k, v]) => `<div class="node-stat">${esc(k)}: ${esc(v)}</div>`).join('');
+  const popup = `<div class="node-popup">
+    <div class="node-name">📋 ${esc(rep.template || 'custom')}</div>
+    <div class="node-stat">From: ${esc(rep.from_display || rep.from_id || '')}</div>
+    <div class="node-stat">${rep.sent ? '✓ Sent' + (rep.winlink_dest ? ' → ' + esc(rep.winlink_dest) : '') : '⏳ Pending'}</div>
+    <div class="node-stat">${new Date(rep.timestamp).toUTCString().slice(5,22)}</div>
+    ${fieldLines}
+    <div class="node-ext-links"><a href="/reports" target="_blank" rel="noopener">Open in Reports →</a></div>
+  </div>`;
+  const m = L.marker([rep.lat, rep.lon], {icon}).bindPopup(popup).addTo(map);
+  _stripMarkers.push(m);
 }
 
 function toggleGridSquares() {

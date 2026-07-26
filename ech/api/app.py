@@ -276,7 +276,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
   <a href="/logs" data-p="/logs" title="Logs">&#128220;</a>
   <a href="/anomalies" data-p="/anomalies" title="Anomalies">&#9888;&#65039;</a>
   <a href="/analytics" data-p="/analytics" title="Analytics">&#128202;</a>
-  <a href="/skywarn" data-p="/skywarn" title="SKYWARN">&#127786;&#65039;</a>
+  <a href="/skywarn" data-p="/skywarn" title="Reports (SKYWARN + Strip)">&#127786;&#65039;</a>
   <a href="/remote-hw" data-p="/remote-hw" title="Remote Hardware">&#128268;</a>
   <a href="/simulation" data-p="/simulation" id="ech-topnav-sim" title="Simulation">&#129514;</a>
   <a href="/settings" data-p="/settings" id="ech-topnav-settings" title="Settings">&#9881;&#65039;</a>
@@ -1318,11 +1318,58 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         return {"status": "ok"}
 
     @app.get("/skywarn", response_class=HTMLResponse)
-    async def skywarn_page():
-        template = UI_DIR / "templates" / "skywarn.html"
+    @app.get("/strips", response_class=HTMLResponse)
+    @app.get("/reports", response_class=HTMLResponse)
+    async def reports_page():
+        template = UI_DIR / "templates" / "reports.html"
         if template.exists():
-            return HTMLResponse(content=_render_template("skywarn.html"), headers=_NO_CACHE)
-        return HTMLResponse(content="<h1>SKYWARN reports not found</h1>")
+            return HTMLResponse(content=_render_template("reports.html"), headers=_NO_CACHE)
+        return HTMLResponse(content="<h1>Reports page not found</h1>")
+
+    # ── Strip (RI) reports ────────────────────────────────────────────────
+
+    @app.get("/api/strip_reports")
+    async def get_strip_reports_api(limit: int = 200):
+        reports = await db.get_strip_reports(limit=limit)
+        return {"reports": reports, "total": len(reports)}
+
+    @app.post("/api/strip_reports/{report_id}")
+    async def update_strip_report_api(report_id: int, request: Request):
+        from fastapi import HTTPException
+        data = await request.json()
+        answers = data.get("answers")
+        strip_text = data.get("strip_text")
+        updated = await db.update_strip_report(report_id, answers=answers, strip_text=strip_text)
+        if not updated:
+            raise HTTPException(status_code=404, detail="report not found")
+        return {"status": "ok", "report": updated}
+
+    @app.post("/api/strip_reports/{report_id}/sent")
+    async def set_strip_sent_api(report_id: int, request: Request):
+        from fastapi import HTTPException
+        data = await request.json() if await request.body() else {}
+        sent = bool(data.get("sent", True))
+        updated = await db.set_strip_sent(report_id, sent)
+        if not updated:
+            raise HTTPException(status_code=404, detail="report not found")
+        return {"status": "ok", "report": updated}
+
+    @app.delete("/api/strip_reports/{report_id}")
+    async def delete_strip_report_api(report_id: int):
+        from fastapi import HTTPException
+        ok = await db.delete_strip_report(report_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="report not found")
+        return {"status": "ok"}
+
+    # ── Bot active sessions (strip/skywarn guided forms in progress) ───────
+
+    @app.get("/api/bot/sessions")
+    async def get_bot_active_sessions():
+        wx_bot = getattr(router, "_weather_bot", None)
+        if not wx_bot or not hasattr(wx_bot, "active_sessions"):
+            return {"sessions": []}
+        return {"sessions": wx_bot.active_sessions()}
 
     # ── Auth ──────────────────────────────────────────────────────────────
 

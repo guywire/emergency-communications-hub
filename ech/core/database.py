@@ -238,6 +238,29 @@ CREATE TABLE IF NOT EXISTS skywarn_reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_skywarn_ts ON skywarn_reports (timestamp DESC);
+
+-- Strip (RI report) templates have wildly different field sets (16-27 fields,
+-- all different names across the 5 templates) — a fixed-column table like
+-- skywarn_reports doesn't fit. answers_json holds {field_key: answer}; lat/lon
+-- are populated only when derivable from an MGRS or explicit LAT/LON field
+-- (never guessed) so the map layer has something to plot.
+CREATE TABLE IF NOT EXISTS strip_reports (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp      TEXT NOT NULL,
+    template       TEXT NOT NULL,
+    from_id        TEXT NOT NULL,
+    from_display   TEXT NOT NULL,
+    adapter        TEXT NOT NULL DEFAULT '',
+    source_channel TEXT NOT NULL DEFAULT '',
+    answers_json   TEXT NOT NULL,
+    strip_text     TEXT NOT NULL,
+    lat            REAL,
+    lon            REAL,
+    winlink_dest   TEXT,
+    sent           INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_strip_ts ON strip_reports (timestamp DESC);
 """
 
 
@@ -428,6 +451,30 @@ class Database:
         raw["_delivery_status"] = status
         if path is not None:
             raw["_delivery_path"] = path
+        await self._db.execute(
+            "UPDATE messages SET raw_json = ? WHERE id = ?",
+            (_json.dumps(raw), msg_id),
+        )
+        await self._db.commit()
+
+    async def update_msg_type(self, msg_id: str, msg_type: str) -> None:
+        """Retroactively hide a message from the main inbox by tagging it
+        non-'text' — same _msg_type raw_json convention save_message() uses
+        on insert. Used to suppress an already-persisted inbound message once
+        a guided bot session (strip/skywarn) claims it as a form answer. Only
+        affects the DB (later page loads/refreshes) — a message already
+        pushed live over WS to an open browser tab was rendered before this
+        runs, since router._handle_inbound() saves+broadcasts before handing
+        off to the bot."""
+        import json as _json
+        async with self._db.execute(
+            "SELECT raw_json FROM messages WHERE id = ?", (msg_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return
+        raw = _json.loads(row[0] or "{}")
+        raw["_msg_type"] = msg_type
         await self._db.execute(
             "UPDATE messages SET raw_json = ? WHERE id = ?",
             (_json.dumps(raw), msg_id),
@@ -1027,6 +1074,98 @@ class Database:
             ) as cur:
                 rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    # ── Strip (RI) reports ───────────────────────────────────────────────────
+
+    async def save_strip_report(self, template: str, from_id: str, from_display: str,
+                                 adapter: str, source_channel: str, answers: dict,
+                                 strip_text: str, lat: float | None = None, lon: float | None = None,
+                                 winlink_dest: str | None = None, sent: bool = False) -> int:
+        import json as _json
+        from datetime import datetime, timezone
+        cur = await self._db.execute(
+            """INSERT INTO strip_reports(timestamp,template,from_id,from_display,adapter,
+               source_channel,answers_json,strip_text,lat,lon,winlink_dest,sent)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (datetime.now(timezone.utc).isoformat(), template, from_id, from_display,
+             adapter, source_channel, _json.dumps(answers), strip_text, lat, lon,
+             winlink_dest, int(sent))
+        )
+        await self._db.commit()
+        return cur.lastrowid
+
+    async def update_strip_report(self, report_id: int, answers: dict | None = None,
+                                   strip_text: str | None = None) -> dict | None:
+        import json as _json
+        if answers is not None:
+            async with self._db.execute(
+                "SELECT answers_json FROM strip_reports WHERE id = ?", (report_id,)
+            ) as cur:
+                row = await cur.fetchone()
+            if not row:
+                return None
+            merged = _json.loads(row["answers_json"])
+            merged.update(answers)
+            await self._db.execute(
+                "UPDATE strip_reports SET answers_json = ? WHERE id = ?",
+                (_json.dumps(merged), report_id)
+            )
+        if strip_text is not None:
+            await self._db.execute(
+                "UPDATE strip_reports SET strip_text = ? WHERE id = ?", (strip_text, report_id)
+            )
+        await self._db.commit()
+        return await self.get_strip_report(report_id)
+
+    async def set_strip_sent(self, report_id: int, sent: bool, winlink_dest: str | None = None) -> dict | None:
+        if winlink_dest is not None:
+            await self._db.execute(
+                "UPDATE strip_reports SET sent = ?, winlink_dest = ? WHERE id = ?",
+                (int(sent), winlink_dest, report_id)
+            )
+        else:
+            await self._db.execute(
+                "UPDATE strip_reports SET sent = ? WHERE id = ?", (int(sent), report_id)
+            )
+        await self._db.commit()
+        return await self.get_strip_report(report_id)
+
+    async def delete_strip_report(self, report_id: int) -> bool:
+        cur = await self._db.execute("DELETE FROM strip_reports WHERE id = ?", (report_id,))
+        await self._db.commit()
+        return cur.rowcount > 0
+
+    async def get_strip_report(self, report_id: int) -> dict | None:
+        import json as _json
+        async with self._db.execute(
+            "SELECT * FROM strip_reports WHERE id = ?", (report_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["answers"] = _json.loads(d.pop("answers_json"))
+        return d
+
+    async def get_strip_reports(self, limit: int = 200, from_id: str | None = None) -> list[dict]:
+        import json as _json
+        if from_id:
+            async with self._db.execute(
+                "SELECT * FROM strip_reports WHERE from_id=? ORDER BY timestamp DESC LIMIT ?",
+                (from_id, limit)
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with self._db.execute(
+                "SELECT * FROM strip_reports ORDER BY timestamp DESC LIMIT ?", (limit,)
+            ) as cur:
+                rows = await cur.fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["answers"] = _json.loads(d.pop("answers_json"))
+            out.append(d)
+        return out
 
     # ── QSO log ───────────────────────────────────────────────────────────
 

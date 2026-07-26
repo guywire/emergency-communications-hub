@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SM — SKYWARN Reports</title>
+<title>SM — Reports</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxjaXJjbGUgY3g9IjkiIGN5PSI5IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iOSIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48Y2lyY2xlIGN4PSIyMyIgY3k9IjkiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjIzIiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjIzIiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMjMiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iMjMiIGN5PSIyMyIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48cGF0aCBkPSJNNCwxNiBRNywxMCAxMCwxNiBRMTMsMjIgMTYsMTYgUTE5LDEwIDIyLDE2IFEyNSwyMiAyOCwxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjIuNSIgZmlsbD0iIzNmYjk1MCIvPjwvc3ZnPg==">
 
 <style>
 :root {
   --bg:#0d1117;--bg2:#161b22;--bg3:#1c2230;--border:#30363d;--border2:#444c56;
   --text:#e6edf3;--muted:#8b949e;--dim:#484f58;
-  --green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;--purple:#a371f7;
   --mono:'IBM Plex Mono','Cascadia Code','Consolas','Liberation Mono',monospace;--sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -27,18 +27,19 @@ body.sim-mode #reports-container{height:calc(100vh - 186px)}
 .back-link:hover{text-decoration:underline}
 .spacer{flex:1}
 #clock{font-family:var(--mono);font-size:12px;color:var(--muted)}
-.badge{display:inline-flex;align-items:center;justify-content:center;
-  font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:10px;min-width:24px}
-.badge-new{background:rgba(63,185,80,.15);color:var(--green);border:1px solid var(--green)}
 
-#toolbar{display:flex;align-items:center;gap:10px;padding:10px 20px;
+#toolbar{display:flex;align-items:center;gap:10px;padding:10px 20px;flex-wrap:wrap;
   border-bottom:1px solid var(--border);background:var(--bg2)}
 #search-box{background:var(--bg);border:1px solid var(--border);color:var(--text);
-  font-family:var(--mono);font-size:12px;padding:4px 10px;border-radius:4px;outline:none;width:240px}
+  font-family:var(--mono);font-size:12px;padding:4px 10px;border-radius:4px;outline:none;width:220px}
 #search-box:focus{border-color:var(--blue)}
 .action-btn{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:4px;
   cursor:pointer;border:1px solid;background:var(--bg3);border-color:var(--border);color:var(--muted)}
 .action-btn:hover{border-color:var(--blue);color:var(--blue)}
+.filter-btn{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:4px;
+  border:1px solid var(--border);background:var(--bg3);color:var(--muted);cursor:pointer}
+.filter-btn.active{border-color:var(--blue);color:var(--blue)}
+.filter-sep{width:1px;background:var(--border);align-self:stretch;margin:0 4px}
 .summary-bar{display:flex;gap:16px;padding:10px 20px;border-bottom:1px solid var(--border);background:var(--bg)}
 .summary-item{font-family:var(--mono);font-size:11px;color:var(--muted)}
 .summary-item span{font-weight:500;color:var(--text)}
@@ -50,23 +51,29 @@ body.sim-mode #reports-container{height:calc(100vh - 186px)}
 .report-card{background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--blue);
   border-radius:8px;margin-bottom:8px;overflow:hidden;transition:border-color .15s}
 .report-card:hover{border-color:var(--border2)}
+.report-card.kind-strip{border-left-color:var(--purple)}
 .report-card.report-new{border-left-color:var(--green)}
-.report-card.report-completed{border-left-color:var(--green);opacity:.6}
+.report-card.report-done{opacity:.7}
 
 .report-header{display:flex;align-items:center;gap:10px;padding:10px 14px;flex-wrap:wrap}
-.report-callsign{font-family:var(--mono);font-weight:600;font-size:13px;color:var(--text)}
-.report-spotter{font-family:var(--mono);font-size:10px;background:var(--bg3);
+.kind-badge{font-family:var(--mono);font-size:9px;padding:2px 6px;border-radius:3px;letter-spacing:.05em}
+.kind-badge.skywarn{background:rgba(56,139,253,.12);border:1px solid var(--blue);color:var(--blue)}
+.kind-badge.strip{background:rgba(163,113,247,.12);border:1px solid var(--purple);color:var(--purple)}
+.report-title{font-family:var(--mono);font-weight:600;font-size:13px;color:var(--text)}
+.report-tag{font-family:var(--mono);font-size:10px;background:var(--bg3);
   padding:2px 6px;border-radius:3px;color:var(--muted)}
-.report-event{font-family:var(--mono);font-size:10px;background:rgba(210,153,34,.12);
-  border:1px solid var(--yellow);padding:2px 6px;border-radius:3px;color:var(--yellow)}
-.report-loc{font-family:var(--mono);font-size:11px;color:var(--blue)}
-.report-done-tag{font-family:var(--mono);font-size:10px;background:rgba(63,185,80,.12);
+.report-loc{font-family:var(--mono);font-size:11px;color:var(--blue);text-decoration:none}
+.report-loc:hover{text-decoration:underline}
+.report-status-done{font-family:var(--mono);font-size:10px;background:rgba(63,185,80,.12);
   border:1px solid var(--green);padding:2px 6px;border-radius:3px;color:var(--green)}
+.report-status-open{font-family:var(--mono);font-size:10px;background:rgba(210,153,34,.12);
+  border:1px solid var(--yellow);padding:2px 6px;border-radius:3px;color:var(--yellow)}
 .report-ts{font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:auto}
+.report-summary{padding:0 14px 8px;font-family:var(--mono);font-size:11px;color:var(--text)}
 
 .report-fields{background:var(--bg3);border-top:1px solid var(--border);border-bottom:1px solid var(--border);
   padding:10px 14px;font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.8;
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:2px 16px}
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:2px 16px}
 .field-key{color:var(--dim)}
 .field-val{color:var(--text)}
 .field-val input{background:var(--bg);border:1px solid var(--border2);color:var(--text);
@@ -74,7 +81,6 @@ body.sim-mode #reports-container{height:calc(100vh - 186px)}
 .field-val input:focus{border-color:var(--blue)}
 
 .report-actions{display:flex;gap:8px;padding:8px 14px 10px}
-
 .action-sm{font-family:var(--mono);font-size:10px;padding:3px 10px;border-radius:3px;
   border:1px solid;cursor:pointer;transition:all .1s;background:var(--bg)}
 .edit-btn{border-color:var(--blue);color:var(--blue)}
@@ -89,9 +95,6 @@ body.sim-mode #reports-container{height:calc(100vh - 186px)}
 .save-btn:hover{background:rgba(63,185,80,.15)}
 .cancel-btn{border-color:var(--border2);color:var(--muted)}
 .cancel-btn:hover{border-color:var(--red);color:var(--red)}
-.filter-btn{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:4px;
-  border:1px solid var(--border);background:var(--bg3);color:var(--muted);cursor:pointer}
-.filter-btn.active{border-color:var(--blue);color:var(--blue)}
 
 .empty-state{text-align:center;padding:60px 20px;font-family:var(--mono);
   font-size:13px;color:var(--dim)}
@@ -110,29 +113,33 @@ body.sim-mode #reports-container{height:calc(100vh - 186px)}
 <div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY &#9888;</div>
 <div id="header">
   <a class="back-link" href="/">← SM</a>
-  <div class="logo">▣ SM / SKYWARN Reports</div>
+  <div class="logo">▣ SM / Reports</div>
   <div class="spacer"></div>
   <div id="clock"></div>
 </div>
 
 <div id="toolbar">
-  <button class="filter-btn active" data-filter="all" onclick="setFilter('all',this)">All</button>
-  <button class="filter-btn" data-filter="open" onclick="setFilter('open',this)">Open</button>
-  <button class="filter-btn" data-filter="completed" onclick="setFilter('completed',this)">Completed</button>
-  <input type="text" id="search-box" placeholder="Filter by callsign, location, sender…" oninput="renderReports()">
+  <button class="filter-btn active" data-filter-kind="all" onclick="setKindFilter('all',this)">All</button>
+  <button class="filter-btn" data-filter-kind="skywarn" onclick="setKindFilter('skywarn',this)">🌦 SKYWARN</button>
+  <button class="filter-btn" data-filter-kind="strip" onclick="setKindFilter('strip',this)">📋 Strip</button>
+  <div class="filter-sep"></div>
+  <button class="filter-btn active" data-filter-status="all" onclick="setStatusFilter('all',this)">Any status</button>
+  <button class="filter-btn" data-filter-status="open" onclick="setStatusFilter('open',this)">Open</button>
+  <button class="filter-btn" data-filter-status="done" onclick="setStatusFilter('done',this)">Done/Sent</button>
+  <input type="text" id="search-box" placeholder="Filter…" oninput="renderReports()">
   <div class="spacer"></div>
   <button class="action-btn" onclick="loadReports()">↻ Refresh</button>
 </div>
 
 <div class="summary-bar">
   <div class="summary-item">Total on file: <span id="cnt-total">0</span></div>
-  <div class="summary-item" style="margin-left:auto">These are logged locally only — never auto-submitted to NWS. Use "skywarn net"/"inws"/"winlink" from the bot to relay one.</div>
+  <div class="summary-item" style="margin-left:auto">SKYWARN reports are logged locally only — never auto-submitted to NWS. Strip reports are sent via Winlink when the mesh bot's guided form completes.</div>
 </div>
 
 <div id="reports-container">
   <div class="empty-state" id="empty-state" style="display:none">
-    <div class="icon">☁</div>
-    No SKYWARN reports on file yet
+    <div class="icon">📄</div>
+    No reports on file yet
   </div>
   <div id="reports-list"></div>
 </div>
@@ -140,12 +147,14 @@ body.sim-mode #reports-container{height:calc(100vh - 186px)}
 <div id="toast-area"></div>
 
 <script>
-let allReports = [];
+let skywarnReports = [];
+let stripReports = [];
 let newIds = new Set();
-let editingId = null;
-let currentFilter = 'all';
+let editingKey = null;   // `${kind}:${id}`
+let kindFilter = 'all';
+let statusFilter = 'all';
 
-const EDITABLE_FIELDS = [
+const SKYWARN_FIELDS = [
   ['callsign',   'Callsign'],
   ['spotter_id', 'Spotter ID'],
   ['location',   'Location'],
@@ -168,35 +177,57 @@ setInterval(tick, 1000); tick();
 // ── Data load ────────────────────────────────────────────────────────────
 async function loadReports() {
   try {
-    const r = await fetch('/api/skywarn?limit=500');
-    const data = await r.json();
-    allReports = data.reports;
-    document.getElementById('cnt-total').textContent = data.total;
+    const [swRes, stRes] = await Promise.all([
+      fetch('/api/skywarn?limit=500').then(r => r.json()).catch(() => ({reports:[]})),
+      fetch('/api/strip_reports?limit=500').then(r => r.json()).catch(() => ({reports:[]})),
+    ]);
+    skywarnReports = swRes.reports || [];
+    stripReports = stRes.reports || [];
+    document.getElementById('cnt-total').textContent = skywarnReports.length + stripReports.length;
     renderReports();
   } catch(e) {
     toast('Failed to load reports', 'err');
   }
 }
 
+function mergedReports() {
+  const sw = skywarnReports.map(r => ({...r, kind: 'skywarn'}));
+  const st = stripReports.map(r => ({...r, kind: 'strip'}));
+  return [...sw, ...st].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+}
+
 // ── Filter & render ──────────────────────────────────────────────────────
-function setFilter(filter, el) {
-  currentFilter = filter;
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+function setKindFilter(kind, el) {
+  kindFilter = kind;
+  el.parentElement.querySelectorAll('[data-filter-kind]').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderReports();
+}
+function setStatusFilter(status, el) {
+  statusFilter = status;
+  el.parentElement.querySelectorAll('[data-filter-status]').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
   renderReports();
 }
 
+function isDone(r) {
+  return r.kind === 'skywarn' ? !!r.completed : !!r.sent;
+}
+
 function renderReports() {
   const search = document.getElementById('search-box').value.toLowerCase();
-  let filtered = allReports;
+  let filtered = mergedReports();
 
-  if (currentFilter === 'open') filtered = filtered.filter(r => !r.completed);
-  else if (currentFilter === 'completed') filtered = filtered.filter(r => r.completed);
+  if (kindFilter !== 'all') filtered = filtered.filter(r => r.kind === kindFilter);
+  if (statusFilter === 'open') filtered = filtered.filter(r => !isDone(r));
+  else if (statusFilter === 'done') filtered = filtered.filter(r => isDone(r));
 
   if (search) {
-    filtered = filtered.filter(r =>
-      ((r.callsign||'') + (r.location||'') + (r.from_display||'') + (r.raw_text||'')).toLowerCase().includes(search)
-    );
+    filtered = filtered.filter(r => {
+      const vals = r.kind === 'strip' ? Object.values(r.answers || {}) : Object.values(r);
+      return [r.from_display, r.callsign, r.template, r.raw_text, ...vals]
+        .join(' ').toLowerCase().includes(search);
+    });
   }
 
   const container = document.getElementById('reports-list');
@@ -212,78 +243,100 @@ function renderReports() {
 }
 
 function buildCard(r) {
+  const key = `${r.kind}:${r.id}`;
   const ts = new Date(r.timestamp).toUTCString().slice(5,25);
-  const isNew = newIds.has(r.id) ? ' report-new' : '';
-  const isDone = r.completed ? ' report-completed' : '';
-  const isEditing = editingId === r.id;
-  const spotterBadge = (r.spotter_id && r.spotter_id.toLowerCase() !== 'none')
-    ? `<span class="report-spotter">Spotter #${esc(r.spotter_id)}</span>` : '';
-  const eventBadge = (r.event_type && r.event_type.toLowerCase() !== 'none')
-    ? `<span class="report-event">${esc(r.event_type)}</span>` : '';
-  const loc = r.location ? `<span class="report-loc">📍 ${esc(r.location)}</span>` : '';
-  const doneTag = r.completed ? `<span class="report-done-tag">✓ Complete</span>` : '';
+  const isNew = newIds.has(key) ? ' report-new' : '';
+  const done = isDone(r);
+  const doneClass = done ? ' report-done' : '';
+  const isEditing = editingKey === key;
+  const kindBadge = r.kind === 'strip'
+    ? `<span class="kind-badge strip">📋 STRIP</span>`
+    : `<span class="kind-badge skywarn">🌦 SKYWARN</span>`;
+  const title = r.kind === 'strip' ? esc(r.template || 'custom') : esc(r.callsign || '?');
+  const fromTag = `<span class="report-tag">${esc(r.from_display || r.from_id || '')}</span>`;
+  let loc = '';
+  if (r.kind === 'strip' && r.lat != null && r.lon != null) {
+    loc = `<a class="report-loc" href="/map?lat=${r.lat}&lon=${r.lon}&zoom=14" target="_blank" rel="noopener">📍 ${r.lat.toFixed(4)}, ${r.lon.toFixed(4)}</a>`;
+  } else if (r.kind === 'skywarn' && r.location) {
+    loc = `<span class="report-loc">📍 ${esc(r.location)}</span>`;
+  }
+  const statusTag = done
+    ? `<span class="report-status-done">✓ ${r.kind === 'strip' ? ('Sent' + (r.winlink_dest ? ' → ' + esc(r.winlink_dest) : '')) : 'Complete'}</span>`
+    : `<span class="report-status-open">⏳ ${r.kind === 'strip' ? 'Pending' : 'Open'}</span>`;
 
-  // Always show the structured fields directly (field: value), not collapsed —
-  // and swap values for inputs when this card is in edit mode.
-  const shown = [
-    ['From',        r.from_display || r.from_id, null],
-    ['Adapter',     r.adapter, null],
-    ['Channel',     r.source_channel, null],
-    ...EDITABLE_FIELDS.slice(0).map(([key,label]) => [label, r[key], key]),
-  ];
-  const fieldRows = shown.map(([label, val, key]) => {
-    const display = key && isEditing
-      ? `<input type="text" data-field="${key}" value="${escAttr(val || '')}">`
-      : esc(val || '—');
-    return `<div><span class="field-key">${esc(label)}: </span><span class="field-val">${display}</span></div>`;
-  }).join('');
+  let fieldRows, summary = '';
+  if (r.kind === 'strip') {
+    const shown = [['Adapter', r.adapter, null], ...Object.entries(r.answers || {}).map(([k,v]) => [k, v, k])];
+    fieldRows = shown.map(([label, val, key2]) => {
+      const display = key2 && isEditing
+        ? `<input type="text" data-field="${escAttr(key2)}" value="${escAttr(val || '')}">`
+        : esc(val || '—');
+      return `<div><span class="field-key">${esc(label)}: </span><span class="field-val">${display}</span></div>`;
+    }).join('');
+  } else {
+    summary = `<div class="report-summary">${esc(r.raw_text || '')}</div>`;
+    const shown = [['Adapter', r.adapter, null], ['Channel', r.source_channel, null],
+      ...SKYWARN_FIELDS.map(([k,label]) => [label, r[k], k])];
+    fieldRows = shown.map(([label, val, key2]) => {
+      const display = key2 && isEditing
+        ? `<input type="text" data-field="${key2}" value="${escAttr(val || '')}">`
+        : esc(val || '—');
+      return `<div><span class="field-key">${esc(label)}: </span><span class="field-val">${display}</span></div>`;
+    }).join('');
+  }
 
   const actions = isEditing
-    ? `<button class="action-sm save-btn" onclick="saveEdit(${r.id})">💾 Save</button>
+    ? `<button class="action-sm save-btn" onclick="saveEdit('${r.kind}',${r.id})">💾 Save</button>
        <button class="action-sm cancel-btn" onclick="cancelEdit()">✕ Cancel</button>`
-    : `<button class="action-sm edit-btn" onclick="startEdit(${r.id})">✎ Edit</button>
-       ${r.completed
-         ? `<button class="action-sm undone-btn" onclick="setCompleted(${r.id}, false)">↺ Reopen</button>`
-         : `<button class="action-sm done-btn" onclick="setCompleted(${r.id}, true)">✓ Complete</button>`}
-       <button class="action-sm del-btn" onclick="deleteReport(${r.id})">🗑 Delete</button>`;
+    : `<button class="action-sm edit-btn" onclick="startEdit('${r.kind}',${r.id})">✎ Edit</button>
+       ${done
+         ? `<button class="action-sm undone-btn" onclick="setDone('${r.kind}',${r.id}, false)">↺ Reopen</button>`
+         : `<button class="action-sm done-btn" onclick="setDone('${r.kind}',${r.id}, true)">✓ ${r.kind === 'strip' ? 'Mark sent' : 'Complete'}</button>`}
+       <button class="action-sm del-btn" onclick="deleteReport('${r.kind}',${r.id})">🗑 Delete</button>`;
 
-  return `<div class="report-card${isNew}${isDone}" id="card-${r.id}">
+  return `<div class="report-card kind-${r.kind}${isNew}${doneClass}" id="card-${key}">
     <div class="report-header">
-      <span class="report-callsign">${esc(r.callsign)}</span>
-      ${spotterBadge}
-      ${eventBadge}
+      ${kindBadge}
+      <span class="report-title">${title}</span>
+      ${fromTag}
       ${loc}
-      ${doneTag}
+      ${statusTag}
       <span class="report-ts">${ts}</span>
     </div>
-    <div class="report-summary">${esc(r.raw_text)}</div>
+    ${summary}
     <div class="report-fields">${fieldRows}</div>
     <div class="report-actions">${actions}</div>
   </div>`;
 }
 
 // ── Edit ───────────────────────────────────────────────────────────────
-function startEdit(id) {
-  editingId = id;
+function startEdit(kind, id) {
+  editingKey = `${kind}:${id}`;
   renderReports();
 }
-
 function cancelEdit() {
-  editingId = null;
+  editingKey = null;
   renderReports();
 }
 
-async function saveEdit(id) {
-  const card = document.getElementById(`card-${id}`);
+async function saveEdit(kind, id) {
+  const card = document.getElementById(`card-${kind}:${id}`);
   const fields = {};
   card.querySelectorAll('input[data-field]').forEach(inp => { fields[inp.dataset.field] = inp.value; });
   try {
-    const r = await fetch(`/api/skywarn/${id}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(fields)});
+    const url = kind === 'strip' ? `/api/strip_reports/${id}` : `/api/skywarn/${id}`;
+    const body = kind === 'strip' ? {answers: fields} : fields;
+    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     const d = await r.json();
     if (d.status === 'ok') {
-      const idx = allReports.findIndex(x => x.id === id);
-      if (idx >= 0) allReports[idx] = d.report;
-      editingId = null;
+      if (kind === 'strip') {
+        const idx = stripReports.findIndex(x => x.id === id);
+        if (idx >= 0) stripReports[idx] = d.report;
+      } else {
+        const idx = skywarnReports.findIndex(x => x.id === id);
+        if (idx >= 0) skywarnReports[idx] = d.report;
+      }
+      editingKey = null;
       toast('Report updated', 'ok');
       renderReports();
     } else {
@@ -294,15 +347,22 @@ async function saveEdit(id) {
   }
 }
 
-// ── Complete / delete ────────────────────────────────────────────────────
-async function setCompleted(id, completed) {
+// ── Done/sent toggle & delete ─────────────────────────────────────────────
+async function setDone(kind, id, done) {
   try {
-    const r = await fetch(`/api/skywarn/${id}/complete`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({completed})});
+    const url = kind === 'strip' ? `/api/strip_reports/${id}/sent` : `/api/skywarn/${id}/complete`;
+    const body = kind === 'strip' ? {sent: done} : {completed: done};
+    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     const d = await r.json();
     if (d.status === 'ok') {
-      const idx = allReports.findIndex(x => x.id === id);
-      if (idx >= 0) allReports[idx] = d.report;
-      toast(completed ? 'Marked complete' : 'Reopened', 'ok');
+      if (kind === 'strip') {
+        const idx = stripReports.findIndex(x => x.id === id);
+        if (idx >= 0) stripReports[idx] = d.report;
+      } else {
+        const idx = skywarnReports.findIndex(x => x.id === id);
+        if (idx >= 0) skywarnReports[idx] = d.report;
+      }
+      toast(done ? 'Marked done' : 'Reopened', 'ok');
       renderReports();
     } else {
       toast('Action failed', 'err');
@@ -312,14 +372,16 @@ async function setCompleted(id, completed) {
   }
 }
 
-async function deleteReport(id) {
-  if (!confirm('Delete this SKYWARN report? This cannot be undone.')) return;
+async function deleteReport(kind, id) {
+  if (!confirm('Delete this report? This cannot be undone.')) return;
   try {
-    const r = await fetch(`/api/skywarn/${id}`, {method:'DELETE'});
+    const url = kind === 'strip' ? `/api/strip_reports/${id}` : `/api/skywarn/${id}`;
+    const r = await fetch(url, {method:'DELETE'});
     const d = await r.json();
     if (d.status === 'ok') {
-      allReports = allReports.filter(x => x.id !== id);
-      document.getElementById('cnt-total').textContent = allReports.length;
+      if (kind === 'strip') stripReports = stripReports.filter(x => x.id !== id);
+      else skywarnReports = skywarnReports.filter(x => x.id !== id);
+      document.getElementById('cnt-total').textContent = skywarnReports.length + stripReports.length;
       toast('Report deleted', 'ok');
       renderReports();
     } else {
@@ -337,11 +399,13 @@ function connectWS() {
   ws.onmessage = (e) => {
     const pkt = JSON.parse(e.data);
     if (pkt.type === 'skywarn_report') {
-      allReports.unshift(pkt.data);
-      newIds.add(pkt.data.id);
-      document.getElementById('cnt-total').textContent = allReports.length;
-      renderReports();
-      toast(`☁ New SKYWARN report: ${pkt.data.callsign}${pkt.data.location ? ' — ' + pkt.data.location : ''}`, 'ok');
+      newIds.add(`skywarn:${pkt.data.id}`);
+      loadReports();
+      toast(`🌦 New SKYWARN report: ${pkt.data.callsign}${pkt.data.location ? ' — ' + pkt.data.location : ''}`, 'ok');
+    } else if (pkt.type === 'strip_report') {
+      newIds.add(`strip:${pkt.data.id}`);
+      loadReports();
+      toast(`📋 New strip report: ${pkt.data.template || 'custom'} from ${pkt.data.from_display || ''}`, 'ok');
     }
   };
   ws.onclose = () => setTimeout(connectWS, 3000);
@@ -350,11 +414,9 @@ function connectWS() {
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-
 function escAttr(s) {
   return esc(s).replace(/"/g,'&quot;');
 }
-
 function toast(msg, type='') {
   const el = document.createElement('div');
   el.className = `toast ${type}`;

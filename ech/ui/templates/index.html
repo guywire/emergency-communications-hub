@@ -967,7 +967,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
       <button id="bot-stats-btn" onclick="toggleBotStats(event)"
         style="font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:4px"
         title="Mesh bot activity">
-        🤖 <span id="bot-total-count">0</span>
+        🤖 <span id="bot-total-count">0</span><span id="bot-session-dot" style="display:none;width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 5px var(--green)"></span>
       </button>
       <div id="bot-stats-popover" style="display:none;position:absolute;right:0;top:calc(100% + 4px);min-width:220px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 0;z-index:200;box-shadow:0 4px 16px rgba(0,0,0,.5)">
         <div style="font-family:var(--mono);font-size:9px;color:var(--dim);padding:0 12px 6px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);margin-bottom:4px">Bot activity</div>
@@ -2160,6 +2160,8 @@ async function kickUser(username) {
 // ── Bot stats chip ────────────────────────────────────────────────────────
 let _botStats = null;
 
+let _botSessions = [];
+
 async function loadBotStats() {
   try {
     // Show widget once we know the bot config (enabled or not)
@@ -2169,6 +2171,10 @@ async function loadBotStats() {
     _botStats = s;
     document.getElementById('bot-total-count').textContent = s.total || 0;
     if (s.total > 0) document.getElementById('bot-stats-wrap').style.display = '';
+    _botSessions = await fetch('/api/bot/sessions').then(r => r.json()).then(d => d.sessions || []).catch(() => []);
+    const dot = document.getElementById('bot-session-dot');
+    if (dot) dot.style.display = _botSessions.length > 0 ? '' : 'none';
+    if (_botSessions.length > 0) document.getElementById('bot-stats-wrap').style.display = '';
     // Refresh popover if open
     if (document.getElementById('bot-stats-popover').style.display !== 'none') renderBotStatsPopover();
   } catch(e) {}
@@ -2178,11 +2184,19 @@ function renderBotStatsPopover() {
   const s = _botStats;
   if (!s) return;
   const body = document.getElementById('bot-stats-body');
+  const sessions = (_botSessions || []).map(sess =>
+    `<div style="display:flex;justify-content:space-between;padding:2px 0;color:var(--green)">
+      <span>&#9679; ${escHtml(sess.from_display)}</span><span style="color:var(--dim)">${escHtml(sess.detail)}</span>
+    </div>`
+  ).join('');
+  const sessionsBlock = sessions
+    ? `<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)">${sessions}</div>`
+    : '';
   const last = s.last ? `<div style="color:var(--dim);margin-top:4px;font-size:10px">Last: ${s.last.from_display||s.last.from_id} · ${s.last.command} · ${(s.last.timestamp||'').slice(11,19)} UTC</div>` : '';
   const cmds = (s.by_command||[]).slice(0,6).map(x =>
     `<div style="display:flex;justify-content:space-between;padding:1px 0"><span>${x.command}</span><span style="color:var(--dim)">${x.cnt}</span></div>`
   ).join('');
-  body.innerHTML = `<div style="margin-bottom:4px">Total: <strong>${s.total}</strong> · Callers: <strong>${s.unique_callers}</strong></div>${cmds}${last}`;
+  body.innerHTML = `${sessionsBlock}<div style="margin-bottom:4px">Total: <strong>${s.total}</strong> · Callers: <strong>${s.unique_callers}</strong></div>${cmds}${last}`;
 }
 
 function toggleBotStats(e) {

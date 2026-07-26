@@ -126,6 +126,21 @@ def resolve_mgrs_answer(text: str) -> str:
     return text + " [MGRS conversion unavailable — mgrs package not installed]"
 
 
+def mgrs_to_latlon(grid: str) -> tuple[float, float] | None:
+    """MGRS grid reference -> (lat, lon), for plotting a completed strip on
+    the map. Same reasoning as latlon_to_mgrs(): use the trusted library,
+    return None (skip the map step) rather than risk a wrong coordinate."""
+    try:
+        import mgrs as _mgrs
+    except ImportError:
+        return None
+    try:
+        lat, lon = _mgrs.MGRS().toLatLon(grid.strip().replace(" ", ""))
+        return float(lat), float(lon)
+    except Exception:
+        return None
+
+
 def parse_response_strip(template_name: str, response_text: str) -> dict[str, str]:
     """Parse a pasted 'NAME/ans1/ans2/.../' string into {question_key: answer},
     skipping spacer positions and blank/whitespace-only values."""

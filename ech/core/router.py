@@ -373,6 +373,7 @@ class Router:
         to_id: str | None = None,
         priority: Priority = Priority.NORMAL,
         raw: dict | None = None,
+        msg_type: str = "text",
     ) -> dict[str, bool]:
         """
         Send a message via one or more adapters.
@@ -381,6 +382,11 @@ class Router:
         ``raw`` is an optional metadata dict passed through to the adapter via
         NormalizedMessage.raw.  MeshCore uses ``raw["channel_idx"]`` to route
         a reply back to the originating channel instead of the adapter default.
+
+        ``msg_type`` defaults to "text" (shown in the inbox). Pass e.g.
+        "bot_session" to send a real message over the radio while keeping it
+        out of the main feed — msgPassesFilter() on the frontend already
+        hides anything non-"text", same mechanism used for position/telemetry.
         """
         if adapter_names is None:
             targets = [n for n, a in self._adapters.items() if getattr(a, "send_enabled", True)]
@@ -405,6 +411,7 @@ class Router:
                 body=body,
                 priority=priority,
                 raw=raw or {},
+                msg_type=msg_type,
             )
             ok = await adapter.send(msg)
             results[name] = ok

@@ -115,7 +115,7 @@ import httpx
 from ech.core.models import NormalizedMessage, Priority
 from ech.core.strip_templates import (
     STRIP_TEMPLATES, TEMPLATE_ALIASES, build_response_strip, guided_fields,
-    identify_strip, parse_response_strip, resolve_mgrs_answer,
+    identify_strip, latlon_to_mgrs, mgrs_to_latlon, parse_response_strip, resolve_mgrs_answer,
 )
 
 log = logging.getLogger(__name__)
@@ -847,7 +847,7 @@ class MeshBot:
             except Exception:
                 pass
 
-    async def _send(self, msg: NormalizedMessage, text: str) -> None:
+    async def _send(self, msg: NormalizedMessage, text: str, msg_type: str = "text") -> None:
         if not self._router:
             return
         body = text[:self._max_len]
@@ -886,6 +886,7 @@ class MeshBot:
             to_id=to_id,
             priority=Priority.NORMAL,
             raw=raw or None,
+            msg_type=msg_type,
         )
 
     # ── Command handlers ──────────────────────────────────────────────────────
@@ -1869,7 +1870,8 @@ class MeshBot:
         shared = "" if is_dm else " Shared — anyone can send moves."
         return f"Pick a game (reply 1-3): {opts}.{shared}"
 
-    async def _send_multi(self, msg: NormalizedMessage, text: str, max_chunks: int = 3) -> None:
+    async def _send_multi(self, msg: NormalizedMessage, text: str, max_chunks: int = 3,
+                          msg_type: str = "text") -> None:
         """Send long text as several sequential replies instead of one hard-truncated
         one. Used for Adventure's paragraph-length room descriptions, which regularly
         exceed a single LoRa payload. Splits on word boundaries; a short pause between
@@ -1897,7 +1899,7 @@ class MeshBot:
                 last = last[: limit - len(marker)]
             chunks[-1] = last + marker
         for i, chunk in enumerate(chunks):
-            await self._send(msg, chunk)
+            await self._send(msg, chunk, msg_type=msg_type)
             if i < len(chunks) - 1:
                 await asyncio.sleep(1.5)
         # Overwrite the per-chunk tracking _send() just did with the full
@@ -2131,7 +2133,7 @@ class MeshBot:
         # which polled MeshCore channel messages can't provide (no sender pubkey).
         if (msg.source_channel or "").lower() != "dm":
             return "skywarn: DM the bot for the guided form, or send 'skywarn <callsign> <report>' here"
-        self._skywarn_sessions[msg.from_id] = {"step": 0, "answers": {}}
+        self._skywarn_sessions[msg.from_id] = {"step": 0, "answers": {}, "from_display": msg.from_display or msg.from_id}
         return f"Skywarn report — {_SKYWARN_FIELDS[0][1]} (or 'cancel')"
 
     async def _cmd_skywarn_last(self, msg: NormalizedMessage) -> str:
@@ -2270,8 +2272,19 @@ class MeshBot:
             await self._send(msg, "Skywarn report cancelled.")
             return
         if text.lower() in ("repeat", "again"):
-            await self._send(msg, _SKYWARN_FIELDS[sess["step"]][1])
+            await self._send(msg, _SKYWARN_FIELDS[sess["step"]][1], msg_type="bot_session")
             return
+
+        # Same reasoning as strip: the guided back-and-forth is noise once
+        # the report is filed — hide the bot's own prompts in real time, and
+        # retag this inbound answer (won't hide it from an already-open live
+        # view, since router._handle_inbound() broadcasts before the bot
+        # runs, but keeps it out of the feed on refresh/reload).
+        if self._db and msg.id:
+            try:
+                await self._db.update_msg_type(msg.id, "bot_session")
+            except Exception as exc:
+                log.debug("MeshBot: skywarn msg_type retag failed: %s", exc)
 
         field_key, _ = _SKYWARN_FIELDS[sess["step"]]
         # Uppercase every field except free-text notes — matches standard
@@ -2281,7 +2294,7 @@ class MeshBot:
 
         if sess["step"] < len(_SKYWARN_FIELDS):
             _, prompt = _SKYWARN_FIELDS[sess["step"]]
-            await self._send(msg, prompt)
+            await self._send(msg, prompt, msg_type="bot_session")
             return
 
         answers = sess["answers"]
@@ -2345,6 +2358,30 @@ class MeshBot:
             except Exception as exc:
                 log.debug("MeshBot: skywarn WS broadcast error: %s", exc)
 
+    def active_sessions(self) -> list[dict]:
+        """Operators currently mid-form (strip/skywarn) — for the header bot-
+        activity popover, so "what's the bot doing right now" is visible
+        without having to watch a feed that no longer shows the step-by-step
+        chatter (see the msg_type="bot_session" suppression in the guided
+        dispatchers below)."""
+        out = []
+        for from_id, sess in self._strip_sessions.items():
+            phase = sess.get("phase", "?")
+            template = sess.get("template") or "custom"
+            if phase == "fields":
+                detail = f"strip {template} — step {sess['step'] + 1}/{len(sess['fields'])}"
+            elif phase == "picking":
+                detail = "strip — choosing template"
+            else:
+                detail = f"strip {template} — awaiting Winlink destination"
+            out.append({"from_id": from_id, "from_display": sess.get("from_display", from_id),
+                        "kind": "strip", "detail": detail})
+        for from_id, sess in self._skywarn_sessions.items():
+            detail = f"skywarn — step {sess.get('step', 0) + 1}/{len(_SKYWARN_FIELDS)}"
+            out.append({"from_id": from_id, "from_display": sess.get("from_display", from_id),
+                        "kind": "skywarn", "detail": detail})
+        return out
+
     # ── RI strip reports (SHARES Region 1 "Response Creator" format) ──────────
     # Two entry paths, per operator request:
     #   1. Paste a complete strip in one message — parsed directly, no back-
@@ -2368,12 +2405,74 @@ class MeshBot:
         # bodies, so "leave blank" literally can't be sent.
         return f"(NA=skip) {label}"
 
-    def _start_strip_session(self, msg: NormalizedMessage, template: str) -> str:
+    # Template field key -> canonical prefill-data key (see _node_prefill).
+    _STRIP_PREFILL_MAP = {
+        "CALL SIGN": "callsign", "MGRS": "mgrs",
+        "TEMPERATURE": "temp_f", "TEMP DEG F": "temp_f",
+    }
+
+    async def _node_prefill(self, msg: NormalizedMessage) -> dict[str, str]:
+        """Best-effort data about the sending node — a callsign-shaped display
+        name, MGRS derived from a live reported position, temperature from
+        telemetry — so the guided form doesn't re-ask for what ECH already
+        has. Never invents anything; only uses what the adapter already
+        reports for this exact node_id, and only if the operator confirms it
+        (each prefilled field is stated up front, not silently assumed)."""
+        out: dict[str, str] = {}
+        if not self._router:
+            return out
+        adapter = self._router._adapters.get(msg.source_adapter)
+        if not adapter or not hasattr(adapter, "nodes"):
+            return out
+        try:
+            nodes = await adapter.nodes()
+        except Exception:
+            return out
+        node = next((n for n in nodes if n.node_id == msg.from_id), None)
+        if not node:
+            return out
+        if node.display_name and _CALL_RE.match(node.display_name.strip()):
+            out["callsign"] = node.display_name.strip().upper()
+        if node.lat is not None and node.lon is not None:
+            grid = latlon_to_mgrs(node.lat, node.lon)
+            if grid:
+                out["mgrs"] = grid
+        temp_c = getattr(node, "temperature", None)
+        if temp_c is not None:
+            try:
+                out["temp_f"] = str(round(float(temp_c) * 9 / 5 + 32))
+            except (TypeError, ValueError):
+                pass
+        return out
+
+    @staticmethod
+    def _next_strip_step(fields: list[tuple[str, str]], answers: dict, step: int) -> int:
+        while step < len(fields) and fields[step][0] in answers:
+            step += 1
+        return step
+
+    async def _start_strip_session(self, msg: NormalizedMessage, template: str) -> str:
         fields = guided_fields(template)
+        prefill = await self._node_prefill(msg)
+        answers: dict[str, str] = {}
+        filled_notes = []
+        for key, _ in fields:
+            src = self._STRIP_PREFILL_MAP.get(key)
+            if src and prefill.get(src):
+                answers[key] = prefill[src]
+                filled_notes.append(f"{key}={prefill[src]}")
+        step = self._next_strip_step(fields, answers, 0)
         self._strip_sessions[msg.from_id] = {
-            "template": template, "fields": fields, "step": 0, "answers": {}, "phase": "fields",
+            "template": template, "fields": fields, "step": step, "answers": answers, "phase": "fields",
+            "from_display": msg.from_display or msg.from_id,
         }
-        return f"{template} report — {self._strip_prompt(fields[0][1])} (or 'cancel')"
+        note = f" [auto-filled from your node: {', '.join(filled_notes)}]" if filled_notes else ""
+        if step >= len(fields):
+            # Every field was prefilled (unlikely, but possible on a small template).
+            self._strip_sessions[msg.from_id]["phase"] = "dest"
+            preview = build_response_strip(template, answers)
+            return f"{template} report{note} — all fields auto-filled:\n{preview}\n\nWinlink destination address to send, or 'cancel'."
+        return f"{template} report{note} — {self._strip_prompt(fields[step][1])} (or 'cancel')"
 
     async def _cmd_strip(self, msg: NormalizedMessage) -> str:
         m = re.search(r'strip\s+(.+)', msg.body, re.IGNORECASE | re.DOTALL)
@@ -2388,7 +2487,7 @@ class MeshBot:
             # most template names aren't registered top-level commands, so
             # without a session that reply would otherwise hit "unrecognized
             # command" instead of starting the guided form.
-            self._strip_sessions[msg.from_id] = {"phase": "picking"}
+            self._strip_sessions[msg.from_id] = {"phase": "picking", "from_display": msg.from_display or msg.from_id}
             return f"Strip report — which template? ({self._strip_template_names()}), or paste a complete strip. 'cancel' anytime."
 
         if "/" in args:
@@ -2399,7 +2498,7 @@ class MeshBot:
             return f"strip: unknown template {args!r}. Try: {self._strip_template_names()}"
         if not is_dm:
             return "strip: DM the bot for the guided form"
-        return self._start_strip_session(msg, template)
+        return await self._start_strip_session(msg, template)
 
     async def _start_strip_from_paste(self, msg: NormalizedMessage, args: str, is_dm: bool) -> str:
         first_field = args.split("/", 1)[0].strip()
@@ -2411,11 +2510,15 @@ class MeshBot:
             preview = build_response_strip(template, answers)
             self._strip_sessions[msg.from_id] = {
                 "template": template, "answers": answers, "phase": "dest",
+                "from_display": msg.from_display or msg.from_id,
             }
             return f"Strip parsed ({template}):\n{preview}\n\nWinlink destination address to send, or 'cancel'."
         # Unrecognized strip name — no known field layout to parse against, so
         # forward the pasted text verbatim rather than guessing its structure.
-        self._strip_sessions[msg.from_id] = {"template": None, "raw": args.strip(), "phase": "dest"}
+        self._strip_sessions[msg.from_id] = {
+            "template": None, "raw": args.strip(), "phase": "dest",
+            "from_display": msg.from_display or msg.from_id,
+        }
         return f"Strip template not recognized — will send as-is:\n{args.strip()}\n\nWinlink destination address to send, or 'cancel'."
 
     async def _dispatch_strip(self, msg: NormalizedMessage) -> None:
@@ -2436,12 +2539,26 @@ class MeshBot:
                 await self._send(msg, "Winlink destination address to send, or 'cancel'.")
             return
 
+        # Every prompt/answer exchange while still filling out fields is
+        # noise once the report is done — hide it from the main inbox (the
+        # bot's own prompts fully, in real time; this inbound answer only
+        # retroactively, since router._handle_inbound() already broadcast it
+        # live before the bot ever saw it). The "Strip complete" summary and
+        # the final send confirmation stay visible — that's the record that
+        # matters afterward.
+        if sess["phase"] in ("picking", "fields") and self._db and msg.id:
+            try:
+                await self._db.update_msg_type(msg.id, "bot_session")
+            except Exception as exc:
+                log.debug("MeshBot: strip msg_type retag failed: %s", exc)
+
         if sess["phase"] == "picking":
             template = TEMPLATE_ALIASES.get(text.strip().lower())
             if not template:
-                await self._send(msg, f"Unknown template {text.strip()!r}. Try: {self._strip_template_names()}, or 'cancel'.")
+                await self._send(msg, f"Unknown template {text.strip()!r}. Try: {self._strip_template_names()}, or 'cancel'.",
+                                  msg_type="bot_session")
                 return
-            await self._send(msg, self._start_strip_session(msg, template))
+            await self._send(msg, await self._start_strip_session(msg, template), msg_type="bot_session")
             return
 
         if sess["phase"] == "fields":
@@ -2462,10 +2579,10 @@ class MeshBot:
             else:
                 answer = text.upper()
             sess["answers"][key] = answer
-            sess["step"] += 1
+            sess["step"] = self._next_strip_step(fields, sess["answers"], sess["step"] + 1)
             if sess["step"] < len(fields):
                 _, next_label = fields[sess["step"]]
-                await self._send(msg, self._strip_prompt(next_label))
+                await self._send(msg, self._strip_prompt(next_label), msg_type="bot_session")
                 return
             sess["phase"] = "dest"
             preview = build_response_strip(sess["template"], sess["answers"])
@@ -2475,14 +2592,19 @@ class MeshBot:
         if sess["phase"] == "dest":
             dest = text
             del self._strip_sessions[msg.from_id]
-            if sess.get("template"):
-                strip_text = build_response_strip(sess["template"], sess["answers"])
+            template = sess.get("template")
+            answers = sess.get("answers", {})
+            if template:
+                strip_text = build_response_strip(template, answers)
             else:
                 strip_text = sess["raw"]
-            await self._send_strip_via_winlink(msg, strip_text, dest)
+                answers = {}
+            report_id = await self._save_strip_report(msg, template, answers, strip_text, dest)
+            await self._send_strip_via_winlink(msg, strip_text, dest, report_id)
             return
 
-    async def _send_strip_via_winlink(self, msg: NormalizedMessage, strip_text: str, dest: str) -> None:
+    async def _send_strip_via_winlink(self, msg: NormalizedMessage, strip_text: str, dest: str,
+                                       report_id: int | None = None) -> None:
         if not self._router:
             await self._send(msg, "strip: router not available")
             return
@@ -2493,10 +2615,71 @@ class MeshBot:
             await self._send(msg, "strip: no Winlink adapter connected")
             return
         result = await self._router.send(body=strip_text, adapter_names=[winlink_adapter], to_id=dest)
-        if result.get(winlink_adapter):
+        ok = bool(result.get(winlink_adapter))
+        if self._db and report_id is not None:
+            try:
+                await self._db.set_strip_sent(report_id, ok, winlink_dest=dest)
+            except Exception as exc:
+                log.debug("MeshBot: strip sent-status update failed: %s", exc)
+        if ok:
             await self._send(msg, f"Strip sent via Winlink to {dest}.")
         else:
             await self._send(msg, "strip: send failed — check the Winlink adapter is connected to the CMS")
+
+    @staticmethod
+    def _signed_coord(text: str, pos_letter: str, neg_letter: str) -> float | None:
+        t = text.strip().upper()
+        if not t:
+            return None
+        sign = -1.0 if t.endswith(neg_letter) else 1.0
+        t = t.rstrip(pos_letter + neg_letter)
+        try:
+            return sign * float(t)
+        except ValueError:
+            return None
+
+    async def _save_strip_report(self, msg: NormalizedMessage, template: str | None,
+                                  answers: dict, strip_text: str, dest: str) -> int | None:
+        if not self._db:
+            return None
+        lat = lon = None
+        grid = answers.get("MGRS", "")
+        if grid:
+            latlon = mgrs_to_latlon(grid)
+            if latlon:
+                lat, lon = latlon
+        if lat is None and answers.get("LATITUDE") and answers.get("LONGITUDE"):
+            lat = self._signed_coord(answers["LATITUDE"], "N", "S")
+            lon = self._signed_coord(answers["LONGITUDE"], "E", "W")
+        try:
+            report_id = await self._db.save_strip_report(
+                template=template or "CUSTOM", from_id=msg.from_id or "",
+                from_display=msg.from_display or msg.from_id or "",
+                adapter=msg.source_adapter or "", source_channel=msg.source_channel or "",
+                answers=answers, strip_text=strip_text, lat=lat, lon=lon,
+                winlink_dest=dest, sent=False,
+            )
+        except Exception as exc:
+            log.warning("MeshBot: strip report save error: %s", exc)
+            return None
+        if self._router:
+            try:
+                # Broadcast the full saved row (matches _save_skywarn's pattern)
+                # so the map/reports page get consistent data whether they
+                # loaded it live or from a page refresh.
+                saved = await self._db.get_strip_report(report_id)
+                if saved:
+                    await self._router.broadcast_ws_event("strip_report", saved)
+            except Exception:
+                pass
+        # The visible "complete status" record — every answered field,
+        # human-readable — replacing the now-hidden guided Q&A as what an
+        # operator reviewing the log actually sees.
+        if answers:
+            lines = [f"{k}: {v}" for k, v in answers.items() if v]
+            summary = f"Strip report ({template or 'custom'}) from {msg.from_display or msg.from_id}:\n" + "\n".join(lines)
+            await self._send_multi(msg, summary, max_chunks=5)
+        return report_id
 
     # ── Dad jokes ────────────────────────────────────────────────────────────
 
