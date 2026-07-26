@@ -87,7 +87,11 @@ class OpenSkyAdapter(Adapter):
             poll = 300.0
         self._poll = poll
 
-        self._stale_sec = float(config.get("stale_sec", 120.0))
+        # Must comfortably exceed poll_interval or nodes() (filtered on last_heard
+        # vs this cutoff) goes empty between polls — e.g. a 120s default against a
+        # 300s anonymous poll cadence means aircraft vanish for ~3 of every 5 min
+        # even though the adapter still has them internally.
+        self._stale_sec = float(config.get("stale_sec", max(120.0, self._poll * 2.5)))
         self._nodes: dict[str, MeshNode] = {}
         self._run_task: asyncio.Task | None = None
 

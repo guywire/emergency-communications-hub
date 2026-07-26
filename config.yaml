@@ -138,7 +138,9 @@ adapters:
 #     # client_id: "YOUR_CLIENT_ID"          # optional — raises the rate limit
 #     # client_secret: "YOUR_CLIENT_SECRET"
 #     poll_interval: 30       # seconds (default 30 if authenticated, floored at 300 if not)
-#     stale_sec: 120          # remove aircraft not seen for this long (default 120)
+#     stale_sec: 750          # remove aircraft not seen for this long — must comfortably
+#                              # exceed poll_interval or aircraft vanish between polls
+#                              # (default: max(120, poll_interval * 2.5))
 
 # ── AISstream.io (global AIS via WebSocket — supplements local AIS-catcher) ──
 #   Free API key: https://aisstream.io/authenticate
