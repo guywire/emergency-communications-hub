@@ -461,27 +461,36 @@ class AsteriskAdapter(Adapter):
             return False
         text = text.strip()[:500]
         stem = f"/tmp/ech_tts_{uuid.uuid4().hex}"
+        raw_wav = f"{stem}_raw.wav"
         wav_path = f"{stem}.wav"
+        # Two sequential file-to-file steps, not a piped chain — asyncio subprocess
+        # stdout is an async StreamReader, not a real fd a second subprocess can
+        # inherit as stdin the way the synchronous subprocess module allows.
         try:
             espeak_proc = await asyncio.create_subprocess_exec(
-                "espeak-ng", "--stdout", "-s", "150", text,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                "espeak-ng", "-w", raw_wav, "-s", "150", text,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
             )
+            await asyncio.wait_for(espeak_proc.wait(), timeout=10)
+            if espeak_proc.returncode != 0 or not Path(raw_wav).is_file():
+                log.warning("%s: espeak-ng TTS render failed (rc=%s)", self.name, espeak_proc.returncode)
+                return False
+
             sox_proc = await asyncio.create_subprocess_exec(
-                "sox", "-t", "wav", "-", "-r", "8000", "-c", "1", "-b", "16", wav_path,
-                stdin=espeak_proc.stdout, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                "sox", raw_wav, "-r", "8000", "-c", "1", "-b", "16", wav_path,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
             )
-            espeak_proc.stdout.close()   # let espeak see SIGPIPE if sox exits early
-            await asyncio.wait_for(asyncio.gather(espeak_proc.wait(), sox_proc.wait()), timeout=15)
+            await asyncio.wait_for(sox_proc.wait(), timeout=10)
         except FileNotFoundError as exc:
             log.error("%s: TTS tool not installed (%s) — apt install espeak-ng sox", self.name, exc)
             return False
         except asyncio.TimeoutError:
             log.warning("%s: TTS render timed out", self.name)
             return False
-        if espeak_proc.returncode != 0 or sox_proc.returncode != 0 or not Path(wav_path).is_file():
-            log.warning("%s: TTS render failed (espeak rc=%s, sox rc=%s)",
-                        self.name, espeak_proc.returncode, sox_proc.returncode)
+        finally:
+            Path(raw_wav).unlink(missing_ok=True)
+        if sox_proc.returncode != 0 or not Path(wav_path).is_file():
+            log.warning("%s: sox resample failed (rc=%s)", self.name, sox_proc.returncode)
             return False
         Path(wav_path).chmod(0o644)
 
