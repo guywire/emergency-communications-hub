@@ -1407,9 +1407,14 @@ class MeshBot:
             return f"{name[:12]}: no pass in next 24h (el>10)"
 
         p = passes[0]
-        aos_dt = p["aos"].utc_datetime()
-        aos_str = aos_dt.strftime("%H:%Mz")
-        date_str = aos_dt.strftime("%d%b").upper()
+        # Server local time, not UTC — same convention as _cmd_sun(): "server
+        # should be co-located with the station" so its system tz is the
+        # observer's tz. Use the *local* calendar date too, since a pass near
+        # midnight UTC can fall on a different local date.
+        local_tz = datetime.now().astimezone().tzinfo
+        aos_loc = p["aos"].utc_datetime().astimezone(local_tz)
+        aos_str = aos_loc.strftime("%H:%M") + aos_loc.strftime("%Z")
+        date_str = aos_loc.strftime("%d%b").upper()
         max_el  = p.get("max_el", 0)
         dur_min = p.get("duration_s", 0) // 60
         dur_sec = p.get("duration_s", 0) % 60
