@@ -69,6 +69,7 @@ import asyncio
 import logging
 import re
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -442,6 +443,57 @@ class AsteriskAdapter(Adapter):
             })
         log.info("AMI Originate: %s → %s", src, destination)
         return True
+
+    async def speak(self, extension: str, text: str) -> bool:
+        """Text-to-speech call: ring `extension` and play synthesized speech.
+
+        Renders locally with espeak-ng (offline, no API key or internet
+        needed — matches ECH's degraded-connectivity design) to a WAV file,
+        then Originates a call that Playback()s it. Requires espeak-ng
+        installed on THIS host and Asterisk able to read /tmp — both true
+        in the supported deployment (ECH and Asterisk on the same box).
+        """
+        if not self._connected or not text.strip():
+            return False
+        text = text.strip()[:500]
+        stem = f"/tmp/ech_tts_{uuid.uuid4().hex}"
+        wav_path = f"{stem}.wav"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "espeak-ng", "-w", wav_path, "-s", "150", text,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=10)
+        except FileNotFoundError:
+            log.error("%s: espeak-ng not installed — TTS unavailable (apt install espeak-ng)", self.name)
+            return False
+        except asyncio.TimeoutError:
+            log.warning("%s: espeak-ng TTS render timed out", self.name)
+            return False
+        if proc.returncode != 0 or not Path(wav_path).is_file():
+            log.warning("%s: espeak-ng TTS render failed (rc=%s)", self.name, proc.returncode)
+            return False
+        Path(wav_path).chmod(0o644)
+
+        await self._send_action({
+            "Action":      "Originate",
+            "Channel":     f"{self._channel_driver}/{extension}",
+            "Application": "Playback",
+            "Data":        stem,   # Playback wants the path without extension
+            "CallerID":    self._caller_id,
+            "Timeout":     "30000",
+            "Async":       "true",
+        })
+        log.info("AMI TTS Originate: ext %s: %r", extension, text[:60])
+        asyncio.create_task(self._cleanup_tts_file(wav_path))
+        return True
+
+    async def _cleanup_tts_file(self, path: str, delay: float = 90.0) -> None:
+        await asyncio.sleep(delay)
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     async def page(self, target: str | None = None) -> bool:
         """

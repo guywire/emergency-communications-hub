@@ -2505,8 +2505,8 @@ function adapterMeta(name) {
   if (n.includes('reticulum') || n.includes('rns')) return {icon:'RNS', label:'Reticulum', cls:'rns', toggle:'RNS'};
   if (n.includes('aredn') || n.includes('asterisk') || n.includes('ami') || n.includes('pbx'))
     return {icon:'PBX', label:'AREDN/PBX', cls:'pbx', toggle:'PBX', voice:true};
-  if (n.includes('adsb') || n.includes('ais'))
-    return {icon:n.includes('adsb')?'ADSB':(n.includes('aishub')?'AISH':(n.includes('aisstream')?'AISS':'AIS')), label:n.includes('adsb')?'ADS-B':(n.includes('aishub')?'AISHub':(n.includes('aisstream')?'AISstream':'AIS')), cls:'', toggle:'', rxOnly:true};
+  if (n.includes('adsb') || n.includes('opensky') || n.includes('ais'))
+    return {icon:(n.includes('adsb')||n.includes('opensky'))?'ADSB':(n.includes('aishub')?'AISH':(n.includes('aisstream')?'AISS':'AIS')), label:n.includes('adsb')?'ADS-B':n.includes('opensky')?'OpenSky':(n.includes('aishub')?'AISHub':(n.includes('aisstream')?'AISstream':'AIS')), cls:'', toggle:'', rxOnly:true};
   return {icon:name.slice(0,4).toUpperCase(), label:name, cls:'', toggle:name.slice(0,4).toUpperCase()};
 }
 
@@ -2840,6 +2840,21 @@ async function pbxPage() {
         d?.status === 'ok' ? 'ok' : 'err');
 }
 
+async function pbxSpeak() {
+  const extension = document.getElementById('tts-ext').value.trim();
+  const text = document.getElementById('tts-text').value.trim();
+  if (!extension || !text) { toast('Extension and text required', 'err'); return; }
+  const r = await fetch('/api/pbx/speak', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ extension, text }),
+  });
+  const d = r.ok ? await r.json() : null;
+  toast(d?.status === 'ok' ? `Calling ext ${extension}…` : `Speak failed: ${d?.detail || 'error'}`,
+        d?.status === 'ok' ? 'ok' : 'err');
+  if (d?.status === 'ok') document.getElementById('tts-text').value = '';
+}
+
 async function loadCallLog() {
   const el = document.getElementById('panel-calls');
   try {
@@ -2852,6 +2867,11 @@ async function loadCallLog() {
     let html = `<div style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted)">
       PBX: <b>${escHtml(d.adapter)}</b> · <span style="color:${d.connected?'var(--green)':'var(--red)'}">${d.connected?'connected':'offline'}</span>
       &emsp;<button onclick="pbxPage()" style="font-size:10px;padding:2px 6px">📢 Page all</button>
+    </div>
+    <div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:4px;align-items:center">
+      <input type="text" id="tts-ext" placeholder="ext" style="width:44px;font-size:11px;padding:3px 5px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+      <input type="text" id="tts-text" placeholder="Text to speak…" style="flex:1;font-size:11px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+      <button onclick="pbxSpeak()" style="font-size:10px;padding:3px 8px" title="Ring the extension and read this text aloud">🗣 Speak</button>
     </div>
     <div id="pbx-endpoint-status"></div>`;
     if (active.length) {

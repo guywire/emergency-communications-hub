@@ -2422,6 +2422,22 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         ok = await a.page(target)
         return {"status": "ok" if ok else "error"}
 
+    @app.post("/api/pbx/speak")
+    async def pbx_speak(request: Request):
+        """Text-to-speech: ring an extension and read the given text aloud."""
+        data = await request.json()
+        extension = data.get("extension", "").strip()
+        text = data.get("text", "").strip()
+        if not extension or not text:
+            return {"status": "error", "detail": "extension and text required"}
+        a = _find_pbx_adapter()
+        if not a or not hasattr(a, "speak"):
+            return {"status": "error", "detail": "No PBX adapter configured"}
+        if not a._connected:
+            return {"status": "error", "detail": "PBX adapter not connected"}
+        ok = await a.speak(extension, text)
+        return {"status": "ok" if ok else "error", "extension": extension}
+
     @app.get("/api/pbx/endpoints")
     async def pbx_endpoints():
         """Live registration status for every configured SIP extension."""

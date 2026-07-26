@@ -195,6 +195,12 @@ else
   echo "sounddevice package OK"
 fi
 
+# Text-to-speech (Asterisk adapter's speak() — offline, no API key needed)
+if ! command -v espeak-ng >/dev/null 2>&1; then
+  echo "Installing espeak-ng (PBX text-to-speech support) ..."
+  sudo apt-get install -y -q espeak-ng || echo "  WARNING: espeak-ng install failed — PBX speak() will not work"
+fi
+
 echo "Restarting $SERVICE ..."
 sudo systemctl stop "$SERVICE" 2>/dev/null || true
 # Force-kill any survivor holding the port (systemd doesn't always wait long enough)
