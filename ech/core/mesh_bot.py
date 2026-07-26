@@ -2349,6 +2349,25 @@ class MeshBot:
     # config-fixed skywarn_winlink_to) and sends via whatever adapter has
     # "winlink" in its name, same lookup _cmd_skywarn_winlink uses.
 
+    @staticmethod
+    def _strip_template_names() -> str:
+        return ", ".join(sorted(set(TEMPLATE_ALIASES) - {"gyx", "car", "local", "hurricanereport"}))
+
+    @staticmethod
+    def _strip_prompt(label: str) -> str:
+        # Every field gets a working way to skip it, regardless of how that
+        # specific template phrases optionality ("or NA", "leave blank if not
+        # applicable", or nothing at all) — MeshCore rejects empty message
+        # bodies, so "leave blank" literally can't be sent.
+        return f"(NA=skip) {label}"
+
+    def _start_strip_session(self, msg: NormalizedMessage, template: str) -> str:
+        fields = guided_fields(template)
+        self._strip_sessions[msg.from_id] = {
+            "template": template, "fields": fields, "step": 0, "answers": {}, "phase": "fields",
+        }
+        return f"{template} report — {self._strip_prompt(fields[0][1])} (or 'cancel')"
+
     async def _cmd_strip(self, msg: NormalizedMessage) -> str:
         m = re.search(r'strip\s+(.+)', msg.body, re.IGNORECASE | re.DOTALL)
         args = (m.group(1).strip() if m else "")
@@ -2357,23 +2376,23 @@ class MeshBot:
         if not args:
             if not is_dm:
                 return "strip: DM the bot to file a strip report, or paste a full strip here"
-            names = ", ".join(sorted(set(TEMPLATE_ALIASES) - {"gyx", "car", "local", "hurricanereport"}))
-            return f"Strip report — which template? ({names}), or paste a complete strip. 'cancel' anytime."
+            # Actually starts a session so the next message (just the template
+            # name, e.g. "sitrep") is recognized as answering this prompt —
+            # most template names aren't registered top-level commands, so
+            # without a session that reply would otherwise hit "unrecognized
+            # command" instead of starting the guided form.
+            self._strip_sessions[msg.from_id] = {"phase": "picking"}
+            return f"Strip report — which template? ({self._strip_template_names()}), or paste a complete strip. 'cancel' anytime."
 
         if "/" in args:
             return await self._start_strip_from_paste(msg, args, is_dm)
 
         template = TEMPLATE_ALIASES.get(args.strip().lower())
         if not template:
-            names = ", ".join(sorted(set(TEMPLATE_ALIASES) - {"gyx", "car", "local", "hurricanereport"}))
-            return f"strip: unknown template {args!r}. Try: {names}"
+            return f"strip: unknown template {args!r}. Try: {self._strip_template_names()}"
         if not is_dm:
             return "strip: DM the bot for the guided form"
-        fields = guided_fields(template)
-        self._strip_sessions[msg.from_id] = {
-            "template": template, "fields": fields, "step": 0, "answers": {}, "phase": "fields",
-        }
-        return f"{template} report — {fields[0][1]} (or 'cancel')"
+        return self._start_strip_session(msg, template)
 
     async def _start_strip_from_paste(self, msg: NormalizedMessage, args: str, is_dm: bool) -> str:
         first_field = args.split("/", 1)[0].strip()
@@ -2403,22 +2422,41 @@ class MeshBot:
             return
         if text.lower() in ("repeat", "again"):
             if sess["phase"] == "fields":
-                await self._send(msg, sess["fields"][sess["step"]][1])
+                await self._send(msg, self._strip_prompt(sess["fields"][sess["step"]][1]))
+            elif sess["phase"] == "picking":
+                await self._send(msg, f"Which template? ({self._strip_template_names()})")
             else:
                 await self._send(msg, "Winlink destination address to send, or 'cancel'.")
+            return
+
+        if sess["phase"] == "picking":
+            template = TEMPLATE_ALIASES.get(text.strip().lower())
+            if not template:
+                await self._send(msg, f"Unknown template {text.strip()!r}. Try: {self._strip_template_names()}, or 'cancel'.")
+                return
+            await self._send(msg, self._start_strip_session(msg, template))
             return
 
         if sess["phase"] == "fields":
             fields = sess["fields"]
             key, _ = fields[sess["step"]]
-            # MGRS fields: auto-convert if the operator gave "lat,lon"; otherwise
-            # pass through as-is (already-known MGRS string, "NA", etc.) — never
-            # guess a position they didn't explicitly supply.
-            sess["answers"][key] = resolve_mgrs_answer(text) if key == "MGRS" else text
+            # A field left "blank" isn't possible over MeshCore (empty message
+            # bodies are rejected) — recognize common skip words as blank
+            # regardless of how the template itself phrases optionality.
+            if text.strip().lower() in ("na", "n/a", "none", "skip", "-"):
+                answer = ""
+            elif key == "MGRS":
+                # Auto-convert if the operator gave "lat,lon"; otherwise pass
+                # through as-is (already-known MGRS string, etc.) — never
+                # guess a position they didn't explicitly supply.
+                answer = resolve_mgrs_answer(text)
+            else:
+                answer = text
+            sess["answers"][key] = answer
             sess["step"] += 1
             if sess["step"] < len(fields):
                 _, next_label = fields[sess["step"]]
-                await self._send(msg, next_label)
+                await self._send(msg, self._strip_prompt(next_label))
                 return
             sess["phase"] = "dest"
             preview = build_response_strip(sess["template"], sess["answers"])
