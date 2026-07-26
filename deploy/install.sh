@@ -182,6 +182,15 @@ else
   echo "adventure package OK"
 fi
 
+# Same reasoning for `mgrs` (mesh bot 'strip' command's lat/lon -> MGRS conversion) —
+# ships prebuilt wheels for linux x86_64/aarch64, no compiler needed here.
+if ! sudo /opt/ech/.venv/bin/python3 -c "import mgrs" 2>/dev/null; then
+  echo "Installing mgrs (mesh bot 'strip' command MGRS conversion) ..."
+  sudo /opt/ech/.venv/bin/pip install -q "mgrs>=1.5"
+else
+  echo "mgrs package OK"
+fi
+
 # Sound-card support (cw_audio adapter): sounddevice needs the PortAudio system
 # library on Linux — the pip wheel does not bundle it there.
 if ! dpkg -s libportaudio2 >/dev/null 2>&1; then

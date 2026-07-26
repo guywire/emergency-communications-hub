@@ -33,6 +33,7 @@ dependencies = [
     "skyfield>=1.49",             # mesh bot `satpass` command
     "rns>=0.8",                   # Reticulum adapter
     "lxmf>=0.5",                  # Reticulum adapter
+    "mgrs>=1.5",                  # mesh bot 'strip' command — lat/lon to MGRS grid reference
 ]
 
 [project.optional-dependencies]

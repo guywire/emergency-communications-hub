@@ -113,6 +113,10 @@ from typing import Any
 import httpx
 
 from ech.core.models import NormalizedMessage, Priority
+from ech.core.strip_templates import (
+    STRIP_TEMPLATES, TEMPLATE_ALIASES, build_response_strip, guided_fields,
+    identify_strip, parse_response_strip, resolve_mgrs_answer,
+)
 
 log = logging.getLogger(__name__)
 
@@ -152,7 +156,7 @@ _CMD_WORDS = [
     "satpass", "sat", "solar", "space", "ships", "fcc", "trivia", "dad",
     "alerts", "metar", "sun", "nodes", "aprs", "anomalies", "tide", "tides",
     "grid", "id", "moon", "dxcc", "contest", "help", "path",
-    "score", "leaderboard", "lb", "mud", "adventure", "skywarn",
+    "score", "leaderboard", "lb", "mud", "adventure", "skywarn", "strip", "repeat", "again",
     "smoke", "aqi", "airquality",
     "marine", "boating", "buoy", "kayak", "fish", "fishing", "solunar", "water",
 ]
@@ -177,6 +181,7 @@ _CMD_ALIASES: dict[str, str] = {
     "aqi": "smoke", "airquality": "smoke",
     "boating": "marine", "buoy": "marine", "kayak": "marine",
     "fishing": "fish", "solunar": "fish",
+    "again": "repeat",
 }
 _ICAO_RE = re.compile(r'\b([A-Z]{4})\b', re.IGNORECASE)
 APRS_FI_URL = "https://api.aprs.fi/api/get"
@@ -498,6 +503,14 @@ class MeshBot:
         self._sweep_task: asyncio.Task | None = None
         # from_id → in-progress guided SKYWARN report {"step": int, "answers": {...}}
         self._skywarn_sessions: dict[str, dict] = {}
+        self._strip_sessions: dict[str, dict] = {}
+        # Last reply sent to each sender (by from_id), for the "repeat" command —
+        # LoRa/mesh links routinely drop packets, and re-running a whole command
+        # isn't always possible (a guided form's next prompt, a trivia question
+        # already scored) or convenient. Updated by _send()/_send_multi(), which
+        # every reply path already funnels through, so this covers every command
+        # and guided-session prompt for free.
+        self._last_reply: dict[str, str] = {}
 
     def _resolve_coords(self) -> tuple[float | None, float | None]:
         """Return best-available (lat, lon): config override → weather service → station base."""
@@ -654,6 +667,10 @@ class MeshBot:
             if msg.from_id in self._skywarn_sessions:
                 asyncio.ensure_future(self._dispatch_skywarn(msg))
                 return
+            # Same idea for an in-progress guided strip (RI report) session.
+            if msg.from_id in self._strip_sessions:
+                asyncio.ensure_future(self._dispatch_strip(msg))
+                return
             # A pending "which trivia category?" prompt claims the next DM.
             if ("dm", msg.from_id) in self._trivia_choosing:
                 asyncio.ensure_future(self._dispatch_trivia_category_pick(msg, ("dm", msg.from_id), msg.body))
@@ -732,6 +749,17 @@ class MeshBot:
                 reply = self._cmd_mud_start(msg, mention_required)
             elif cmd == "skywarn":
                 reply = await self._cmd_skywarn(msg)
+            elif cmd == "strip":
+                reply = await self._cmd_strip(msg)
+            elif cmd == "repeat":
+                last = self._last_reply.get(msg.from_id or "")
+                if not last:
+                    reply = "Nothing to repeat yet."
+                elif len(last) > self._max_len:
+                    await self._send_multi(msg, last)
+                    reply = ""
+                else:
+                    reply = last
             elif cmd == "dad":
                 reply = await self._cmd_dad()
             elif cmd == "alerts":
@@ -819,6 +847,7 @@ class MeshBot:
             return
         body = text[:self._max_len]
         from_id = msg.from_id or ""
+        self._last_reply[from_id] = body
         ch = (msg.source_channel or "").lower()
         came_via_dm = ch == "dm"
 
@@ -1116,11 +1145,11 @@ class MeshBot:
         # mid-word. Per-command usage (e.g. "fcc <callsign>") is shown by that
         # command's own error reply when called with no args, so it's dropped
         # here to fit everything. Alphabetical so it's easy to scan; the
-        # trivia/mud/dad/score/lb game commands are dropped from this terse
-        # list (not disabled — just not operationally essential enough to
-        # spend budget on here) to leave room for the rest.
-        return ("Cmds: alerts anomalies aprs contest dxcc fcc fish grid help id marine metar moon "
-                "nodes overhead path ping satpass ships skywarn smoke solar sun tide water wx")
+        # trivia/mud/dad/score/lb/contest/repeat commands are dropped from this
+        # terse list (not disabled — just not essential enough to spend budget
+        # on here) to leave room for the rest.
+        return ("Cmds: alerts anomalies aprs dxcc fcc fish grid help id marine metar moon "
+                "nodes overhead path ping satpass ships skywarn smoke solar strip sun tide water wx")
 
     def _cmd_unknown(self) -> str:
         return "Unrecognized command. Send 'help' for a list."
@@ -1861,6 +1890,10 @@ class MeshBot:
             await self._send(msg, chunk)
             if i < len(chunks) - 1:
                 await asyncio.sleep(1.5)
+        # Overwrite the per-chunk tracking _send() just did with the full
+        # original text, so "repeat" re-splits and resends everything, not
+        # just whatever chunk happened to go out last.
+        self._last_reply[msg.from_id or ""] = text
 
     async def _dispatch_mud(self, msg: NormalizedMessage) -> None:
         sess = self._mud_sessions.get(self._mud_key(msg))
@@ -2226,6 +2259,9 @@ class MeshBot:
             del self._skywarn_sessions[msg.from_id]
             await self._send(msg, "Skywarn report cancelled.")
             return
+        if text.lower() in ("repeat", "again"):
+            await self._send(msg, _SKYWARN_FIELDS[sess["step"]][1])
+            return
 
         field_key, _ = _SKYWARN_FIELDS[sess["step"]]
         sess["answers"][field_key] = text
@@ -2296,6 +2332,119 @@ class MeshBot:
                     await self._router.broadcast_ws_event("skywarn_report", saved[0])
             except Exception as exc:
                 log.debug("MeshBot: skywarn WS broadcast error: %s", exc)
+
+    # ── RI strip reports (SHARES Region 1 "Response Creator" format) ──────────
+    # Two entry paths, per operator request:
+    #   1. Paste a complete strip in one message — parsed directly, no back-
+    #      and-forth. Best for a field radio composing offline and sending once.
+    #   2. Unrecognized/bare "strip <template>" — falls back to a guided
+    #      one-field-at-a-time form, same session pattern as _dispatch_skywarn.
+    # Either way ends by asking for a Winlink destination (never hardcoded —
+    # the operator explicitly wants this asked each time, unlike skywarn's
+    # config-fixed skywarn_winlink_to) and sends via whatever adapter has
+    # "winlink" in its name, same lookup _cmd_skywarn_winlink uses.
+
+    async def _cmd_strip(self, msg: NormalizedMessage) -> str:
+        m = re.search(r'strip\s+(.+)', msg.body, re.IGNORECASE | re.DOTALL)
+        args = (m.group(1).strip() if m else "")
+        is_dm = (msg.source_channel or "").lower() == "dm"
+
+        if not args:
+            if not is_dm:
+                return "strip: DM the bot to file a strip report, or paste a full strip here"
+            names = ", ".join(sorted(set(TEMPLATE_ALIASES) - {"gyx", "car", "local", "hurricanereport"}))
+            return f"Strip report — which template? ({names}), or paste a complete strip. 'cancel' anytime."
+
+        if "/" in args:
+            return await self._start_strip_from_paste(msg, args, is_dm)
+
+        template = TEMPLATE_ALIASES.get(args.strip().lower())
+        if not template:
+            names = ", ".join(sorted(set(TEMPLATE_ALIASES) - {"gyx", "car", "local", "hurricanereport"}))
+            return f"strip: unknown template {args!r}. Try: {names}"
+        if not is_dm:
+            return "strip: DM the bot for the guided form"
+        fields = guided_fields(template)
+        self._strip_sessions[msg.from_id] = {
+            "template": template, "fields": fields, "step": 0, "answers": {}, "phase": "fields",
+        }
+        return f"{template} report — {fields[0][1]} (or 'cancel')"
+
+    async def _start_strip_from_paste(self, msg: NormalizedMessage, args: str, is_dm: bool) -> str:
+        first_field = args.split("/", 1)[0].strip()
+        template = identify_strip(first_field)
+        if not is_dm:
+            return "strip: DM the bot to complete and send a strip report"
+        if template:
+            answers = parse_response_strip(template, args)
+            preview = build_response_strip(template, answers)
+            self._strip_sessions[msg.from_id] = {
+                "template": template, "answers": answers, "phase": "dest",
+            }
+            return f"Strip parsed ({template}):\n{preview}\n\nWinlink destination address to send, or 'cancel'."
+        # Unrecognized strip name — no known field layout to parse against, so
+        # forward the pasted text verbatim rather than guessing its structure.
+        self._strip_sessions[msg.from_id] = {"template": None, "raw": args.strip(), "phase": "dest"}
+        return f"Strip template not recognized — will send as-is:\n{args.strip()}\n\nWinlink destination address to send, or 'cancel'."
+
+    async def _dispatch_strip(self, msg: NormalizedMessage) -> None:
+        sess = self._strip_sessions.get(msg.from_id)
+        if sess is None:
+            return
+        text = msg.body.strip()
+        if text.lower() in ("cancel", "quit", "exit"):
+            del self._strip_sessions[msg.from_id]
+            await self._send(msg, "Strip report cancelled.")
+            return
+        if text.lower() in ("repeat", "again"):
+            if sess["phase"] == "fields":
+                await self._send(msg, sess["fields"][sess["step"]][1])
+            else:
+                await self._send(msg, "Winlink destination address to send, or 'cancel'.")
+            return
+
+        if sess["phase"] == "fields":
+            fields = sess["fields"]
+            key, _ = fields[sess["step"]]
+            # MGRS fields: auto-convert if the operator gave "lat,lon"; otherwise
+            # pass through as-is (already-known MGRS string, "NA", etc.) — never
+            # guess a position they didn't explicitly supply.
+            sess["answers"][key] = resolve_mgrs_answer(text) if key == "MGRS" else text
+            sess["step"] += 1
+            if sess["step"] < len(fields):
+                _, next_label = fields[sess["step"]]
+                await self._send(msg, next_label)
+                return
+            sess["phase"] = "dest"
+            preview = build_response_strip(sess["template"], sess["answers"])
+            await self._send_multi(msg, f"Strip complete:\n{preview}\n\nWinlink destination address to send, or 'cancel'.")
+            return
+
+        if sess["phase"] == "dest":
+            dest = text
+            del self._strip_sessions[msg.from_id]
+            if sess.get("template"):
+                strip_text = build_response_strip(sess["template"], sess["answers"])
+            else:
+                strip_text = sess["raw"]
+            await self._send_strip_via_winlink(msg, strip_text, dest)
+            return
+
+    async def _send_strip_via_winlink(self, msg: NormalizedMessage, strip_text: str, dest: str) -> None:
+        if not self._router:
+            await self._send(msg, "strip: router not available")
+            return
+        winlink_adapter = next(
+            (a.name for a in self._router._adapters.values() if "winlink" in a.name.lower()), None
+        )
+        if not winlink_adapter:
+            await self._send(msg, "strip: no Winlink adapter connected")
+            return
+        result = await self._router.send(body=strip_text, adapter_names=[winlink_adapter], to_id=dest)
+        if result.get(winlink_adapter):
+            await self._send(msg, f"Strip sent via Winlink to {dest}.")
+        else:
+            await self._send(msg, "strip: send failed — check the Winlink adapter is connected to the CMS")
 
     # ── Dad jokes ────────────────────────────────────────────────────────────
 
