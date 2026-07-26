@@ -2852,7 +2852,8 @@ async function loadCallLog() {
     let html = `<div style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted)">
       PBX: <b>${escHtml(d.adapter)}</b> · <span style="color:${d.connected?'var(--green)':'var(--red)'}">${d.connected?'connected':'offline'}</span>
       &emsp;<button onclick="pbxPage()" style="font-size:10px;padding:2px 6px">📢 Page all</button>
-    </div>`;
+    </div>
+    <div id="pbx-endpoint-status"></div>`;
     if (active.length) {
       html += `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--yellow)">● ACTIVE (${active.length})</div>`;
       active.forEach(c => {
@@ -2877,10 +2878,29 @@ async function loadCallLog() {
       html += '<div style="padding:12px;font-size:11px;color:var(--dim)">No calls yet</div>';
     }
     el.innerHTML = html;
+    loadEndpointStatus();
     loadVoicemailSection(el);
   } catch(e) {
     el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red)">Error loading call log</div>';
   }
+}
+
+async function loadEndpointStatus() {
+  const el = document.getElementById('pbx-endpoint-status');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/pbx/endpoints');
+    if (!r.ok) return;
+    const d = await r.json();
+    const eps = d.endpoints || [];
+    if (!eps.length) return;
+    el.innerHTML = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted)">EXTENSIONS</div>` +
+      eps.map(e => `<div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px">
+        <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${e.online ? 'var(--green)' : 'var(--dim)'}"></span>
+        <span style="flex:1">ext ${escHtml(e.extension)}</span>
+        <span style="color:var(--muted);font-size:10px">${escHtml(e.device_state || 'unknown')}</span>
+      </div>`).join('');
+  } catch(e) {}
 }
 
 async function loadVoicemailSection(el) {

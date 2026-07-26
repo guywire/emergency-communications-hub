@@ -2422,6 +2422,14 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         ok = await a.page(target)
         return {"status": "ok" if ok else "error"}
 
+    @app.get("/api/pbx/endpoints")
+    async def pbx_endpoints():
+        """Live registration status for every configured SIP extension."""
+        a = _find_pbx_adapter()
+        if not a or not hasattr(a, "list_endpoint_status"):
+            return {"endpoints": []}
+        return {"endpoints": a.list_endpoint_status()}
+
     @app.get("/api/pbx/voicemail")
     async def pbx_voicemail_mailboxes():
         """Mailboxes with waiting messages: {mailbox: count}."""

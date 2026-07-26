@@ -106,6 +106,11 @@ class AsteriskAdapter(Adapter):
         self._vm_context     = config.get("vm_context", "default")
         self._vm_spool_dir   = config.get("vm_spool_dir") or f"/var/spool/asterisk/voicemail/{self._vm_context}"
         self._vm_counts: dict[str, tuple[int, int]] = {}   # mailbox -> (new, old)
+        self._endpoint_status: dict[str, dict] = {}    # extension -> {device_state, online, contacts}
+        self._endpoint_scratch: dict[str, dict] = {}   # accumulator during a refresh cycle
+        self._endpoint_poll_task: asyncio.Task | None = None
+        self._endpoint_poll_sec = float(config.get("endpoint_poll_sec", 20.0))
+        self.auto_page_on_emergency = bool(config.get("auto_page_on_emergency", True))
 
         # Screen phone stubs
         self._screen_ext     = config.get("screen_extension", "")
@@ -118,6 +123,7 @@ class AsteriskAdapter(Adapter):
         self._active_calls: dict[str, dict] = {}   # uniqueid → call info
         self._call_log: list[dict] = []             # recent completed calls (last 50)
         self._action_counter = 0
+        self._run_task: asyncio.Task | None = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -145,10 +151,24 @@ class AsteriskAdapter(Adapter):
                 f"Check manager.conf: section name=[{self._username}], secret={self._secret[:2]}***"
             )
         self._connected = True
+        # Without this, the AMI event stream (Hangup call-logging, MessageWaiting
+        # voicemail alerts, inbound-text UserEvent, endpoint status) is never read —
+        # only the direct request/response actions (originate/page/send) work.
+        self._run_task = asyncio.create_task(self._run(), name=f"{self.name}-ami-events")
+        self._endpoint_poll_task = asyncio.create_task(
+            self._endpoint_poll_loop(), name=f"{self.name}-endpoint-poll"
+        )
         log.info("Asterisk AMI: logged in as %s @ %s:%d", self._username, self._host, self._port)
 
     async def disconnect(self) -> None:
         self._connected = False
+        for task in (self._run_task, self._endpoint_poll_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         if self._writer:
             try:
                 await self._send_action({"Action": "Logoff"})
@@ -177,7 +197,7 @@ class AsteriskAdapter(Adapter):
         await self._send_action({
             "Action": "MessageSend",
             "To":     f"pjsip:{to_ext}",
-            "From":   f"pjsip:{self._local_ext}",
+            "From":   f"sip:{self._local_ext}@{self._host}",
             "Body":   message.body,
         })
         log.info("AMI MessageSend: %s -> %s", self._local_ext, to_ext)
@@ -197,6 +217,13 @@ class AsteriskAdapter(Adapter):
                     await self._on_hangup(pkt)
                 elif event == "MessageWaiting":
                     await self._on_message_waiting(pkt)
+                elif event == "UserEvent" and pkt.get("UserEvent") == "ECHTextMessage":
+                    await self._on_text_message(pkt)
+                elif event == "EndpointList":
+                    self._on_endpoint_list_item(pkt)
+                elif event == "EndpointListComplete":
+                    self._endpoint_status = self._endpoint_scratch
+                    self._endpoint_scratch = {}
         except ConnectionError as exc:
             log.error("Asterisk AMI: connection lost: %s", exc)
             self._connected = False
@@ -329,6 +356,54 @@ class AsteriskAdapter(Adapter):
             )
             await self._enqueue(msg)
             log.info("AMI MessageWaiting: mailbox=%s new=%d old=%d", mailbox, new_count, old_count)
+
+    async def _on_text_message(self, pkt: dict) -> None:
+        """Inbound SIP MESSAGE, delivered via the [messages] dialplan context's
+        UserEvent (see extensions.conf) — required because AMI has no direct
+        'message received' event of its own."""
+        from_raw = pkt.get("From", "")
+        to_ext   = pkt.get("To", "").strip()
+        body     = pkt.get("Body", "")
+        m = re.search(r"[Ss][Ii][Pp]s?:(\+?\w+)@", from_raw)
+        from_ext = m.group(1) if m else from_raw.strip()
+        msg = NormalizedMessage(
+            source_adapter=self.name,
+            source_channel="DM",
+            from_id=from_ext,
+            from_display=f"Ext {from_ext}",
+            to_id=to_ext or None,
+            body=body,
+            priority=Priority.NORMAL,
+            raw={"from_uri": from_raw, "to_ext": to_ext},
+        )
+        await self._enqueue(msg)
+        log.info("AMI inbound MESSAGE: %s -> %s: %s", from_ext, to_ext, body[:80])
+
+    # ── Endpoint status (periodic poll — AMI has no push subscription for this) ─
+
+    async def _endpoint_poll_loop(self) -> None:
+        while self._connected:
+            try:
+                self._endpoint_scratch = {}
+                await self._send_action({"Action": "PJSIPShowEndpoints"})
+            except Exception as exc:
+                log.debug("%s: endpoint status poll failed: %s", self.name, exc)
+            await asyncio.sleep(self._endpoint_poll_sec)
+
+    def _on_endpoint_list_item(self, pkt: dict) -> None:
+        ext = pkt.get("ObjectName", "")
+        if not ext:
+            return
+        device_state = pkt.get("DeviceState", "")
+        self._endpoint_scratch[ext] = {
+            "extension":    ext,
+            "device_state": device_state,
+            "online":       device_state not in ("", "Unavailable", "Invalid"),
+            "contacts":     pkt.get("Contacts", ""),
+        }
+
+    def list_endpoint_status(self) -> list[dict]:
+        return sorted(self._endpoint_status.values(), key=lambda e: e["extension"])
 
     # ── Public PBX actions ────────────────────────────────────────────────
 

@@ -456,7 +456,25 @@ class Router:
                 await self._handle_delivery_status(name, msg.id, "sent_to_air", "sent")
             else:
                 await self._handle_delivery_status(name, msg.id, "failed", "send error")
+        if priority == Priority.EMERGENCY:
+            await self._auto_page_emergency()
         return results
+
+    async def _auto_page_emergency(self) -> None:
+        """Page the PBX (if configured, connected, and opted in) whenever an
+        operator sends an Emergency-priority message — puts the phone system
+        in the loop for the highest-severity traffic without a separate step."""
+        for adapter in self._adapters.values():
+            if not hasattr(adapter, "page") or not getattr(adapter, "_connected", False):
+                continue
+            if not getattr(adapter, "auto_page_on_emergency", False):
+                continue
+            try:
+                await adapter.page()
+                log.info("Router: auto-paged '%s' for an Emergency-priority message", adapter.name)
+            except Exception as exc:
+                log.warning("Router: auto-page on '%s' failed: %s", adapter.name, exc)
+            break
 
     async def _mark_tx_in_db(self, msg: NormalizedMessage) -> None:
         await self._db.save_message(msg)
