@@ -212,6 +212,11 @@ _TRIVIA_SCORES_KV_KEY = "mesh_bot_trivia_scores"
 # Report" form templates (event/observation type, hail size, and wind/precip
 # are all standard fields there) — event_type and hail_size were missing
 # before and have been added to match.
+# Strip fields left as-typed (not uppercased) when answered via the guided
+# form — narrative/free-text fields across all 5 templates, vs. everything
+# else which follows standard ham radio report convention of being uppercase.
+_STRIP_FREETEXT_KEYS = {"COMMENTS", "COMMENTS,DAMAGE", "STORM DAMAGE", "CURRENT WEATHER"}
+
 _SKYWARN_FIELDS = [
     ("callsign", "Callsign?"),
     ("spotter_id", "Spotter ID? (or 'none')"),
@@ -2269,7 +2274,9 @@ class MeshBot:
             return
 
         field_key, _ = _SKYWARN_FIELDS[sess["step"]]
-        sess["answers"][field_key] = text
+        # Uppercase every field except free-text notes — matches standard
+        # ham radio report convention without mangling a narrative sentence.
+        sess["answers"][field_key] = text if field_key == "notes" else text.upper()
         sess["step"] += 1
 
         if sess["step"] < len(_SKYWARN_FIELDS):
@@ -2450,8 +2457,10 @@ class MeshBot:
                 # through as-is (already-known MGRS string, etc.) — never
                 # guess a position they didn't explicitly supply.
                 answer = resolve_mgrs_answer(text)
-            else:
+            elif key in _STRIP_FREETEXT_KEYS:
                 answer = text
+            else:
+                answer = text.upper()
             sess["answers"][key] = answer
             sess["step"] += 1
             if sess["step"] < len(fields):
