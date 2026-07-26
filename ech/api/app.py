@@ -43,7 +43,7 @@ _psk_stats: dict = {"last_success": None, "last_failure": None, "last_error": No
 UI_DIR = Path(__file__).parent.parent / "ui"
 
 
-def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None) -> FastAPI:
+def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None) -> FastAPI:
     global _psk_contact, _psk_default_callsign
     _op_callsign = "N0CALL"   # injected into pages as window.ECH_CALLSIGN
     # Build PSKReporter User-Agent from config: PSKReporter TOS requires a real
@@ -1027,6 +1027,158 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         results = await router.send(body=summary, adapter_names=adapters or None)
         return {"status": "ok", "summary": summary, "sent": results}
 
+    # ── Air quality / wildfire smoke service ────────────────────────────────
+
+    @app.get("/api/airquality")
+    async def get_air_quality():
+        if not aq_service:
+            return {"enabled": False}
+        return aq_service.status()
+
+    @app.get("/api/airquality/stations")
+    async def get_air_quality_stations():
+        if not aq_service:
+            return {"stations": []}
+        return {"stations": aq_service.stations()}
+
+    @app.get("/api/airquality/purpleair")
+    async def get_air_quality_purpleair():
+        if not aq_service:
+            return {"sensors": []}
+        return {"sensors": aq_service.purpleair_sensors()}
+
+    @app.get("/api/airquality/hotspots")
+    async def get_air_quality_hotspots():
+        if not aq_service:
+            return {"hotspots": []}
+        if aq_service._lat is not None and aq_service._lon is not None:
+            return {"hotspots": aq_service.hotspots_with_distance(aq_service._lat, aq_service._lon)}
+        return {"hotspots": aq_service.hotspots()}
+
+    @app.get("/api/airquality/smoke")
+    async def get_air_quality_smoke():
+        if not aq_service:
+            return {"polygons": []}
+        return {"polygons": aq_service.smoke_polygons()}
+
+    @app.post("/api/airquality/poll")
+    async def poll_air_quality():
+        if not aq_service:
+            return {"status": "error", "detail": "Air quality service not configured"}
+        await aq_service.trigger_poll()
+        return {"status": "ok", **aq_service.status()}
+
+    @app.get("/api/airquality/config")
+    async def get_aq_config():
+        if not aq_service:
+            return {"enabled": False}
+        return {
+            "enabled": aq_service.enabled,
+            "airnow_api_key": aq_service._airnow_key,
+            "firms_api_key": aq_service._firms_key,
+            "purpleair_api_key": aq_service._purpleair_key,
+            "poll_interval_sec": aq_service._poll_interval,
+            "station_bbox_deg": aq_service._station_bbox_deg,
+            "fire_bbox_deg": aq_service._fire_bbox_deg,
+            "firms_source": aq_service._fire_source,
+            "firms_dayrange": aq_service._fire_dayrange,
+            "smoke_bbox_deg": aq_service._smoke_bbox_deg,
+        }
+
+    @app.post("/api/airquality/config")
+    async def update_aq_config(request: Request):
+        data = await request.json()
+        if ech_state:
+            await ech_state.update_air_quality_config(data)
+        return {"status": "ok"}
+
+    # ── Named water bodies (map markers) ─────────────────────────────────
+
+    @app.get("/api/waterbodies")
+    async def get_water_bodies():
+        if not wb_service:
+            return {"enabled": False, "bodies": []}
+        wx_bot = getattr(router, "_weather_bot", None)
+        bodies = []
+        for b in wb_service.water_bodies():
+            b = dict(b)
+            if wx_bot and b.get("buoy"):
+                try:
+                    boating, kayak, color = wx_bot._boating_rating(b["buoy"])
+                    b["boating_rating"], b["kayak_rating"], b["condition_color"] = boating, kayak, color
+                except Exception:
+                    pass
+            if wx_bot:
+                try:
+                    factors, phase_label = wx_bot._fish_base_factors(b.get("buoy"))
+                    rating, detail = wx_bot._finalize_fish_score(factors)
+                    b["fishing_rating"], b["fishing_detail"] = rating, f"{phase_label}{', ' + detail if detail else ''}"
+                except Exception:
+                    pass
+            bodies.append(b)
+        return {"enabled": wb_service.enabled, "bodies": bodies}
+
+    @app.get("/api/waterbodies/status")
+    async def get_water_bodies_status():
+        if not wb_service:
+            return {"enabled": False}
+        return wb_service.status()
+
+    @app.post("/api/waterbodies/poll")
+    async def poll_water_bodies():
+        if not wb_service:
+            return {"status": "error", "detail": "Water body service not configured"}
+        await wb_service.trigger_poll()
+        return {"status": "ok", **wb_service.status()}
+
+    @app.get("/api/waterbodies/config")
+    async def get_wb_config():
+        if not wb_service:
+            return {"enabled": False}
+        return {
+            "enabled": wb_service.enabled,
+            "bbox_deg": wb_service._bbox_deg,
+            "buoy_match_max_mi": wb_service._buoy_match_max_mi,
+            "poll_interval_sec": wb_service._poll_interval,
+        }
+
+    @app.post("/api/waterbodies/config")
+    async def update_wb_config(request: Request):
+        data = await request.json()
+        if ech_state:
+            await ech_state.update_water_body_config(data)
+        return {"status": "ok"}
+
+    # ── Marine / boating buoy (map marker) ──────────────────────────────────
+
+    @app.get("/api/marine")
+    async def get_marine():
+        wx_bot = getattr(router, "_weather_bot", None)
+        if not wx_bot or not wx_bot._ndbc_station:
+            return {"configured": False}
+        result = {
+            "configured": True,
+            "station": wx_bot._ndbc_station,
+            "lat": wx_bot._ndbc_lat,
+            "lon": wx_bot._ndbc_lon,
+        }
+        try:
+            result["summary"] = await wx_bot._cmd_marine()
+        except Exception as exc:
+            result["summary"] = f"marine: error ({type(exc).__name__})"
+        try:
+            reading = await wx_bot._fetch_buoy_reading()
+            if reading:
+                boating, kayak, color = wx_bot._boating_rating(reading)
+                result.update({"boating_rating": boating, "kayak_rating": kayak, "color": color})
+        except Exception:
+            pass
+        try:
+            result["fishing_summary"] = await wx_bot._cmd_fish()
+        except Exception:
+            pass
+        return result
+
     @app.post("/api/time-sync")
     async def time_sync_broadcast(adapters: list[str] = Query(default=None),
                                   incident: str = ""):
@@ -1615,6 +1767,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             "lon":                   wx_bot._lon,
             "aprs_fi_key":           cfg.get("aprs_fi_key", ""),
             "tide_station":          wx_bot._tide_station,
+            "ndbc_station":          wx_bot._ndbc_station,
+            "ndbc_lat":              wx_bot._ndbc_lat,
+            "ndbc_lon":              wx_bot._ndbc_lon,
             "mention_name":          wx_bot._mention_name,
         }
 
@@ -1645,6 +1800,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
         if "ships_radius_nm" in data:
             wx_bot._config.setdefault("mesh_bot", {})["ships_radius_nm"] = float(data["ships_radius_nm"])
         if "mention_name" in data:          wx_bot._mention_name         = str(data["mention_name"]).strip()
+        if "tide_station" in data:          wx_bot._tide_station         = str(data["tide_station"]).strip()
+        if "ndbc_station" in data:          wx_bot._ndbc_station         = str(data["ndbc_station"]).strip()
+        if "ndbc_lat" in data:              wx_bot._ndbc_lat             = float(data["ndbc_lat"]) if data["ndbc_lat"] not in (None, "") else None
+        if "ndbc_lon" in data:              wx_bot._ndbc_lon             = float(data["ndbc_lon"]) if data["ndbc_lon"] not in (None, "") else None
         # Persist to config.yaml so settings survive restart
         config_path = Path("/etc/ech/config.yaml")
         if not config_path.exists():
@@ -1669,6 +1828,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             if "aprs_fi_key" in data:           bot_cfg["aprs_fi_key"]           = data["aprs_fi_key"]
             if "ships_radius_nm" in data:       bot_cfg["ships_radius_nm"]       = float(data["ships_radius_nm"])
             if "tide_station" in data:          bot_cfg["tide_station"]          = str(data["tide_station"]).strip()
+            if "ndbc_station" in data:          bot_cfg["ndbc_station"]          = str(data["ndbc_station"]).strip()
+            if "ndbc_lat" in data:              bot_cfg["ndbc_lat"]              = float(data["ndbc_lat"]) if data["ndbc_lat"] not in (None, "") else None
+            if "ndbc_lon" in data:              bot_cfg["ndbc_lon"]              = float(data["ndbc_lon"]) if data["ndbc_lon"] not in (None, "") else None
             if "mention_name" in data:          bot_cfg["mention_name"]          = str(data["mention_name"]).strip()
             with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
@@ -1725,6 +1887,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, auth=None, ech_
             elif cmd == "moon":              result = wx_bot._cmd_moon()
             elif cmd == "dxcc":              result = await wx_bot._cmd_dxcc(args)
             elif cmd == "contest":           result = await wx_bot._cmd_contest()
+            elif cmd in ("smoke", "aqi"):    result = await wx_bot._cmd_smoke()
+            elif cmd in ("marine", "boating", "buoy", "kayak"): result = await wx_bot._cmd_marine(args)
+            elif cmd in ("fish", "fishing", "solunar"):         result = await wx_bot._cmd_fish(args)
+            elif cmd == "water":                                result = await wx_bot._cmd_water_list()
             elif cmd == "help":              result = wx_bot._cmd_help()
             else:                            result = f"unknown command: {cmd}"
         except Exception as exc:

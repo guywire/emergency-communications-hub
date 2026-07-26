@@ -26,7 +26,7 @@
   --blue:     #388bfd;
   --blue-bg:  #051d4d;
   --mesh:     #58a6ff;
-  --aprs:     #79c0ff;
+  --aprs:     #7c3aed;
   --meshcore: #56d364;
   --hf:       #e2a44f;
   --sms:      #c792ea;
@@ -1513,6 +1513,48 @@ function closeMsgDetail() {
   document.getElementById('msg-detail-popup').classList.remove('open');
 }
 
+// ── Node detail popup ────────────────────────────────────────────────────
+function openNodeDetail(nodeId, adapter) {
+  const n = _allNodes.find(x => x.node_id === nodeId && x._adapter === adapter);
+  if (!n) { toast('Node not found', 'err'); return; }
+  document.getElementById('node-detail-content').innerHTML = buildNodeDetailHTML(n);
+  document.getElementById('node-detail-popup').classList.add('open');
+}
+
+function closeNodeDetail() {
+  document.getElementById('node-detail-popup').classList.remove('open');
+}
+
+function buildNodeDetailHTML(n) {
+  const rows = [];
+  rows.push(['Name', escHtml(n.display_name || '')]);
+  rows.push(['Node ID', escHtml(n.node_id || '')]);
+  rows.push(['Adapter', escHtml(n._adapter || '')]);
+  if (n.node_type) rows.push(['Type', escHtml(n.node_type)]);
+  if (n.lat != null && n.lon != null) {
+    rows.push(['Coordinates', `${n.lat.toFixed(6)}, ${n.lon.toFixed(6)} <a href="/map?lat=${encodeURIComponent(n.lat)}&lon=${encodeURIComponent(n.lon)}&zoom=16" target="_blank" rel="noopener" style="color:var(--blue);margin-left:6px">Show on map</a>`]);
+  }
+  if (n.last_heard) rows.push(['Last heard', escHtml(new Date(n.last_heard).toUTCString())]);
+  if (n.snr != null && !isNaN(n.snr)) rows.push(['SNR', `${parseFloat(n.snr).toFixed(1)} dB`]);
+  if (n.rssi != null) rows.push(['RSSI', `${n.rssi} dBm`]);
+  if (n.battery_level != null) rows.push(['Battery', `${parseInt(n.battery_level)}%`]);
+  if (n.battery_voltage != null) rows.push(['Voltage', `${parseFloat(n.battery_voltage).toFixed(2)}V`]);
+  if (n.ch_util != null) rows.push(['Channel util', `${parseFloat(n.ch_util).toFixed(1)}%`]);
+  if (n.air_util_tx != null) rows.push(['Air util TX', `${parseFloat(n.air_util_tx).toFixed(1)}%`]);
+  if (n.temperature != null) rows.push(['Temperature', `${parseFloat(n.temperature).toFixed(1)}°C`]);
+  if (n.humidity != null) rows.push(['Humidity', `${parseFloat(n.humidity).toFixed(0)}%`]);
+  if (n.pressure != null) rows.push(['Pressure', `${parseFloat(n.pressure).toFixed(0)} hPa`]);
+  if (n.uptime_secs != null) rows.push(['Uptime', `${n.uptime_secs}s`]);
+  if (n.name_source) rows.push(['Name source', escHtml(n.name_source)]);
+  const meta = n.meta || {};
+  Object.entries(meta).forEach(([k, v]) => {
+    if (v === null || v === undefined || v === '') return;
+    rows.push([escHtml(k), escHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))]);
+  });
+  const tableRows = rows.map(([k, v]) => `<tr><td class="msg-detail-key">${k}</td><td>${v}</td></tr>`).join('');
+  return `<table class="msg-detail-table"><tbody>${tableRows}</tbody></table>`;
+}
+
 function buildMsgDetailHTML(msg) {
   const ts = new Date(msg.timestamp);
   const raw = msg._raw || {};
@@ -2231,16 +2273,21 @@ function _renderNodeCards(nodes, totalCount) {
     const batt = (n.battery_level != null && !isNaN(n.battery_level)) ? parseInt(n.battery_level) : null;
     const battClass = batt != null ? (batt < 20 ? 'critical' : batt < 40 ? 'low' : '') : '';
     const adapterLabel = n._adapter?.includes('meshcore') ? 'MSHC' : n._adapter?.includes('aprs') ? 'APRS' : 'MSHT';
-    const adapterColor = n._adapter?.includes('meshcore') ? 'var(--meshcore)' : n._adapter?.includes('aprs') ? 'var(--aprs,#ff9900)' : 'var(--mesh)';
+    const adapterColor = n._adapter?.includes('meshcore') ? 'var(--meshcore)' : n._adapter?.includes('aprs') ? 'var(--aprs,#7c3aed)' : 'var(--mesh)';
     const heardMs = n.last_heard ? _now - new Date(n.last_heard) : Infinity;
     const agoStr  = _agoStr(n.last_heard);
     const isStale = heardMs > 15 * 60 * 1000;   // >15 min = stale
     const staleStyle = isStale ? 'opacity:0.55;' : '';
     const staleTag = isStale ? '<span style="font-size:8px;color:var(--muted);margin-left:3px" title="Not heard in >15 minutes">stale</span>' : '';
+    const hasPos = n.lat != null && n.lon != null;
+    const mapBtn = hasPos ? `<a href="/map?lat=${encodeURIComponent(n.lat)}&lon=${encodeURIComponent(n.lon)}&zoom=16" target="_blank" rel="noopener" class="node-ping-btn" style="text-decoration:none;display:inline-block" title="Show this node on the map">📍 Map</a>` : '';
+    const detailBtn = `<button class="node-ping-btn" onclick="openNodeDetail('${escHtml(n.node_id)}','${escHtml(n._adapter)}')" title="Show all known details for this node">ℹ Details</button>`;
     return `<div class="node-card" style="${staleStyle}">
       <div class="node-name" style="display:flex;align-items:center;gap:4px">
         <span onclick="fillTo('${escHtml(n.node_id)}')" title="Click to fill compose-to with this node ID" style="cursor:pointer;flex:1">${escHtml(n.display_name)}${nodeTypeBadge(n)}${staleTag}</span>
         <span style="font-size:9px;color:${adapterColor}">${adapterLabel}</span>
+        ${mapBtn}
+        ${detailBtn}
         ${n._adapter?.includes('meshcore') ? `${nodeMessageable(n) ? `<button class="node-ping-btn" style="margin-left:2px" onclick="fillTo('${escHtml(n.node_id)}')" title="Direct message this node (fills compose To: field)">✉ DM</button>` : ''}<button class="node-ping-btn" onclick="pingNode('${escHtml(n._adapter)}','${escHtml(n.node_id)}',this)" title="Send a directed trace via this node (probe routed through it; result appears in the feed and as a green path on the map)">📡 Trace</button>` : ''}
       </div>
       <div class="node-id">${escHtml(n.node_id)}${n.name_source ? ` <span style="font-size:8px;color:var(--muted)">[${escHtml(n.name_source)}]</span>` : ''}</div>
@@ -2986,6 +3033,16 @@ function mobileClosePanels() {
       <button class="msg-detail-close" onclick="closeMsgDetail()" title="Close">✕</button>
     </div>
     <div id="msg-detail-content"></div>
+  </div>
+</div>
+<div id="node-detail-popup" class="msg-detail-popup" aria-modal="true">
+  <div class="msg-detail-overlay" onclick="closeNodeDetail()"></div>
+  <div class="msg-detail-panel">
+    <div class="msg-detail-hdr">
+      <span>Node Detail</span>
+      <button class="msg-detail-close" onclick="closeNodeDetail()" title="Close">✕</button>
+    </div>
+    <div id="node-detail-content"></div>
   </div>
 </div>
 </body>

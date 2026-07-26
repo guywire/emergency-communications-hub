@@ -42,10 +42,12 @@ class ECHState:
     All state changes are persisted and broadcast to WebSocket clients.
     """
 
-    def __init__(self, db, router=None, wx_service=None):
+    def __init__(self, db, router=None, wx_service=None, aq_service=None, wb_service=None):
         self._db = db
         self._router = router
         self._wx_service = wx_service
+        self._aq_service = aq_service
+        self._wb_service = wb_service
         self._ws_broadcast_fn = None   # set by router after init
 
         # In-memory state (loaded from DB on start)
@@ -98,6 +100,26 @@ class ECHState:
                 log.info("ECHState: restored weather broadcast state (last_auto=%.0f)", self._wx_service._last_auto_broadcast)
             except Exception as exc:
                 log.warning("ECHState: failed to restore broadcast state: %s", exc)
+
+        # Restore persisted air quality configuration on startup.
+        aq_json = await self._db.get_kv("aq_config")
+        if aq_json and self._aq_service:
+            try:
+                cfg = json.loads(aq_json)
+                await self.update_air_quality_config(cfg)
+                log.info("ECHState: restored air quality configuration from database")
+            except Exception as exc:
+                log.warning("ECHState: failed to restore air quality configuration: %s", exc)
+
+        # Restore persisted water body configuration on startup.
+        wb_json = await self._db.get_kv("wb_config")
+        if wb_json and self._wb_service:
+            try:
+                cfg = json.loads(wb_json)
+                await self.update_water_body_config(cfg)
+                log.info("ECHState: restored water body configuration from database")
+            except Exception as exc:
+                log.warning("ECHState: failed to restore water body configuration: %s", exc)
 
         log.info("ECHState: mode=%s simulation=%s incident=%s base=(%.4f,%.4f)",
                  self._mode, self._simulation_enabled, self._incident_name,
@@ -232,6 +254,14 @@ class ECHState:
             wx_cfg = {**self._wx_config, "nws_lat": lat, "nws_lon": lon}
             await self._db.set_kv("wx_config", json.dumps(wx_cfg))
             self._wx_config = wx_cfg
+        # Propagate to air quality service
+        if self._aq_service:
+            self._aq_service._lat = lat
+            self._aq_service._lon = lon
+        # Propagate to water body service
+        if self._wb_service:
+            self._wb_service._lat = lat
+            self._wb_service._lon = lon
         # Propagate to all adapters — updates positions in mocks; MeshCore also
         # pushes this onto the radio's own advert position (CMD_SET_ADVERT_LATLON)
         # and stamps its own map node, no-op for other real adapters
@@ -286,6 +316,15 @@ class ECHState:
         lon = config.get("nws_lon")
         if lat is not None: self._wx_service._lat = float(lat)
         if lon is not None: self._wx_service._lon = float(lon)
+        # Air quality / water body services have no separate Settings UI for
+        # their location — they share the hub's weather coordinates unless
+        # explicitly overridden.
+        if self._aq_service and lat is not None and lon is not None:
+            self._aq_service._lat = float(lat)
+            self._aq_service._lon = float(lon)
+        if self._wb_service and lat is not None and lon is not None:
+            self._wb_service._lat = float(lat)
+            self._wb_service._lon = float(lon)
         # Persist
         import json
         await self._db.set_kv("wx_config", json.dumps(config))
@@ -293,6 +332,62 @@ class ECHState:
         log.info("ECHState: weather config updated: area=%s auto_channel=%r severities=%s",
                  self._wx_service._area, self._wx_service._auto_channel,
                  sorted(self._wx_service._auto_broadcast_severities))
+
+    # ── Air quality config live reload ──────────────────────────────────────
+
+    async def update_air_quality_config(self, config: dict) -> None:
+        """Update air quality service config without restarting ECH (enable/disable itself
+        still requires a restart — it decides whether to start a client at all)."""
+        if not self._aq_service:
+            return
+        if "airnow_api_key" in config:
+            self._aq_service._airnow_key = str(config["airnow_api_key"] or "").strip()
+        if "firms_api_key" in config:
+            self._aq_service._firms_key = str(config["firms_api_key"] or "").strip()
+        if "purpleair_api_key" in config:
+            self._aq_service._purpleair_key = str(config["purpleair_api_key"] or "").strip()
+        if "poll_interval_sec" in config:
+            self._aq_service._poll_interval = int(config["poll_interval_sec"])
+        if "station_bbox_deg" in config:
+            self._aq_service._station_bbox_deg = float(config["station_bbox_deg"])
+        if "fire_bbox_deg" in config:
+            self._aq_service._fire_bbox_deg = float(config["fire_bbox_deg"])
+        if "firms_source" in config:
+            self._aq_service._fire_source = str(config["firms_source"])
+        if "firms_dayrange" in config:
+            self._aq_service._fire_dayrange = int(config["firms_dayrange"])
+        if "smoke_bbox_deg" in config:
+            self._aq_service._smoke_bbox_deg = float(config["smoke_bbox_deg"])
+        lat = config.get("lat")
+        lon = config.get("lon")
+        if lat is not None: self._aq_service._lat = float(lat)
+        if lon is not None: self._aq_service._lon = float(lon)
+        # Persist
+        import json
+        await self._db.set_kv("aq_config", json.dumps(config))
+        await self._broadcast("aq_config_change", config)
+
+    # ── Water body config live reload ────────────────────────────────────
+
+    async def update_water_body_config(self, config: dict) -> None:
+        """Update water body service config without restarting ECH (enable/disable
+        itself still requires a restart)."""
+        if not self._wb_service:
+            return
+        if "bbox_deg" in config:
+            self._wb_service._bbox_deg = float(config["bbox_deg"])
+        if "buoy_match_max_mi" in config:
+            self._wb_service._buoy_match_max_mi = float(config["buoy_match_max_mi"])
+        if "poll_interval_sec" in config:
+            self._wb_service._poll_interval = int(config["poll_interval_sec"])
+        lat = config.get("lat")
+        lon = config.get("lon")
+        if lat is not None: self._wb_service._lat = float(lat)
+        if lon is not None: self._wb_service._lon = float(lon)
+        # Persist
+        import json
+        await self._db.set_kv("wb_config", json.dumps(config))
+        await self._broadcast("wb_config_change", config)
 
     # ── Status snapshot ───────────────────────────────────────────────────
 

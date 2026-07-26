@@ -230,6 +230,98 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     </div>
   </div>
 
+  <!-- ── Air quality / wildfire smoke ───────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('aqi-body')">
+      <span class="section-title">AIR QUALITY / SMOKE (AirNow + NASA FIRMS)</span>
+    </div>
+    <div id="aqi-body" class="section-body">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:10px">
+        Powers the mesh bot's "smoke"/"aqi" command and the map's 🔥 AQI layer (real AirNow
+        stations + FIRMS fire hotspots + NOAA HMS smoke-plume polygons — smoke drifting in from
+        a distant fire, e.g. Canada, shows up even with no local fire detected).
+        Enabling/disabling the service itself still requires <code>air_quality_service.enabled: true</code>
+        in config.yaml + a restart — everything below applies live, no restart needed.
+      </div>
+      <div class="row">
+        <div>
+          <label>AirNow API key <span style="color:var(--dim)">(free — docs.airnowapi.org)</span></label>
+          <input type="text" id="aqi-airnow-key" style="font-family:var(--mono);font-size:11px">
+        </div>
+        <div>
+          <label>NASA FIRMS map key <span style="color:var(--dim)">(free — firms.modaps.eosdis.nasa.gov/api/area; optional)</span></label>
+          <input type="text" id="aqi-firms-key" style="font-family:var(--mono);font-size:11px">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>PurpleAir API key <span style="color:var(--dim)">(free — develop.purpleair.com; optional — adds a denser crowd-sourced sensor layer, shown with a purple outline on the map)</span></label>
+          <input type="text" id="aqi-purpleair-key" style="font-family:var(--mono);font-size:11px">
+        </div>
+      </div>
+      <div class="row3" style="margin-top:12px">
+        <div>
+          <label>Poll interval (seconds)</label>
+          <input type="number" id="aqi-poll" value="1800" min="300">
+        </div>
+        <div>
+          <label>AirNow station search box (&plusmn; degrees)</label>
+          <input type="number" id="aqi-station-bbox" value="4" min="1" max="15">
+        </div>
+        <div>
+          <label>Fire search box (&plusmn; degrees) <span style="color:var(--dim)">(keep &ge; smoke box, or fires stay hidden)</span></label>
+          <input type="number" id="aqi-fire-bbox" value="15" min="1" max="40">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>FIRMS day range</label>
+          <input type="number" id="aqi-fire-dayrange" value="1" min="1" max="10">
+        </div>
+        <div>
+          <label>Smoke plume search box (&plusmn; degrees) <span style="color:var(--dim)">(HMS — smoke travels far)</span></label>
+          <input type="number" id="aqi-smoke-bbox" value="15" min="1" max="40">
+        </div>
+      </div>
+      <button class="btn btn-green" style="margin-top:16px" onclick="saveAqConfig()">Save air quality config</button>
+      <button class="btn" style="margin-top:16px;margin-left:8px" onclick="pollAqNow()">Poll now</button>
+      <div id="aqi-current" style="margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--muted)"></div>
+    </div>
+  </div>
+
+  <!-- ── Named water bodies ─────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('wb-body')">
+      <span class="section-title">WATER BODIES (EPA quality + NDBC buoys)</span>
+    </div>
+    <div id="wb-body" class="section-body">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:10px">
+        Auto-discovers every EPA-assessed lake/bay/estuary/river near the hub and matches each to
+        its nearest live NDBC buoy. No API key needed. Powers the mesh bot's "marine &lt;name&gt;",
+        "fish &lt;name&gt;", and "water" commands, plus per-water-body map markers. Enabling itself
+        still requires <code>water_body_service.enabled: true</code> in config.yaml + a restart.
+      </div>
+      <div class="row3">
+        <div>
+          <label>Discovery search box (&plusmn; degrees, ~50mi at 0.75)</label>
+          <input type="number" id="wb-bbox" value="0.75" min="0.1" max="5" step="0.05">
+        </div>
+        <div>
+          <label>Max buoy match distance (mi)</label>
+          <input type="number" id="wb-buoy-max" value="60" min="5" max="300">
+        </div>
+        <div>
+          <label>Poll interval (seconds)</label>
+          <input type="number" id="wb-poll" value="21600" min="600">
+        </div>
+      </div>
+      <button class="btn btn-green" style="margin-top:16px" onclick="saveWbConfig()">Save water body config</button>
+      <button class="btn" style="margin-top:16px;margin-left:8px" onclick="pollWbNow()">Poll now</button>
+      <div id="wb-current" style="margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--muted)"></div>
+      <div id="wb-list" style="margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--dim);max-height:160px;overflow-y:auto"></div>
+    </div>
+  </div>
+
   <!-- ── Live adapter control ────────────────────────────────── -->
   <div class="section">
     <div class="section-header" onclick="toggle('adapter-live-body')">
@@ -652,6 +744,22 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
         <label>NOAA Tide Station ID (for <code>!tide</code> command — find at <a href="https://tidesandcurrents.noaa.gov/tide_predictions.html" target="_blank" style="color:var(--blue)">tidesandcurrents.noaa.gov</a>)</label>
         <input type="text" id="bot-tide-station" placeholder="e.g. 8418150 (Portland ME)">
       </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>NDBC Buoy Station ID (for <code>marine</code>/<code>boating</code>/<code>buoy</code>/<code>kayak</code> — find at <a href="https://www.ndbc.noaa.gov/" target="_blank" style="color:var(--blue)">ndbc.noaa.gov</a>)</label>
+          <input type="text" id="bot-ndbc-station" placeholder="e.g. 44007">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Buoy lat <span style="color:var(--dim)">(optional — for the ⚓ map marker)</span></label>
+          <input type="number" id="bot-ndbc-lat" step="0.0001">
+        </div>
+        <div>
+          <label>Buoy lon</label>
+          <input type="number" id="bot-ndbc-lon" step="0.0001">
+        </div>
+      </div>
       <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
         <button class="btn btn-green" onclick="saveBotConfig()">Save Bot Config</button>
         <span id="bot-save-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none">Saved (in-memory — restart to persist or use Config → Save)</span>
@@ -958,6 +1066,29 @@ async function init() {
   if (wx.auto_broadcast_max_per_hour != null) document.getElementById('wx-ab-max-per-hour').value = wx.auto_broadcast_max_per_hour;
   if (wx.broadcast_count_session != null) document.getElementById('wx-broadcast-count').textContent = `Broadcasts this session: ${wx.broadcast_count_session}`;
 
+  // Load air quality config + current status
+  const aq = await fetch('/api/airquality/config').then(r=>r.json()).catch(()=>({}));
+  if (aq.enabled !== undefined) {
+    document.getElementById('aqi-airnow-key').value = aq.airnow_api_key || '';
+    document.getElementById('aqi-firms-key').value = aq.firms_api_key || '';
+    document.getElementById('aqi-purpleair-key').value = aq.purpleair_api_key || '';
+    document.getElementById('aqi-poll').value = aq.poll_interval_sec || 1800;
+    document.getElementById('aqi-station-bbox').value = aq.station_bbox_deg || 4;
+    document.getElementById('aqi-fire-bbox').value = aq.fire_bbox_deg || 15;
+    document.getElementById('aqi-fire-dayrange').value = aq.firms_dayrange || 2;
+    document.getElementById('aqi-smoke-bbox').value = aq.smoke_bbox_deg || 15;
+  }
+  loadAqStatus();
+
+  // Load water body config + current status
+  const wb = await fetch('/api/waterbodies/config').then(r=>r.json()).catch(()=>({}));
+  if (wb.enabled !== undefined) {
+    document.getElementById('wb-bbox').value = wb.bbox_deg || 0.75;
+    document.getElementById('wb-buoy-max').value = wb.buoy_match_max_mi || 60;
+    document.getElementById('wb-poll').value = wb.poll_interval_sec || 21600;
+  }
+  loadWbStatus();
+
   // Load adapter config
   const ac = await fetch('/api/adapter-config').then(r=>r.json());
   if (ac.adapters) {
@@ -1035,6 +1166,95 @@ async function saveWxConfig() {
   await fetch('/api/weather/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
   toast('Weather config saved — takes effect immediately');
   loadWxAlerts();
+}
+
+async function saveAqConfig() {
+  const cfg = {
+    airnow_api_key: document.getElementById('aqi-airnow-key').value.trim(),
+    firms_api_key: document.getElementById('aqi-firms-key').value.trim(),
+    purpleair_api_key: document.getElementById('aqi-purpleair-key').value.trim(),
+    poll_interval_sec: parseInt(document.getElementById('aqi-poll').value) || 1800,
+    station_bbox_deg: parseFloat(document.getElementById('aqi-station-bbox').value) || 4,
+    fire_bbox_deg: parseFloat(document.getElementById('aqi-fire-bbox').value) || 15,
+    firms_dayrange: parseInt(document.getElementById('aqi-fire-dayrange').value) || 2,
+    smoke_bbox_deg: parseFloat(document.getElementById('aqi-smoke-bbox').value) || 15,
+  };
+  await fetch('/api/airquality/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
+  toast('Air quality config saved — takes effect immediately');
+  loadAqStatus();
+}
+
+async function pollAqNow() {
+  const r = await fetch('/api/airquality/poll', {method:'POST'}).then(r=>r.json()).catch(()=>null);
+  toast(r && r.status === 'ok' ? 'Air quality poll triggered' : 'Air quality poll failed');
+  loadAqStatus();
+}
+
+async function loadAqStatus() {
+  const el = document.getElementById('aqi-current');
+  if (!el) return;
+  try {
+    const st = await fetch('/api/airquality').then(r=>r.json());
+    if (!st.enabled) {
+      el.textContent = 'Service disabled — set air_quality_service.enabled: true in config.yaml and restart to turn on.';
+      return;
+    }
+    const parts = [`Poll #${st.poll_count || 0}`, st.last_poll ? `last: ${st.last_poll}` : 'never polled'];
+    if (st.current) parts.push(`AQI ${st.current.aqi} (${st.current.category})`);
+    if (st.station_count != null) parts.push(`${st.station_count} AirNow station(s)`);
+    if (st.purpleair_count != null) parts.push(`${st.purpleair_count} PurpleAir sensor(s)`);
+    if (st.hotspot_count != null) parts.push(`${st.hotspot_count} fire hotspot(s)`);
+    if (st.smoke_polygon_count != null) parts.push(`${st.smoke_polygon_count} smoke polygon(s)`);
+    if (st.last_error) parts.push(`error: ${st.last_error}`);
+    el.textContent = parts.join(' | ');
+  } catch (e) {
+    el.textContent = 'Status unavailable';
+  }
+}
+
+async function saveWbConfig() {
+  const cfg = {
+    bbox_deg: parseFloat(document.getElementById('wb-bbox').value) || 0.75,
+    buoy_match_max_mi: parseFloat(document.getElementById('wb-buoy-max').value) || 60,
+    poll_interval_sec: parseInt(document.getElementById('wb-poll').value) || 21600,
+  };
+  await fetch('/api/waterbodies/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
+  toast('Water body config saved — takes effect immediately');
+  loadWbStatus();
+}
+
+async function pollWbNow() {
+  const r = await fetch('/api/waterbodies/poll', {method:'POST'}).then(r=>r.json()).catch(()=>null);
+  toast(r && r.status === 'ok' ? 'Water body poll triggered' : 'Water body poll failed');
+  loadWbStatus();
+}
+
+async function loadWbStatus() {
+  const el = document.getElementById('wb-current');
+  const listEl = document.getElementById('wb-list');
+  if (!el) return;
+  try {
+    const st = await fetch('/api/waterbodies/status').then(r=>r.json());
+    if (!st.enabled) {
+      el.textContent = 'Service disabled — set water_body_service.enabled: true in config.yaml and restart to turn on.';
+      if (listEl) listEl.textContent = '';
+      return;
+    }
+    const parts = [`Poll #${st.poll_count || 0}`, st.last_poll ? `last: ${st.last_poll}` : 'never polled'];
+    if (st.water_body_count != null) parts.push(`${st.water_body_count} water bod${st.water_body_count===1?'y':'ies'}`);
+    if (st.buoy_matched_count != null) parts.push(`${st.buoy_matched_count} with a live buoy`);
+    if (st.last_error) parts.push(`error: ${st.last_error}`);
+    el.textContent = parts.join(' | ');
+
+    if (listEl) {
+      const data = await fetch('/api/waterbodies').then(r=>r.json()).catch(()=>({bodies:[]}));
+      listEl.innerHTML = (data.bodies || []).map(b =>
+        `<div>${b.name} — ${b.status}${b.buoy ? ` (buoy ${b.buoy.station}, ${b.buoy.distance_mi.toFixed(0)}mi)` : ' (no live buoy)'}</div>`
+      ).join('') || '<div>No water bodies discovered yet.</div>';
+    }
+  } catch (e) {
+    el.textContent = 'Status unavailable';
+  }
 }
 
 async function loadWxAlerts() {
@@ -2331,6 +2551,9 @@ async function loadBotConfig() {
     document.getElementById('bot-tle').value          = (d.tle_targets||[]).join('\n');
     document.getElementById('bot-aprs-key').value     = d.aprs_fi_key || '';
     document.getElementById('bot-tide-station').value = d.tide_station || '';
+    document.getElementById('bot-ndbc-station').value = d.ndbc_station || '';
+    document.getElementById('bot-ndbc-lat').value      = d.ndbc_lat ?? '';
+    document.getElementById('bot-ndbc-lon').value      = d.ndbc_lon ?? '';
     const st = document.getElementById('bot-header-status');
     if (st) st.textContent = d.enabled ? 'enabled' : 'disabled';
   } catch(e) {
@@ -2363,6 +2586,9 @@ async function saveBotConfig() {
     tle_targets:           tleStr.split('\n').map(s=>s.trim()).filter(Boolean),
     aprs_fi_key:           document.getElementById('bot-aprs-key').value.trim(),
     tide_station:          document.getElementById('bot-tide-station').value.trim(),
+    ndbc_station:          document.getElementById('bot-ndbc-station').value.trim(),
+    ndbc_lat:              document.getElementById('bot-ndbc-lat').value.trim() !== '' ? parseFloat(document.getElementById('bot-ndbc-lat').value) : null,
+    ndbc_lon:              document.getElementById('bot-ndbc-lon').value.trim() !== '' ? parseFloat(document.getElementById('bot-ndbc-lon').value) : null,
   };
   const msg = document.getElementById('bot-save-msg');
   msg.style.display = 'inline';

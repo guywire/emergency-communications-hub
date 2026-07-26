@@ -111,7 +111,7 @@ incident:
 #
 # Real adapters (live hardware):
 #   meshtastic       aprs_kiss  aprs_is        meshcore      js8call   sms  pat_winlink
-#   mqtt             reticulum  aredn_ami       asterisk      adsb
+#   mqtt             reticulum  aredn_ami       asterisk      adsb     ax25_bbs  opensky
 
 adapters:
 
@@ -125,6 +125,19 @@ adapters:
 #     port: 80                # HTTP port (default 80)
 #     # path: /skyaware/data/aircraft.json   # auto-detected if omitted
 #     poll_interval: 10       # seconds between polls (default 10)
+#     stale_sec: 120          # remove aircraft not seen for this long (default 120)
+
+# ── OpenSky Network (global ADS-B via public REST API) ───────────────────────
+#   Complements the local dump1090/PiAware feed above with wide-area coverage.
+#   Anonymous access works but is heavily rate-limited (poll_interval floored
+#   at 300s). For faster polling, register a free account at
+#   opensky-network.org and create an API client (Account -> API Client).
+#   - type: opensky
+#     name: opensky
+#     bbox: [[43.0, -72.0], [47.0, -65.0]]   # [min_lat, min_lon], [max_lat, max_lon]
+#     # client_id: "YOUR_CLIENT_ID"          # optional — raises the rate limit
+#     # client_secret: "YOUR_CLIENT_SECRET"
+#     poll_interval: 30       # seconds (default 30 if authenticated, floored at 300 if not)
 #     stale_sec: 120          # remove aircraft not seen for this long (default 120)
 
 # ── AISstream.io (global AIS via WebSocket — supplements local AIS-catcher) ──
@@ -411,14 +424,18 @@ adapters:
 #     connect_alias: telnet          # telnet | ardop | ax25 | vara-hf | vara-fm
 
 # ── Asterisk/PBX (real) ───────────────────────────────────────────────────────
-#   Bridges VoIP/PSTN calls with ECH messaging via Asterisk AGI.
+#   Bridges VoIP/PSTN calls with ECH messaging via Asterisk AMI. Requires a
+#   manager.conf stanza on the Asterisk box granting these credentials
+#   read/write access (call/originate permissions).
 #   - type: asterisk
 #     name: pbx
-#     host: 127.0.0.1
+#     ami_host: 127.0.0.1
 #     ami_port: 5038
-#     username: ech
-#     password: changeme
+#     ami_username: ech
+#     ami_secret: changeme
+#     local_extension: "101"       # ATA/phone extension for click-to-call source
 #     context: from-internal
+#     caller_id: "ECH <100>"
 
 # ── AREDN (real) ─────────────────────────────────────────────────────────────
 #   Polls AREDN mesh node API for topology and device info.
@@ -426,6 +443,23 @@ adapters:
 #     name: aredn
 #     host: localnode.local.mesh
 #     poll_interval: 60
+
+# ── AX.25 packet BBS (real) ────────────────────────────────────────────────────
+#   Classic connected-mode packet BBS mail (W0RLI/FBB/MSYS-style) — NOT Winlink;
+#   Winlink over packet is handled by pat_winlink (Pat owns that protocol
+#   regardless of transport). Requires the Linux AX.25 stack already configured
+#   on this box: ax25-apps installed, ax25 kernel module loaded, a KISS TNC
+#   (e.g. Direwolf) kissattach'd to a port defined in /etc/ax25/axports. See
+#   ech/adapters/ax25_bbs_adapter.py's module docstring for full setup steps.
+#   - type: ax25_bbs
+#     name: packet-bbs
+#     ax25_port: radio            # port name from /etc/ax25/axports
+#     bbs_callsign: "KA1ABC-1"    # target BBS station
+#     poll_interval_sec: 1800     # packet is slow — don't poll aggressively
+#     # list_command: "L"          # BBS dialect commands — defaults follow the
+#     # read_command_fmt: "R {n}"  # common W0RLI convention; adjust if your
+#     # bye_command: "B"           # BBS software uses a different command set
+#     # send_end_marker: "/EX"
 
 # ── Bridge rules (optional) ───────────────────────────────────────────────────
 # Forward messages from one adapter's output to another's send().
@@ -493,7 +527,57 @@ mesh_bot:
   # Solar / space weather (hamqsl.com — no key needed)
   solar_cache_sec: 900          # re-fetch after 15 minutes
 
+  # Marine/boating conditions (NDBC buoy — no key needed). Find a station at
+  # ndbc.noaa.gov. Powers the "marine"/"boating"/"buoy"/"kayak" command.
+  # ndbc_station: "44007"
+  # ndbc_lat: null              # optional — for a map marker at the buoy location
+  # ndbc_lon: null
+
 # weather_bot key is still accepted as an alias for mesh_bot (backwards compat)
+
+# ── Air quality / wildfire smoke (AirNow AQI + NASA FIRMS + NOAA HMS smoke) ───
+# Powers the mesh bot's "smoke"/"aqi" command and the map's 🔥 AQI layer
+# (real AirNow monitor stations + fire hotspots + actual smoke-plume polygons,
+# so smoke drifting in from a fire hundreds of miles away — e.g. Canada — still
+# shows up even though FIRMS itself only reports point fire detections).
+# Disabled by default — needs API keys for the sources you want:
+#   AirNow:      https://docs.airnowapi.org/  (current AQI + station coverage — required)
+#   NASA FIRMS:  https://firms.modaps.eosdis.nasa.gov/api/area/  (fire hotspots — optional)
+#   PurpleAir:   https://develop.purpleair.com/  (denser crowd-sourced sensors — optional;
+#                raw/uncorrected PM2.5, converted to AQI here via EPA breakpoints)
+#   NOAA HMS smoke plumes — no key needed, always polled if enabled.
+# All fields below except `enabled` are also editable live from Settings (no
+# restart needed) — this block is only the first-install default.
+# air_quality_service:
+#   enabled: true
+#   airnow_api_key: ""            # required for AQI data
+#   firms_api_key: ""             # optional — omit to skip fire-hotspot lookup
+#   purpleair_api_key: ""         # optional — omit to skip the denser sensor layer
+#   lat: null                     # falls back to weather_service.nws_lat/lon
+#   lon: null
+#   poll_interval_sec: 1800       # 30 min — AirNow stations update roughly hourly
+#   station_bbox_deg: 4            # AirNow station search box (degrees, ~275mi) — 1 API call
+#   smoke_bbox_deg: 15             # HMS smoke-plume search box (degrees) — plumes travel far
+#   fire_bbox_deg: 15              # FIRMS search box (degrees) — matches smoke_bbox_deg by default
+#                                   # so a fire producing visible smoke isn't outside the fire search
+#   firms_source: "VIIRS_SNPP_NRT"
+#   firms_dayrange: 2              # satellite passes can miss a fire on any single day (cloud cover)
+
+# ── Named water bodies (EPA ATTAINS water quality + nearest live NDBC buoy) ───
+# Auto-discovers every EPA-assessed lake/bay/estuary/river near the hub — no
+# manual buoy-picking needed. Powers the mesh bot's "marine <name>"/"fish <name>"/
+# "water" commands and per-water-body map markers. No API key needed — both EPA
+# ATTAINS (gispub.epa.gov) and NOAA NDBC's global buoy snapshot are public.
+# Most lakes/rivers have no live buoy nearby — that's reported explicitly
+# (water quality status only) rather than silently omitted.
+# All fields below except `enabled` are also editable live from Settings.
+# water_body_service:
+#   enabled: true
+#   lat: null                      # falls back to weather_service.nws_lat/lon
+#   lon: null
+#   bbox_deg: 0.75                 # discovery search box (degrees, ~50mi) around the hub
+#   buoy_match_max_mi: 60          # max distance to match a water body to a live buoy
+#   poll_interval_sec: 21600       # 6h — EPA assessment status changes slowly
 
 # ── CAT radio control (rigctld / Hamlib) ──────────────────────────────────────
 # ECH connects to a running rigctld process over TCP and polls freq/mode every

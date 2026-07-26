@@ -32,6 +32,16 @@ no argument, e.g. "overhead now" still runs overhead):
                              equivalent; "skywarn winlink" emails it via the Pat Winlink
                              adapter to mesh_bot.skywarn_winlink_to (must be configured)
   dad               — dad joke (icanhazdadjoke.com)
+  smoke / aqi       — current AQI near base location + nearest active fire hotspot
+                      (requires air_quality_service configured — see air_quality.py)
+  marine [name] / boating / buoy / kayak — conditions for a named water body (EPA
+                      water quality + nearest live NDBC buoy if one exists); blank
+                      name = nearest to base location. Requires water_body_service
+                      enabled (falls back to mesh_bot.ndbc_station if not).
+  fish [name] / fishing / solunar — fishing score combining moon phase, tide change,
+                      and (if available) that water body's pressure trend + wind.
+                      Heuristic, not a certified solunar table.
+  water             — list nearby named water bodies and their EPA quality status
   help              — list available commands
 
 New aliases are added by adding the trigger word to _CMD_WORDS (for matching)
@@ -143,6 +153,8 @@ _CMD_WORDS = [
     "alerts", "metar", "sun", "nodes", "aprs", "anomalies", "tide", "tides",
     "grid", "id", "moon", "dxcc", "contest", "help", "path",
     "score", "leaderboard", "lb", "mud", "adventure", "skywarn",
+    "smoke", "aqi", "airquality",
+    "marine", "boating", "buoy", "kayak", "fish", "fishing", "solunar", "water",
 ]
 _CMD_RE = re.compile(
     r'(?<![a-z0-9])'
@@ -162,6 +174,9 @@ _CMD_ALIASES: dict[str, str] = {
     "tides": "tide",
     "lb": "leaderboard",
     "adventure": "mud",
+    "aqi": "smoke", "airquality": "smoke",
+    "boating": "marine", "buoy": "marine", "kayak": "marine",
+    "fishing": "fish", "solunar": "fish",
 }
 _ICAO_RE = re.compile(r'\b([A-Z]{4})\b', re.IGNORECASE)
 APRS_FI_URL = "https://api.aprs.fi/api/get"
@@ -443,6 +458,9 @@ class MeshBot:
         self._tle_targets          = [t.upper() for t in cfg.get("tle_targets", ["ISS (ZARYA)", "NOAA 19", "NOAA 18"])]
         self._solar_cache_sec      = int(cfg.get("solar_cache_sec", 900))
         self._tide_station         = str(cfg.get("tide_station", "")).strip()
+        self._ndbc_station         = str(cfg.get("ndbc_station", "")).strip()
+        self._ndbc_lat: float | None = cfg.get("ndbc_lat")
+        self._ndbc_lon: float | None = cfg.get("ndbc_lon")
         self._mention_name         = str(cfg.get("mention_name", "SM")).strip()
 
         # Observer coordinates — priority: mesh_bot.lat/lon → weather_service.nws_lat/lon → state.base_lat/lon
@@ -718,6 +736,14 @@ class MeshBot:
                 reply = await self._cmd_dad()
             elif cmd == "alerts":
                 reply = await self._cmd_alerts()
+            elif cmd == "smoke":
+                reply = await self._cmd_smoke()
+            elif cmd == "marine":
+                reply = await self._cmd_marine(args)
+            elif cmd == "fish":
+                reply = await self._cmd_fish(args)
+            elif cmd == "water":
+                reply = await self._cmd_water_list()
             elif cmd == "metar":
                 reply = await self._cmd_metar(args)
             elif cmd == "sun":
@@ -952,13 +978,15 @@ class MeshBot:
                 - y // 100 + y // 400 - 32045
                 + (dt.hour * 3600 + dt.minute * 60 + dt.second) / 86400.0)
 
-    def _cmd_moon(self) -> str:
-        now = datetime.now(timezone.utc)
+    _SYNODIC_MONTH = 29.53058867
+    _KNOWN_NEW_MOON_JD = 2451550.1   # 2000-01-06 18:14 UTC
+
+    def _moon_state(self, now: "datetime.datetime | None" = None) -> tuple[float, int, str]:
+        """Return (age_days, illum_pct, phase_name) for the given time (default: now)."""
+        now = now or datetime.now(timezone.utc)
         jd  = self._julian_day(now)
-        synodic = 29.53058867
-        known_new_jd = 2451550.1           # 2000-01-06 18:14 UTC
-        age = (jd - known_new_jd) % synodic
-        illum = int((1 - math.cos(2 * math.pi * age / synodic)) / 2 * 100)
+        age = (jd - self._KNOWN_NEW_MOON_JD) % self._SYNODIC_MONTH
+        illum = int((1 - math.cos(2 * math.pi * age / self._SYNODIC_MONTH)) / 2 * 100)
         if   age <  1.85: phase = "New Moon"
         elif age <  7.38: phase = "Waxing Crescent"
         elif age <  9.22: phase = "First Quarter"
@@ -967,7 +995,11 @@ class MeshBot:
         elif age < 22.15: phase = "Waning Gibbous"
         elif age < 23.99: phase = "Last Quarter"
         else:             phase = "Waning Crescent"
-        return f"Moon: {phase} {illum}% (day {age:.1f}/{synodic:.0f})"
+        return age, illum, phase
+
+    def _cmd_moon(self) -> str:
+        age, illum, phase = self._moon_state()
+        return f"Moon: {phase} {illum}% (day {age:.1f}/{self._SYNODIC_MONTH:.0f})"
 
     def _cmd_ping(self, msg: NormalizedMessage) -> str:
         parts = ["pong"]
@@ -1079,13 +1111,16 @@ class MeshBot:
         return f"{cs}: {name} ({pfx}) {continent} CQ{cq} ITU{itu}"
 
     def _cmd_help(self) -> str:
-        # Kept under ~155 chars on purpose: config.yaml's default max_reply_len is
-        # 160, and this used to silently exceed it (228 chars), hard-truncating
-        # mid-word before "skywarn"/"trivia"/"mud" ever appeared. Per-command
-        # usage (e.g. "fcc <callsign>") is shown by that command's own error
-        # reply when called with no args, so it's dropped here to fit everything.
-        return ("Cmds: ping wx overhead satpass solar ships fcc aprs dxcc contest nodes anomalies "
-                "grid moon id path dad alerts metar sun tide skywarn trivia score lb mud help")
+        # Kept under ~160 chars on purpose: config.yaml's default max_reply_len is
+        # 160, and this has previously silently exceeded it, hard-truncating
+        # mid-word. Per-command usage (e.g. "fcc <callsign>") is shown by that
+        # command's own error reply when called with no args, so it's dropped
+        # here to fit everything. Alphabetical so it's easy to scan; the
+        # trivia/mud/dad/score/lb game commands are dropped from this terse
+        # list (not disabled — just not operationally essential enough to
+        # spend budget on here) to leave room for the rest.
+        return ("Cmds: alerts anomalies aprs contest dxcc fcc fish grid help id marine metar moon "
+                "nodes overhead path ping satpass ships skywarn smoke solar sun tide water wx")
 
     def _cmd_unknown(self) -> str:
         return "Unrecognized command. Send 'help' for a list."
@@ -2340,6 +2375,313 @@ class MeshBot:
         except Exception as exc:
             log.warning("MeshBot/alerts error: %s", exc)
             return f"alerts: fetch failed ({type(exc).__name__})"
+
+    # ── Air quality / smoke ─────────────────────────────────────────────────
+
+    async def _cmd_smoke(self) -> str:
+        aq_svc = getattr(getattr(self, "_state", None), "_aq_service", None)
+        if not aq_svc:
+            return "smoke: air quality service not configured"
+        lat, lon = self._resolve_coords()
+        return aq_svc.summary_text(lat, lon)
+
+    # ── Marine / boating (NDBC buoy) ────────────────────────────────────────
+
+    async def _fetch_buoy_reading(self) -> dict | None:
+        """Fetch + parse the latest NDBC realtime2 observation for the
+        configured buoy. Returns None if unconfigured/unreachable; converted
+        fields are in US units (mph/ft/°F), raw hPa kept for pressure."""
+        station = self._ndbc_station
+        if not station:
+            return None
+        client = self._client
+        assert client is not None
+        r = await client.get(f"https://www.ndbc.noaa.gov/data/realtime2/{station}.txt", timeout=10)
+        r.raise_for_status()
+        lines = [l for l in r.text.splitlines() if l.strip() and not l.startswith("#")]
+        if not lines:
+            return None
+        # NDBC realtime2 header (commented, stripped above): YY MM DD hh mm WDIR WSPD GST
+        # WVHT DPD APD MWD PRES ATMP WTMP DEWP VIS PTDY TIDE — most recent obs is first row.
+        fields = lines[0].split()
+        cols = ["YY","MM","DD","hh","mm","WDIR","WSPD","GST","WVHT","DPD","APD",
+                "MWD","PRES","ATMP","WTMP","DEWP","VIS","PTDY","TIDE"]
+        row = dict(zip(cols, fields))
+
+        def _num(key):
+            v = row.get(key, "MM")
+            return None if v in ("MM", "") else float(v)
+
+        wspd, gst, wvht, wtmp, pres, ptdy = (
+            _num("WSPD"), _num("GST"), _num("WVHT"), _num("WTMP"), _num("PRES"), _num("PTDY")
+        )
+        return {
+            "station": station,
+            "wind_mph": wspd * 2.237 if wspd is not None else None,
+            "gust_mph": gst * 2.237 if gst is not None else None,
+            "wave_ft": wvht * 3.281 if wvht is not None else None,
+            "water_f": wtmp * 9 / 5 + 32 if wtmp is not None else None,
+            "pres_hpa": pres,
+            # PTDY = NDBC's own 3-hour pressure tendency (hPa) — a falling
+            # trend (negative) traditionally means fish feed more actively
+            # ahead of a front; rising/steady is less productive.
+            "ptdy_hpa": ptdy,
+        }
+
+    def _boating_rating(self, reading: dict) -> tuple[str, str, str]:
+        """Return (boating_label, kayak_label, color) from NOAA small-craft-
+        style thresholds. Kayak is stricter since a small boat/kayak is far
+        more exposed to wind/chop than a powered vessel."""
+        wind = reading.get("gust_mph") or reading.get("wind_mph") or 0
+        wave = reading.get("wave_ft") or 0
+
+        if wind >= 39 or wave >= 8:
+            boating = "DANGEROUS"
+        elif wind >= 21 or wave >= 4:
+            boating = "CAUTION"
+        elif wind >= 11 or wave >= 2:
+            boating = "FAIR"
+        else:
+            boating = "GOOD"
+
+        if wind >= 25 or wave >= 4:
+            kayak = "DANGEROUS"
+        elif wind >= 15 or wave >= 2:
+            kayak = "CAUTION"
+        elif wind >= 8 or wave >= 1:
+            kayak = "FAIR"
+        else:
+            kayak = "GOOD"
+
+        worst = max(boating, kayak, key=lambda r: ["GOOD","FAIR","CAUTION","DANGEROUS"].index(r))
+        color = {"GOOD": "#00e400", "FAIR": "#ffff00", "CAUTION": "#ff7e00", "DANGEROUS": "#ff0000"}[worst]
+        return boating, kayak, color
+
+    async def _active_marine_advisory(self) -> str:
+        """Small Craft Advisory / Gale Warning text from the weather service's
+        already-fetched active NWS alerts, if any are currently in effect."""
+        wx_svc = getattr(getattr(self, "_state", None), "_wx_service", None)
+        if not wx_svc:
+            return ""
+        for a in getattr(wx_svc, "_active_alerts", []):
+            event = (a.get("event") or "").lower()
+            if "small craft" in event or "gale" in event or "marine" in event:
+                return a.get("event", "")
+        return ""
+
+    async def _resolve_water_body(self, args: str) -> tuple[dict | None, str | None]:
+        """(body, error_message). body is None with no error if the water body
+        service isn't enabled — callers should fall back to the legacy single
+        ndbc_station in that case."""
+        wb_svc = getattr(getattr(self, "_state", None), "_wb_service", None)
+        if not wb_svc or not wb_svc.enabled:
+            return None, None
+        args = args.strip()
+        if args:
+            body = wb_svc.find(args)
+            if not body:
+                names = wb_svc.list_names(5)
+                hint = f" Nearby: {', '.join(names)}" if names else " (no water bodies discovered yet)"
+                return None, f"marine: no water body matching '{args}'.{hint}"
+            return body, None
+        lat, lon = self._resolve_coords()
+        if lat is None:
+            return None, None
+        return wb_svc.nearest(lat, lon), None
+
+    def _format_buoy_reading(self, reading: dict) -> list[str]:
+        parts = []
+        if reading.get("wind_mph") is not None:
+            wtxt = f"Wind {reading['wind_mph']:.0f}mph"
+            if reading.get("gust_mph") is not None:
+                wtxt += f" G{reading['gust_mph']:.0f}"
+            parts.append(wtxt)
+        if reading.get("wave_ft") is not None:
+            parts.append(f"Waves {reading['wave_ft']:.1f}ft")
+        if reading.get("water_f") is not None:
+            parts.append(f"Water {reading['water_f']:.0f}F")
+        if reading.get("pres_hpa") is not None:
+            ptxt = f"Pres {reading['pres_hpa']:.0f}hPa"
+            if reading.get("ptdy_hpa") is not None:
+                trend = "rising" if reading["ptdy_hpa"] > 0.5 else "falling" if reading["ptdy_hpa"] < -0.5 else "steady"
+                ptxt += f" ({trend})"
+            parts.append(ptxt)
+        return parts
+
+    async def _cmd_marine(self, args: str = "") -> str:
+        body, err = await self._resolve_water_body(args)
+        if err:
+            return err
+
+        if body:
+            label = f"{body['name']} ({body['status']})"
+            reading = body.get("buoy")
+            if not reading:
+                return (f"{label}: no live buoy nearby (typical for lakes/rivers — "
+                        f"water quality from EPA ATTAINS, no wind/wave data available)")[:200]
+            parts = self._format_buoy_reading(reading)
+            if not parts:
+                return f"{label}: buoy {reading.get('station','?')} reporting but no usable readings"
+            boating, kayak, _color = self._boating_rating(reading)
+            advisory = await self._active_marine_advisory()
+            rating_txt = f"Boating {boating} / Kayak {kayak}"
+            if advisory:
+                rating_txt += f" — {advisory.upper()}"
+            buoy_note = f" (buoy {reading['station']}, {reading['distance_mi']:.0f}mi away)" if reading.get("distance_mi") is not None else ""
+            return (f"{label}{buoy_note}: " + ", ".join(parts) + f" | {rating_txt}")[:200]
+
+        # Legacy fallback: single manually-configured buoy, water body service
+        # not enabled/configured.
+        if not self._ndbc_station:
+            return ("marine: no water bodies configured — enable water_body_service in config, "
+                    "or set mesh_bot.ndbc_station for a single buoy")
+        try:
+            reading = await self._fetch_buoy_reading()
+        except Exception as exc:
+            return f"marine: fetch failed ({type(exc).__name__})"
+        if not reading:
+            return f"marine: no data for buoy {self._ndbc_station}"
+        parts = self._format_buoy_reading(reading)
+        if not parts:
+            return f"marine: buoy {self._ndbc_station} reporting but no usable readings"
+        boating, kayak, _color = self._boating_rating(reading)
+        advisory = await self._active_marine_advisory()
+        rating_txt = f"Boating {boating} / Kayak {kayak}"
+        if advisory:
+            rating_txt += f" — {advisory.upper()}"
+        return (f"BUOY {self._ndbc_station}: " + ", ".join(parts) + f" | {rating_txt}")[:200]
+
+    # ── Fishing / solunar ────────────────────────────────────────────────────
+
+    async def _cmd_fish(self, args: str = "") -> str:
+        """Simplified fishing score combining several classic angling factors
+        into one weighted estimate — not a certified solunar table (those need
+        actual moon rise/transit/set times), just the heuristics anglers
+        already use: moon phase proximity to new/full is the traditional
+        solunar factor; a falling barometric trend and light wind are widely
+        cited as improving feeding activity; a tide change adds a coastal
+        bonus. Each factor is only included if data for it is available, and
+        the weights are renormalized across whatever's present so a lake with
+        no tide station and no buoy still gets a sensible score from moon
+        phase alone. Buoy/pressure/wind data comes from whichever named water
+        body matched (or is nearest), not a single hardcoded anchor point."""
+        body, err = await self._resolve_water_body(args)
+        if err:
+            return err
+
+        reading = None
+        label = ""
+        if body:
+            label = f"{body['name']} ({body['status']})"
+            reading = body.get("buoy")
+        elif self._ndbc_station:
+            try:
+                reading = await self._fetch_buoy_reading()
+            except Exception:
+                reading = None
+            label = f"buoy {self._ndbc_station}"
+
+        factors, phase_label = self._fish_base_factors(reading)
+
+        # Tide needs a live per-station fetch — cheap enough for a single bot
+        # lookup, too expensive to run for every water body in a batch listing
+        # (see _fish_base_factors, used directly by the map/API for that case).
+        if self._tide_station:
+            try:
+                mins_to_change = await self._minutes_to_next_tide_change()
+                if mins_to_change is not None:
+                    tide_score = max(0.0, 1 - abs(mins_to_change) / 90.0)
+                    factors.append((tide_score, 0.25, f"tide change in {mins_to_change:.0f}min"))
+            except Exception:
+                pass
+
+        buoy_note = f", {label}" if reading else (f", {label} (no live buoy nearby)" if label else "")
+        rating, detail_notes = self._finalize_fish_score(factors)
+        detail = f", {detail_notes}" if detail_notes else ""
+        source = "lake/freshwater — moon phase only" if len(factors) == 1 else "combined factors"
+        advisory = ""
+        if body and body.get("fish_advisory") == "Not Supporting":
+            advisory = " ⚠ FISH CONSUMPTION ADVISORY IN EFFECT"
+
+        return (f"FISHING est.: {rating} — {phase_label}{detail}{buoy_note} "
+                f"[{source}].{advisory} Heuristic only, not a certified solunar table.")[:200]
+
+    def _fish_base_factors(self, reading: dict | None) -> tuple[list[tuple[float, float, str]], str]:
+        """(factors, moon-phase label) from moon phase + buoy pressure/wind —
+        the parts that don't need a live per-station tide fetch, so they're
+        cheap enough to compute for every water body in a batch listing."""
+        age, illum, phase = self._moon_state()
+        half = self._SYNODIC_MONTH / 2
+        dist_to_major = min(age, abs(age - half), self._SYNODIC_MONTH - age)
+        moon_score = max(0.0, min(1.0, 1 - (dist_to_major / (half / 2))))
+        factors: list[tuple[float, float, str]] = [(moon_score, 0.4, "")]
+        if reading:
+            if reading.get("ptdy_hpa") is not None:
+                ptdy = reading["ptdy_hpa"]
+                # Falling pressure ahead of a front = classic "bite is on" signal.
+                pres_score = 0.9 if ptdy < -1.0 else 0.7 if ptdy < -0.3 else 0.5 if ptdy < 0.3 else 0.3
+                trend = "falling" if ptdy < -0.3 else "rising" if ptdy > 0.3 else "steady"
+                factors.append((pres_score, 0.2, f"pressure {trend}"))
+            if reading.get("wind_mph") is not None:
+                wind = reading["wind_mph"]
+                # Light-to-moderate wind ripples the surface (good); dead
+                # calm or heavy chop both reduce bite activity.
+                wind_score = 0.4 if wind < 2 else 1.0 if wind <= 12 else 0.5 if wind <= 20 else 0.2
+                factors.append((wind_score, 0.15, f"wind {wind:.0f}mph"))
+        return factors, f"{phase} ({illum}% illum)"
+
+    @staticmethod
+    def _finalize_fish_score(factors: list[tuple[float, float, str]]) -> tuple[str, str]:
+        total_weight = sum(w for _, w, _ in factors)
+        score = sum(s * w for s, w, _ in factors) / total_weight
+        if score >= 0.66:
+            rating = "GOOD"
+        elif score >= 0.4:
+            rating = "FAIR"
+        else:
+            rating = "POOR"
+        notes = [n for _, _, n in factors if n]
+        return rating, ", ".join(notes)
+
+    # ── Water body list ────────────────────────────────────────────────────
+
+    async def _cmd_water_list(self) -> str:
+        wb_svc = getattr(getattr(self, "_state", None), "_wb_service", None)
+        if not wb_svc or not wb_svc.enabled:
+            return "water: water body service not enabled (set water_body_service.enabled in config)"
+        bodies = wb_svc.water_bodies()
+        if not bodies:
+            return "water: no water bodies discovered yet (waiting on first poll, or none in range)"
+        lat, lon = self._resolve_coords()
+        if lat is not None:
+            bodies = sorted(bodies, key=lambda b: _haversine_nm(lat, lon, b["lat"], b["lon"]))
+        parts = [f"{b['name']} ({b['status'][:12]})" for b in bodies[:6]]
+        return ("WATER BODIES: " + " | ".join(parts) + " — use 'marine <name>' or 'fish <name>'")[:200]
+
+    async def _minutes_to_next_tide_change(self) -> float | None:
+        """Minutes until the next high/low tide at the configured station (negative if just passed)."""
+        client = self._client
+        assert client is not None
+        import datetime as _dt
+        now = _dt.datetime.now()
+        begin = now.strftime("%Y%m%d")
+        url = (
+            f"https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
+            f"?product=predictions&application=ECH&begin_date={begin}&range=24"
+            f"&station={self._tide_station}&time_zone=lst_ldt&interval=hilo"
+            f"&units=english&datum=MLLW&format=json"
+        )
+        r = await client.get(url, timeout=10)
+        data = r.json()
+        preds = data.get("predictions", [])
+        if not preds:
+            return None
+        for p in preds:
+            t = _dt.datetime.strptime(p["t"], "%Y-%m-%d %H:%M")
+            delta_min = (t - now).total_seconds() / 60.0
+            if delta_min >= -15:   # first upcoming (or just-passed) change
+                return delta_min
+        return None
 
     # ── Tides ────────────────────────────────────────────────────────────────
 

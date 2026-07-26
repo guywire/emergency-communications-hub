@@ -65,9 +65,14 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn" id="follow-btn" onclick="toggleFollow()">📍 Follow</button>
     <button class="ctrl-btn on" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADSB</button>
     <button class="ctrl-btn on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS</button>
+    <button class="ctrl-btn on" id="bucket-repeater-btn"  onclick="toggleNodeBucket('repeater')"  title="Toggle repeater/infrastructure nodes (routers, digipeaters, IGates)">🔁 RPT</button>
+    <button class="ctrl-btn on" id="bucket-companion-btn" onclick="toggleNodeBucket('companion')" title="Toggle companion/operator nodes (messageable devices, mobile/fixed stations)">👤 CMPN</button>
+    <button class="ctrl-btn on" id="bucket-other-btn"     onclick="toggleNodeBucket('other')"     title="Toggle other node types (sensors, weather stations, unknown, AIS/ADS-B, etc.)">❓ OTHR</button>
     <button class="ctrl-btn on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Traffic</button>
     <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show PSKReporter callsign spots">PSK</button>
     <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">GRID</button>
+    <button class="ctrl-btn" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI</button>
+    <button class="ctrl-btn" id="water-btn" onclick="toggleWaterBodies()" title="Water body quality + boating/kayak conditions (EPA ATTAINS + NDBC buoys)">🌊 WATER</button>
     <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">HAM LOG</button>
     <button class="ctrl-btn" id="draw-btn" onclick="toggleDrawMode()" title="Draw a repeater path: click each repeater in order, then Send Trace">✏ Draw Path</button>
   </div>
@@ -87,7 +92,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
   <div style="font-weight:500;margin-bottom:6px;font-size:11px">Node Types</div>
   <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>Meshtastic</div>
   <div class="legend-item"><div class="legend-dot" style="background:#f78c6c"></div>MeshCore</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#79c0ff"></div>APRS</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div>APRS</div>
   <div class="legend-item"><div class="legend-dot" style="background:#c792ea"></div>Reticulum</div>
   <div class="legend-item"><div class="legend-dot" style="background:#e2a44f"></div>MQTT</div>
   <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Alert / WL</div>
@@ -126,11 +131,30 @@ let followMode = false;
 let _showAircraft = true;
 let _showVessels  = true;
 
+// Node-type filter buckets — repeater/infrastructure, companion/operator, other (default catch-all)
+const _REPEATER_TYPES  = new Set(['REP', 'REPEATER', 'ROUTER', 'DIGI', 'RPTR', 'IGATE']);
+const _COMPANION_TYPES = new Set(['CLI', 'ROOM', 'MOBILE', 'FIXED']);
+let _showBuckets = new Set(['repeater', 'companion', 'other']);
+
+function nodeBucket(node) {
+  const t = node.node_type || '';
+  if (_REPEATER_TYPES.has(t))  return 'repeater';
+  if (_COMPANION_TYPES.has(t)) return 'companion';
+  return 'other';
+}
+
+function toggleNodeBucket(bucket) {
+  if (_showBuckets.has(bucket)) _showBuckets.delete(bucket);
+  else _showBuckets.add(bucket);
+  document.getElementById(`bucket-${bucket}-btn`).classList.toggle('on', _showBuckets.has(bucket));
+  loadNodes();
+}
+
 function adapterColor(adapter) {
   const a = adapter.toLowerCase();
   if (a.includes('meshtastic')) return '#3fb950';
   if (a.includes('meshcore'))   return '#f78c6c';
-  if (a.includes('aprs'))       return '#79c0ff';
+  if (a.includes('aprs'))       return '#7c3aed';
   if (a.includes('reticulum') || a.includes('rns')) return '#c792ea';
   if (a.includes('mqtt'))       return '#e2a44f';
   if (a.includes('winlink') || a.includes('pat'))   return '#f85149';
@@ -469,6 +493,7 @@ async function loadNodes() {
       const isVessel   = nodeIsVessel(node);
       if (!_showAircraft && isAircraft) return;
       if (!_showVessels  && isVessel)   return;
+      if (!_showBuckets.has(nodeBucket(node))) return;
       const id = node.node_id;
       seen.add(id);
       const isAlert  = alertNodes.has(id);
@@ -809,6 +834,217 @@ function drawGridSquares() {
   }
 }
 
+// ── Air quality choropleth + fire hotspots ─────────────────────────────────
+let _aqiEnabled = false;
+let _aqiLayers = [];
+let _aqiTimer = null;
+
+function toggleAirQuality() {
+  _aqiEnabled = !_aqiEnabled;
+  const btn = document.getElementById('aqi-btn');
+  btn.classList.toggle('on', _aqiEnabled);
+  if (_aqiEnabled) {
+    loadAirQuality();
+    toast('AQI: fetching conditions…');
+  } else {
+    _aqiLayers.forEach(l => map.removeLayer(l));
+    _aqiLayers = [];
+    if (_aqiTimer) { clearTimeout(_aqiTimer); _aqiTimer = null; }
+    toast('AQI overlay off');
+  }
+}
+
+const _SMOKE_STYLE = {
+  Light:   {color: '#999999', opacity: 0.15},
+  Medium:  {color: '#666666', opacity: 0.28},
+  Heavy:   {color: '#333333', opacity: 0.42},
+  Unknown: {color: '#888888', opacity: 0.20},
+};
+
+async function loadAirQuality() {
+  if (!_aqiEnabled) return;
+  try {
+    const [stResp, paResp, hsResp, smResp] = await Promise.all([
+      fetch('/api/airquality/stations').catch(() => null),
+      fetch('/api/airquality/purpleair').catch(() => null),
+      fetch('/api/airquality/hotspots').catch(() => null),
+      fetch('/api/airquality/smoke').catch(() => null),
+    ]);
+
+    _aqiLayers.forEach(l => map.removeLayer(l));
+    _aqiLayers = [];
+
+    // Smoke plume polygons first (bottom layer) — real HMS satellite-derived
+    // smoke coverage, so smoke drifting in from a fire hundreds of miles away
+    // (e.g. Canada) shows up even with no local fire hotspot.
+    if (smResp && smResp.ok) {
+      const sm = await smResp.json();
+      (sm.polygons || []).forEach(p => {
+        const style = _SMOKE_STYLE[p.density] || _SMOKE_STYLE.Unknown;
+        const latlngs = p.coordinates.map(c => [c[1], c[0]]);   // [lon,lat] -> [lat,lon]
+        const poly = L.polygon(latlngs, {
+          color: style.color, weight: 0, fillColor: style.color, fillOpacity: style.opacity,
+        }).bindPopup(`<div class="node-popup"><div class="node-name">Smoke plume</div><div class="node-stat">Density: ${p.density}</div><div class="node-stat">Source: NOAA HMS</div></div>`)
+          .addTo(map);
+        _aqiLayers.push(poly);
+      });
+    }
+
+    // Real AirNow monitor stations — every station actually present in the
+    // search box, not a probed grid, so coverage has no artificial holes.
+    if (stResp && stResp.ok) {
+      const data = await stResp.json();
+      (data.stations || []).forEach(st => {
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="width:14px;height:14px;border-radius:50%;background:${st.color};border:1px solid #000;box-shadow:0 0 3px #000"></div>`,
+          iconSize: [14, 14], iconAnchor: [7, 7],
+        });
+        const m = L.marker([st.lat, st.lon], {icon})
+          .bindPopup(`<div class="node-popup"><div class="node-name">${st.site_name || 'AirNow station'}</div><div class="node-stat">AQI ${st.aqi} (${st.category})</div><div class="node-stat">${st.parameter || ''}</div></div>`)
+          .addTo(map);
+        _aqiLayers.push(m);
+      });
+      if (!data.stations || !data.stations.length) {
+        toast('AQI: no station data yet (service disabled, no API key, or waiting on first poll)');
+      }
+    }
+
+    // PurpleAir — denser crowd-sourced network, drawn smaller with a purple
+    // outline so they read as distinct from official AirNow stations (which
+    // have a black outline). Uncorrected PM2.5, converted to AQI here.
+    if (paResp && paResp.ok) {
+      const pa = await paResp.json();
+      (pa.sensors || []).forEach(s => {
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="width:10px;height:10px;border-radius:50%;background:${s.color};border:2px solid #a855f7;box-shadow:0 0 3px #000"></div>`,
+          iconSize: [10, 10], iconAnchor: [5, 5],
+        });
+        const m = L.marker([s.lat, s.lon], {icon})
+          .bindPopup(`<div class="node-popup"><div class="node-name">${s.name || 'PurpleAir sensor'}</div><div class="node-stat">AQI ${s.aqi} (${s.category}, est.)</div><div class="node-stat">PM2.5 ${s.pm25} µg/m³ (uncorrected)</div></div>`)
+          .addTo(map);
+        _aqiLayers.push(m);
+      });
+    }
+
+    if (hsResp && hsResp.ok) {
+      const hs = await hsResp.json();
+      (hs.hotspots || []).forEach(h => {
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="font-size:14px;text-shadow:0 0 3px #000">🔥</div>`,
+          iconSize: [18, 18], iconAnchor: [9, 9],
+        });
+        const distLine = h.distance_mi != null
+          ? `<div class="node-stat"><b>${h.distance_mi.toFixed(0)}mi ${h.bearing || ''}</b> from base</div>` : '';
+        const m = L.marker([h.lat, h.lon], {icon})
+          .bindPopup(`<div class="node-popup"><div class="node-name">Fire hotspot</div>${distLine}<div class="node-stat">Confidence: ${h.confidence}</div><div class="node-stat">Detected: ${h.acq_date} ${h.acq_time}Z</div></div>`)
+          .addTo(map);
+        _aqiLayers.push(m);
+      });
+      if (hs.hotspots && hs.hotspots.length) {
+        toast(`AQI: ${hs.hotspots.length} fire hotspot(s), nearest ${hs.hotspots[0].distance_mi?.toFixed(0) ?? '?'}mi ${hs.hotspots[0].bearing || ''}`);
+      }
+    }
+  } catch(e) {
+    toast('AQI fetch failed: ' + e.message);
+  }
+  if (_aqiEnabled) _aqiTimer = setTimeout(loadAirQuality, 300000);
+}
+
+// ── Named water bodies (toggleable) ────────────────────────────────────────
+// One marker per EPA-assessed lake/bay/river discovered near the hub — not a
+// single anchor point. Marker color reflects live boating conditions where a
+// buoy was matched, otherwise the EPA water-quality status color.
+let _waterEnabled = false;
+let _waterLayers = [];
+
+function toggleWaterBodies() {
+  _waterEnabled = !_waterEnabled;
+  const btn = document.getElementById('water-btn');
+  btn.classList.toggle('on', _waterEnabled);
+  if (_waterEnabled) {
+    loadWaterBodies();
+    toast('Water quality icons on');
+  } else {
+    _waterLayers.forEach(l => map.removeLayer(l));
+    _waterLayers = [];
+    toast('Water quality icons off');
+  }
+}
+
+async function loadWaterBodies() {
+  if (!_waterEnabled) return;
+  _waterLayers.forEach(l => map.removeLayer(l));
+  _waterLayers = [];
+  try {
+    const r = await fetch('/api/waterbodies').catch(() => null);
+    if (r && r.ok) {
+      const data = await r.json();
+      if (data.enabled && data.bodies && data.bodies.length) {
+        data.bodies.forEach(b => {
+          const color = b.condition_color || b.color || '#888888';
+          const icon = L.divIcon({
+            className: '',
+            html: `<div style="font-size:15px;text-shadow:0 0 3px #000;filter:drop-shadow(0 0 3px ${color})">🌊</div>`,
+            iconSize: [18, 18], iconAnchor: [9, 9],
+          });
+          const qualityLine = `<div class="node-stat">EPA status: <b style="color:${b.color}">${b.status}</b></div>`;
+          const ratingLine = b.boating_rating
+            ? `<div class="node-stat">Boating: <b>${b.boating_rating}</b> / Kayak: <b>${b.kayak_rating}</b></div>`
+            : '<div class="node-stat">No live buoy nearby</div>';
+          const buoyLine = b.buoy
+            ? `<div class="node-stat">${[
+                b.buoy.wind_mph != null ? `Wind ${b.buoy.wind_mph.toFixed(0)}mph` : '',
+                b.buoy.wave_ft != null ? `Waves ${b.buoy.wave_ft.toFixed(1)}ft` : '',
+                b.buoy.water_f != null ? `Water ${b.buoy.water_f.toFixed(0)}F` : '',
+              ].filter(Boolean).join(', ')} (buoy ${b.buoy.station}, ${b.buoy.distance_mi.toFixed(0)}mi)</div>`
+            : '';
+          const fishLine = b.fishing_rating
+            ? `<div class="node-stat" style="margin-top:4px;padding-top:4px;border-top:1px solid var(--border)">Fishing: <b>${b.fishing_rating}</b> — ${b.fishing_detail || ''}</div>`
+            : '';
+          const advisoryLine = b.fish_advisory === 'Not Supporting'
+            ? `<div class="node-stat" style="color:#f85149">&#9888; Fish consumption advisory in effect</div>`
+            : '';
+          const linkLine = b.report_link
+            ? `<div class="node-stat" style="margin-top:4px"><a href="${b.report_link}" target="_blank" style="color:var(--blue)">EPA report ↗</a></div>`
+            : '';
+          const m = L.marker([b.lat, b.lon], {icon})
+            .bindPopup(`<div class="node-popup"><div class="node-name">${b.name}</div>${qualityLine}${advisoryLine}${ratingLine}${buoyLine}${fishLine}${linkLine}</div>`)
+            .addTo(map);
+          _waterLayers.push(m);
+        });
+        return;   // water_body_service active — skip the legacy single-buoy marker
+      }
+    }
+  } catch(e) { /* fall through to legacy marker */ }
+
+  // Legacy fallback: single manually-configured buoy, water_body_service not enabled.
+  try {
+    const r = await fetch('/api/marine').catch(() => null);
+    if (!r || !r.ok) return;
+    const data = await r.json();
+    if (!data.configured || data.lat == null || data.lon == null) return;
+    const color = data.color || '#79c0ff';
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="font-size:16px;text-shadow:0 0 3px #000;filter:drop-shadow(0 0 3px ${color})">⚓</div>`,
+      iconSize: [20, 20], iconAnchor: [10, 10],
+    });
+    const ratingLine = data.boating_rating
+      ? `<div class="node-stat">Boating: <b style="color:${color}">${data.boating_rating}</b> / Kayak: <b>${data.kayak_rating}</b></div>`
+      : '';
+    const fishLine = data.fishing_summary
+      ? `<div class="node-stat" style="margin-top:4px;padding-top:4px;border-top:1px solid var(--border)">${data.fishing_summary}</div>`
+      : '';
+    const m = L.marker([data.lat, data.lon], {icon})
+      .bindPopup(`<div class="node-popup"><div class="node-name">Buoy ${data.station}</div>${ratingLine}<div class="node-stat">${data.summary}</div>${fishLine}</div>`)
+      .addTo(map);
+    _waterLayers.push(m);
+  } catch(e) { /* silent — optional layer */ }
+}
+
 function lonLatToMaidenhead(lon, lat) {
   lon += 180; lat += 90;
   const field = String.fromCharCode(65 + Math.floor(lon/20)) +
@@ -1053,6 +1289,7 @@ function toast(msg) {
 
 loadNodes();
 setInterval(loadNodes, 30000);
+loadWaterBodies();
 connectWS();
 // Base position for the rx end of stored-route lines
 fetch('/api/state').then(r => r.json()).then(st => {

@@ -253,6 +253,8 @@ class AsteriskAdapter(Adapter):
             },
         )
         await self._enqueue(msg)
+        if self._router_notify:
+            await self._router_notify(self.name, msg.id, "direct" if answered else "failed", status)
         self._call_log.insert(0, msg.raw | {"body": body, "timestamp": msg.timestamp.isoformat()})
         if len(self._call_log) > 50:
             self._call_log = self._call_log[:50]

@@ -115,6 +115,7 @@ def build_adapter(cfg: dict):
         "meshtastic":  ("ech.adapters.meshtastic_adapter","MeshtasticAdapter", "meshtastic"),
         "aprs_is":     ("ech.adapters.aprs_is",          "APRSISAdapter",      "aprslib"),
         "adsb":        ("ech.adapters.adsb_adapter",       "ADSBAdapter",        "aiohttp"),
+        "opensky":     ("ech.adapters.opensky_adapter",    "OpenSkyAdapter",     "aiohttp"),
         "ais_catcher": ("ech.adapters.ais_catcher_adapter", "AISCatcherAdapter", "aiohttp"),
         "aisstream":   ("ech.adapters.aisstream_adapter",   "AISStreamAdapter",  "aiohttp"),
         "aishub":      ("ech.adapters.aishub_adapter",      "AISHubAdapter",     "aiohttp"),
@@ -130,6 +131,7 @@ def build_adapter(cfg: dict):
         "mqtt":        ("ech.adapters.mqtt_adapter",     "MQTTAdapter",        "aiomqtt"),
         "aredn_ami":   ("ech.adapters.aredn_ami",        "AREDNAMIAdapter",    None),
         "asterisk":    ("ech.adapters.asterisk_adapter", "AsteriskAdapter",    None),
+        "ax25_bbs":    ("ech.adapters.ax25_bbs_adapter",  "AX25BBSAdapter",    None),
     }
 
     entry = _mocks.get(adapter_type) or _real.get(adapter_type)
@@ -231,9 +233,17 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     from ech.core.weather import WeatherService
     wx_service = WeatherService(config, router=router)
 
+    # Air quality / wildfire smoke service (AirNow AQI + NASA FIRMS hotspots)
+    from ech.core.air_quality import AirQualityService
+    aq_service = AirQualityService(config, router=router)
+
+    # Named water bodies (EPA ATTAINS water quality + nearest NDBC buoy per body)
+    from ech.core.water_bodies import WaterBodyService
+    wb_service = WaterBodyService(config, router=router)
+
     # ECH state — init BEFORE router.start() so adapters are paused before connecting
     from ech.core.state import ECHState
-    state = ECHState(db, router=router, wx_service=wx_service)
+    state = ECHState(db, router=router, wx_service=wx_service, aq_service=aq_service, wb_service=wb_service)
     await state.init()
 
     # Load bridge rules from config before starting
@@ -266,6 +276,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
 
     # Start weather service after router is live
     await wx_service.start()
+    await aq_service.start()
+    await wb_service.start()
 
     # CAT radio control via rigctld (Hamlib)
     from ech.core.cat_rigctld import CATController
@@ -314,6 +326,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
 
     app = create_app(router, db, anomaly_engine=anomaly_engine,
                      wx_service=wx_service if 'wx_service' in dir() else None,
+                     aq_service=aq_service if 'aq_service' in dir() else None,
+                     wb_service=wb_service if 'wb_service' in dir() else None,
                      auth=auth, ech_state=state, mc_bridge=mc_bridge,
                      gps_reader=gps_reader, secure_cookies=secure_cookies,
                      cat_ctrl=cat_ctrl if 'cat_ctrl' in dir() else None,
@@ -363,6 +377,10 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
             await gps_reader.stop()
         if 'wx_service' in dir():
             await wx_service.stop()
+        if 'aq_service' in dir():
+            await aq_service.stop()
+        if 'wb_service' in dir():
+            await wb_service.stop()
         if 'wx_bot' in dir():
             await wx_bot.stop()
         if 'cat_ctrl' in dir():
