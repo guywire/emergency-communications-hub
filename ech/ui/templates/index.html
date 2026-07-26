@@ -1436,7 +1436,7 @@ function buildMsgEl(msg) {
     <div class="msg-ts">${timeStr}</div>
     <div>
       <div class="msg-header">
-        <span class="msg-from" onclick="fillTo('${escHtml(msg.from_id)}')">${escHtml(msg.from_display||msg.from_id)}</span>
+        <span class="msg-from" onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Click to reply — fills the To: field and selects the right adapter">${escHtml(msg.from_display||msg.from_id)}</span>
         ${adapterTag}
         ${channelTag}
         ${priorityFlag}
@@ -1444,7 +1444,7 @@ function buildMsgEl(msg) {
         ${sigBadge}
         ${decryptBadge}
         ${deliveryHTML}
-        ${(msg.source_channel === 'DM' && msg.from_id !== 'local') ? `<span onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Reply to this DM" style="font-family:var(--mono);font-size:10px;color:var(--blue);cursor:pointer;padding:1px 5px;border:1px solid var(--border);border-radius:3px;white-space:nowrap">↩ Reply</span>` : ''}
+        ${(msg.from_id !== 'local' && msg.source_channel !== 'outbound') ? `<span onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Reply — fills the To: field and selects the right adapter" style="font-family:var(--mono);font-size:10px;color:var(--blue);cursor:pointer;padding:1px 5px;border:1px solid var(--border);border-radius:3px;white-space:nowrap">↩ Reply</span>` : ''}
         <span class="msg-detail-btn" onclick="openMsgDetail('${escHtml(msg.id)}')" title="Message detail">⋯</span>
       </div>
       <div class="${bodyClass}">${isEncrypted ? '🔒 ' : ''}${escHtml(msg.body)}</div>
