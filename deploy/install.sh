@@ -195,10 +195,17 @@ else
   echo "sounddevice package OK"
 fi
 
-# Text-to-speech (Asterisk adapter's speak() — offline, no API key needed)
+# Text-to-speech (Asterisk adapter's speak() — offline, no API key needed).
+# sox resamples espeak-ng's native output to the 8kHz/16-bit/mono Asterisk's
+# WAV player requires — without it, Playback() silently can't recognize the
+# file and the caller hears dead air/dialtone.
 if ! command -v espeak-ng >/dev/null 2>&1; then
   echo "Installing espeak-ng (PBX text-to-speech support) ..."
   sudo apt-get install -y -q espeak-ng || echo "  WARNING: espeak-ng install failed — PBX speak() will not work"
+fi
+if ! command -v sox >/dev/null 2>&1; then
+  echo "Installing sox (PBX text-to-speech audio resampling) ..."
+  sudo apt-get install -y -q sox || echo "  WARNING: sox install failed — PBX speak() will not work"
 fi
 
 echo "Restarting $SERVICE ..."
