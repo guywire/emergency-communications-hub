@@ -29,17 +29,17 @@ SignalMatrix is a Python/FastAPI application that bridges multiple emergency-com
 | **GPS time sync** | Optional NMEA receiver auto-sets system clock and base position |
 | **Storage guard** | Warns when disk free falls below 1 GB or 5%; automatic message retention purge (configurable per adapter family) |
 
-<img width="1885" height="916" alt="image" src="https://github.com/user-attachments/assets/bc31414c-9c4c-44c4-9f79-711742a525e2" />
 Map
+<img width="1885" height="916" alt="image" src="https://github.com/user-attachments/assets/bc31414c-9c4c-44c4-9f79-711742a525e2" />
 
-<img width="1873" height="928" alt="image" src="https://github.com/user-attachments/assets/0c2145e1-cb23-44fc-bfbc-29d0b29c642a" />
 Message window
+<img width="1873" height="928" alt="image" src="https://github.com/user-attachments/assets/0c2145e1-cb23-44fc-bfbc-29d0b29c642a" />
 
-<img width="1877" height="908" alt="image" src="https://github.com/user-attachments/assets/03ef1ed9-7e22-4266-acc9-f755e4fa8d3b" />
 Analytics
+<img width="1877" height="908" alt="image" src="https://github.com/user-attachments/assets/03ef1ed9-7e22-4266-acc9-f755e4fa8d3b" />
 
-<img width="1882" height="917" alt="image" src="https://github.com/user-attachments/assets/12625145-10d2-4970-832c-959afa743bcb" />
 Anomaly Detection
+<img width="1882" height="917" alt="image" src="https://github.com/user-attachments/assets/12625145-10d2-4970-832c-959afa743bcb" />
 
 ---
 
