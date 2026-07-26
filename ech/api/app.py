@@ -1853,6 +1853,26 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return {"error": "Bot HTTP client not started — is bot enabled?"}
         # Parse command + args the same way the bot does
         import re as _re
+        from ech.core.models import NormalizedMessage
+        fake = NormalizedMessage(source_adapter="test", source_channel="DM", from_id="test-console", body=command)
+
+        # An active guided session (strip/skywarn/mud) claims the next input as
+        # a session reply, same priority order mesh_bot.handle() uses for real
+        # traffic — otherwise a session's next prompt gets typed back in here
+        # as if it were a brand-new, unrecognized command. These dispatchers
+        # reply via _send(), which safely no-ops the actual radio send (no
+        # adapter is named "test") but still updates _last_reply, so read the
+        # response back from there instead of a return value.
+        if fake.from_id in wx_bot._strip_sessions:
+            await wx_bot._dispatch_strip(fake)
+            return {"command": command, "response": wx_bot._last_reply.get(fake.from_id, "")}
+        if fake.from_id in wx_bot._skywarn_sessions:
+            await wx_bot._dispatch_skywarn(fake)
+            return {"command": command, "response": wx_bot._last_reply.get(fake.from_id, "")}
+        if fake.from_id in wx_bot._mud_sessions:
+            await wx_bot._dispatch_mud(fake)
+            return {"command": command, "response": wx_bot._last_reply.get(fake.from_id, "")}
+
         m = _re.match(r'^(\S+)\s*(.*)', command, _re.IGNORECASE)
         if not m:
             return {"error": "Could not parse command"}
@@ -1861,8 +1881,6 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         try:
             # Dispatch directly without cooldown / routing
             if cmd == "ping":
-                from ech.core.models import NormalizedMessage
-                fake = NormalizedMessage(source_adapter="test", source_channel="test", body=command)
                 result = wx_bot._cmd_ping(fake)
             elif cmd in ("weather", "wx"):   result = await wx_bot._cmd_weather(args)
             elif cmd == "overhead":          result = await wx_bot._cmd_overhead()
@@ -1870,10 +1888,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             elif cmd in ("solar", "space"):  result = await wx_bot._cmd_solar()
             elif cmd == "ships":             result = await wx_bot._cmd_ships()
             elif cmd == "fcc":               result = await wx_bot._cmd_fcc(args)
-            elif cmd == "trivia":
-                from ech.core.models import NormalizedMessage
-                fake = NormalizedMessage(source_adapter="test", source_channel="DM", from_id="test-console", body=command)
-                result = await wx_bot._cmd_trivia(fake)
+            elif cmd == "trivia":            result = await wx_bot._cmd_trivia(fake)
+            elif cmd == "skywarn":           result = await wx_bot._cmd_skywarn(fake)
+            elif cmd == "strip":             result = await wx_bot._cmd_strip(fake)
+            elif cmd in ("repeat", "again"):
+                last = wx_bot._last_reply.get(fake.from_id, "")
+                result = last if last else "Nothing to repeat yet."
             elif cmd == "dad":               result = await wx_bot._cmd_dad()
             elif cmd == "alerts":            result = await wx_bot._cmd_alerts()
             elif cmd == "metar":             result = await wx_bot._cmd_metar(args)
