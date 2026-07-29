@@ -1132,7 +1132,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
       <div class="panel-tab active" onclick="switchTab('nodes', this)">Nodes</div>
       <div class="panel-tab" onclick="switchTab('health', this)">Adapters</div>
       <div class="panel-tab" onclick="switchTab('calls', this)">Calls</div>
-      <div class="panel-tab" onclick="switchTab('services', this)">Services</div>
+      <div class="panel-tab" onclick="switchTab('winlink', this)">Winlink <span class="ch-badge" id="winlink-badge" style="margin-left:2px"></span></div>
     </div>
     <div style="padding:6px 8px 0;display:flex;gap:6px;align-items:center">
       <input id="node-search" type="search" placeholder="Filter nodes…" oninput="filterNodes(this.value)"
@@ -1142,7 +1142,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
     <div class="panel-content" id="panel-nodes"></div>
     <div class="panel-content" id="panel-health" style="display:none"></div>
     <div class="panel-content" id="panel-calls" style="display:none"></div>
-    <div class="panel-content" id="panel-services" style="display:none"></div>
+    <div class="panel-content" id="panel-winlink" style="display:none"></div>
   </aside>
 </div>
 
@@ -2089,9 +2089,9 @@ function switchTab(tab, el) {
   document.getElementById('panel-nodes').style.display    = tab === 'nodes'    ? '' : 'none';
   document.getElementById('panel-health').style.display   = tab === 'health'   ? '' : 'none';
   document.getElementById('panel-calls').style.display    = tab === 'calls'    ? '' : 'none';
-  document.getElementById('panel-services').style.display = tab === 'services' ? '' : 'none';
+  document.getElementById('panel-winlink').style.display  = tab === 'winlink'  ? '' : 'none';
   if (tab === 'calls') loadCallLog();
-  if (tab === 'services') loadServicesPanel();
+  if (tab === 'winlink') loadWinlinkPanel();
 }
 
 function showNodes() {
@@ -3034,47 +3034,74 @@ async function loadVoicemailSection(el) {
   } catch(e) {}
 }
 
-async function loadServicesPanel() {
-  const el = document.getElementById('panel-services');
+// ── Winlink mail panel ──────────────────────────────────────────────────
+let _winlinkLastUnread = 0;
+
+async function loadWinlinkPanel() {
+  const el = document.getElementById('panel-winlink');
   el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--muted)">Loading…</div>';
   try {
-    const d = await fetch('/api/system/services').then(r => r.json());
-    const svcs = d.services || [];
-    if (!svcs.length) {
-      el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--dim)">No services configured</div>';
+    const d = await fetch('/api/winlink/inbox').then(r => r.json());
+    updateWinlinkBadge(d.unread || 0);
+    if (!d.count && !d.callsign) {
+      el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--dim)">No Winlink adapter configured.<br>Add type: pat_winlink in config.yaml.</div>';
       return;
     }
-    const STATE_COLOR = { active: 'var(--green)', failed: 'var(--red)', inactive: 'var(--muted)', unknown: 'var(--muted)' };
-    let html = `<div style="padding:4px 8px 6px;display:flex;justify-content:flex-end">
-      <button onclick="loadServicesPanel()" style="font-size:10px;padding:2px 6px">↻ Refresh</button>
+    let html = `<div style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);display:flex;justify-content:space-between;align-items:center">
+      <span>${escHtml(d.callsign||'')} · ${d.count} message${d.count===1?'':'s'}${d.unread ? `, <span style="color:var(--blue)">${d.unread} unread</span>` : ''}</span>
+      <button onclick="loadWinlinkPanel()" style="font-size:10px;padding:2px 6px">↻ Refresh</button>
     </div>`;
-    svcs.forEach(s => {
-      const state = s.active || 'unknown';
-      const col = STATE_COLOR[state] || 'var(--muted)';
-      const dot = state === 'active' ? '●' : state === 'failed' ? '✗' : '○';
-      html += `<div style="padding:5px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
-        <span style="color:${col};font-size:13px;min-width:14px">${dot}</span>
-        <span style="flex:1;font-family:var(--mono);font-size:11px">${escHtml(s.name)}</span>
-        <span style="font-size:10px;color:${col}">${escHtml(state)}</span>
-        <button onclick="restartService('${escHtml(s.name)}',this)" style="font-size:9px;padding:1px 5px" title="Restart ${escHtml(s.name)}">↺</button>
-      </div>`;
-    });
+    if (!d.messages || !d.messages.length) {
+      html += '<div style="padding:12px;font-size:11px;color:var(--dim)">Inbox empty</div>';
+    } else {
+      d.messages.forEach(m => {
+        html += `<div style="padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer" onclick="readWinlinkMessage('${escHtml(m.mid)}')">
+          <div style="display:flex;justify-content:space-between;gap:6px">
+            <span style="font-size:11px;font-weight:${m.unread?'700':'400'};color:${m.unread?'var(--text)':'var(--muted)'}">${m.unread ? '● ' : ''}${escHtml(m.subject || '(no subject)')}</span>
+            <span style="font-size:9px;color:var(--dim);white-space:nowrap">${escHtml((m.date||'').replace('T',' ').slice(0,16))}</span>
+          </div>
+          <div style="font-size:10px;color:var(--dim);font-family:var(--mono)">${escHtml(m.from||'')}</div>
+        </div>`;
+      });
+    }
     el.innerHTML = html;
   } catch(e) {
-    el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red)">Error loading services</div>';
+    el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red)">Error loading Winlink inbox</div>';
   }
 }
 
-async function restartService(name, btn) {
-  btn.disabled = true; btn.textContent = '…';
+async function readWinlinkMessage(mid) {
   try {
-    const r = await fetch(`/api/system/services/${encodeURIComponent(name)}/restart`, {method:'POST'});
-    const d = r.ok ? await r.json() : null;
-    toast(d?.status === 'ok' ? `${name} restarted` : `Restart failed: ${d?.detail || 'error'}`,
-          d?.status === 'ok' ? 'ok' : 'err');
-  } catch(e) { toast('Restart error: ' + e.message, 'err'); }
-  setTimeout(loadServicesPanel, 1500);
+    const m = await fetch(`/api/winlink/inbox/${encodeURIComponent(mid)}`).then(r => r.json());
+    const body = (m.body || '(no body)').replace(/</g, '&lt;');
+    document.getElementById('msg-detail-content').innerHTML = `
+      <div style="margin-bottom:8px"><b>${escHtml(m.subject||'(no subject)')}</b></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">From: ${escHtml(m.from||'')} &emsp; ${escHtml((m.date||'').replace('T',' ').slice(0,16))}</div>
+      <div style="white-space:pre-wrap;font-size:12px;font-family:var(--mono)">${body}</div>
+    `;
+    document.getElementById('msg-detail-popup').classList.add('open');
+  } catch(e) { toast('Could not load message: ' + e.message, 'err'); }
 }
+
+function updateWinlinkBadge(unread) {
+  const badge = document.getElementById('winlink-badge');
+  if (!badge) return;
+  badge.textContent = unread > 0 ? unread : '';
+  badge.classList.toggle('has-msgs', unread > 0);
+  if (unread > _winlinkLastUnread) {
+    toast(`✉ ${unread} unread Winlink message${unread===1?'':'s'}`, 'ok');
+  }
+  _winlinkLastUnread = unread;
+}
+
+async function checkWinlinkBadge() {
+  try {
+    const d = await fetch('/api/winlink/inbox').then(r => r.json());
+    if (d.callsign) updateWinlinkBadge(d.unread || 0);
+  } catch(e) {}
+}
+checkWinlinkBadge();
+setInterval(checkWinlinkBadge, 120_000);  // background poll so the badge/toast fire even with the tab closed
 
 // ── Simulation banner ────────────────────────────────────────────────────
 function updateSimBanner(enabled) {

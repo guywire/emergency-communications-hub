@@ -2555,6 +2555,34 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 }
         return {"count": 0, "gateways": [], "session_status": "", "session_log": []}
 
+    @app.get("/api/winlink/inbox")
+    async def winlink_inbox_list():
+        """Current Winlink inbox listing straight from Pat, for the dashboard's
+        mail panel — separate from the message feed, which only shows mail that
+        arrived while ECH was running and polling."""
+        for adapter in router._adapters.values():
+            if hasattr(adapter, "list_inbox"):
+                messages = await adapter.list_inbox()
+                return {
+                    "callsign": getattr(adapter, "_callsign", ""),
+                    "pat_url": getattr(adapter, "_pat_url", ""),
+                    "count": len(messages),
+                    "unread": sum(1 for m in messages if m.get("unread")),
+                    "messages": messages,
+                }
+        return {"count": 0, "unread": 0, "messages": []}
+
+    @app.get("/api/winlink/inbox/{mid}")
+    async def winlink_inbox_message(mid: str):
+        """Full body of one inbox message, for the mail panel's read view."""
+        for adapter in router._adapters.values():
+            if hasattr(adapter, "_fetch_message"):
+                msg = await adapter._fetch_message("in", mid)
+                if msg is None:
+                    raise HTTPException(status_code=404, detail="Message not found")
+                return msg
+        raise HTTPException(status_code=404, detail="No Winlink adapter configured")
+
     @app.post("/api/winlink/connect")
     async def winlink_connect(request: Request):
         """Trigger a Pat connect session."""

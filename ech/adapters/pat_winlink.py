@@ -444,6 +444,32 @@ class PatWinlinkAdapter(Adapter):
         except Exception as exc:
             log.debug("Pat Winlink %s: RMS discovery error: %s", self.name, exc)
 
+    async def list_inbox(self) -> list[dict]:
+        """Current Winlink inbox listing for the dashboard's mail panel — everything
+        in Pat's inbox folder right now, not just what arrived since ECH started
+        (the poll loop only emits new-since-last-check as feed messages)."""
+        try:
+            msgs = await self._fetch_inbox()
+        except Exception as exc:
+            log.debug("Pat Winlink %s: list_inbox error: %s", self.name, exc)
+            return []
+        out = []
+        for m in msgs:
+            mid = m.get("mid") or m.get("MID", "")
+            # Pat's own read flag if the API exposes one; otherwise fall back to
+            # "ECH hasn't surfaced this one as a feed message yet" as a proxy.
+            read = m.get("read", m.get("Read"))
+            unread = (not read) if read is not None else (mid not in self._seen_mids)
+            out.append({
+                "mid": mid,
+                "subject": m.get("subject") or m.get("Subject", ""),
+                "from": m.get("from") or m.get("From", ""),
+                "date": m.get("date") or m.get("Date", ""),
+                "unread": unread,
+            })
+        out.sort(key=lambda m: m["date"], reverse=True)
+        return out
+
     async def nodes(self) -> list:
         """Return discovered RMS gateways as MeshNode objects for the map."""
         from ech.core.models import MeshNode
