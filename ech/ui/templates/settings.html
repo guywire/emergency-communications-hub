@@ -384,6 +384,7 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
           <div><label>Role</label>
             <select id="new-role">
               <option value="operator">Operator</option>
+              <option value="viewer">Viewer (view-only)</option>
               <option value="admin">Admin</option>
             </select>
           </div>
@@ -1330,9 +1331,13 @@ function renderUsers(users) {
     const kickBtn = !isSelf
       ? `<button class="btn btn-yellow" onclick="kickUser('${esc(u.username)}')" style="padding:3px 8px;font-size:10px" title="Force logout all sessions">Kick</button>`
       : '';
+    const resetBtn = !isSelf
+      ? `<button class="btn btn-blue" onclick="resetUserPassword('${esc(u.username)}')" style="padding:3px 8px;font-size:10px" title="Set a new password for this user — they must change it at next login">Reset PW</button>`
+      : '';
     return `<div class="user-row">
       <span class="user-name">${esc(u.username)}</span>
       <span class="user-role">${esc(u.role)}</span>
+      ${resetBtn}
       ${kickBtn}
       <button class="btn btn-red" onclick="deleteUser('${esc(u.username)}')" style="padding:3px 8px;font-size:10px">Delete</button>
     </div>`;
@@ -1348,6 +1353,18 @@ async function kickUser(username) {
   } else {
     toast(`Error: ${d.detail || 'unknown'}`, true);
   }
+}
+
+async function resetUserPassword(username) {
+  const pw = prompt(`New password for "${username}" (min 8 characters). They'll be required to change it at next login.`);
+  if (!pw) return;
+  if (pw.length < 8) { alert('Password must be at least 8 characters'); return; }
+  const r = await fetch(`/api/users/${encodeURIComponent(username)}/password`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({password: pw, force_change: true}),
+  });
+  const d = await r.json();
+  toast(d.status === 'ok' ? `Password reset for ${username} — logged out, must change at next login` : `Error: ${d.detail || 'failed'}`);
 }
 
 async function addUser() {

@@ -75,7 +75,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <div class="ctrl-sep"></div>
     <button class="ctrl-btn" id="strips-btn" onclick="toggleStripReports()" title="Strip reports with a known MGRS or LAT/LON field (mesh bot 'strip' command)">📋 STRIPS</button>
     <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">📓 HAM LOG</button>
-    <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show PSKReporter callsign spots">📻 PSK</button>
+    <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show ham stations transmitting near your base position (PSKReporter, 300km radius)">📻 PSK</button>
     <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ GRID</button>
     <div class="ctrl-sep"></div>
     <button class="ctrl-btn" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI</button>
@@ -789,32 +789,36 @@ function togglePSKReporter() {
 async function loadPSKReporter() {
   if (!_pskEnabled) return;
   try {
-    // Use the operator callsign (injected at page render) so the map and the
-    // settings-page test share the same cache key and never double-hit PSKReporter.
-    const call = (window.ECH_CALLSIGN || '').replace(/-\d+$/, '');  // strip SSID
-    const url = '/api/pskreporter/spots' + (call ? `?callsign=${encodeURIComponent(call)}` : '');
-    const r = await fetch(url).catch(() => null);
+    // "nearby" mode: no callsign filter — general band activity, filtered
+    // server-side to transmitters within radius_km of the base position.
+    // (The Settings page's PSK tool covers "who has heard MY callsign";
+    // this overlay answers "who's on the air near me" instead.)
+    const r = await fetch('/api/pskreporter/spots?mode=nearby&radius_km=300').catch(() => null);
     if (!r || !r.ok) {
       toast('PSKReporter: enable via /api/pskreporter — needs backend proxy');
       return;
     }
     const data = await r.json();
+    if (data.error) {
+      toast('PSKReporter: ' + data.error, 'err');
+      return;
+    }
     _pskMarkers.forEach(m => m.remove());
     _pskMarkers = [];
     (data.spots || []).forEach(spot => {
-      if (!spot.rxLat || !spot.rxLon) return;
+      if (spot.txLat == null || spot.txLon == null) return;
       const icon = L.divIcon({
         className: '',
         html: `<div style="font-family:monospace;font-size:9px;color:#ffcb6b;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #ffcb6b;white-space:nowrap">${spot.senderCallsign||'?'}</div>`,
         iconSize: [60, 16],
         iconAnchor: [30, 8],
       });
-      const m = L.marker([spot.rxLat, spot.rxLon], {icon})
+      const m = L.marker([spot.txLat, spot.txLon], {icon})
         .bindPopup(`<div class="node-popup"><div class="node-name">${spot.senderCallsign}</div><div class="node-stat">Heard by: ${spot.receiverCallsign}</div><div class="node-stat">Mode: ${spot.mode} | Band: ${spot.band}</div><div class="node-stat">SNR: ${spot.sNR}dB</div><div class="node-stat">${new Date(spot.flowStartSeconds*1000).toUTCString().slice(5,22)}</div></div>`)
         .addTo(map);
       _pskMarkers.push(m);
     });
-    toast(`PSKReporter: ${_pskMarkers.length} spots`);
+    toast(`PSKReporter: ${_pskMarkers.length} station(s) transmitting nearby`);
   } catch(e) {
     toast('PSKReporter fetch failed: ' + e.message);
   }

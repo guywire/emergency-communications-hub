@@ -755,6 +755,17 @@ class Database:
         await self._db.execute("DELETE FROM sessions WHERE username=?", (username,))
         await self._db.commit()
 
+    async def admin_reset_user_password(self, username: str, pw_hash: str) -> None:
+        """Admin-initiated reset for another user — unlike update_user_password
+        (self-service), this forces the user to pick their own password at
+        next login rather than trusting the admin's temporary one indefinitely."""
+        await self._db.execute(
+            "UPDATE users SET pw_hash=?, must_change_pw=1 WHERE username=?",
+            (pw_hash, username),
+        )
+        await self._db.execute("DELETE FROM sessions WHERE username=?", (username,))
+        await self._db.commit()
+
     async def delete_user(self, username: str) -> None:
         await self._db.execute("DELETE FROM users WHERE username=?", (username,))
         await self._db.commit()

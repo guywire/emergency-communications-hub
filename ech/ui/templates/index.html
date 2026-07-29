@@ -2158,6 +2158,19 @@ async function applyRoleUI() {
       toast('Settings & Simulation require admin access', 'err');
       history.replaceState({}, '', '/');
     }
+    // Viewer role: view-only everywhere except their own password and Ham
+    // Log — hide the compose panel entirely instead of letting them fill it
+    // out and hit a 403 on send.
+    if (_myRole === 'viewer') {
+      const compose = document.getElementById('compose');
+      if (compose) {
+        compose.style.display = 'none';
+        const notice = document.createElement('div');
+        notice.style.cssText = 'padding:10px 14px;font-family:var(--mono);font-size:11px;color:var(--muted);border-top:1px solid var(--border)';
+        notice.textContent = 'View-only account — messaging is disabled for this role.';
+        compose.parentNode.insertBefore(notice, compose.nextSibling);
+      }
+    }
   } catch (e) {
     // auth disabled — nothing to do; the shared top-nav's own /api/auth/me
     // check handles Settings/Simulation visibility independently.

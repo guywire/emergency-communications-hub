@@ -4,7 +4,11 @@ ech/core/auth.py
 Session-based authentication for ECH.
 
 - Username/password stored as bcrypt hashes in SQLite
-- Two roles: admin (full access), operator (no settings/user management)
+- Three roles: admin (full access), operator (no settings/user management),
+  viewer (read-only: every page is viewable and Ham Log is writable, but
+  settings, user management, and sending messages over any adapter are
+  blocked — see ADMIN_PATHS/ADMIN_PREFIXES and the viewer check in
+  ech/api/app.py's auth_middleware)
 - Session tokens stored in SQLite with expiry
 - Default admin/admin created on first run if no users exist
 - Login page at /login, protected routes check session cookie
@@ -66,6 +70,16 @@ class AuthManager:
         pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
         await self._db.update_user_password(username, pw_hash)
         log.info("AUTH: password changed for '%s'", username)
+        return True
+
+    async def admin_reset_password(self, username: str, new_password: str) -> bool:
+        """Admin resets another user's password — forces a change at next login
+        (see database.admin_reset_user_password) instead of trusting the admin's
+        temporary password indefinitely."""
+        import bcrypt
+        pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+        await self._db.admin_reset_user_password(username, pw_hash)
+        log.info("AUTH: admin reset password for '%s' — must change at next login", username)
         return True
 
     async def delete_user(self, username: str) -> None:

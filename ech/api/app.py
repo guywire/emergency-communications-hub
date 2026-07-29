@@ -150,6 +150,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 return JSONResponse({"detail": "Admin access required"}, status_code=403)
             return RedirectResponse(url="/?access=denied", status_code=302)
 
+        # Viewer role: can watch every page (map, messages, reports, Ham Log)
+        # and log their own QSOs, but can't transmit over any adapter. Ham Log
+        # is deliberately NOT blocked — logging a contact isn't sending traffic.
+        if session.get("role") == "viewer" and method == "POST" and path == "/api/messages":
+            return JSONResponse({"detail": "Viewer accounts can't send messages"}, status_code=403)
+
         return await call_next(request)
 
     @app.middleware("http")
@@ -1543,9 +1549,17 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     @app.post("/api/users/{username}/password")
     async def change_password(username: str, request: Request):
+        """This whole path is already admin-gated (ADMIN_PREFIXES: '/api/users').
+        force_change distinguishes an admin resetting SOMEONE ELSE's password
+        (forces them to pick their own at next login) from an admin changing
+        their own via the Settings page's "Change my password" box (shouldn't
+        immediately re-demand a change)."""
         data = await request.json()
         if auth:
-            await auth.change_password(username, data["password"])
+            if data.get("force_change"):
+                await auth.admin_reset_password(username, data["password"])
+            else:
+                await auth.change_password(username, data["password"])
         return {"status": "ok"}
 
     # ── ECH State / Mode ──────────────────────────────────────────────────
@@ -2290,18 +2304,36 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # ── PSKReporter proxy ────────────────────────────────────────────────────
 
     @app.get("/api/pskreporter/spots")
-    async def pskreporter_spots(callsign: str = "", band: str = "", limit: int = 200):
+    async def pskreporter_spots(callsign: str = "", band: str = "", limit: int = 200,
+                                 mode: str = "mine", radius_km: float = 300.0):
         """
         Proxy for PSKReporter JSON API.
         PSKReporter doesn't support CORS so browser can't fetch directly.
         Rate limited to 1 upstream request per 5 minutes (PSKReporter TOS).
+
+        mode="mine" (default, used by the Settings diagnostic tool): who has
+        heard MY callsign — falls back to the configured operator callsign so
+        a missing callsign parameter never causes an all-band query instead.
+        mode="nearby" (used by the map overlay): general band activity with
+        no callsign filter, then filtered server-side to senders within
+        radius_km of the configured base position — "who's transmitting near
+        me" rather than a self-check.
         """
         import time as _time
         global _psk_last_upstream
-        # Fall back to the configured operator callsign so a missing callsign parameter
-        # never causes PSKReporter to return all-band spots instead of yours.
-        effective_call = callsign.strip().upper() or _psk_default_callsign.upper()
-        cache_key = f"{effective_call}|{band}"
+        if mode == "nearby" and not callsign.strip():
+            effective_call = ""
+            # An unrestricted query has no callsign filter to narrow it, so without
+            # a base position to filter by proximity we'd otherwise return (and burn
+            # our one rate-limited upstream call on) an unfiltered global spot dump.
+            base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
+            base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
+            if base_lat is None or base_lon is None:
+                return {"spots": [], "error": "Set a base position (Settings → base_lat/base_lon, "
+                                               "or your GPS) to use nearby-station mode", "cached": False}
+        else:
+            effective_call = callsign.strip().upper() or _psk_default_callsign.upper()
+        cache_key = f"{effective_call}|{band}|{mode}"
         cached = _psk_cache.get(cache_key)
         if cached:
             age = _time.monotonic() - cached[0]
@@ -2353,9 +2385,11 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 for rx in root.findall(".//receptionReport"):
                     grid = rx.get("receiverLocator", "")
                     lat, lon = _grid_to_latlon(grid) if len(grid) >= 4 else (None, None)
+                    tx_grid = rx.get("senderLocator", "")
+                    tx_lat, tx_lon = _grid_to_latlon(tx_grid) if len(tx_grid) >= 4 else (None, None)
                     spots.append({
                         "senderCallsign": rx.get("senderCallsign", ""),
-                        "senderLocator": rx.get("senderLocator", ""),
+                        "senderLocator": tx_grid,
                         "receiverCallsign": rx.get("receiverCallsign", ""),
                         "mode": rx.get("mode", ""),
                         "frequency": int(rx.get("frequency", 0)),
@@ -2363,9 +2397,24 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                         "sNR": int(rx.get("sNR", 0)),
                         "rxLat": lat,
                         "rxLon": lon,
+                        "txLat": tx_lat,
+                        "txLon": tx_lon,
                         "receiverLocator": grid,
                         "flowStartSeconds": int(rx.get("flowStartSeconds", 0)),
                     })
+                if mode == "nearby":
+                    base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
+                    base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
+                    if base_lat is not None and base_lon is not None:
+                        from ech.core.anomaly import _haversine_km
+                        # Keep spots where the TRANSMITTING station is nearby — that's
+                        # "who's on the air near me", regardless of how far their
+                        # signal happened to be heard (skip can carry it thousands of km).
+                        spots = [
+                            s for s in spots
+                            if s["txLat"] is not None and s["txLon"] is not None
+                            and _haversine_km(base_lat, base_lon, s["txLat"], s["txLon"]) <= radius_km
+                        ]
                 payload = {"spots": spots, "total": len(spots)}
                 _psk_cache[cache_key] = (_time.monotonic(), payload)
                 _psk_last_upstream = _time.monotonic()
