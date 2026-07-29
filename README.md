@@ -508,6 +508,7 @@ No inbound ports are required for most adapters (they connect outward). Exceptio
 | APRS KISS TNC / Direwolf | `aprs_kiss` | Direwolf or hardware TNC |
 | MeshCore serial/TCP | `meshcore` | `pip install pycryptodome pyserial-asyncio-fast` — custom protocol client, no `meshcore` PyPI package needed |
 | LetsMesh MQTT | `mqtt` (with `pubkey_auth`) | `pip install aiomqtt pycryptodome` |
+| LetsMesh packet comparison | `letsmesh_compare` | `pip install aiomqtt pycryptodome` — merges path data from other LetsMesh observers into a local MeshCore adapter's topology graph; no messages added to the feed |
 | MQTT generic | `mqtt` | `pip install aiomqtt` |
 | JS8Call HF | `js8call` | JS8Call app running with TCP API on port 2442 |
 | Winlink / Pat | `pat_winlink` | Pat running with HTTP API |

@@ -60,6 +60,10 @@ class Router:
         adapter._router_notify_nodes = self._handle_nodes_updated
         # Generic broadcast for telemetry, topology, and other real-time events.
         adapter._router_broadcast = self.broadcast_ws_event
+        # Lets an adapter reach a sibling by name — e.g. the LetsMesh packet
+        # comparison adapter feeding observed path data into a MeshCore
+        # adapter's topology graph. Returns None if no such adapter exists.
+        adapter._get_sibling_adapter = self._adapters.get
         # Give mesh adapters direct access to the anomaly engine for contact/flood detection
         if hasattr(adapter, '_anomaly_engine'):
             adapter._anomaly_engine = self._anomaly_engine

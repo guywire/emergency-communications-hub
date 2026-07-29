@@ -129,6 +129,7 @@ def build_adapter(cfg: dict):
         "pat_winlink": ("ech.adapters.pat_winlink",      "PatWinlinkAdapter",  "httpx"),
         "reticulum":   ("ech.adapters.reticulum_adapter","ReticulumAdapter",   "rns, lxmf"),
         "mqtt":        ("ech.adapters.mqtt_adapter",     "MQTTAdapter",        "aiomqtt"),
+        "letsmesh_compare": ("ech.adapters.letsmesh_compare", "LetsMeshCompareAdapter", "aiomqtt"),
         "aredn_ami":   ("ech.adapters.aredn_ami",        "AREDNAMIAdapter",    None),
         "asterisk":    ("ech.adapters.asterisk_adapter", "AsteriskAdapter",    None),
         "ax25_bbs":    ("ech.adapters.ax25_bbs_adapter",  "AX25BBSAdapter",    None),

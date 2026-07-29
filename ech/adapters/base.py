@@ -51,6 +51,7 @@ class Adapter(ABC):
         self._router_notify_nodes = None           # async callback(adapter, node_count)
         self._router_broadcast = None              # async callback(event_type, data_dict)
         self._db = None                            # Database — injected by Router.register()
+        self._get_sibling_adapter = None            # sync callback(name) -> Adapter | None
 
     # ── Required ──────────────────────────────────────────────────────────
 
