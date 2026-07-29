@@ -40,6 +40,16 @@ _psk_contact: str = "(SignalMatrix, contact@example.com)"  # set from config on 
 _psk_default_callsign: str = ""    # operator callsign — used when API caller omits callsign
 _psk_stats: dict = {"last_success": None, "last_failure": None, "last_error": None, "total_fetches": 0}
 
+# POTA/SOTA activation spots — no documented rate limit like PSKReporter's TOS,
+# just a courteous short cache so a busy map (auto-refresh + multiple browser
+# tabs) doesn't re-poll on every render.
+_pota_cache: dict = {}         # key → (timestamp, payload)
+_POTA_CACHE_TTL = 60           # seconds
+_sota_spot_cache: dict = {}    # key → (timestamp, payload)
+_SOTA_CACHE_TTL = 60           # seconds
+# Summit lat/lon never changes, so this cache has no TTL — it only grows.
+_sota_summit_cache: dict = {}  # (associationCode, summitCode) → (lat, lon, name)
+
 UI_DIR = Path(__file__).parent.parent / "ui"
 
 
@@ -2481,6 +2491,121 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             lon += 1.0   # center of 2-degree cell
             lat += 0.5   # center of 1-degree cell
         return round(lat, 4), round(lon, 4)
+
+    # ── POTA / SOTA activation spots ────────────────────────────────────────
+
+    @app.get("/api/pota/spots")
+    async def pota_spots_endpoint(radius_km: float = 500.0):
+        """Parks on the Air activator spots within radius_km of the base
+        position. POTA's spot API already includes lat/lon per spot."""
+        import time as _time
+        cache_key = f"{radius_km}"
+        cached = _pota_cache.get(cache_key)
+        if cached and _time.monotonic() - cached[0] < _POTA_CACHE_TTL:
+            return cached[1]
+        base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
+        base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
+        if base_lat is None or base_lon is None:
+            return {"spots": [], "total": 0,
+                    "error": "Set a base position (Settings → GPS, or base_lat/base_lon) to see nearby POTA activity"}
+        try:
+            import httpx as _httpx
+            from ech.core.anomaly import _haversine_km
+            async with _httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get("https://api.pota.app/spot/activator")
+                r.raise_for_status()
+                raw_spots = r.json()
+            spots = []
+            for s in raw_spots:
+                lat, lon = s.get("latitude"), s.get("longitude")
+                if lat is None or lon is None:
+                    continue
+                if _haversine_km(base_lat, base_lon, lat, lon) > radius_km:
+                    continue
+                spots.append({
+                    "activator": s.get("activator", ""),
+                    "reference": s.get("reference", ""),
+                    "parkName": s.get("name") or s.get("parkName") or "",
+                    "locationDesc": s.get("locationDesc", ""),
+                    "frequency": s.get("frequency", ""),
+                    "mode": s.get("mode", ""),
+                    "comments": s.get("comments", ""),
+                    "spotTime": s.get("spotTime", ""),
+                    "lat": lat, "lon": lon,
+                })
+            payload = {"spots": spots, "total": len(spots)}
+            _pota_cache[cache_key] = (_time.monotonic(), payload)
+            return payload
+        except Exception as exc:
+            return {"spots": [], "total": 0, "error": f"POTA fetch failed: {exc.__class__.__name__}"}
+
+    @app.get("/api/sota/spots")
+    async def sota_spots_endpoint(radius_km: float = 500.0):
+        """Summits on the Air activator spots within radius_km of the base
+        position. SOTA's spot API has no lat/lon, only a summit code — resolve
+        each summit's coordinates via a lookup, cached forever since summit
+        locations don't change."""
+        import time as _time
+        cache_key = f"{radius_km}"
+        cached = _sota_spot_cache.get(cache_key)
+        if cached and _time.monotonic() - cached[0] < _SOTA_CACHE_TTL:
+            return cached[1]
+        base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
+        base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
+        if base_lat is None or base_lon is None:
+            return {"spots": [], "total": 0,
+                    "error": "Set a base position (Settings → GPS, or base_lat/base_lon) to see nearby SOTA activity"}
+        try:
+            import asyncio as _asyncio
+            import httpx as _httpx
+            from ech.core.anomaly import _haversine_km
+            async with _httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get("https://api2.sota.org.uk/api/spots/100/all")
+                r.raise_for_status()
+                raw_spots = r.json()
+
+                need = {(s.get("associationCode", ""), s.get("summitCode", ""))
+                        for s in raw_spots
+                        if s.get("associationCode") and s.get("summitCode")
+                        and (s.get("associationCode"), s.get("summitCode")) not in _sota_summit_cache}
+
+                async def _lookup(assoc: str, code: str, sem: "_asyncio.Semaphore") -> None:
+                    async with sem:
+                        try:
+                            resp = await client.get(f"https://api2.sota.org.uk/api/summits/{assoc}/{code}")
+                            resp.raise_for_status()
+                            d = resp.json()
+                            _sota_summit_cache[(assoc, code)] = (d.get("latitude"), d.get("longitude"), d.get("name", ""))
+                        except Exception:
+                            _sota_summit_cache[(assoc, code)] = (None, None, "")
+
+                if need:
+                    sem = _asyncio.Semaphore(5)  # cap concurrent lookups on a big first-run batch
+                    await _asyncio.gather(*(_lookup(a, c, sem) for a, c in need))
+
+            spots = []
+            for s in raw_spots:
+                key = (s.get("associationCode", ""), s.get("summitCode", ""))
+                lat, lon, summit_name = _sota_summit_cache.get(key, (None, None, ""))
+                if lat is None or lon is None:
+                    continue
+                if _haversine_km(base_lat, base_lon, lat, lon) > radius_km:
+                    continue
+                spots.append({
+                    "activator": s.get("activatorCallsign") or s.get("callsign", ""),
+                    "summitCode": f"{s.get('associationCode','')}/{s.get('summitCode','')}",
+                    "summitName": summit_name,
+                    "frequency": s.get("frequency", ""),
+                    "mode": s.get("mode", ""),
+                    "comments": s.get("comments", ""),
+                    "spotTime": s.get("timeStamp", ""),
+                    "lat": lat, "lon": lon,
+                })
+            payload = {"spots": spots, "total": len(spots)}
+            _sota_spot_cache[cache_key] = (_time.monotonic(), payload)
+            return payload
+        except Exception as exc:
+            return {"spots": [], "total": 0, "error": f"SOTA fetch failed: {exc.__class__.__name__}"}
 
     # ── PBX / Asterisk AMI ───────────────────────────────────────────────
 

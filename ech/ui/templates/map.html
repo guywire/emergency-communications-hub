@@ -76,6 +76,8 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn" id="strips-btn" onclick="toggleStripReports()" title="Strip reports with a known MGRS or LAT/LON field (mesh bot 'strip' command)">📋 STRIPS</button>
     <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">📓 HAM LOG</button>
     <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show ham stations transmitting near your base position (PSKReporter, 300km radius)">📻 PSK</button>
+    <button class="ctrl-btn" id="pota-btn" onclick="togglePOTA()" title="Show active Parks on the Air activators near your base position">🏞 POTA</button>
+    <button class="ctrl-btn" id="sota-btn" onclick="toggleSOTA()" title="Show active Summits on the Air activators near your base position">⛰ SOTA</button>
     <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ GRID</button>
     <div class="ctrl-sep"></div>
     <button class="ctrl-btn" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI</button>
@@ -823,6 +825,102 @@ async function loadPSKReporter() {
     toast('PSKReporter fetch failed: ' + e.message);
   }
   if (_pskEnabled) setTimeout(loadPSKReporter, 300000);
+}
+
+// ── POTA (Parks on the Air) activator spots ─────────────────────────────
+let _potaEnabled = false;
+let _potaMarkers = [];
+
+function togglePOTA() {
+  _potaEnabled = !_potaEnabled;
+  const btn = document.getElementById('pota-btn');
+  btn.style.color = _potaEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _potaEnabled ? 'var(--green)' : '';
+  if (_potaEnabled) {
+    loadPOTA();
+    toast('POTA: fetching nearby activators…');
+  } else {
+    _potaMarkers.forEach(m => m.remove());
+    _potaMarkers = [];
+    toast('POTA overlay off');
+  }
+}
+
+async function loadPOTA() {
+  if (!_potaEnabled) return;
+  try {
+    const r = await fetch('/api/pota/spots?radius_km=500').catch(() => null);
+    if (!r || !r.ok) { toast('POTA: fetch failed'); return; }
+    const data = await r.json();
+    if (data.error) { toast('POTA: ' + data.error, 'err'); return; }
+    _potaMarkers.forEach(m => m.remove());
+    _potaMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.lat == null || spot.lon == null) return;
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#7ee787;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #7ee787;white-space:nowrap">🏞 ${spot.activator||'?'}</div>`,
+        iconSize: [80, 16],
+        iconAnchor: [40, 8],
+      });
+      const m = L.marker([spot.lat, spot.lon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.activator} @ ${spot.reference}</div><div class="node-stat">${spot.parkName||''}${spot.locationDesc ? ' ('+spot.locationDesc+')' : ''}</div><div class="node-stat">${spot.frequency} kHz ${spot.mode}</div><div class="node-stat">${spot.comments||''}</div><div class="node-stat">${spot.spotTime||''}</div></div>`)
+        .addTo(map);
+      _potaMarkers.push(m);
+    });
+    toast(`POTA: ${_potaMarkers.length} activator(s) nearby`);
+  } catch(e) {
+    toast('POTA fetch failed: ' + e.message);
+  }
+  if (_potaEnabled) setTimeout(loadPOTA, 90000);
+}
+
+// ── SOTA (Summits on the Air) activator spots ───────────────────────────
+let _sotaEnabled = false;
+let _sotaMarkers = [];
+
+function toggleSOTA() {
+  _sotaEnabled = !_sotaEnabled;
+  const btn = document.getElementById('sota-btn');
+  btn.style.color = _sotaEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _sotaEnabled ? 'var(--green)' : '';
+  if (_sotaEnabled) {
+    loadSOTA();
+    toast('SOTA: fetching nearby activators…');
+  } else {
+    _sotaMarkers.forEach(m => m.remove());
+    _sotaMarkers = [];
+    toast('SOTA overlay off');
+  }
+}
+
+async function loadSOTA() {
+  if (!_sotaEnabled) return;
+  try {
+    const r = await fetch('/api/sota/spots?radius_km=500').catch(() => null);
+    if (!r || !r.ok) { toast('SOTA: fetch failed'); return; }
+    const data = await r.json();
+    if (data.error) { toast('SOTA: ' + data.error, 'err'); return; }
+    _sotaMarkers.forEach(m => m.remove());
+    _sotaMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.lat == null || spot.lon == null) return;
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#f0b429;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #f0b429;white-space:nowrap">⛰ ${spot.activator||'?'}</div>`,
+        iconSize: [80, 16],
+        iconAnchor: [40, 8],
+      });
+      const m = L.marker([spot.lat, spot.lon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.activator} @ ${spot.summitCode}</div><div class="node-stat">${spot.summitName||''}</div><div class="node-stat">${spot.frequency} MHz ${spot.mode}</div><div class="node-stat">${spot.comments||''}</div><div class="node-stat">${spot.spotTime||''}</div></div>`)
+        .addTo(map);
+      _sotaMarkers.push(m);
+    });
+    toast(`SOTA: ${_sotaMarkers.length} activator(s) nearby`);
+  } catch(e) {
+    toast('SOTA fetch failed: ' + e.message);
+  }
+  if (_sotaEnabled) setTimeout(loadSOTA, 90000);
 }
 
 // ── Strip reports (mesh bot "strip" command, only those with a real coordinate) ─
