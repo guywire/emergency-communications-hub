@@ -78,6 +78,9 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show ham stations transmitting near your base position (PSKReporter, 300km radius)">📻 PSK</button>
     <button class="ctrl-btn" id="pota-btn" onclick="togglePOTA()" title="Show active Parks on the Air activators near your base position">🏞 POTA</button>
     <button class="ctrl-btn" id="sota-btn" onclick="toggleSOTA()" title="Show active Summits on the Air activators near your base position">⛰ SOTA</button>
+    <button class="ctrl-btn" id="iota-btn" onclick="toggleIOTA()" title="Show active Islands on the Air activators near your base position (filtered from the DX cluster)">🏝 IOTA</button>
+    <button class="ctrl-btn" id="bota-btn" onclick="toggleBOTA()" title="Show active Bunkers on the Air activators near your base position (filtered from the DX cluster — low volume, empty is normal)">🪖 BOTA</button>
+    <button class="ctrl-btn" id="dx-btn" onclick="toggleDXCluster()" title="Show general DX cluster spots near your base position — precise for US calls (FCC address), approximate country-center for others">🌐 DX</button>
     <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ GRID</button>
     <div class="ctrl-sep"></div>
     <button class="ctrl-btn" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI</button>
@@ -921,6 +924,153 @@ async function loadSOTA() {
     toast('SOTA fetch failed: ' + e.message);
   }
   if (_sotaEnabled) setTimeout(loadSOTA, 90000);
+}
+
+// ── IOTA (Islands on the Air) — filtered from the DX cluster feed ───────
+let _iotaEnabled = false;
+let _iotaMarkers = [];
+
+function toggleIOTA() {
+  _iotaEnabled = !_iotaEnabled;
+  const btn = document.getElementById('iota-btn');
+  btn.style.color = _iotaEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _iotaEnabled ? 'var(--green)' : '';
+  if (_iotaEnabled) {
+    loadIOTA();
+    toast('IOTA: fetching nearby activators…');
+  } else {
+    _iotaMarkers.forEach(m => m.remove());
+    _iotaMarkers = [];
+    toast('IOTA overlay off');
+  }
+}
+
+async function loadIOTA() {
+  if (!_iotaEnabled) return;
+  try {
+    const r = await fetch('/api/iota/spots?radius_km=750').catch(() => null);
+    if (!r || !r.ok) { toast('IOTA: fetch failed'); return; }
+    const data = await r.json();
+    if (data.error) { toast('IOTA: ' + data.error, 'err'); return; }
+    _iotaMarkers.forEach(m => m.remove());
+    _iotaMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.lat == null || spot.lon == null) return;
+      const dashed = spot.precise ? '' : 'border-style:dashed;';
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#79c0ff;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #79c0ff;${dashed}white-space:nowrap">🏝 ${spot.dxCall||'?'}${spot.reference ? ' '+spot.reference : ''}</div>`,
+        iconSize: [100, 16],
+        iconAnchor: [50, 8],
+      });
+      const m = L.marker([spot.lat, spot.lon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.dxCall}${spot.reference ? ' — IOTA '+spot.reference : ''}</div><div class="node-stat">${spot.info||''}</div><div class="node-stat">Spotted by: ${spot.spotter||''}</div><div class="node-stat">${spot.frequency ? (spot.frequency/1000).toFixed(3)+' MHz' : ''}</div><div class="node-stat">${spot.time||''}</div><div class="node-stat" style="color:var(--muted)">${spot.precise ? 'Precise (FCC address)' : 'Approximate (country-center)'}</div></div>`)
+        .addTo(map);
+      _iotaMarkers.push(m);
+    });
+    toast(`IOTA: ${_iotaMarkers.length} activator(s) nearby`);
+  } catch(e) {
+    toast('IOTA fetch failed: ' + e.message);
+  }
+  if (_iotaEnabled) setTimeout(loadIOTA, 90000);
+}
+
+// ── BOTA (Bunkers on the Air) — filtered from the DX cluster feed ───────
+let _botaEnabled = false;
+let _botaMarkers = [];
+
+function toggleBOTA() {
+  _botaEnabled = !_botaEnabled;
+  const btn = document.getElementById('bota-btn');
+  btn.style.color = _botaEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _botaEnabled ? 'var(--green)' : '';
+  if (_botaEnabled) {
+    loadBOTA();
+    toast('BOTA: fetching nearby activators… (low volume — empty is normal)');
+  } else {
+    _botaMarkers.forEach(m => m.remove());
+    _botaMarkers = [];
+    toast('BOTA overlay off');
+  }
+}
+
+async function loadBOTA() {
+  if (!_botaEnabled) return;
+  try {
+    const r = await fetch('/api/bota/spots?radius_km=750').catch(() => null);
+    if (!r || !r.ok) { toast('BOTA: fetch failed'); return; }
+    const data = await r.json();
+    if (data.error) { toast('BOTA: ' + data.error, 'err'); return; }
+    _botaMarkers.forEach(m => m.remove());
+    _botaMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.lat == null || spot.lon == null) return;
+      const dashed = spot.precise ? '' : 'border-style:dashed;';
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#e2a44f;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #e2a44f;${dashed}white-space:nowrap">🪖 ${spot.dxCall||'?'}${spot.reference ? ' '+spot.reference : ''}</div>`,
+        iconSize: [100, 16],
+        iconAnchor: [50, 8],
+      });
+      const m = L.marker([spot.lat, spot.lon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.dxCall}${spot.reference ? ' — BOTA '+spot.reference : ''}</div><div class="node-stat">${spot.info||''}</div><div class="node-stat">Spotted by: ${spot.spotter||''}</div><div class="node-stat">${spot.frequency ? (spot.frequency/1000).toFixed(3)+' MHz' : ''}</div><div class="node-stat">${spot.time||''}</div><div class="node-stat" style="color:var(--muted)">${spot.precise ? 'Precise (FCC address)' : 'Approximate (country-center)'}</div></div>`)
+        .addTo(map);
+      _botaMarkers.push(m);
+    });
+    toast(`BOTA: ${_botaMarkers.length} activator(s) nearby`);
+  } catch(e) {
+    toast('BOTA fetch failed: ' + e.message);
+  }
+  if (_botaEnabled) setTimeout(loadBOTA, 90000);
+}
+
+// ── General DX cluster spots ─────────────────────────────────────────────
+let _dxEnabled = false;
+let _dxMarkers = [];
+
+function toggleDXCluster() {
+  _dxEnabled = !_dxEnabled;
+  const btn = document.getElementById('dx-btn');
+  btn.style.color = _dxEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _dxEnabled ? 'var(--green)' : '';
+  if (_dxEnabled) {
+    loadDXCluster();
+    toast('DX cluster: fetching nearby spots…');
+  } else {
+    _dxMarkers.forEach(m => m.remove());
+    _dxMarkers = [];
+    toast('DX cluster overlay off');
+  }
+}
+
+async function loadDXCluster() {
+  if (!_dxEnabled) return;
+  try {
+    const r = await fetch('/api/dxcluster/spots?radius_km=500').catch(() => null);
+    if (!r || !r.ok) { toast('DX cluster: fetch failed'); return; }
+    const data = await r.json();
+    if (data.error) { toast('DX cluster: ' + data.error, 'err'); return; }
+    _dxMarkers.forEach(m => m.remove());
+    _dxMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.lat == null || spot.lon == null) return;
+      const dashed = spot.precise ? '' : 'border-style:dashed;';
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#f78c6c;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #f78c6c;${dashed}white-space:nowrap">${spot.dxCall||'?'}</div>`,
+        iconSize: [70, 16],
+        iconAnchor: [35, 8],
+      });
+      const m = L.marker([spot.lat, spot.lon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.dxCall}</div><div class="node-stat">${spot.info||''}</div><div class="node-stat">Spotted by: ${spot.spotter||''}</div><div class="node-stat">${spot.frequency ? (spot.frequency/1000).toFixed(3)+' MHz' : ''}</div><div class="node-stat">${spot.country||''}</div><div class="node-stat">${spot.time||''}</div><div class="node-stat" style="color:var(--muted)">${spot.precise ? 'Precise (FCC address)' : 'Approximate (country-center)'}</div></div>`)
+        .addTo(map);
+      _dxMarkers.push(m);
+    });
+    toast(`DX cluster: ${_dxMarkers.length} spot(s) nearby`);
+  } catch(e) {
+    toast('DX cluster fetch failed: ' + e.message);
+  }
+  if (_dxEnabled) setTimeout(loadDXCluster, 90000);
 }
 
 // ── Strip reports (mesh bot "strip" command, only those with a real coordinate) ─
