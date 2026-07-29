@@ -2448,7 +2448,7 @@ function renderHealth(channels) {
       <div style="margin-top:4px;display:flex;align-items:center;gap:4px">
         <span style="font-size:9px;color:var(--muted)">ch:</span>
         <select style="font-size:9px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:2px;padding:1px 2px"
-          onchange="setAdapterChannel('${escHtml(ch.adapter)}', this.value)">
+          onchange="setAdapterChannel('${escHtml(ch.adapter)}', this.value, this)">
           ${chList.map(c => `<option value="${c.idx}" ${c.idx===d.channel_idx?'selected':''}>${c.idx}: ${escHtml(c.name)}</option>`).join('')}
         </select>
       </div>` : '';
@@ -2502,21 +2502,26 @@ async function renameDevice(adapterName) {
   }
 }
 
-async function setAdapterChannel(adapterName, channelIdx) {
+async function setAdapterChannel(adapterName, channelIdx, selectEl) {
   try {
     const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/channel`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({channel: parseInt(channelIdx, 10)}),
     });
-    const d = await r.json();
-    if (d.status === 'ok') {
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.status === 'ok') {
       toast(`${adapterName}: switched to ch${d.channel_idx}${d.channel_name ? ' ('+d.channel_name+')' : ''}`, 'ok');
     } else {
-      toast(`Channel switch failed: ${d.detail || d.status}`, 'err');
+      // The <select> already shows the newly-picked option regardless of what
+      // the server did — re-render from server truth instead of leaving a
+      // rejected channel change looking selected.
+      toast(`Channel switch failed: ${d.detail || d.status || r.status}`, 'err');
+      if (selectEl) pollHealth();
     }
   } catch(e) {
     toast(`Channel switch error: ${e.message}`, 'err');
+    if (selectEl) pollHealth();
   }
 }
 
@@ -2745,7 +2750,11 @@ function clearMessageDisplay() {
 async function clearHistory() {
   if (!confirm('Delete all messages from the server database? This cannot be undone.')) return;
   const r = await fetch('/api/messages/clear', {method: 'POST'});
-  const d = await r.json();
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    toast(`Clear history failed: ${d.detail || r.status}`, 'err');
+    return;
+  }
   clearMessageDisplay();
   toast(`Cleared ${d.cleared} messages from server`, 'ok');
 }
