@@ -1060,6 +1060,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
     <div id="dynamic-channels"></div>
     <div id="chan-subbar"></div>
 
+    <div id="quick-send-section">
     <div class="sidebar-section" style="margin-top:8px">Quick send</div>
     <div class="channel-item" onclick="sendTemplate('Net check-in, all units please respond')">
       <span class="ch-icon" style="background:var(--bg3);color:var(--muted)">NET</span>
@@ -1073,8 +1074,9 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
       <span class="ch-icon" style="background:var(--red-bg);color:var(--red)">EMG</span>
       <span class="ch-label" style="font-size:11px;color:var(--red)">Emergency</span>
     </div>
+    </div>
 
-    <div class="sidebar-footer">
+    <div class="sidebar-footer" id="sidebar-footer-actions">
       <button onclick="timeSyncBroadcast()" title="Sends a readable time message to the channel and sets THIS station's own radio clock — the mesh protocol has no way to set other nodes' clocks remotely">🕐 Time sync</button>
       <button onclick="nodeAnnounce()" title="Broadcast this station's presence (advert + discovery pulse) to all connected mesh adapters">📡 Announce</button>
       <button onclick="wxBroadcast()">🌩 WX alerts</button>
@@ -2159,8 +2161,9 @@ async function applyRoleUI() {
       history.replaceState({}, '', '/');
     }
     // Viewer role: view-only everywhere except their own password and Ham
-    // Log — hide the compose panel entirely instead of letting them fill it
-    // out and hit a 403 on send.
+    // Log — hide every transmit-capable control instead of letting them fill
+    // one out and hit a 403 (the server enforces this regardless; this is
+    // just so the UI doesn't dangle controls that don't actually work).
     if (_myRole === 'viewer') {
       const compose = document.getElementById('compose');
       if (compose) {
@@ -2170,6 +2173,10 @@ async function applyRoleUI() {
         notice.textContent = 'View-only account — messaging is disabled for this role.';
         compose.parentNode.insertBefore(notice, compose.nextSibling);
       }
+      const quickSend = document.getElementById('quick-send-section');
+      if (quickSend) quickSend.style.display = 'none';
+      const footerActions = document.getElementById('sidebar-footer-actions');
+      if (footerActions) footerActions.style.display = 'none';
     }
   } catch (e) {
     // auth disabled — nothing to do; the shared top-nav's own /api/auth/me
@@ -2960,15 +2967,16 @@ async function loadCallLog() {
     if (!d.enabled) { el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--dim)">No PBX adapter configured.<br>Add type: asterisk (or mock_asterisk) in config.yaml.</div>'; return; }
     const active = d.active_calls || [];
     const recent = d.recent_calls || [];
+    const canTransmit = _myRole !== 'viewer';
     let html = `<div style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted)">
       PBX: <b>${escHtml(d.adapter)}</b> · <span style="color:${d.connected?'var(--green)':'var(--red)'}">${d.connected?'connected':'offline'}</span>
-      &emsp;<button onclick="pbxPage()" style="font-size:10px;padding:2px 6px">📢 Page all</button>
+      ${canTransmit ? `&emsp;<button onclick="pbxPage()" style="font-size:10px;padding:2px 6px">📢 Page all</button>` : ''}
     </div>
-    <div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:4px;align-items:center">
+    ${canTransmit ? `<div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:4px;align-items:center">
       <input type="text" id="tts-ext" placeholder="ext" style="width:44px;font-size:11px;padding:3px 5px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
       <input type="text" id="tts-text" placeholder="Text to speak…" style="flex:1;font-size:11px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
       <button onclick="pbxSpeak()" style="font-size:10px;padding:3px 8px" title="Ring the extension and read this text aloud">🗣 Speak</button>
-    </div>
+    </div>` : ''}
     <div id="pbx-endpoint-status"></div>`;
     if (active.length) {
       html += `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--yellow)">● ACTIVE (${active.length})</div>`;
@@ -2986,7 +2994,7 @@ async function loadCallLog() {
         html += `<div style="padding:4px 10px 4px;font-size:11px;border-bottom:1px solid var(--border);color:${col}">
           ${icon} ${escHtml(c.callerid||'')} → ${escHtml(c.exten||'')}
           <span style="color:var(--muted);float:right">${c.duration_s||0}s</span>
-          <button onclick="pbxCallNode('${escHtml(c.callerid||'')}',this)" style="font-size:9px;padding:1px 4px;margin-left:4px" title="Call back">↩</button>
+          ${canTransmit ? `<button onclick="pbxCallNode('${escHtml(c.callerid||'')}',this)" style="font-size:9px;padding:1px 4px;margin-left:4px" title="Call back">↩</button>` : ''}
         </div>`;
       });
     }

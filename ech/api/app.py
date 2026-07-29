@@ -175,10 +175,24 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return RedirectResponse(url="/?access=denied", status_code=302)
 
         # Viewer role: can watch every page (map, messages, reports, Ham Log)
-        # and log their own QSOs, but can't transmit over any adapter. Ham Log
-        # is deliberately NOT blocked — logging a contact isn't sending traffic.
-        if session.get("role") == "viewer" and method == "POST" and path == "/api/messages":
-            return JSONResponse({"detail": "Viewer accounts can't send messages"}, status_code=403)
+        # and log their own QSOs, but can't cause any adapter to transmit or
+        # change any config. This is an ALLOWLIST, not a denylist of specific
+        # "send" endpoints — a denylist has to be remembered and updated every
+        # time a new transmit-capable endpoint is added (that's exactly how
+        # time-sync, PBX, and Winlink connect slipped through the first pass).
+        # Anything not explicitly listed here is blocked by default for a
+        # state-changing (POST/PUT/DELETE) request.
+        # (/api/auth/* — logout, self password-change — never reaches this
+        # check at all: it's matched as a public path above and returns early.)
+        VIEWER_ALLOWED_MUTATIONS = (
+            "/api/hamlog/",              # logging a QSO isn't transmitting
+            "/api/ping",                 # trace probe — diagnostic, not a composed message
+        )
+        if session.get("role") == "viewer" and method in ("POST", "PUT", "DELETE"):
+            if not any(path == p or path.startswith(p) for p in VIEWER_ALLOWED_MUTATIONS):
+                if path.startswith("/api/"):
+                    return JSONResponse({"detail": "Viewer accounts are view-only"}, status_code=403)
+                return RedirectResponse(url="/?access=denied", status_code=302)
 
         return await call_next(request)
 
