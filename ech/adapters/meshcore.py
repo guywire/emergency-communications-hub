@@ -1131,11 +1131,26 @@ class MeshCoreAdapter(Adapter):
         want = (display_name or "").strip().lower()
         if not want:
             return display_name
+        # Skip no-pubkey placeholders (registered for senders we've only ever
+        # heard via decrypted channel text) — matching against them would make
+        # a real, later-known pubkey unresolvable forever once both share a name.
         matches = [n for n in self._nodes.values()
-                   if (n.display_name or "").strip().lower() == want]
+                   if not n.meta.get("no_pubkey")
+                   and (n.display_name or "").strip().lower() == want]
         if len(matches) == 1:
             return matches[0].node_id
         return display_name
+
+    def _drop_placeholder(self, display_name: str) -> None:
+        """Remove a no-pubkey placeholder node once the real node identity —
+        with an actual pubkey — becomes known under the same name (via GET_CONTACTS
+        or a DM), so the node list doesn't keep showing an unreachable duplicate."""
+        want = (display_name or "").strip().lower()
+        if not want:
+            return
+        for nid, n in list(self._nodes.items()):
+            if n.meta.get("no_pubkey") and (n.display_name or "").strip().lower() == want:
+                del self._nodes[nid]
 
     def _resolve_dm_dest(self, to_id: str) -> bytes | None:
         """Turn a DM destination — pubkey hex or node display name — into the
@@ -1143,7 +1158,8 @@ class MeshCoreAdapter(Adapter):
         value is neither valid hex nor a unique known node name."""
         want = to_id.strip().lower()
         matches = [n for n in self._nodes.values()
-                   if (n.display_name or "").strip().lower() == want]
+                   if not n.meta.get("no_pubkey")
+                   and (n.display_name or "").strip().lower() == want]
         if len(matches) == 1:
             key = matches[0].node_id
         elif len(matches) > 1:
@@ -1829,11 +1845,14 @@ class MeshCoreAdapter(Adapter):
                     self._nodes[node_id].meta["expected_hops"] = expected_hops
                     self._nodes[node_id].meta["out_path"] = out_path_hex
                     self._nodes[node_id].meta["node_type"] = node_type
+                    if adv_name:
+                        self._drop_placeholder(adv_name)
                 else:
                     n = self._nodes[node_id]
                     if adv_name and n.name_source not in ("self_info",):
                         n.display_name = adv_name
                         n.name_source = "contact"
+                        self._drop_placeholder(adv_name)
                     if lat is not None:
                         n.lat = lat
                     if lon is not None:
@@ -2315,11 +2334,25 @@ class MeshCoreAdapter(Adapter):
         # comes from the "name: body" prefix in the decrypted text.
         display = extracted_name or "unknown"
         from_id = self._resolve_sender_node_id(display)
+        _now = datetime.now(timezone.utc)
         if from_id in self._nodes:
             # A decrypted channel message from a resolvable sender is direct
             # proof they're active right now — same "still alive" signal a
             # PUSH_ADVERT gives, just via chat instead of an advert.
-            self._nodes[from_id].last_heard = datetime.now(timezone.utc)
+            self._nodes[from_id].last_heard = _now
+        elif from_id != "unknown":
+            # No pubkey known for this sender (channel messages carry no sender
+            # pubkey — only the "name: body" text prefix, and this name hasn't
+            # matched any contact we've heard directly). Register a placeholder
+            # so the sender still shows up in the node list instead of vanishing
+            # entirely; meta.no_pubkey tells the UI DM/trace can't work against
+            # it yet. Cleared automatically once the real pubkey is learned
+            # (see _drop_placeholder).
+            self._nodes[from_id] = MeshNode(
+                node_id=from_id, display_name=display,
+                first_seen=_now, last_heard=_now, name_source="message_text",
+                meta={"no_pubkey": True},
+            )
         log.debug("MeshCore %s: polled ch%d msg sender=%r", self.name, ch_idx, display)
 
         if not decrypted_ok and _is_likely_encrypted(body_text):
@@ -2437,6 +2470,7 @@ class MeshCoreAdapter(Adapter):
         if extracted_name and node.name_source not in ("self_info", "contact"):
             node.display_name = extracted_name
             node.name_source = "message_text"
+            self._drop_placeholder(extracted_name)
         display = node.display_name
 
         dm_decrypt_label = ""

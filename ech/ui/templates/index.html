@@ -402,6 +402,20 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
   cursor: pointer;
 }
 .node-ping-btn:hover { background: #112a22; }
+.chan-pill {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 2px 7px;
+  background: var(--bg);
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.chan-pill:hover { background: var(--bg3); }
+.chan-pill.active { background: var(--blue-bg, #0e2a4a); color: var(--blue); border-color: var(--blue); }
+#chan-subbar { display: none; flex-wrap: wrap; gap: 4px; padding: 4px 8px 6px; }
+#chan-subbar.show { display: flex; }
 .msg-delivery {
   font-family: var(--mono);
   font-size: 10px;
@@ -1044,6 +1058,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
       <span class="ch-status-dot ok" id="dot-all"></span>
     </div>
     <div id="dynamic-channels"></div>
+    <div id="chan-subbar"></div>
 
     <div class="sidebar-section" style="margin-top:8px">Quick send</div>
     <div class="channel-item" onclick="sendTemplate('Net check-in, all units please respond')">
@@ -1137,7 +1152,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 // ── State ────────────────────────────────────────────────────────────────
 const state = {
   messages: [],          // all received, newest first
-  filter: { adapter: 'all', search: '', priority: '' },
+  filter: { adapter: 'all', channel: 'all', search: '', priority: '' },
   unread: {},            // {adapter: count}
   activeTab: 'nodes',
   ws: null,
@@ -1290,6 +1305,7 @@ function handleInbound(msg) {
     prependMsgDOM(msg);
     updateCount();
   }
+  if (msg.source_adapter === state.filter.adapter) buildChanSubBar();
 
   // Priority alert
   if (msg.priority >= 2) {
@@ -1302,6 +1318,7 @@ function msgPassesFilter(msg) {
   if (state.mutedAdapters.has(msg.source_adapter)) return false;
   const f = state.filter;
   if (f.adapter !== 'all' && msg.source_adapter !== f.adapter) return false;
+  if (f.channel !== 'all' && msg.source_channel !== f.channel) return false;
   if (f.priority && msg.priority < parseInt(f.priority)) return false;
   if (f.search && !`${msg.from_display} ${msg.from_id} ${msg.body} ${msg.source_channel||''}`.toLowerCase().includes(f.search.toLowerCase())) return false;
   return true;
@@ -1769,6 +1786,7 @@ function updateCount() {
 // ── Filters ──────────────────────────────────────────────────────────────
 function filterAdapter(adapter, el) {
   state.filter.adapter = adapter;
+  state.filter.channel = 'all';   // switching networks — any per-channel pick no longer applies
   document.querySelectorAll('.channel-item').forEach(i => i.classList.remove('active'));
   el.classList.add('active');
   // Clear unread for this adapter
@@ -1777,7 +1795,43 @@ function filterAdapter(adapter, el) {
     const badge = document.getElementById(`badge-${adapter}`);
     if (badge) { badge.textContent = ''; badge.classList.remove('has-msgs'); }
   }
+  buildChanSubBar();
   renderAll();
+}
+
+// Per-channel filter (ch0/ch1/DM/etc.) within whichever single adapter is
+// selected — mirrors the channel picker native mesh apps have, since one
+// physical adapter often carries several logical channels worth of traffic.
+function filterChannel(channel, el) {
+  state.filter.channel = channel;
+  document.querySelectorAll('.chan-pill').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  renderAll();
+}
+
+function buildChanSubBar() {
+  const bar = document.getElementById('chan-subbar');
+  const adapter = state.filter.adapter;
+  if (adapter === 'all') {
+    bar.classList.remove('show');
+    bar.innerHTML = '';
+    return;
+  }
+  const channels = [...new Set(
+    state.messages.filter(m => m.source_adapter === adapter && m.source_channel)
+      .map(m => m.source_channel)
+  )].sort();
+  if (!channels.length) {
+    bar.classList.remove('show');
+    bar.innerHTML = '';
+    return;
+  }
+  if (!channels.includes(state.filter.channel)) state.filter.channel = 'all';
+  bar.classList.add('show');
+  bar.innerHTML = [
+    `<span class="chan-pill${state.filter.channel === 'all' ? ' active' : ''}" onclick="filterChannel('all', this)">All ch</span>`,
+    ...channels.map(ch => `<span class="chan-pill${state.filter.channel === ch ? ' active' : ''}" onclick="filterChannel('${escHtml(ch)}', this)">${escHtml(ch)}</span>`),
+  ].join('');
 }
 
 function applyFilter() {
@@ -1994,6 +2048,9 @@ function nodeTypeBadge(n) {
 }
 
 function nodeMessageable(n) {
+  // No confirmed pubkey (MeshCore sender only ever seen via decrypted channel
+  // text, never a contact/DM/advert) — there's nothing to address a DM to yet.
+  if (n.meta && n.meta.no_pubkey) return false;
   // Unknown type → assume messageable (don't hide functionality on missing data)
   return !['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT'].includes(n.node_type);
 }
@@ -2005,6 +2062,16 @@ function fillTo(callsign) {
 }
 
 function replyTo(nodeId, adapterName) {
+  // MeshCore channel messages carry no sender pubkey — only a "name: body" text
+  // prefix. If that name never matched a node we've heard directly (contact/DM/
+  // advert), ECH only knows the sender's display name, not an address a DM can
+  // reach. Filling the To: field with that name would look like a real address
+  // and then silently fail to send, so warn instead.
+  const known = _allNodes.find(n => n.node_id === nodeId && n._adapter === adapterName);
+  if (known && known.meta && known.meta.no_pubkey) {
+    toast(`Can't DM "${nodeId}" — only heard on a channel, no pubkey yet (needs a direct contact/advert first)`, 'err');
+    return;
+  }
   document.getElementById('compose-to').value = nodeId;
   // Select only the adapter the DM came in on so the reply goes back the same path
   document.querySelectorAll('.adapter-toggle').forEach(btn => {
@@ -2293,16 +2360,18 @@ function _renderNodeCards(nodes, totalCount) {
     const isStale = heardMs > 15 * 60 * 1000;   // >15 min = stale
     const staleStyle = isStale ? 'opacity:0.55;' : '';
     const staleTag = isStale ? '<span style="font-size:8px;color:var(--muted);margin-left:3px" title="Not heard in >15 minutes">stale</span>' : '';
+    const noPubkey = !!(n.meta && n.meta.no_pubkey);
+    const noPubkeyTag = noPubkey ? '<span style="font-size:8px;color:var(--muted);margin-left:3px" title="Only heard via decrypted channel text — no pubkey known yet, so DM/trace can\'t reach it until it advertises or DMs first">no pubkey</span>' : '';
     const hasPos = n.lat != null && n.lon != null;
     const mapBtn = hasPos ? `<a href="/map?lat=${encodeURIComponent(n.lat)}&lon=${encodeURIComponent(n.lon)}&zoom=16" target="_blank" rel="noopener" class="node-ping-btn" style="text-decoration:none;display:inline-block" title="Show this node on the map">📍 Map</a>` : '';
     const detailBtn = `<button class="node-ping-btn" onclick="openNodeDetail('${escHtml(n.node_id)}','${escHtml(n._adapter)}')" title="Show all known details for this node">ℹ Details</button>`;
     return `<div class="node-card" style="${staleStyle}">
       <div class="node-name" style="display:flex;align-items:center;gap:4px">
-        <span onclick="fillTo('${escHtml(n.node_id)}')" title="Click to fill compose-to with this node ID" style="cursor:pointer;flex:1">${escHtml(n.display_name)}${nodeTypeBadge(n)}${staleTag}</span>
+        <span onclick="fillTo('${escHtml(n.node_id)}')" title="Click to fill compose-to with this node ID" style="cursor:pointer;flex:1">${escHtml(n.display_name)}${nodeTypeBadge(n)}${staleTag}${noPubkeyTag}</span>
         <span style="font-size:9px;color:${adapterColor}">${adapterLabel}</span>
         ${mapBtn}
         ${detailBtn}
-        ${n._adapter?.includes('meshcore') ? `${nodeMessageable(n) ? `<button class="node-ping-btn" style="margin-left:2px" onclick="fillTo('${escHtml(n.node_id)}')" title="Direct message this node (fills compose To: field)">✉ DM</button>` : ''}<button class="node-ping-btn" onclick="pingNode('${escHtml(n._adapter)}','${escHtml(n.node_id)}',this)" title="Send a directed trace via this node (probe routed through it; result appears in the feed and as a green path on the map)">📡 Trace</button>` : ''}
+        ${n._adapter?.includes('meshcore') ? `${nodeMessageable(n) ? `<button class="node-ping-btn" style="margin-left:2px" onclick="fillTo('${escHtml(n.node_id)}')" title="Direct message this node (fills compose To: field)">✉ DM</button>` : ''}${noPubkey ? '' : `<button class="node-ping-btn" onclick="pingNode('${escHtml(n._adapter)}','${escHtml(n.node_id)}',this)" title="Send a directed trace via this node (probe routed through it; result appears in the feed and as a green path on the map)">📡 Trace</button>`}` : ''}
       </div>
       <div class="node-id">${escHtml(n.node_id)}${n.name_source ? ` <span style="font-size:8px;color:var(--muted)">[${escHtml(n.name_source)}]</span>` : ''}</div>
       <div class="node-stats">
