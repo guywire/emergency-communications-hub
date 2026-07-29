@@ -25,6 +25,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 .ctrl-btn.on:hover{color:var(--green);border-color:var(--green)}
 .ctrl-btn:disabled{opacity:.4;cursor:default}
 .ctrl-btn:disabled:hover{border-color:var(--border);color:var(--muted)}
+.ctrl-sep{width:1px;align-self:stretch;background:var(--border);margin:4px 2px}
 #map{height:calc(100vh - 44px);width:100%}
 /* Dark tile overlay */
 .leaflet-tile{filter:brightness(0.7) invert(1) hue-rotate(180deg) saturate(0.5)}
@@ -61,20 +62,25 @@ body.sim-mode #map{height:calc(100vh - 70px)}
   <span id="node-count">Loading…</span>
   <div class="spacer"></div>
   <div id="controls">
-    <button class="ctrl-btn" onclick="loadNodes()">↻ Refresh</button>
-    <button class="ctrl-btn" id="follow-btn" onclick="toggleFollow()">📍 Follow</button>
-    <button class="ctrl-btn on" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADSB</button>
-    <button class="ctrl-btn on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS</button>
+    <button class="ctrl-btn" onclick="loadNodes()" title="Reload node/marker data">↻ Refresh</button>
+    <button class="ctrl-btn" id="follow-btn" onclick="toggleFollow()" title="Auto-pan to follow this device's GPS position">📍 Follow</button>
+    <div class="ctrl-sep"></div>
     <button class="ctrl-btn on" id="bucket-repeater-btn"  onclick="toggleNodeBucket('repeater')"  title="Toggle repeater/infrastructure nodes (routers, digipeaters, IGates)">🔁 RPT</button>
     <button class="ctrl-btn on" id="bucket-companion-btn" onclick="toggleNodeBucket('companion')" title="Toggle companion/operator nodes (messageable devices, mobile/fixed stations)">👤 CMPN</button>
     <button class="ctrl-btn on" id="bucket-other-btn"     onclick="toggleNodeBucket('other')"     title="Toggle other node types (sensors, weather stations, unknown, AIS/ADS-B, etc.)">❓ OTHR</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn on" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADSB</button>
+    <button class="ctrl-btn on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS</button>
     <button class="ctrl-btn on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Traffic</button>
-    <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show PSKReporter callsign spots">PSK</button>
-    <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">GRID</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn" id="strips-btn" onclick="toggleStripReports()" title="Strip reports with a known MGRS or LAT/LON field (mesh bot 'strip' command)">📋 STRIPS</button>
+    <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">📓 HAM LOG</button>
+    <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show PSKReporter callsign spots">📻 PSK</button>
+    <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ GRID</button>
+    <div class="ctrl-sep"></div>
     <button class="ctrl-btn" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI</button>
     <button class="ctrl-btn" id="water-btn" onclick="toggleWaterBodies()" title="Water body quality + boating/kayak conditions (EPA ATTAINS + NDBC buoys)">🌊 WATER</button>
-    <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">HAM LOG</button>
-    <button class="ctrl-btn" id="strips-btn" onclick="toggleStripReports()" title="Strip reports with a known MGRS or LAT/LON field (mesh bot 'strip' command)">📋 STRIPS</button>
+    <div class="ctrl-sep"></div>
     <button class="ctrl-btn" id="draw-btn" onclick="toggleDrawMode()" title="Draw a repeater path: click each repeater in order, then Send Trace">✏ Draw Path</button>
   </div>
 </div>
