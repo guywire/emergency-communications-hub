@@ -168,6 +168,13 @@ class AnomalyEngine:
         self._finding_id = 0
         self._finding_prefix = f"{int(time.time()):010d}"  # unique per process start
 
+        self._coverage_service = None  # optional MeshMapperCoverageService, see set_coverage_service
+
+    def set_coverage_service(self, service) -> None:
+        """Wire in a MeshMapperCoverageService so long_range_contact findings can
+        say whether the hub's own grid square is a confirmed two-way link."""
+        self._coverage_service = service
+
     async def init_from_db(self) -> None:
         """Load persisted anomaly history so known-bad nodes don't re-alert after restart."""
         if not self._db or self._db_primed:
@@ -531,13 +538,30 @@ class AnomalyEngine:
                     else:
                         transport_class = "unknown"
                         tip = ""
+                    evidence = {"lat": lat, "lon": lon, "name": name,
+                                "distance_km": round(dist_km, 1), "distance_mi": round(dist_mi, 1),
+                                "transport_class": transport_class, "tip": tip}
+                    # If a MeshMapper coverage cell is known for the hub's own location,
+                    # say whether it's a confirmed two-way link or a one-way asymmetric
+                    # one — turns a distance-only guess into an RF-evidence-backed answer.
+                    if self._coverage_service:
+                        my_cell = self._coverage_service.my_coverage()
+                        if my_cell:
+                            cov_type = my_cell.get("coverage_type")
+                            from ech.core.meshmapper_coverage import COVERAGE_EXPLANATION
+                            evidence["my_coverage_type"] = cov_type
+                            evidence["my_coverage_note"] = COVERAGE_EXPLANATION.get(cov_type, "")
+                            if cov_type == "RX":
+                                tip = (tip + " " if tip else "") + \
+                                    "MeshMapper coverage data confirms your grid square is RX-only " \
+                                    "(you hear others, they don't hear you back) — this is likely a " \
+                                    "one-way asymmetric RF link, not ducting."
+                                evidence["tip"] = tip
                     f = AnomalyFinding(
                         id=self._next_id(), adapter=adapter, node_id=node_id,
                         rule="long_range_contact", severity=severity,
                         summary=f"Contact {label} is {dist_km:.0f}km ({dist_mi:.0f}mi) away",
-                        evidence={"lat": lat, "lon": lon, "name": name,
-                                  "distance_km": round(dist_km, 1), "distance_mi": round(dist_mi, 1),
-                                  "transport_class": transport_class, "tip": tip},
+                        evidence=evidence,
                     )
                     new_findings.append(f)
 

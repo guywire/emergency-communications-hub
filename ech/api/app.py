@@ -67,7 +67,7 @@ _callook_cache: dict = {}       # base callsign → (lat, lon, precise: bool)
 UI_DIR = Path(__file__).parent.parent / "ui"
 
 
-def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None) -> FastAPI:
+def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None) -> FastAPI:
     global _psk_contact, _psk_default_callsign
     _op_callsign = "N0CALL"   # injected into pages as window.ECH_CALLSIGN
     # Build PSKReporter User-Agent from config: PSKReporter TOS requires a real
@@ -112,7 +112,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # Public paths that don't require login
     PUBLIC_PATHS = {"/login", "/change-password", "/api/auth/login", "/api/auth/change-password",
                     "/api/health", "/ws", "/static", "/favicon.ico", "/metrics",
-                    "/ca.crt", "/tls-setup"}
+                    "/ca.crt", "/tls-setup", "/phonebook.xml"}
 
     # Paths/prefixes that require admin role (operators are blocked).
     # Covers the settings page, all adapter mutations, user management,
@@ -313,7 +313,15 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     _NO_CACHE = {"Cache-Control": "no-store"}
 
     _TOPNAV_HTML = """
-<nav id="ech-topnav" style="display:flex;gap:2px;align-items:center;margin-left:10px;padding-left:10px;border-left:1px solid rgba(139,148,158,.3);overflow-x:auto;flex-shrink:1">
+<style>
+/* Same header height on every page so the nav sits in the same vertical
+   spot regardless of which page injected it — each template previously
+   declared its own slightly different #header height (44-48px). Padding is
+   deliberately left alone — some pages tighten it responsively for small
+   screens, and forcing it here would fight that. */
+#header { height:44px !important; }
+</style>
+<nav id="ech-topnav" style="display:flex;gap:1px;align-items:center;margin-left:10px;padding-left:10px;border-left:1px solid rgba(139,148,158,.3);flex-shrink:0">
   <a href="/" data-p="/" title="Messages">&#128172;</a>
   <a href="/map" data-p="/map" title="Map">&#128506;&#65039;</a>
   <a href="/hamlog" data-p="/hamlog" title="Ham Log">&#128251;</a>
@@ -328,8 +336,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 <script>
 (function(){
   document.querySelectorAll('#ech-topnav a').forEach(function(a){
-    a.style.cssText = 'display:flex;align-items:center;justify-content:center;width:26px;height:26px;'
-      + 'border-radius:5px;font-size:14px;text-decoration:none;flex-shrink:0;line-height:1';
+    a.style.cssText = 'display:flex;align-items:center;justify-content:center;width:23px;height:23px;'
+      + 'border-radius:5px;font-size:13px;text-decoration:none;flex-shrink:0;line-height:1';
     if (a.dataset.p === location.pathname) {
       a.style.background = 'rgba(56,139,253,.18)';
       a.style.boxShadow = 'inset 0 0 0 1px rgba(56,139,253,.5)';
@@ -804,6 +812,38 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         packets.reverse()  # newest first
         return {"adapter": adapter_name, "count": len(packets), "packets": packets}
 
+    @app.get("/api/adapters/{adapter_name}/resolve_path")
+    async def resolve_meshcore_path(adapter_name: str, path: str = "", from_id: str = ""):
+        """Resolve a MeshCore relay-hash path (and/or a sender's node_id) to
+        known names/coordinates, for the message pane's hop-count badge.
+        `path` is the same comma-separated hex hash list stored on
+        NormalizedMessage.path (path[0] = first relay to touch the packet,
+        i.e. closest to the sender; path[-1] = closest to us).
+
+        If the sender itself has no known position, `approx` gives the
+        nearest-to-sender resolved relay's coordinates as a rough guess —
+        never exact, always labeled as such by the caller."""
+        adapter = router._adapters.get(adapter_name)
+        if not adapter or not hasattr(adapter, "_resolve_traffic_node"):
+            return {"status": "error", "detail": "not a MeshCore adapter"}
+        hashes = [h.strip() for h in path.split(",") if h.strip()]
+        resolved = [adapter._resolve_traffic_node(h) for h in hashes]
+
+        sender = None
+        if from_id:
+            node = adapter._nodes.get(from_id)
+            if node:
+                sender = {"id": node.node_id, "name": node.display_name,
+                          "lat": node.lat, "lon": node.lon}
+
+        approx = None
+        if not sender or sender.get("lat") is None:
+            # Best guess for the sender's area: the earliest-resolved relay in
+            # the chain (closest to the sender) that has a known position.
+            approx = next((r for r in resolved if r and r.get("lat") is not None), None)
+
+        return {"status": "ok", "path": resolved, "sender": sender, "approx": approx}
+
     @app.get("/api/meshcore/raw")
     async def get_meshcore_raw(limit: int = 200):
         """Merged raw packet log from all MeshCore adapters, newest first. For protocol debugging."""
@@ -905,6 +945,54 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     async def delete_contact(contact_id: str):
         await db.delete_contact(contact_id)
         return {"status": "ok"}
+
+    # ── Yealink remote phone book ────────────────────────────────────────
+    # Roster mirrors /etc/asterisk/voicemail.conf and pjsip.conf callerid
+    # on the PBX — update all three if extensions are added/renamed.
+    # Deliberately boring names (no role/callsign-to-position mapping
+    # broadcast to anyone who can fetch this URL). Yealink T4x series polls
+    # this once configured under Directory > Remote Phone Book.
+    _PBX_ROSTER = [(str(100 + i), f"KN0O Extension {i}") for i in range(1, 11)]
+    _PBX_FEATURE_CODES = [
+        ("*98", "Voicemail"),
+        ("900", "Conference Room"),
+        ("9999", "Page All Stations"),
+        ("*43", "Echo Test"),
+        ("*86", "Time Announcement"),
+    ]
+    # Curated HOIP (Hams Over IP) network extensions — dialable directly since
+    # extensions.conf's _[1-9]X. rule already routes any 4+ digit number out
+    # the hoip-iax trunk. Source: HOIP wiki conference-bridge-list and
+    # test-numbers reference pages (hamsoverip.github.io/wiki/reference/).
+    # HOIP's own directory is much larger and changes over time — check
+    # https://hamsoverip.com/phonebook for the current full list.
+    _HOIP_DIRECTORY = [
+        ("10001", "HOIP Public Chat 1"),
+        ("10021", "HOIP Hurricane Watch"),
+        ("10028", "HOIP Eastern US Storm"),
+        ("10029", "HOIP Region 1 Hams Net"),
+        ("10387", "HOIP ET Skywarn"),
+        ("3194", "HOIP Echo Test"),
+        ("3192", "HOIP Talking Clock"),
+    ]
+
+    @app.get("/phonebook.xml")
+    async def pbx_phonebook():
+        from xml.sax.saxutils import escape
+        entries = "".join(
+            f'<DirectoryEntry><Name>{escape(name)}</Name><Telephone>{escape(ext)}</Telephone></DirectoryEntry>'
+            for ext, name in _PBX_ROSTER
+        )
+        entries += "".join(
+            f'<DirectoryEntry><Name>{escape(name)}</Name><Telephone>{escape(code)}</Telephone></DirectoryEntry>'
+            for code, name in _PBX_FEATURE_CODES
+        )
+        entries += "".join(
+            f'<DirectoryEntry><Name>{escape(name)}</Name><Telephone>{escape(ext)}</Telephone></DirectoryEntry>'
+            for ext, name in _HOIP_DIRECTORY
+        )
+        xml = f'<?xml version="1.0" encoding="UTF-8"?><YealinkIPPhoneDirectory>{entries}</YealinkIPPhoneDirectory>'
+        return Response(content=xml, media_type="application/xml")
 
     @app.post("/api/contacts/import")
     async def import_contacts(
@@ -1192,6 +1280,59 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if ech_state:
             await ech_state.update_water_body_config(data)
         return {"status": "ok"}
+
+    # ── MeshMapper Coverage API (RF one-way-link diagnostics) ──────────────
+
+    @app.get("/api/meshmapper/status")
+    async def get_meshmapper_status():
+        if not mm_coverage_service:
+            return {"enabled": False, "configured": False}
+        return mm_coverage_service.status()
+
+    @app.post("/api/meshmapper/poll")
+    async def poll_meshmapper():
+        if not mm_coverage_service:
+            return {"status": "error", "detail": "MeshMapper coverage service not configured"}
+        await mm_coverage_service.trigger_poll()
+        return {"status": "ok", **mm_coverage_service.status()}
+
+    @app.post("/api/meshmapper/config")
+    async def update_meshmapper_config(request: Request):
+        # Only the poll interval is live-editable — the API key stays
+        # config.yaml-only so it never round-trips through a browser response.
+        if not mm_coverage_service:
+            return {"status": "error", "detail": "MeshMapper coverage service not configured"}
+        data = await request.json()
+        if "poll_interval_sec" in data:
+            mm_coverage_service._poll_interval = max(864, int(data["poll_interval_sec"]))
+        return {"status": "ok"}
+
+    # ── Map mode colors ───────────────────────────────────────────────────
+    # Per-mode marker color overrides for map.html's adapterColor(); falls
+    # back to that function's hardcoded defaults for any mode not present.
+
+    _MAP_COLOR_MODES = {"meshtastic", "meshcore", "aprs", "reticulum", "mqtt",
+                         "winlink", "js8", "adsb", "ais"}
+
+    @app.get("/api/map-colors")
+    async def get_map_colors():
+        import json as _json
+        raw = await db.get_kv("map_colors")
+        return {"colors": _json.loads(raw) if raw else {}}
+
+    @app.post("/api/map-colors")
+    async def update_map_colors(request: Request):
+        import json as _json
+        import re as _re
+        data = await request.json()
+        colors = data.get("colors", {})
+        cleaned = {
+            mode: color for mode, color in colors.items()
+            if mode in _MAP_COLOR_MODES and isinstance(color, str)
+            and _re.fullmatch(r"#[0-9a-fA-F]{6}", color)
+        }
+        await db.set_kv("map_colors", _json.dumps(cleaned))
+        return {"status": "ok", "colors": cleaned}
 
     # ── Marine / boating buoy (map marker) ──────────────────────────────────
 
@@ -1577,12 +1718,24 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         data = await request.json()
         if not auth:
             return {"status": "error", "detail": "auth not configured"}
-        ok = await auth.create_user(data["username"], data["password"], data.get("role","operator"))
+        ok = await auth.create_user(data["username"], data["password"], data.get("role","operator"),
+                                     color=data.get("color", "#8b949e"))
         return {"status": "ok" if ok else "error"}
 
     @app.delete("/api/users/{username}")
     async def delete_user(username: str):
         await db.delete_user(username)
+        return {"status": "ok"}
+
+    @app.post("/api/users/{username}/color")
+    async def set_user_color(username: str, request: Request):
+        import re as _re
+        data = await request.json()
+        color = data.get("color", "")
+        if not _re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            from starlette.responses import JSONResponse as _JR
+            return _JR({"status": "error", "detail": "color must be a #rrggbb hex value"}, status_code=400)
+        await db.update_user_color(username, color)
         return {"status": "ok"}
 
     @app.post("/api/users/{username}/password")
@@ -3045,7 +3198,8 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
 <h2>Supported radios (Web Serial CAT)</h2>
 <div class="box">
 <strong>Icom CI-V protocol</strong> — Xiegu G90 (0x70), IC-7300 (0x94), IC-705 (0x91), IC-9700 (0x98)<br>
-<strong>Kenwood text CAT</strong> — Elecraft K3/K4/KX3, TS-590/2000, Yaesu FT-991A (Kenwood emulation)
+<strong>Kenwood/Yaesu text CAT</strong> — Elecraft K3/K4/KX3, TS-590/2000, Yaesu FT-991A, FT-891, FT-857, FT-450, FT-DX10<br>
+<strong>DigiRig Mobile</strong> — not a rig itself; pick the protocol/baud for whichever radio it's wired to
 </div>
 
 <p><a href="/">← Back to SM</a></p>

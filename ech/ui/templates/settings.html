@@ -322,6 +322,48 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     </div>
   </div>
 
+  <!-- ── Map mode colors ────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('map-colors-body'); loadMapColors()">
+      <span class="section-title">MAP COLORS</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Marker color per mode</span>
+    </div>
+    <div id="map-colors-body" class="section-body" style="display:none">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:10px">
+        Overrides the default marker color used on the map for each mode. Leave a swatch at its
+        default to keep the built-in color.
+      </div>
+      <div id="map-colors-list" class="row3"></div>
+      <button class="btn btn-green" style="margin-top:16px" onclick="saveMapColors()">Save map colors</button>
+      <button class="btn" style="margin-top:16px;margin-left:8px" onclick="resetMapColors()">Reset to defaults</button>
+    </div>
+  </div>
+
+  <!-- ── MeshMapper coverage (RF one-way-link diagnostics) ─────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('mm-coverage-body'); loadMmCoverageStatus()">
+      <span class="section-title">MESHMAPPER COVERAGE</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Diagnose one-way RF links</span>
+    </div>
+    <div id="mm-coverage-body" class="section-body" style="display:none">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:10px">
+        Checks whether the hub's own grid square is a confirmed two-way (BIDIR) link in
+        community coverage data, or one-way (you hear others, they don't hear you). Requires
+        <code>meshmapper_coverage.api_key</code> set in config.yaml (never editable here — the
+        key stays server-side only) and a restart to enable.
+      </div>
+      <div id="mm-coverage-current" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></div>
+      <div class="row3" style="margin-top:12px">
+        <div>
+          <label>Poll interval (seconds, min 864 = 100/day cap)</label>
+          <input type="number" id="mm-poll" value="1800" min="864">
+        </div>
+      </div>
+      <button class="btn btn-green" style="margin-top:16px" onclick="saveMmCoverageConfig()">Save poll interval</button>
+      <button class="btn" style="margin-top:16px;margin-left:8px" onclick="pollMmCoverageNow()">Poll now</button>
+    </div>
+  </div>
+
   <!-- ── Live adapter control ────────────────────────────────── -->
   <div class="section">
     <div class="section-header" onclick="toggle('adapter-live-body')">
@@ -332,6 +374,7 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
       <div id="adapter-live-list"><div style="font-family:var(--mono);font-size:11px;color:var(--dim)">Loading…</div></div>
       <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:10px">
         Pausing an adapter stops it from generating mock traffic immediately. Does not affect config.yaml.
+        To rename/add MeshCore channels or set encryption keys, use MESHCORE TOOLS below.
       </div>
     </div>
   </div>
@@ -388,6 +431,10 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
               <option value="admin">Admin</option>
             </select>
           </div>
+        </div>
+        <div style="margin-top:12px;max-width:120px">
+          <label>Color</label>
+          <input type="color" id="new-color" value="#8b949e" style="width:100%;height:32px;padding:2px;cursor:pointer">
         </div>
         <button class="btn btn-green" style="margin-top:8px" onclick="addUser()">Add user</button>
       </div>
@@ -1230,6 +1277,88 @@ async function pollWbNow() {
   loadWbStatus();
 }
 
+async function loadMmCoverageStatus() {
+  const el = document.getElementById('mm-coverage-current');
+  if (!el) return;
+  try {
+    const st = await fetch('/api/meshmapper/status').then(r=>r.json());
+    if (!st.enabled) {
+      el.textContent = 'Service disabled — set meshmapper_coverage.enabled: true and api_key in config.yaml, then restart.';
+      return;
+    }
+    if (!st.configured) {
+      el.textContent = 'Enabled but no api_key configured in config.yaml.';
+      return;
+    }
+    const lines = [];
+    lines.push(`Region: ${esc(st.region_name || st.region || 'unknown')} — ${st.total_squares || 0} grid squares`);
+    if (st.my_coverage_type) {
+      lines.push(`Your grid square: <strong>${esc(st.my_coverage_type)}</strong> — ${esc(st.my_coverage_explanation || '')}`);
+    } else {
+      lines.push('Your grid square: no data yet for the configured hub location.');
+    }
+    if (st.coverage_type_counts) {
+      const counts = Object.entries(st.coverage_type_counts).map(([k,v]) => `${esc(k)}: ${v}`).join(', ');
+      lines.push(`Region totals — ${counts}`);
+    }
+    if (st.last_poll) lines.push(`Last poll: ${new Date(st.last_poll).toLocaleString()}`);
+    if (st.last_error) lines.push(`Error: ${esc(st.last_error)}`);
+    el.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
+  } catch (e) {
+    el.textContent = 'Status unavailable';
+  }
+}
+
+async function saveMmCoverageConfig() {
+  const cfg = { poll_interval_sec: parseInt(document.getElementById('mm-poll').value) || 1800 };
+  await fetch('/api/meshmapper/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
+  toast('MeshMapper poll interval saved');
+}
+
+async function pollMmCoverageNow() {
+  const r = await fetch('/api/meshmapper/poll', {method:'POST'}).then(r=>r.json()).catch(()=>null);
+  toast(r && r.status === 'ok' ? 'MeshMapper coverage poll triggered' : 'MeshMapper coverage poll failed');
+  loadMmCoverageStatus();
+}
+
+// Must match adapterColor()'s hardcoded defaults in map.html.
+const MAP_COLOR_DEFAULTS = {
+  meshtastic: '#3fb950', meshcore: '#f78c6c', aprs: '#7c3aed',
+  reticulum: '#c792ea', mqtt: '#e2a44f', winlink: '#f85149',
+  js8: '#ffcb6b', adsb: '#f0b429', ais: '#56d3c8',
+};
+
+async function loadMapColors() {
+  const listEl = document.getElementById('map-colors-list');
+  if (!listEl || listEl.dataset.loaded) return;
+  listEl.dataset.loaded = '1';
+  const d = await fetch('/api/map-colors').then(r=>r.json()).catch(()=>({colors:{}}));
+  const colors = d.colors || {};
+  listEl.innerHTML = Object.entries(MAP_COLOR_DEFAULTS).map(([mode, def]) => `
+    <div>
+      <label>${esc(mode)}</label>
+      <input type="color" id="map-color-${esc(mode)}" value="${esc(colors[mode] || def)}" style="width:100%;height:32px;padding:2px;cursor:pointer">
+    </div>
+  `).join('');
+}
+
+async function saveMapColors() {
+  const colors = {};
+  for (const mode of Object.keys(MAP_COLOR_DEFAULTS)) {
+    const el = document.getElementById(`map-color-${mode}`);
+    if (el) colors[mode] = el.value;
+  }
+  await fetch('/api/map-colors', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({colors})});
+  toast('Map colors saved — refresh the map to see changes');
+}
+
+function resetMapColors() {
+  for (const [mode, def] of Object.entries(MAP_COLOR_DEFAULTS)) {
+    const el = document.getElementById(`map-color-${mode}`);
+    if (el) el.value = def;
+  }
+}
+
 async function loadWbStatus() {
   const el = document.getElementById('wb-current');
   const listEl = document.getElementById('wb-list');
@@ -1335,6 +1464,9 @@ function renderUsers(users) {
       ? `<button class="btn btn-blue" onclick="resetUserPassword('${esc(u.username)}')" style="padding:3px 8px;font-size:10px" title="Set a new password for this user — they must change it at next login">Reset PW</button>`
       : '';
     return `<div class="user-row">
+      <input type="color" value="${esc(u.color || '#8b949e')}" title="Account color"
+        style="width:22px;height:22px;padding:0;border:none;cursor:pointer;vertical-align:middle"
+        onchange="setUserColor('${esc(u.username)}', this.value)">
       <span class="user-name">${esc(u.username)}</span>
       <span class="user-role">${esc(u.role)}</span>
       ${resetBtn}
@@ -1371,8 +1503,9 @@ async function addUser() {
   const username = document.getElementById('new-username').value;
   const password = document.getElementById('new-password').value;
   const role = document.getElementById('new-role').value;
+  const color = document.getElementById('new-color').value;
   if (!username || !password) { alert('Username and password required'); return; }
-  await fetch('/api/users', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, password, role})});
+  await fetch('/api/users', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, password, role, color})});
   const users = await fetch('/api/users').then(r=>r.json());
   renderUsers(users.users || []);
   document.getElementById('new-username').value = '';
@@ -1380,9 +1513,18 @@ async function addUser() {
   toast(`User ${username} created`);
 }
 
+async function setUserColor(username, color) {
+  const r = await fetch(`/api/users/${encodeURIComponent(username)}/color`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({color}),
+  });
+  const d = await r.json();
+  toast(d.status === 'ok' ? `Color updated for ${username}` : `Error: ${d.detail || 'failed'}`);
+}
+
 async function deleteUser(username) {
   if (!confirm(`Delete user ${username}?`)) return;
-  await fetch(`/api/users/${username}`, {method:'DELETE'});
+  await fetch(`/api/users/${encodeURIComponent(username)}`, {method:'DELETE'});
   const users = await fetch('/api/users').then(r=>r.json());
   renderUsers(users.users || []);
 }
@@ -1470,20 +1612,9 @@ async function loadAdapterLive() {
       const chInput = chOpts
         ? `<select id="ch-${aEsc}" style="width:130px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">${chOpts}</select>`
         : `<input id="ch-${aEsc}" type="text" placeholder="name or index 0-7" style="width:130px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">`;
-      // MeshCore: channel rename table (one row per slot)
-      const mcChRenameRows = chList.map(c =>
-        `<div style="display:flex;align-items:center;gap:6px;padding:2px 0">
-          <span style="font-family:var(--mono);font-size:10px;color:var(--dim);width:18px;flex-shrink:0">${c.idx}</span>
-          <span style="font-family:var(--mono);font-size:10px;color:var(--muted);width:110px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis" title="${esc(c.name)}">${esc(c.name) || '<em style="color:var(--dim)">unnamed</em>'}</span>
-          <input type="text" id="mcren-${aEsc}-${c.idx}" placeholder="new name" value="${esc(c.name)}" style="width:120px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
-          <button class="btn btn-blue" style="padding:2px 8px;font-size:10px" onclick="renameMeshCoreChannel('${aEsc}',${c.idx})">Rename</button>
-        </div>`
-      ).join('');
-      const mcChRenameTable = chList.length ? `
-        <div style="width:100%;margin-top:6px;padding:6px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px">
-          <div style="font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted);margin-bottom:6px">Rename channels on device</div>
-          ${mcChRenameRows}
-        </div>` : '';
+      // MeshCore: renaming/adding channels and setting keys lives in the
+      // MESHCORE TOOLS section below (single source of truth) — this block
+      // only handles which channel to actively transmit on.
       const chSwitcher = isMeshCore ? `
         ${chInput}
         <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="switchChannel('${aEsc}')">Switch TX ch</button>
@@ -1496,8 +1627,7 @@ async function loadAdapterLive() {
           <option value="3" ${curMaxHops===3?'selected':''}>3</option>
         </select>
         <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="setMaxHops('${aEsc}')">Set hops</button>
-        <button id="scan-${aEsc}" class="btn btn-blue" style="padding:3px 8px;font-size:10px" title="Query device for all channel slots (0–255) via CMD_GET_CHANNEL 0x1F — takes ~13s" onclick="scanChannels('${aEsc}')">Scan channels</button>
-        ${mcChRenameTable}` : '';
+        <button id="scan-${aEsc}" class="btn btn-blue" style="padding:3px 8px;font-size:10px" title="Query device for all channel slots (0–255) via CMD_GET_CHANNEL 0x1F — takes ~13s" onclick="scanChannels('${aEsc}')">Scan channels</button>` : '';
       // Meshtastic controls
       const isMeshtastic = a.adapter.includes('meshtastic') && !a.adapter.includes('mock');
       const txIdx = a.detail ? (a.detail.channel_idx || 0) : 0;
@@ -1808,27 +1938,6 @@ async function setMaxHops(adapterName) {
     toast(`${adapterName}: max hops → ${d.max_hops === 0 ? 'device default' : d.max_hops}`, 'ok');
   } else {
     toast(`Set hops failed: ${d.detail}`, 'err');
-  }
-}
-
-async function renameMeshCoreChannel(adapterName, idx) {
-  const inp = document.getElementById(`mcren-${adapterName}-${idx}`);
-  const newName = inp ? inp.value.trim() : '';
-  if (!newName) { toast('Enter a channel name', 'err'); return; }
-  try {
-    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/add_channel`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({idx, name: newName}),
-    });
-    const d = await r.json();
-    if (d.status === 'ok') {
-      toast(`${adapterName}: channel ${idx} renamed to "${newName}"`, 'ok');
-      setTimeout(loadAdapterLive, 800);
-    } else {
-      toast(`Rename failed: ${d.detail || JSON.stringify(d)}`, 'err');
-    }
-  } catch(e) {
-    toast(`Rename error: ${e.message}`, 'err');
   }
 }
 
@@ -2367,11 +2476,21 @@ async function loadMeshCoreTools() {
     el.innerHTML = adapters.map(a => {
       const aName = a.adapter;
       const aEsc  = esc(aName);
+      const chList = a.detail && a.detail.channels_list ? a.detail.channels_list : [];
+      const knownChannels = chList.length ? `
+        <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:8px">
+          Known slots: ${chList.map(c => `${c.idx}:${esc(c.name) || '<em style="color:var(--dim)">unnamed</em>'}`).join(', ')}
+          — use "Scan channels" in Adapter Control above to refresh this list.
+        </div>` : `
+        <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:8px">
+          No known slots yet — use "Scan channels" in Adapter Control above to discover them.
+        </div>`;
       return `<div style="margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border)">
         <div style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--green);margin-bottom:8px">${aEsc}</div>
-        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:6px">Add / overwrite channel slot</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:6px">Rename, add, or set the key on a channel slot</div>
+        ${knownChannels}
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <input id="mc-ch-idx-${aEsc}" type="number" min="0" max="7" value="1" placeholder="idx" style="width:52px;font-family:var(--mono);font-size:11px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+          <input id="mc-ch-idx-${aEsc}" type="number" min="0" max="15" value="1" placeholder="idx" style="width:52px;font-family:var(--mono);font-size:11px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
           <input id="mc-ch-name-${aEsc}" type="text" placeholder="channel name" style="width:150px;font-family:var(--mono);font-size:11px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
           <input id="mc-ch-key-${aEsc}" type="text" placeholder="key hex (optional, 32 chars)" style="width:220px;font-family:var(--mono);font-size:11px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
           <button class="btn btn-blue" style="padding:4px 10px;font-size:10px" onclick="mcAddChannel('${aEsc}')">Set channel</button>
@@ -2430,6 +2549,7 @@ async function mcAddChannel(adapterName) {
     if (d.status === 'ok') {
       res.textContent = `✓ Channel ${d.idx} set to "${d.name}"`;
       res.style.color = 'var(--green)';
+      setTimeout(loadMeshCoreTools, 800);
     } else {
       res.textContent = `Error: ${d.detail || 'unknown'}`;
       res.style.color = 'var(--red)';

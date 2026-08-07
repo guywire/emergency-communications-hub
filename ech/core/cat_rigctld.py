@@ -27,14 +27,33 @@ rigctld setup examples
   Yaesu FT-991A   (38400 baud):
     rigctld -m 1035 -r /dev/ttyUSB0 -s 38400 -t 4532
 
+  Yaesu FT-891    (4800–38400 baud, check radio's MENU > CAT RATE):
+    rigctld -m 1036 -r /dev/ttyUSB0 -s 38400 -t 4532
+
+  Yaesu FT-857/FT-857D (4800–38400 baud, check MENU-24/25):
+    rigctld -m 1022 -r /dev/ttyUSB0 -s 9600 -t 4532
+
+  Yaesu FT-450/FT-450D (4800–38400 baud, check MENU-31/32):
+    rigctld -m 1027 -r /dev/ttyUSB0 -s 4800 -t 4532
+
   Yaesu FT-817/818:
     rigctld -m 1039 -r /dev/ttyUSB0 -s 9600 -t 4532
 
   Yaesu FT-DX10:
     rigctld -m 1043 -r /dev/ttyUSB0 -s 38400 -t 4532
 
+  DigiRig Mobile: not a radio — it's a USB sound-card + CAT/PTT interface.
+  It shows up as a USB-serial port (commonly /dev/ttyUSB0 or /dev/ttyACM0)
+  carrying whatever CAT protocol your actual radio speaks, so pick the -m
+  model number for YOUR radio from this list and point -r at the DigiRig's
+  serial port; there is no separate DigiRig hamlib model.
+
   Any rig (test without hardware):
     rigctld -m 1 -t 4532   # dummy rig
+
+  Model numbers above are current as of Hamlib's published model list —
+  run `rigctld --list | grep -i <model>` to confirm the exact ID for your
+  installed Hamlib version if a connection fails with "unknown rig".
 
 Config (config.yaml)
 ---------------------

@@ -69,6 +69,10 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn on" id="bucket-companion-btn" onclick="toggleNodeBucket('companion')" title="Toggle companion/operator nodes (messageable devices, mobile/fixed stations)">👤 CMPN</button>
     <button class="ctrl-btn on" id="bucket-other-btn"     onclick="toggleNodeBucket('other')"     title="Toggle other node types (sensors, weather stations, unknown, AIS/ADS-B, etc.)">❓ OTHR</button>
     <div class="ctrl-sep"></div>
+    <button class="ctrl-btn on" id="proto-meshtastic-btn" onclick="toggleNodeProtocol('meshtastic')" title="Toggle Meshtastic nodes — button border/text matches its map marker color">MSHT</button>
+    <button class="ctrl-btn on" id="proto-meshcore-btn"   onclick="toggleNodeProtocol('meshcore')"   title="Toggle MeshCore nodes — button border/text matches its map marker color">MSHC</button>
+    <button class="ctrl-btn on" id="proto-aprs-btn"       onclick="toggleNodeProtocol('aprs')"       title="Toggle APRS nodes — button border/text matches its map marker color">APRS</button>
+    <div class="ctrl-sep"></div>
     <button class="ctrl-btn on" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADSB</button>
     <button class="ctrl-btn on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS</button>
     <button class="ctrl-btn on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Traffic</button>
@@ -102,14 +106,14 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 </div>
 <div id="legend">
   <div style="font-weight:500;margin-bottom:6px;font-size:11px">Node Types</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>Meshtastic</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#f78c6c"></div>MeshCore</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div>APRS</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#c792ea"></div>Reticulum</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#e2a44f"></div>MQTT</div>
+  <div class="legend-item"><div class="legend-dot" id="legend-dot-meshtastic" style="background:#3fb950"></div>Meshtastic</div>
+  <div class="legend-item"><div class="legend-dot" id="legend-dot-meshcore" style="background:#f78c6c"></div>MeshCore</div>
+  <div class="legend-item"><div class="legend-dot" id="legend-dot-aprs" style="background:#7c3aed"></div>APRS</div>
+  <div class="legend-item"><div class="legend-dot" id="legend-dot-reticulum" style="background:#c792ea"></div>Reticulum</div>
+  <div class="legend-item"><div class="legend-dot" id="legend-dot-mqtt" style="background:#e2a44f"></div>MQTT</div>
   <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Alert / WL</div>
-  <div class="legend-item"><span style="color:#f0b429;font-size:13px;line-height:1;margin-right:6px">✈</span>ADS-B Aircraft</div>
-  <div class="legend-item"><span style="color:#56d3c8;font-size:13px;line-height:1;margin-right:6px">⚓</span>AIS Vessels</div>
+  <div class="legend-item"><span id="legend-dot-adsb" style="color:#f0b429;font-size:13px;line-height:1;margin-right:6px">✈</span>ADS-B Aircraft</div>
+  <div class="legend-item"><span id="legend-dot-ais" style="color:#56d3c8;font-size:13px;line-height:1;margin-right:6px">⚓</span>AIS Vessels</div>
   <div class="legend-item" id="legend-hamlog" style="display:none"><div class="legend-dot" style="background:#ffd700;border:1px solid #997a00"></div>Ham Log QSO</div>
 </div>
 
@@ -162,17 +166,59 @@ function toggleNodeBucket(bucket) {
   loadNodes();
 }
 
+// Protocol filter — MSHT/MSHC/APRS toggles, independent of the RPT/CMPN/OTHR
+// node-role buckets above (a repeater can be any of these three protocols).
+// Buttons are colored to match adapterColor() so the toggle itself doubles
+// as a legend.
+let _showProtocols = new Set(['meshtastic', 'meshcore', 'aprs']);
+
+function nodeProtocol(node) {
+  const a = (node._adapter || '').toLowerCase();
+  if (a.includes('meshtastic')) return 'meshtastic';
+  if (a.includes('meshcore'))   return 'meshcore';
+  if (a.includes('aprs'))       return 'aprs';
+  return null;   // anything else (reticulum, mqtt, js8, etc.) is unaffected by this filter
+}
+
+function toggleNodeProtocol(proto) {
+  if (_showProtocols.has(proto)) _showProtocols.delete(proto);
+  else _showProtocols.add(proto);
+  document.getElementById(`proto-${proto}-btn`).classList.toggle('on', _showProtocols.has(proto));
+  _applyProtoButtonColor(proto);
+  loadNodes();
+}
+
+// Colors a protocol toggle button to match its marker color while "on";
+// clears the inline override while "off" so the muted .ctrl-btn default
+// still reads as visually disabled instead of staying colored either way.
+function _applyProtoButtonColor(proto) {
+  const btn = document.getElementById(`proto-${proto}-btn`);
+  if (!btn) return;
+  if (_showProtocols.has(proto)) {
+    const color = adapterColor(proto);
+    btn.style.borderColor = color;
+    btn.style.color = color;
+  } else {
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  }
+}
+
+// Populated from /api/map-colors on load; falls back to the hardcoded
+// defaults below for any mode the admin hasn't customized.
+let _mapColorOverrides = {};
+
 function adapterColor(adapter) {
   const a = adapter.toLowerCase();
-  if (a.includes('meshtastic')) return '#3fb950';
-  if (a.includes('meshcore'))   return '#f78c6c';
-  if (a.includes('aprs'))       return '#7c3aed';
-  if (a.includes('reticulum') || a.includes('rns')) return '#c792ea';
-  if (a.includes('mqtt'))       return '#e2a44f';
-  if (a.includes('winlink') || a.includes('pat'))   return '#f85149';
-  if (a.includes('js8') || a.includes('hf'))        return '#ffcb6b';
-  if (a.includes('adsb') || a.includes('ads-b') || a.includes('opensky')) return '#f0b429';
-  if (a.includes('ais'))                            return '#56d3c8';
+  if (a.includes('meshtastic')) return _mapColorOverrides.meshtastic || '#3fb950';
+  if (a.includes('meshcore'))   return _mapColorOverrides.meshcore || '#f78c6c';
+  if (a.includes('aprs'))       return _mapColorOverrides.aprs || '#7c3aed';
+  if (a.includes('reticulum') || a.includes('rns')) return _mapColorOverrides.reticulum || '#c792ea';
+  if (a.includes('mqtt'))       return _mapColorOverrides.mqtt || '#e2a44f';
+  if (a.includes('winlink') || a.includes('pat'))   return _mapColorOverrides.winlink || '#f85149';
+  if (a.includes('js8') || a.includes('hf'))        return _mapColorOverrides.js8 || '#ffcb6b';
+  if (a.includes('adsb') || a.includes('ads-b') || a.includes('opensky')) return _mapColorOverrides.adsb || '#f0b429';
+  if (a.includes('ais'))                            return _mapColorOverrides.ais || '#56d3c8';
   return '#8b949e';
 }
 
@@ -523,6 +569,8 @@ async function loadNodes() {
       if (!_showAircraft && isAircraft) return;
       if (!_showVessels  && isVessel)   return;
       if (!_showBuckets.has(nodeBucket(node))) return;
+      const proto = nodeProtocol(node);
+      if (proto && !_showProtocols.has(proto)) return;
       const id = node.node_id;
       seen.add(id);
       const isAlert  = alertNodes.has(id);
@@ -531,7 +579,7 @@ async function loadNodes() {
       // reduced marker opacity below — the old grey (#555566) override erased
       // which network a stale node belonged to and, on the dark tiles, made
       // dimmed markers look missing entirely.
-      const color = isAlert ? '#f85149' : isVessel ? '#56d3c8' : adapterColor(node._adapter);
+      const color = isAlert ? '#f85149' : isVessel ? adapterColor('ais') : adapterColor(node._adapter);
       const size  = isAlert ? 16 : 12;
       const popup = popupContent(node, isAlert);
       const icon  = makeNodeIcon(node, color, size);
@@ -1620,8 +1668,22 @@ function toast(msg) {
   setTimeout(() => el.remove(), 3000);
 }
 
-loadNodes();
-setInterval(loadNodes, 30000);
+fetch('/api/map-colors').then(r => r.json()).then(d => {
+  _mapColorOverrides = d.colors || {};
+  for (const [mode, color] of Object.entries(_mapColorOverrides)) {
+    const el = document.getElementById(`legend-dot-${mode}`);
+    if (!el) continue;
+    if (el.classList.contains('legend-dot')) el.style.background = color;
+    else el.style.color = color;
+  }
+  // Color the MSHT/MSHC/APRS toggle buttons to match their marker color —
+  // uses adapterColor() (override or default) so it's always in sync even
+  // with no saved override.
+  ['meshtastic', 'meshcore', 'aprs'].forEach(_applyProtoButtonColor);
+}).catch(() => {}).finally(() => {
+  loadNodes();
+  setInterval(loadNodes, 30000);
+});
 loadWaterBodies();
 connectWS();
 // Base position for the rx end of stored-route lines

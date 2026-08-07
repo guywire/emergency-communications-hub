@@ -131,7 +131,11 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* A long channel list used to push Quick Send / the footer actions (Time
+     sync, Announce, etc.) below the fold with no way to reach them —
+     overflow:hidden clipped them outright. Scroll instead of clip. */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .sidebar-section {
   padding: 10px 12px 4px;
@@ -141,7 +145,19 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
   color: var(--dim);
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
 }
+.sidebar-section:hover { color: var(--muted); }
+.sidebar-section .collapse-chevron {
+  font-size: 9px;
+  transition: transform 0.15s ease;
+}
+.sidebar-section.collapsed .collapse-chevron { transform: rotate(-90deg); }
+.sidebar-collapsible.collapsed { display: none; }
 .channel-item {
   display: flex;
   align-items: center;
@@ -391,6 +407,8 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
   word-break: break-all;
 }
 .msg-path-detail.open { display: block; }
+.path-detail-resolved { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); color: var(--text); }
+.path-detail-resolved a { color: var(--blue); }
 .node-ping-btn {
   font-family: var(--mono);
   font-size: 9px;
@@ -416,6 +434,8 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 .chan-pill.active { background: var(--blue-bg, #0e2a4a); color: var(--blue); border-color: var(--blue); }
 #chan-subbar { display: none; flex-wrap: wrap; gap: 4px; padding: 4px 8px 6px; }
 #chan-subbar.show { display: flex; }
+#type-subbar { display: none; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; }
+#type-subbar.show { display: flex; }
 .msg-delivery {
   font-family: var(--mono);
   font-size: 10px;
@@ -848,12 +868,15 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
     padding: 0 8px;
     overflow-x: auto;
   }
-  /* Hide SVG radio graphic and some secondary header items to save space */
+  /* Hide SVG radio graphic and some secondary header items to save space —
+     the icon nav is the priority; everything else here is secondary chrome
+     that can go first so the nav reliably fits without its own scrollbar. */
   #header svg        { display: none; }
   #header .spacer    { min-width: 0; }
   #ws-status         { display: none; }
   #mode-indicator    { display: none; }
   #operator-display  { display: none; }
+  #incident-name     { display: none; }
 
   /* Show mobile toggle buttons */
   .mob-btn { display: block; }
@@ -1050,18 +1073,28 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 
   <!-- ── Sidebar ───────────────────────────────────────── -->
   <nav id="sidebar">
-    <div class="sidebar-section">Channels</div>
-    <div class="channel-item active" data-adapter="all" onclick="filterAdapter('all', this)">
-      <span class="ch-icon" style="background:var(--bg3);color:var(--muted)">ALL</span>
-      <span class="ch-label">All traffic</span>
-      <span class="ch-badge" id="badge-all"></span>
-      <span class="ch-status-dot ok" id="dot-all"></span>
+    <div class="sidebar-section" id="channels-header" onclick="toggleSidebarSection('channels')">
+      <span>Channels</span>
+      <span class="collapse-chevron">▾</span>
     </div>
-    <div id="dynamic-channels"></div>
-    <div id="chan-subbar"></div>
+    <div class="sidebar-collapsible" id="channels-collapsible">
+      <div class="channel-item active" data-adapter="all" onclick="filterAdapter('all', this)">
+        <span class="ch-icon" style="background:var(--bg3);color:var(--muted)">ALL</span>
+        <span class="ch-label">All traffic</span>
+        <span class="ch-badge" id="badge-all"></span>
+        <span class="ch-status-dot ok" id="dot-all"></span>
+      </div>
+      <div id="dynamic-channels"></div>
+      <div id="chan-subbar"></div>
+      <div id="type-subbar"></div>
+    </div>
 
     <div id="quick-send-section">
-    <div class="sidebar-section" style="margin-top:8px">Quick send</div>
+    <div class="sidebar-section" id="quicksend-header" style="margin-top:8px" onclick="toggleSidebarSection('quicksend')">
+      <span>Quick send</span>
+      <span class="collapse-chevron">▾</span>
+    </div>
+    <div class="sidebar-collapsible" id="quicksend-collapsible">
     <div class="channel-item" onclick="sendTemplate('Net check-in, all units please respond')">
       <span class="ch-icon" style="background:var(--bg3);color:var(--muted)">NET</span>
       <span class="ch-label" style="font-size:11px">Net check-in</span>
@@ -1073,6 +1106,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
     <div class="channel-item" onclick="sendEmergencyTemplate()">
       <span class="ch-icon" style="background:var(--red-bg);color:var(--red)">EMG</span>
       <span class="ch-label" style="font-size:11px;color:var(--red)">Emergency</span>
+    </div>
     </div>
     </div>
 
@@ -1154,7 +1188,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 // ── State ────────────────────────────────────────────────────────────────
 const state = {
   messages: [],          // all received, newest first
-  filter: { adapter: 'all', channel: 'all', search: '', priority: '' },
+  filter: { adapter: 'all', channel: 'all', search: '', priority: '', msgType: 'all' },
   unread: {},            // {adapter: count}
   activeTab: 'nodes',
   ws: null,
@@ -1201,7 +1235,7 @@ function connectWS() {
     setWsState(true);
     state.wsRetries = 0;
     toast('Connected to ECH bridge', 'ok');
-    loadHistory();
+    loadHistory().then(selectDefaultFilter);
     pollHealth();
     setInterval(pollHealth, 15000);
     pollWhoOnline();
@@ -1307,7 +1341,7 @@ function handleInbound(msg) {
     prependMsgDOM(msg);
     updateCount();
   }
-  if (msg.source_adapter === state.filter.adapter) buildChanSubBar();
+  if (msg.source_adapter === state.filter.adapter) { buildChanSubBar(); buildTypeSubBar(); }
 
   // Priority alert
   if (msg.priority >= 2) {
@@ -1320,10 +1354,34 @@ function msgPassesFilter(msg) {
   if (state.mutedAdapters.has(msg.source_adapter)) return false;
   const f = state.filter;
   if (f.adapter !== 'all' && msg.source_adapter !== f.adapter) return false;
-  if (f.channel !== 'all' && msg.source_channel !== f.channel) return false;
+  // Channel/type filters are per-adapter settings, not a single "current
+  // view" filter — an adapter you've set to MSG-only (or a specific channel)
+  // stays that way even while viewing "All traffic" mixed with every other
+  // adapter, so one busy adapter can't bury the rest in clutter. The adapter
+  // currently being viewed/edited reads its live (not-yet-saved) selection;
+  // every other adapter reads its last-saved one from _adapterFilterMemory.
+  const live = f.adapter === msg.source_adapter;
+  const remembered = _adapterFilterMemory[msg.source_adapter];
+  const chan = live ? f.channel   : (remembered ? remembered.channel : 'all');
+  const type = live ? f.msgType   : (remembered ? remembered.msgType : 'all');
+  if (chan !== 'all' && msg.source_channel !== chan) return false;
+  if (type !== 'all' && msgTypePrefix(msg.body) !== type) return false;
   if (f.priority && msg.priority < parseInt(f.priority)) return false;
   if (f.search && !`${msg.from_display} ${msg.from_id} ${msg.body} ${msg.source_channel||''}`.toLowerCase().includes(f.search.toLowerCase())) return false;
   return true;
+}
+
+// APRS bodies are prefixed by type (see aprs_is.py _packet_to_body): MSG for
+// directed/broadcast messages, OBJ for object reports (commonly AIS vessels
+// rebroadcast by a gate), POS for position beacons, STATUS for status text.
+// Non-APRS traffic (Meshtastic/MeshCore/etc.) has none of these and is
+// treated as its own implicit "text" type, unaffected by this filter.
+function msgTypePrefix(body) {
+  if (!body) return null;
+  for (const p of ['MSG ', 'OBJ ', 'POS ', 'STATUS ']) {
+    if (body.startsWith(p)) return p.trim();
+  }
+  return null;
 }
 
 function prependMsgDOM(msg) {
@@ -1421,11 +1479,16 @@ function buildMsgEl(msg) {
       if (Math.abs(diffSec) > 5) detail += `\nclock diff:  ${diffSec > 0 ? '+' : ''}${diffSec}s`;
     }
     const isMeshCoreMsg = (msg.source_adapter || '').toLowerCase().includes('meshcore');
-    const hopTip = (isMeshCoreMsg && hasHop && msg.hop_count > 0 && msg.from_id !== 'local')
-      ? 'Click for detail — relay node IDs not available in received channel msgs; open message detail to traceroute'
+    const hopTip = (isMeshCoreMsg && hasPath)
+      ? 'Click to show routing detail (resolves relay hashes to node names)'
+      : (isMeshCoreMsg && hasHop && msg.hop_count > 0 && msg.from_id !== 'local')
+      ? 'Click for detail — relay hashes weren\'t captured for this message; open message detail to traceroute'
       : 'Click to show routing detail';
-    pathBadge = `<span id="${badgeId}" class="msg-path-badge${mqttCls}" title="${hopTip}" onclick="togglePathDetail('${detailId}')">${label}</span>
-<div id="${detailId}" class="msg-path-detail">${escHtml(detail.trim())}</div>`;
+    const resolveArgs = isMeshCoreMsg && hasPath
+      ? `,'${escHtml(msg.source_adapter)}','${escHtml(msg.path)}','${escHtml(msg.from_id||'')}'`
+      : '';
+    pathBadge = `<span id="${badgeId}" class="msg-path-badge${mqttCls}" title="${hopTip}" onclick="togglePathDetail('${detailId}'${resolveArgs})">${label}</span>
+<div id="${detailId}" class="msg-path-detail"><div class="path-detail-raw">${escHtml(detail.trim())}</div></div>`;
   }
 
   // Signal strength badge — always visible when SNR or RSSI is available
@@ -1474,9 +1537,42 @@ function buildMsgEl(msg) {
   return div;
 }
 
-function togglePathDetail(id) {
+function togglePathDetail(id, adapter, path, fromId) {
   const el = document.getElementById(id);
-  if (el) el.classList.toggle('open');
+  if (!el) return;
+  el.classList.toggle('open');
+  if (el.classList.contains('open') && adapter && path) resolvePathDetail(el, adapter, path, fromId);
+}
+
+// path[0] = first relay to touch the packet (closest to sender), path[-1] =
+// closest to us — see /api/adapters/{name}/resolve_path docstring.
+const _pathResolveCache = new Map();
+
+async function resolvePathDetail(el, adapter, path, fromId) {
+  if (el.dataset.resolved) return;   // already fetched for this element
+  const cacheKey = `${adapter}|${path}|${fromId || ''}`;
+  let data = _pathResolveCache.get(cacheKey);
+  if (!data) {
+    try {
+      const r = await fetch(`/api/adapters/${encodeURIComponent(adapter)}/resolve_path?path=${encodeURIComponent(path)}&from_id=${encodeURIComponent(fromId || '')}`);
+      data = await r.json();
+    } catch(e) { return; }
+    _pathResolveCache.set(cacheKey, data);
+  }
+  if (data.status !== 'ok') return;
+  el.dataset.resolved = '1';
+
+  const names = data.path.map(n => n ? (n.ambiguous ? `${n.name} (±${n.ambiguous})` : n.name) : '? unresolved').join(' → ');
+  let html = `<div class="path-detail-resolved">resolved: ${escHtml(names)}</div>`;
+
+  const known  = data.sender && data.sender.lat != null;
+  const approx = !known && data.approx && data.approx.lat != null;
+  if (known) {
+    html += `<div class="path-detail-resolved">📍 <a href="/map?lat=${data.sender.lat}&lon=${data.sender.lon}&zoom=16" target="_blank" rel="noopener">show sender on map</a></div>`;
+  } else if (approx) {
+    html += `<div class="path-detail-resolved">📍 <a href="/map?lat=${data.approx.lat}&lon=${data.approx.lon}&zoom=10" target="_blank" rel="noopener">approx area — near relay "${escHtml(data.approx.name)}"</a> (guess, not the sender's actual position)</div>`;
+  }
+  el.insertAdjacentHTML('beforeend', html);
 }
 
 function deliveryStatusInfo(status) {
@@ -1526,6 +1622,36 @@ function openMsgDetail(msgId) {
   if (!msg) return;
   document.getElementById('msg-detail-content').innerHTML = buildMsgDetailHTML(msg);
   document.getElementById('msg-detail-popup').classList.add('open');
+  const isMeshCore = (msg.source_adapter || '').toLowerCase().includes('meshcore');
+  if (isMeshCore && msg.path) enhanceMsgDetailPath(msg);
+}
+
+async function enhanceMsgDetailPath(msg) {
+  const cacheKey = `${msg.source_adapter}|${msg.path}|${msg.from_id || ''}`;
+  let data = _pathResolveCache.get(cacheKey);
+  if (!data) {
+    try {
+      const r = await fetch(`/api/adapters/${encodeURIComponent(msg.source_adapter)}/resolve_path?path=${encodeURIComponent(msg.path)}&from_id=${encodeURIComponent(msg.from_id || '')}`);
+      data = await r.json();
+    } catch(e) { return; }
+    _pathResolveCache.set(cacheKey, data);
+  }
+  if (data.status !== 'ok') return;
+  // Popup may have been closed/replaced by the time this resolves — only patch if still showing this message
+  const table = document.querySelector('#msg-detail-content .msg-detail-table');
+  if (!table || !document.getElementById('msg-detail-popup').classList.contains('open')) return;
+
+  const names = data.path.map(n => n ? (n.ambiguous ? `${n.name} (±${n.ambiguous})` : n.name) : '? unresolved').join(' → ');
+  let rowsHtml = `<tr><td class="msg-detail-key">Resolved path</td><td>${escHtml(names)}</td></tr>`;
+
+  const known  = data.sender && data.sender.lat != null;
+  const approx = !known && data.approx && data.approx.lat != null;
+  if (known) {
+    rowsHtml += `<tr><td class="msg-detail-key">Position</td><td>📍 <a href="/map?lat=${data.sender.lat}&lon=${data.sender.lon}&zoom=16" target="_blank" rel="noopener">show sender on map</a></td></tr>`;
+  } else if (approx) {
+    rowsHtml += `<tr><td class="msg-detail-key">Approx. area</td><td>📍 <a href="/map?lat=${data.approx.lat}&lon=${data.approx.lon}&zoom=10" target="_blank" rel="noopener">near relay "${escHtml(data.approx.name)}"</a> <span style="color:var(--muted);font-size:10px">(guess, not the sender's actual position)</span></td></tr>`;
+  }
+  table.insertAdjacentHTML('beforeend', rowsHtml);
 }
 
 function closeMsgDetail() {
@@ -1785,10 +1911,57 @@ function updateCount() {
   document.getElementById('msg-count').textContent = `${visible} message${visible !== 1 ? 's' : ''}`;
 }
 
+// ── Collapsible sidebar sections (Channels / Quick send) — mainly for small
+// screens, where a long channel list can otherwise push Quick Send and the
+// footer actions (Time sync, Announce, etc.) out of reach ──────────────────
+function toggleSidebarSection(name) {
+  const collapsed = document.getElementById(`${name}-header`).classList.toggle('collapsed');
+  document.getElementById(`${name}-collapsible`).classList.toggle('collapsed', collapsed);
+  localStorage.setItem(`ech_sidebar_${name}_collapsed`, collapsed ? 'true' : 'false');
+}
+
+function restoreSidebarSections() {
+  ['channels', 'quicksend'].forEach(name => {
+    if (localStorage.getItem(`ech_sidebar_${name}_collapsed`) === 'true') {
+      document.getElementById(`${name}-header`).classList.add('collapsed');
+      document.getElementById(`${name}-collapsible`).classList.add('collapsed');
+    }
+  });
+}
+restoreSidebarSections();
+
 // ── Filters ──────────────────────────────────────────────────────────────
+// Remembers each adapter's own channel/type filter selection across
+// switches within a session — so "All traffic" -> pick APRS+MSG -> "All
+// traffic" -> back to APRS restores MSG instead of resetting to "all". Reset
+// on every page load (see selectDefaultFilter()), not persisted, since the
+// startup default below always wins on reload.
+let _adapterFilterMemory = {};
+
+// Startup default: land on APRS filtered to MSG-type traffic (directed
+// messages) rather than "All traffic" — cuts through OBJ/POS/STATUS chatter
+// from the moment the page loads. Runs once per page load, after loadHistory()
+// so buildTypeSubBar() has actual messages to detect a "MSG" pill from; a
+// WS reconnect firing ws.onopen again must NOT re-trigger this and clobber
+// whatever the operator has since selected.
+let _didSelectDefaultFilter = false;
+
+async function selectDefaultFilter() {
+  if (_didSelectDefaultFilter) return;
+  _didSelectDefaultFilter = true;
+  const el = document.querySelector('.channel-item[data-adapter*="aprs"]');
+  if (!el) return;   // no APRS adapter configured — leave the "All traffic" default alone
+  filterAdapter(el.dataset.adapter, el);
+  const msgPill = [...document.querySelectorAll('#type-subbar .chan-pill')].find(p => p.textContent.trim() === 'MSG');
+  if (msgPill) filterMsgType('MSG', msgPill);
+}
+
 function filterAdapter(adapter, el) {
+  _adapterFilterMemory[state.filter.adapter] = {channel: state.filter.channel, msgType: state.filter.msgType};
   state.filter.adapter = adapter;
-  state.filter.channel = 'all';   // switching networks — any per-channel pick no longer applies
+  const remembered = _adapterFilterMemory[adapter];
+  state.filter.channel = remembered ? remembered.channel : 'all';
+  state.filter.msgType = remembered ? remembered.msgType : 'all';
   document.querySelectorAll('.channel-item').forEach(i => i.classList.remove('active'));
   el.classList.add('active');
   // Clear unread for this adapter
@@ -1798,6 +1971,7 @@ function filterAdapter(adapter, el) {
     if (badge) { badge.textContent = ''; badge.classList.remove('has-msgs'); }
   }
   buildChanSubBar();
+  buildTypeSubBar();
   renderAll();
 }
 
@@ -1833,6 +2007,43 @@ function buildChanSubBar() {
   bar.innerHTML = [
     `<span class="chan-pill${state.filter.channel === 'all' ? ' active' : ''}" onclick="filterChannel('all', this)">All ch</span>`,
     ...channels.map(ch => `<span class="chan-pill${state.filter.channel === ch ? ' active' : ''}" onclick="filterChannel('${escHtml(ch)}', this)">${escHtml(ch)}</span>`),
+  ].join('');
+}
+
+// Per-type filter (MSG/OBJ/POS/STATUS) — same pill UX as the channel sub-bar,
+// but splits by what KIND of traffic a packet is rather than which channel it
+// came in on. Mainly useful on APRS, where OBJ (object rebroadcasts, often
+// AIS vessels via a gate) can otherwise bury MSG traffic.
+function filterMsgType(type, el) {
+  state.filter.msgType = type;
+  document.querySelectorAll('#type-subbar .chan-pill').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  renderAll();
+}
+
+function buildTypeSubBar() {
+  const bar = document.getElementById('type-subbar');
+  const adapter = state.filter.adapter;
+  if (adapter === 'all') {
+    bar.classList.remove('show');
+    bar.innerHTML = '';
+    return;
+  }
+  const types = [...new Set(
+    state.messages.filter(m => m.source_adapter === adapter)
+      .map(m => msgTypePrefix(m.body))
+      .filter(Boolean)
+  )].sort();
+  if (types.length < 2) {   // nothing to split on — don't show a bar with one option
+    bar.classList.remove('show');
+    bar.innerHTML = '';
+    return;
+  }
+  if (!types.includes(state.filter.msgType)) state.filter.msgType = 'all';
+  bar.classList.add('show');
+  bar.innerHTML = [
+    `<span class="chan-pill${state.filter.msgType === 'all' ? ' active' : ''}" onclick="filterMsgType('all', this)">All types</span>`,
+    ...types.map(t => `<span class="chan-pill${state.filter.msgType === t ? ' active' : ''}" onclick="filterMsgType('${escHtml(t)}', this)">${escHtml(t)}</span>`),
   ].join('');
 }
 
@@ -2615,6 +2826,11 @@ function adapterMeta(name) {
     return {icon:'PBX', label:'AREDN/PBX', cls:'pbx', toggle:'PBX', voice:true};
   if (n.includes('adsb') || n.includes('opensky') || n.includes('ais'))
     return {icon:(n.includes('adsb')||n.includes('opensky'))?'ADSB':(n.includes('aishub')?'AISH':(n.includes('aisstream')?'AISS':'AIS')), label:n.includes('adsb')?'ADS-B':n.includes('opensky')?'OpenSky':(n.includes('aishub')?'AISHub':(n.includes('aisstream')?'AISstream':'AIS')), cls:'', toggle:'', rxOnly:true};
+  // Passive MQTT topology-comparison adapter — merges LetsMesh path data into local
+  // routing but never adds to the message feed and can't send; must not appear as a
+  // compose target (see ech/adapters/letsmesh_compare.py docstring).
+  if (n.includes('letsmesh'))
+    return {icon:'LSM', label:'LetsMesh (compare)', cls:'', toggle:'', rxOnly:true};
   return {icon:name.slice(0,4).toUpperCase(), label:name, cls:'', toggle:name.slice(0,4).toUpperCase()};
 }
 
@@ -3161,8 +3377,9 @@ checkStorage();
 setInterval(checkStorage, 300_000);  // re-check every 5 minutes
 
 // ── Boot ─────────────────────────────────────────────────────────────────
-buildDynamicUI();
-connectWS();
+// Sequenced (not fire-and-forget) so the sidebar's channel items exist
+// before ws.onopen's selectDefaultFilter() looks for the APRS one.
+buildDynamicUI().then(connectWS);
 // Pre-fill compose To/adapter from map ?to= / ?adapter= query params
 (function() {
   const p = new URLSearchParams(location.search);

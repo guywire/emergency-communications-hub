@@ -49,7 +49,7 @@ class AuthManager:
     # ── Users ─────────────────────────────────────────────────────────────
 
     async def create_user(self, username: str, password: str, role: str = "operator",
-                          must_change_pw: bool = False) -> bool:
+                          must_change_pw: bool = False, color: str = "#8b949e") -> bool:
         import bcrypt
         pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
         try:
@@ -58,6 +58,7 @@ class AuthManager:
                 "pw_hash": pw_hash,
                 "role": role,
                 "must_change_pw": must_change_pw,
+                "color": color,
             })
             log.info("AUTH: user '%s' created with role '%s'", username, role)
             return True

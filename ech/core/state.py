@@ -42,12 +42,13 @@ class ECHState:
     All state changes are persisted and broadcast to WebSocket clients.
     """
 
-    def __init__(self, db, router=None, wx_service=None, aq_service=None, wb_service=None):
+    def __init__(self, db, router=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None):
         self._db = db
         self._router = router
         self._wx_service = wx_service
         self._aq_service = aq_service
         self._wb_service = wb_service
+        self._mm_coverage_service = mm_coverage_service
         self._ws_broadcast_fn = None   # set by router after init
 
         # In-memory state (loaded from DB on start)
@@ -262,6 +263,10 @@ class ECHState:
         if self._wb_service:
             self._wb_service._lat = lat
             self._wb_service._lon = lon
+        # Propagate to MeshMapper coverage service
+        if self._mm_coverage_service:
+            self._mm_coverage_service._lat = lat
+            self._mm_coverage_service._lon = lon
         # Propagate to all adapters — updates positions in mocks; MeshCore also
         # pushes this onto the radio's own advert position (CMD_SET_ADVERT_LATLON)
         # and stamps its own map node, no-op for other real adapters
@@ -325,6 +330,9 @@ class ECHState:
         if self._wb_service and lat is not None and lon is not None:
             self._wb_service._lat = float(lat)
             self._wb_service._lon = float(lon)
+        if self._mm_coverage_service and lat is not None and lon is not None:
+            self._mm_coverage_service._lat = float(lat)
+            self._mm_coverage_service._lon = float(lon)
         # Persist
         import json
         await self._db.set_kv("wx_config", json.dumps(config))

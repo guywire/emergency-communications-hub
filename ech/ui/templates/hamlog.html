@@ -3800,7 +3800,7 @@ function initWebSerial() {
     <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:3px">Rig / protocol</label>
     <select id="ws-rig-type" onchange="updateRigModal()" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-family:var(--mono);font-size:12px;margin-bottom:10px">
       <option value="civ">Icom CI-V — Xiegu G90, IC-7300, IC-705, IC-9700</option>
-      <option value="kenwood">Kenwood / Elecraft — TS-590/2000, K3/K4/KX3, FT-991A</option>
+      <option value="kenwood">Kenwood/Yaesu text CAT — TS-590/2000, K3/K4/KX3, FT-991A, FT-891, FT-857, FT-450, FT-DX10</option>
     </select>
 
     <div id="ws-civ-row">
@@ -3821,10 +3821,12 @@ function initWebSerial() {
     <select id="ws-baud" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-family:var(--mono);font-size:12px;margin-bottom:14px">
       <option value="19200">19200 — Xiegu G90 default</option>
       <option value="9600">9600 — Icom default</option>
-      <option value="38400">38400</option>
+      <option value="4800">4800 — Yaesu FT-857/FT-450 default</option>
+      <option value="38400">38400 — Yaesu FT-991A/FT-891/FT-DX10 common setting</option>
       <option value="57600">57600 — Elecraft K3/K4</option>
       <option value="115200">115200</option>
     </select>
+    <div style="font-size:10.5px;color:var(--muted);margin:-8px 0 12px">DigiRig Mobile: not a rig itself — pick the protocol/baud for whichever radio it's wired to.</div>
 
     <div style="display:flex;gap:8px;margin-bottom:10px">
       <button onclick="webSerialConnect()" style="flex:1;padding:6px 0;background:var(--blue-bg);border:1px solid var(--blue);color:var(--blue);border-radius:4px;cursor:pointer;font-family:var(--sans);font-weight:600">Connect</button>

@@ -342,9 +342,6 @@ class MeshCoreAdapter(Adapter):
         # Max hops for outgoing channel messages (second byte of CMD_SEND_CHANNEL_MSG).
         # 0 = device default. Set to 3 for typical local mesh (reduces network load).
         self._max_hops           = int(config.get("max_hops", 0))
-        # path.hash.mode: 0=1-byte, 1=2-byte, 2=3-byte addressing. None = don't set.
-        _phm = config.get("path_hash_mode")
-        self._path_hash_mode: int | None = int(_phm) if _phm is not None else None
         self._contacts_refresh_pending = False   # set when new nodes need name resolution
         self._contacts_last_refresh = 0.0        # monotonic timestamp of last GET_CONTACTS
         self._contacts_min_interval = 600.0      # min seconds between triggered refreshes (10 min)
@@ -926,65 +923,6 @@ class MeshCoreAdapter(Adapter):
             log.warning("MeshCore %s: text cmd %r error: %s", self.name, cmd, exc)
             return ""
 
-    async def _fetch_privkey_from_serial(self) -> str | None:
-        """Send 'get prv.key' text CLI command and return the 128-char hex private key.
-
-        Only works on serial transport before CMD_APP_START puts the device into
-        binary companion mode. TCP (port 4403) is binary-only and cannot use this.
-
-        Response format (meshcoretomqtt parsing scheme):
-          The device echoes "-> > <key128hex>" or emits the key on its own line.
-          We look for any 128-char contiguous hex run in the first 2 seconds of output.
-        """
-        import re
-        try:
-            # Flush stale input
-            await self._transport.read_raw(512, timeout=0.3)
-
-            await self._transport.write(b"get prv.key\r\n")
-
-            # Collect response for up to 2 seconds
-            buf = b""
-            deadline = asyncio.get_event_loop().time() + 2.0
-            while asyncio.get_event_loop().time() < deadline:
-                chunk = await self._transport.read_raw(512, timeout=0.4)
-                if not chunk:
-                    break
-                buf += chunk
-                # Stop early once we have more than enough bytes for a 128-char key
-                if len(buf) > 256:
-                    break
-
-            text = buf.decode("ascii", errors="ignore")
-
-            # meshcoretomqtt splits on "-> >" to find the key after the echo
-            if "-> >" in text:
-                after = text.split("-> >", 1)[1].strip()
-                candidate = re.sub(r"\s+", "", after.split("\n")[0])
-            else:
-                # Fallback: find the first 128-char hex run anywhere in the response
-                m = re.search(r"[0-9a-fA-F]{128}", text.replace(" ", ""))
-                candidate = m.group(0) if m else ""
-
-            if len(candidate) == 128:
-                try:
-                    int(candidate, 16)
-                    log.info("MeshCore %s: private key auto-retrieved from device (%s…)",
-                             self.name, candidate[:8])
-                    return candidate.upper()
-                except ValueError:
-                    pass
-
-            if text.strip():
-                log.warning("MeshCore %s: could not parse private key from device response: %r",
-                            self.name, text[:120])
-            else:
-                log.debug("MeshCore %s: no response to 'get prv.key' (TCP transport?)", self.name)
-            return None
-        except Exception as exc:
-            log.warning("MeshCore %s: private key fetch error: %s", self.name, exc)
-            return None
-
     async def _init_sequence(self) -> None:
         """Run the mandatory startup handshake per companion protocol spec."""
         # Private key fetch has already been done in connect() before _run_task started,
@@ -1033,28 +971,14 @@ class MeshCoreAdapter(Adapter):
         log.info("MeshCore %s: connecting via %s", self.name, self._transport_type)
         await self._transport.connect()
         self._connected = True
-        # Fetch private key via text CLI BEFORE starting the binary RX loop.
-        # Both _fetch_privkey_from_serial and _read_frame (in _run) read from the
-        # same asyncio.StreamReader — running them concurrently raises
-        # "read() called while another coroutine is already waiting for incoming data".
-        if self._transport_type == "serial":
-            privkey = await self._fetch_privkey_from_serial()
-            if privkey:
-                _privkey_registry[self.name] = privkey
-            # Apply persistent device settings via text CLI while we still own the reader.
-            if self._path_hash_mode is not None:
-                await self._send_text_cmd(f"set path.hash.mode {self._path_hash_mode}")
-            # Diagnostic only: log the radio's configured TX duty cycle. Firmware
-            # enforces an airtime budget (src/Dispatcher.cpp) — a low duty cycle
-            # (common where regulation requires it, e.g. 1% in some regions) can
-            # silently DELAY sends once the budget is spent, which reads exactly
-            # like "the first trace worked, then nothing" even though the command
-            # went out fine every time — the delay just isn't visible from ECH.
-            dc_resp = await self._send_text_cmd("get dutycycle")
-            if dc_resp.strip():
-                log.info("MeshCore %s: radio TX duty cycle = %s (a low value here can silently "
-                         "delay/drop repeated sends once the airtime budget is spent)",
-                         self.name, dc_resp.strip())
+        # Note: companion firmware (as opposed to repeater firmware) has no ASCII
+        # CLI over the serial port — only the binary companion protocol. Text
+        # commands like 'get prv.key', 'set path.hash.mode', 'get dutycycle' were
+        # previously sent here and confirmed (via direct serial probing) to get
+        # zero response on companion devices, even immediately after a hardware
+        # power cycle. Removed rather than left as a silent no-op. Private key for
+        # MQTT auth must be set via the 'private_key' config key (export it from
+        # the MeshCore app: Settings → Manage Identity Key).
         # Pre-warm node cache from DB so relay hashes can be resolved before GET_CONTACTS completes.
         await self._prewarm_nodes_from_db()
         await self._restore_topology()

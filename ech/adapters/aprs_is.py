@@ -302,17 +302,19 @@ class APRSISAdapter(Adapter):
             obj_name = packet.get("object_name", "").strip() if fmt == "object" else ""
             from_id  = obj_name if obj_name else gate_id
 
-            # Always update node position cache for any packet with a position
+            # Track every station heard from — even text-only senders with no
+            # position beacon (e.g. a plain APRS message packet) — so they show
+            # up in the node/filter list, not just position-bearing ones.
+            node = self._nodes.get(from_id)
+            if node is None:
+                node = MeshNode(
+                    node_id=from_id,
+                    display_name=from_id,
+                    first_seen=now,
+                )
+                self._nodes[from_id] = node
+            node.last_heard = now
             if lat is not None and lon is not None:
-                node = self._nodes.get(from_id)
-                if node is None:
-                    node = MeshNode(
-                        node_id=from_id,
-                        display_name=from_id,
-                        first_seen=now,
-                    )
-                    self._nodes[from_id] = node
-                node.last_heard = now
                 node.lat = float(lat)
                 node.lon = float(lon)
                 # Classify the station from its APRS symbol so the operator can
@@ -354,9 +356,17 @@ class APRSISAdapter(Adapter):
                 if from_id in self._nodes:
                     self._nodes[from_id].meta["mmsi"] = mmsi
 
+            # Directed messages TO us get their own "DM" channel (matching how
+            # operator-sent APRS messages are tagged) so the DM filter actually
+            # isolates them from ordinary position/object/status traffic, which
+            # otherwise all shares the same generic IS channel label.
+            source_channel = "144.390 (IS)"
+            if fmt == "message" and self._is_directed_to_us(packet.get("addresse", "")):
+                source_channel = "DM"
+
             msg = NormalizedMessage(
                 source_adapter=self.name,
-                source_channel="144.390 (IS)",
+                source_channel=source_channel,
                 from_id=from_id,
                 from_display=from_id,
                 body=body,
@@ -371,6 +381,13 @@ class APRSISAdapter(Adapter):
         except Exception as exc:
             log.debug("APRS-IS %s: packet processing error: %s", self.name, exc)
 
+    def _is_directed_to_us(self, addresse: str) -> bool:
+        """True if an APRS message packet's addressee is one of our own SSIDs
+        (base call or full callsign+SSID)."""
+        own_base = self._callsign.upper().split("-")[0]
+        own_full = self._callsign.upper()
+        return addresse.strip().upper() in (own_base, own_full)
+
     def _packet_to_body(self, packet: dict) -> str:
         """Convert an aprslib decoded packet dict to a human-readable body string."""
         fmt = packet.get("format", "")
@@ -381,11 +398,7 @@ class APRSISAdapter(Adapter):
             text = packet.get("message_text", "").strip()
             if not text:
                 return ""
-            # Check if addressed to any of our SSIDs (base call or full callsign with SSID)
-            own_base = self._callsign.upper().split("-")[0]
-            own_full = self._callsign.upper()
-            addr_upper = addresse.upper()
-            is_for_us = addr_upper in (own_base, own_full)
+            is_for_us = self._is_directed_to_us(addresse)
             if addresse and not is_for_us:
                 return f"MSG {from_id}→{addresse}: {text}"
             return f"MSG {from_id}: {text}"

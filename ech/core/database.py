@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS users (
     pw_hash        TEXT NOT NULL,
     role           TEXT NOT NULL DEFAULT 'operator',
     must_change_pw INTEGER NOT NULL DEFAULT 0,
+    color          TEXT NOT NULL DEFAULT '#8b949e',
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -283,6 +284,13 @@ class Database:
         # Add must_change_pw to users table if upgrading from older schema
         try:
             await self._db.execute("ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0")
+            await self._db.commit()
+        except Exception:
+            pass  # column already exists
+
+        # Add color to users table if upgrading from older schema
+        try:
+            await self._db.execute("ALTER TABLE users ADD COLUMN color TEXT NOT NULL DEFAULT '#8b949e'")
             await self._db.commit()
         except Exception:
             pass  # column already exists
@@ -726,7 +734,7 @@ class Database:
     # ── Users ─────────────────────────────────────────────────────────────
 
     async def get_users(self) -> list[dict]:
-        async with self._db.execute("SELECT username,role,created_at FROM users") as cur:
+        async with self._db.execute("SELECT username,role,color,created_at FROM users") as cur:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
@@ -738,12 +746,16 @@ class Database:
     async def upsert_user(self, user: dict) -> None:
         must_change = 1 if user.get("must_change_pw") else 0
         await self._db.execute(
-            "INSERT INTO users(username,pw_hash,role,must_change_pw,created_at) "
-            "VALUES(:username,:pw_hash,:role,:must_change_pw,datetime('now')) "
+            "INSERT INTO users(username,pw_hash,role,must_change_pw,color,created_at) "
+            "VALUES(:username,:pw_hash,:role,:must_change_pw,:color,datetime('now')) "
             "ON CONFLICT(username) DO UPDATE SET pw_hash=excluded.pw_hash, role=excluded.role, "
-            "must_change_pw=excluded.must_change_pw",
-            {**user, "must_change_pw": must_change},
+            "must_change_pw=excluded.must_change_pw, color=excluded.color",
+            {**user, "must_change_pw": must_change, "color": user.get("color") or "#8b949e"},
         )
+        await self._db.commit()
+
+    async def update_user_color(self, username: str, color: str) -> None:
+        await self._db.execute("UPDATE users SET color=? WHERE username=?", (color, username))
         await self._db.commit()
 
     async def update_user_password(self, username: str, pw_hash: str) -> None:

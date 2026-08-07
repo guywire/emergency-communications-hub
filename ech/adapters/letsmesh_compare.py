@@ -96,6 +96,14 @@ class LetsMeshCompareAdapter(MQTTAdapter):
             return None
         return self._get_sibling_adapter(self._target_name)
 
+    async def send(self, message) -> bool:
+        """Never send — this adapter only subscribes to LetsMesh's observer feed
+        for topology comparison. Publishing here would inject a bogus packet onto
+        a shared third-party network. The UI hides this adapter from compose
+        targets (see adapterMeta() in index.html); this is the server-side backstop."""
+        log.warning("LetsMesh %s: send() called but this adapter never transmits — dropping", self.name)
+        return False
+
     async def _handle_message(self, topic: str, payload: bytes) -> None:
         self._packets_seen += 1
         try:

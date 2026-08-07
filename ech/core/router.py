@@ -421,6 +421,13 @@ class Router:
             results[name] = ok
             if ok:
                 M.record_message_sent(name)
+                # Same live-broadcast gap as send_tracked() had: without this,
+                # weather share/alerts, time-sync, anomaly re-broadcast, mesh
+                # bot replies, and Winlink forwards were all stored but never
+                # pushed to connected browsers — only visible after a reload.
+                # non-"text" msg_types are dropped client-side by handleInbound
+                # already, so broadcasting unconditionally is safe.
+                await self._broadcast_ws(msg)
             await self._mark_tx_in_db(msg)
         return results
 
@@ -464,6 +471,11 @@ class Router:
             await self._mark_tx_in_db(msg)  # INSERT first so delivery UPDATE finds the row
             if ok:
                 M.record_message_sent(name)
+                # Other connected browsers only otherwise learn about this send on
+                # their next /api/messages fetch — broadcast it live, same as
+                # inbound traffic. The sender's own tab already has it via its
+                # local optimistic echo; both sides dedup by msg.id.
+                await self._broadcast_ws(msg)
                 await self._handle_delivery_status(name, msg.id, "sent_to_air", "sent")
             else:
                 await self._handle_delivery_status(name, msg.id, "failed", "send error")

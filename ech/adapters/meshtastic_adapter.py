@@ -12,10 +12,15 @@ Transport options (config 'transport' key):
   serial  — USB serial, auto-detect or explicit port  (default)
   tcp     — TCP/IP to node's built-in WiFi server
   ble     — Bluetooth LE (requires BlueZ; experimental on Linux)
+  browser — node plugged into the OPERATOR'S computer instead of the server;
+            the /remote-hw page opens it with Web Serial and bridges raw
+            bytes over /ws/remote-hw. See _BrowserSerialInterface below —
+            same pattern as meshcore.py's BrowserTransport, adapted to the
+            meshtastic library's synchronous stream interface.
 
 Config keys:
   name          str     adapter name shown in UI (default: meshtastic)
-  transport     str     serial | tcp | ble  (default: serial)
+  transport     str     serial | tcp | ble | browser  (default: serial)
   port          str     /dev/ttyUSB0 or /dev/ttyACM0  (serial; None = auto-detect)
   host          str     IP address or hostname  (tcp)
   ble_address   str     BLE MAC address  (ble; None = first found)
@@ -53,6 +58,85 @@ PORTNUM_ROUTING      = 5
 PORTNUM_TELEMETRY    = 67
 PORTNUM_TRACEROUTE   = 70
 PORTNUM_NEIGHBORINFO = 71
+
+
+class _BrowserSerialStream:
+    """Synchronous, pyserial-like stream (.read/.write/.flush/.close) that
+    bridges the meshtastic library's blocking reader thread to the async
+    ech.core.remote_hw registry. The meshtastic library's StreamInterface
+    calls these from a plain background thread (no event loop of its own),
+    so every call hops onto the adapter's asyncio loop via
+    run_coroutine_threadsafe and blocks on the result — mirrors
+    meshcore.py's BrowserTransport, adapted to this synchronous surface."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, adapter_name: str, timeout: float = 0.5):
+        self._loop = loop
+        self._adapter_name = adapter_name
+        self._timeout = timeout
+        self._buf = bytearray()
+        self._closed = False
+
+        from ech.core.remote_hw import registry
+        fut = asyncio.run_coroutine_threadsafe(registry.wait_for(adapter_name, timeout=10.0), loop)
+        self._sess = fut.result(timeout=15.0)
+        if self._sess is None:
+            raise ConnectionError(
+                f"no browser hardware session for {adapter_name!r} — open /remote-hw "
+                "and connect the Meshtastic node via Web Serial")
+
+    def write(self, data: bytes) -> int:
+        if self._closed:
+            return 0
+        fut = asyncio.run_coroutine_threadsafe(self._sess.write(bytes(data)), self._loop)
+        fut.result(timeout=5.0)
+        return len(data)
+
+    def flush(self) -> None:
+        pass  # writes are queued immediately on the session — nothing to flush
+
+    def read(self, size: int = 1) -> bytes:
+        if self._closed:
+            return b""
+        while len(self._buf) < size:
+            fut = asyncio.run_coroutine_threadsafe(self._sess.read(timeout=self._timeout), self._loop)
+            try:
+                chunk = fut.result(timeout=self._timeout + 1.0)
+            except (TimeoutError, asyncio.TimeoutError):
+                break  # mimic pyserial's read timeout — return whatever's buffered (maybe none)
+            except ConnectionError:
+                self._closed = True
+                break
+            if not chunk:
+                break
+            self._buf.extend(chunk)
+        if not self._buf:
+            return b""
+        n = min(size, len(self._buf))
+        out = bytes(self._buf[:n])
+        del self._buf[:n]
+        return out
+
+    def close(self) -> None:
+        self._closed = True
+
+
+def _make_browser_serial_interface(adapter_name: str, loop: asyncio.AbstractEventLoop,
+                                    connect_now: bool = True):
+    """Builds a SerialInterface whose stream is bridged through the browser
+    remote-hardware registry instead of a local OS serial port."""
+    import meshtastic.serial_interface
+    from meshtastic.stream_interface import StreamInterface
+
+    class _BrowserSerialInterface(meshtastic.serial_interface.SerialInterface):
+        def connect(self) -> None:
+            self.stream = _BrowserSerialStream(loop, adapter_name)
+            # Skip SerialInterface.connect() (opens a real OS port) — go
+            # straight to StreamInterface.connect(), which only uses self.stream.
+            StreamInterface.connect(self)
+
+    # devPath must be non-None so SerialInterface.__init__ skips its
+    # local-port auto-detect probe; our connect() override ignores it.
+    return _BrowserSerialInterface(devPath="browser", connectNow=connect_now)
 
 
 class MeshtasticAdapter(Adapter):
@@ -135,6 +219,8 @@ class MeshtasticAdapter(Adapter):
                 self._iface = meshtastic.ble_interface.BLEInterface(
                     address=self._ble_addr
                 )
+            elif self._transport == "browser":
+                self._iface = _make_browser_serial_interface(self.name, self._loop)
             else:
                 raise ValueError(f"Unknown Meshtastic transport: {self._transport!r}")
 

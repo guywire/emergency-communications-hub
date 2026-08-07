@@ -171,7 +171,10 @@ adapters:
 
 # ── MeshCore (real hardware) ──────────────────────────────────────────────────
 #
-# Serial (USB direct — private key auto-retrieved at startup via 'get prv.key'):
+# Serial (USB direct — companion firmware has no ASCII CLI over serial, so the
+# private key is NOT auto-retrieved. Export it from the MeshCore app: Settings
+# > Manage Identity Key > copy private key, then set private_key: below, OR add
+# a paired mqtt/letsmesh adapter's own private_key: for MQTT auth):
 #   - type: meshcore
 #     name: meshcore
 #     transport: serial
@@ -191,6 +194,12 @@ adapters:
 #     trace_hash_bytes: 1      # hash width for OUR trace probes (1/2/4; default 1 =
 #                              # the ecosystem convention — collisions are handled at
 #                              # name-resolution time by recency weighting)
+#     # NOTE: 'path.hash.mode' is a REPEATER-only CLI setting (ASCII CLI, not the
+#     # companion binary protocol) and does nothing on a companion device — MeshCore's
+#     # own docs say companion path-hash width is only configurable via the mobile
+#     # app's Experimental Settings, not from ECH/serial. Confirmed by direct probe
+#     # (2026-08-02): zero response to any ASCII CLI command over serial to this
+#     # companion, even right after a hardware power cycle.
 #     max_hops: 0              # outgoing message hop limit (0 = device default; 3 = local mesh).
 #     channel_keys:            # optional: per-channel PSKs for decrypting received messages.
 #       - idx: 0               #   channel index (0 = Public)
@@ -321,6 +330,14 @@ adapters:
 #     name: meshtastic-wifi
 #     transport: tcp
 #     host: 192.168.1.100
+#     channel_idx: 0
+#
+# Browser-hosted (radio plugged into the OPERATOR'S computer, not the server —
+# open /remote-hw in that browser and connect it via Web Serial; name below
+# must match the adapter name entered there):
+#   - type: meshtastic
+#     name: meshtastic-remote
+#     transport: browser
 #     channel_idx: 0
 #
 # LoRa / GPS can be configured live from the Settings page after connecting.
@@ -602,6 +619,20 @@ mesh_bot:
 #   bbox_deg: 0.75                 # discovery search box (degrees, ~50mi) around the hub
 #   buoy_match_max_mi: 60          # max distance to match a water body to a live buoy
 #   poll_interval_sec: 21600       # 6h — EPA assessment status changes slowly
+
+# ── MeshMapper Coverage API (community RF coverage — BIDIR/TX/RX/DISC/DEAD/DROP) ──
+# Diagnoses one-way ("I hear them, they don't hear me") links by checking whether
+# the hub's own grid square is a confirmed two-way (BIDIR) link in aggregated
+# community coverage data. Requires a region-scoped API key from a MeshMapper
+# regional administrator (https://wiki.meshmapper.net/coverage-api/) — 100
+# requests/day limit, so keep poll_interval_sec well above 864 (86400/100).
+# All fields below except `enabled`/`api_key` are also editable live from Settings.
+# meshmapper_coverage:
+#   enabled: true
+#   api_key: YOUR_MESHMAPPER_KEY    # NEVER commit a real key — set only in the live config
+#   lat: null                       # falls back to weather_service.nws_lat/lon
+#   lon: null
+#   poll_interval_sec: 1800         # 30 min = 48 requests/day
 
 # ── CAT radio control (rigctld / Hamlib) ──────────────────────────────────────
 # ECH connects to a running rigctld process over TCP and polls freq/mode every

@@ -44,7 +44,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <p>Adapters normally use devices plugged into the ECH server. This page lets the
     hardware live here instead: your browser opens the device and bridges raw
     bytes/audio to the server over WebSocket. The matching server adapter must be
-    configured with <code>transport: browser</code> (MeshCore) or
+    configured with <code>transport: browser</code> (MeshCore, Meshtastic) or
     <code>input_device: browser</code> (CW/RTTY/PSK31), using the adapter name you
     enter below. Keep this tab open — closing it disconnects the adapter.</p>
   </div>
@@ -63,6 +63,20 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   </div>
 
   <div class="card">
+    <h2>📻 Meshtastic node via Web Serial</h2>
+    <p>A Meshtastic radio on this computer's USB port becomes the server's Meshtastic
+    adapter. Requires the matching adapter's config to set
+    <code>transport: browser</code>.</p>
+    <label>Adapter name (must match config)</label>
+    <input id="serial2-adapter" value="meshtastic-remote">
+    <br>
+    <button class="btn" id="serial2-btn" onclick="connectSerial2()">Connect serial device…</button>
+    <div class="status idle" id="serial2-status">Not connected</div>
+    <div class="warn">Requires Chrome/Edge over HTTPS (Web Serial). Pick the Meshtastic
+    node's port in the browser prompt (115200 baud is applied automatically).</div>
+  </div>
+
+  <div class="card">
     <h2>🎛️ CAT radio control via Web Serial</h2>
     <p>Read live frequency/mode from a radio connected to this computer's USB port
     (Icom CI-V or Kenwood/Elecraft text CAT) and share it with the whole ECH
@@ -72,7 +86,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <label>Rig / protocol</label>
     <select id="cat-rig-type" onchange="updateCatRigRow()">
       <option value="civ">Icom CI-V — Xiegu G90, IC-7300, IC-705, IC-9700</option>
-      <option value="kenwood">Kenwood / Elecraft — TS-590/2000, K3/K4/KX3, FT-991A</option>
+      <option value="kenwood">Kenwood/Yaesu text CAT — TS-590/2000, K3/K4/KX3, FT-991A, FT-891, FT-857, FT-450, FT-DX10</option>
     </select>
     <div id="cat-civ-row">
       <label>CI-V address</label>
@@ -91,14 +105,18 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <select id="cat-baud">
       <option value="19200">19200 — Xiegu G90 default</option>
       <option value="9600">9600 — Icom default</option>
-      <option value="38400">38400</option>
+      <option value="4800">4800 — Yaesu FT-857/FT-450 default (check radio's CAT RATE menu)</option>
+      <option value="38400">38400 — Yaesu FT-991A/FT-891/FT-DX10 common setting</option>
       <option value="57600">57600 — Elecraft K3/K4</option>
       <option value="115200">115200</option>
     </select>
     <br>
     <button class="btn" id="cat-btn" onclick="catConnect()">Connect radio…</button>
     <div class="status idle" id="cat-status">Not connected</div>
-    <div class="warn">Requires Chrome/Edge over HTTPS (Web Serial). Firefox is not supported.</div>
+    <div class="warn">Requires Chrome/Edge over HTTPS (Web Serial). Firefox is not supported.
+    DigiRig Mobile users: pick the protocol/baud for your actual radio above — DigiRig is a
+    USB CAT/audio passthrough, not a rig of its own, so its serial port carries whatever
+    protocol the connected radio speaks.</div>
   </div>
 
   <div class="card">
@@ -129,17 +147,18 @@ function wsUrl() {
   return `${proto}//${location.host}/ws/remote-hw`;
 }
 
-// ── Web Serial bridge (MeshCore) ─────────────────────────────────────────
-let _serial = {port: null, ws: null, running: false};
+// ── Web Serial bridge (MeshCore / Meshtastic — keyed so both can run at once) ──
+const _serials = {}; // key -> {port, ws, running, reader, writer}
 
-async function connectSerial() {
-  const btn = document.getElementById('serial-btn');
-  if (_serial.running) { stopSerial('Disconnected'); return; }
+async function connectSerialFor(key) {
+  const btn = document.getElementById(`${key}-btn`);
+  const state = _serials[key] || (_serials[key] = {port: null, ws: null, running: false});
+  if (state.running) { stopSerialFor(key, 'Disconnected'); return; }
   if (!('serial' in navigator)) {
-    setStatus('serial-status', 'Web Serial not supported — use Chrome/Edge over HTTPS', 'err');
+    setStatus(`${key}-status`, 'Web Serial not supported — use Chrome/Edge over HTTPS', 'err');
     return;
   }
-  const adapter = document.getElementById('serial-adapter').value.trim();
+  const adapter = document.getElementById(`${key}-adapter`).value.trim();
   try {
     const port = await navigator.serial.requestPort();
     await port.open({baudRate: 115200});
@@ -147,50 +166,54 @@ async function connectSerial() {
     ws.binaryType = 'arraybuffer';
     await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
     ws.send(JSON.stringify({role: 'serial', adapter}));
-    _serial = {port, ws, running: true};
+    Object.assign(state, {port, ws, running: true});
     btn.textContent = 'Disconnect';
     btn.classList.add('stop');
-    setStatus('serial-status', `Bridging serial ↔ server as "${adapter}"`, 'ok');
+    setStatus(`${key}-status`, `Bridging serial ↔ server as "${adapter}"`, 'ok');
 
     // device → server
     (async () => {
       const reader = port.readable.getReader();
-      _serial.reader = reader;
+      state.reader = reader;
       try {
-        while (_serial.running) {
+        while (state.running) {
           const {value, done} = await reader.read();
           if (done) break;
           if (value && ws.readyState === 1) ws.send(value);
         }
-      } catch(e) { if (_serial.running) stopSerial('Serial read error: ' + e.message, true); }
+      } catch(e) { if (state.running) stopSerialFor(key, 'Serial read error: ' + e.message, true); }
       finally { try { reader.releaseLock(); } catch(e) {} }
     })();
 
     // server → device
     const writer = port.writable.getWriter();
-    _serial.writer = writer;
+    state.writer = writer;
     ws.onmessage = async (e) => {
       if (e.data instanceof ArrayBuffer) {
         try { await writer.write(new Uint8Array(e.data)); } catch(err) {}
       }
     };
-    ws.onclose = () => { if (_serial.running) stopSerial('Server closed the bridge', true); };
+    ws.onclose = () => { if (state.running) stopSerialFor(key, 'Server closed the bridge', true); };
   } catch(e) {
-    setStatus('serial-status', 'Failed: ' + e.message, 'err');
+    setStatus(`${key}-status`, 'Failed: ' + e.message, 'err');
   }
 }
 
-async function stopSerial(msg, isErr) {
-  _serial.running = false;
-  try { _serial.reader && await _serial.reader.cancel(); } catch(e) {}
-  try { _serial.writer && _serial.writer.releaseLock(); } catch(e) {}
-  try { _serial.port && await _serial.port.close(); } catch(e) {}
-  try { _serial.ws && _serial.ws.close(); } catch(e) {}
-  const btn = document.getElementById('serial-btn');
+async function stopSerialFor(key, msg, isErr) {
+  const state = _serials[key] || {};
+  state.running = false;
+  try { state.reader && await state.reader.cancel(); } catch(e) {}
+  try { state.writer && state.writer.releaseLock(); } catch(e) {}
+  try { state.port && await state.port.close(); } catch(e) {}
+  try { state.ws && state.ws.close(); } catch(e) {}
+  const btn = document.getElementById(`${key}-btn`);
   btn.textContent = 'Connect serial device…';
   btn.classList.remove('stop');
-  setStatus('serial-status', msg, isErr ? 'err' : 'idle');
+  setStatus(`${key}-status`, msg, isErr ? 'err' : 'idle');
 }
+
+function connectSerial() { return connectSerialFor('serial'); }
+function connectSerial2() { return connectSerialFor('serial2'); }
 
 // ── Web Audio bridge (CW/RTTY/PSK31) ─────────────────────────────────────
 let _audio = {ctx: null, ws: null, running: false, stream: null};

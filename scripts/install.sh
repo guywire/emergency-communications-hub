@@ -34,7 +34,12 @@ apt-get install -y --no-install-recommends \
   avahi-daemon avahi-utils \
   usbutils \
   mosquitto mosquitto-clients \
+  libportaudio2 \
   bluez 2>/dev/null || warn "bluez not available — BLE transports disabled"
+# libportaudio2 above is required for the cw_audio/rtty_audio/psk31_audio
+# adapters (sounddevice's runtime lib) — README documents it as a manual step
+# for Debian/Raspberry Pi OS; installed automatically here so a from-scratch
+# `install.sh` run doesn't silently miss it.
 
 # ── Python version check ───────────────────────────────────────────────────
 PYVER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")

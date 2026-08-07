@@ -19,6 +19,7 @@ WORK_STATUS.md
 
 # Deploy credentials — never commit
 deploy/local.env
+deploy/_live_config*.yaml
 
 # Config with real credentials — operators must create from template
 # /etc/ech/config.yaml is NOT tracked; copy config.yaml and edit locally
