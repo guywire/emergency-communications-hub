@@ -1,0 +1,30 @@
+[Unit]
+Description=Pat Winlink Client (HTTP API mode)
+Documentation=https://getpat.io
+After=network.target
+# Start Pat after ECH so ECH is ready to receive the WS connection
+After=ech.service
+
+[Service]
+Type=simple
+User=ech
+Group=ech
+# Pat stores config and mailbox under the user's home / XDG dirs
+# When running as the 'ech' system user these resolve to:
+#   config:  /home/ech/.config/pat/config.json
+#   mailbox: /home/ech/.local/share/pat/mailbox/CALLSIGN/
+Environment=HOME=/home/ech
+Environment=XDG_CONFIG_HOME=/home/ech/.config
+Environment=XDG_DATA_HOME=/home/ech/.local/share
+
+# Listen on localhost only — ECH talks to it on 127.0.0.1:8080
+# Change the port here AND in /etc/ech/config.yaml if needed
+ExecStart=/usr/local/bin/pat http -a 127.0.0.1:8080
+
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,3475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SignalMatrix</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxjaXJjbGUgY3g9IjkiIGN5PSI5IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iOSIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48Y2lyY2xlIGN4PSIyMyIgY3k9IjkiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjIzIiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjIzIiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMjMiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iMjMiIGN5PSIyMyIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48cGF0aCBkPSJNNCwxNiBRNywxMCAxMCwxNiBRMTMsMjIgMTYsMTYgUTE5LDEwIDIyLDE2IFEyNSwyMiAyOCwxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjIuNSIgZmlsbD0iIzNmYjk1MCIvPjwvc3ZnPg==">
+
+
+<style>
+:root {
+  --bg:       #0d1117;
+  --bg2:      #161b22;
+  --bg3:      #1c2230;
+  --border:   #30363d;
+  --border2:  #444c56;
+  --text:     #e6edf3;
+  --muted:    #8b949e;
+  --dim:      #484f58;
+  --green:    #3fb950;
+  --green-bg: #122a1a;
+  --yellow:   #d29922;
+  --yellow-bg:#2a1f00;
+  --red:      #f85149;
+  --red-bg:   #2d0f0f;
+  --blue:     #388bfd;
+  --blue-bg:  #051d4d;
+  --mesh:     #58a6ff;
+  --aprs:     #7c3aed;
+  --meshcore: #56d364;
+  --hf:       #e2a44f;
+  --sms:      #c792ea;
+  --wl:       #f78c6c;
+  --mono:     'IBM Plex Mono', 'Cascadia Code', 'Consolas', 'Liberation Mono', monospace;
+  --sans:     'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --header-h: 48px;
+  --sidebar-w: 220px;
+  --compose-h: 180px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; }
+
+/* ── Simulation mode banner ──────────────────────────── */
+#sim-banner {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  background: #431407;
+  border-bottom: 2px solid #c2410c;
+  color: #fb923c;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-align: center;
+  line-height: 24px;
+  z-index: 1000;
+  text-transform: uppercase;
+  user-select: none;
+}
+body.sim-mode #sim-banner { display: block; }
+body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
+
+/* ── Layout ─────────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-rows: var(--header-h) 26px 1fr;
+  grid-template-columns: var(--sidebar-w) 1fr 280px;
+  height: 100vh;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+#header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+#header .logo {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--green);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+#header .incident-badge {
+  background: var(--yellow-bg);
+  border: 1px solid var(--yellow);
+  color: var(--yellow);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+}
+#header .spacer { flex: 1; }
+#header .operator {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+#clock {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  min-width: 80px;
+  text-align: right;
+}
+.conn-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  display: inline-block;
+  margin-right: 4px;
+}
+.conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+/* ── Sidebar — channels ──────────────────────────────── */
+#sidebar {
+  grid-row: 3;
+  grid-column: 1;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  /* A long channel list used to push Quick Send / the footer actions (Time
+     sync, Announce, etc.) below the fold with no way to reach them —
+     overflow:hidden clipped them outright. Scroll instead of clip. */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sidebar-section {
+  padding: 10px 12px 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--dim);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+.sidebar-section:hover { color: var(--muted); }
+.sidebar-section .collapse-chevron {
+  font-size: 9px;
+  transition: transform 0.15s ease;
+}
+.sidebar-section.collapsed .collapse-chevron { transform: rotate(-90deg); }
+.sidebar-collapsible.collapsed { display: none; }
+.channel-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.1s, border-color 0.1s;
+  user-select: none;
+}
+.channel-item:hover { background: var(--bg3); }
+.channel-item.active {
+  background: var(--bg3);
+  border-left-color: var(--blue);
+}
+.ch-icon {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 5px;
+  border-radius: 3px;
+  min-width: 36px;
+  text-align: center;
+}
+.ch-icon.mesh    { background: #0e2a4a; color: var(--mesh); }
+.ch-icon.aprs    { background: #0e2038; color: var(--aprs); }
+.ch-icon.meshc   { background: #122a1a; color: var(--meshcore); }
+.ch-icon.hf      { background: #2a1e08; color: var(--hf); }
+.ch-icon.sms     { background: #1e0e2a; color: var(--sms); }
+.ch-icon.wl      { background: #2a1500; color: var(--wl); }
+.ch-label { font-size: 12px; flex: 1; color: var(--text); }
+.ch-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  background: var(--blue);
+  color: #fff;
+  border-radius: 8px;
+  padding: 1px 6px;
+  min-width: 20px;
+  text-align: center;
+  display: none;
+}
+.ch-badge.has-msgs { display: block; }
+.ch-status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+  flex-shrink: 0;
+}
+.ch-status-dot.ok { background: var(--green); }
+.ch-mute-btn {
+  background: none; border: none; cursor: pointer; font-size: 11px;
+  opacity: 0.2; padding: 0; line-height: 1; flex-shrink: 0;
+  transition: opacity 0.1s;
+}
+.ch-mute-btn:hover { opacity: 0.6; }
+.ch-mute-btn.muted { opacity: 1; filter: grayscale(0); }
+.ch-status-dot.warn { background: var(--yellow); }
+.ch-status-dot.err { background: var(--red); }
+
+.sidebar-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.sidebar-footer button {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.sidebar-footer button:hover { border-color: var(--blue); color: var(--blue); }
+
+/* ── Main inbox ──────────────────────────────────────── */
+#main {
+  grid-row: 3;
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+#filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
+#filter-bar input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  outline: none;
+}
+#filter-bar input:focus { border-color: var(--blue); }
+#filter-bar select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+}
+.msg-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+  scroll-behavior: smooth;
+}
+#messages::-webkit-scrollbar { width: 4px; }
+#messages::-webkit-scrollbar-track { background: transparent; }
+#messages::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.msg {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 0 10px;
+  padding: 6px 14px;
+  border-left: 2px solid transparent;
+  animation: fadeIn 0.2s ease;
+  position: relative;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.msg:hover { background: var(--bg2); }
+.msg.priority-1 { border-left-color: var(--yellow); background: rgba(210,153,34,0.04); }
+.msg.priority-2 { border-left-color: var(--red); background: rgba(248,81,73,0.08); animation: alertPulse 0.4s ease; }
+@keyframes alertPulse { 0%,100%{background:rgba(248,81,73,0.08)} 50%{background:rgba(248,81,73,0.22)} }
+
+.msg-ts {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  padding-top: 2px;
+  text-align: right;
+  line-height: 1.3;
+  grid-row: 1 / 3;
+}
+.msg-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.msg-from {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.msg-from:hover { text-decoration: underline; }
+.msg-adapter-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  letter-spacing: 0.05em;
+}
+.tag-mesh    { background: #0e2a4a; color: var(--mesh); }
+.tag-aprs    { background: #0e2038; color: var(--aprs); }
+.tag-meshc   { background: #122a1a; color: var(--meshcore); }
+.tag-hf      { background: #2a1e08; color: var(--hf); }
+.tag-sms     { background: #1e0e2a; color: var(--sms); }
+.tag-wl      { background: #2a1500; color: var(--wl); }
+.tag-default { background: var(--bg3); color: var(--muted); }
+.msg-priority-flag {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  letter-spacing: 0.05em;
+}
+.flag-1 { background: var(--yellow-bg); color: var(--yellow); }
+.flag-2 { background: var(--red-bg); color: var(--red); }
+.msg-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  margin-top: 2px;
+  word-break: break-word;
+}
+.msg-body.priority-2 { color: #ffb3b0; font-weight: 500; }
+.msg-body.encrypted { color: var(--dim); font-style: italic; font-size: 11px; }
+.msg-pos {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--blue);
+  margin-top: 2px;
+}
+.msg-ais {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.msg-ais a { color: var(--blue); text-decoration: none; }
+.msg-ais a:hover { text-decoration: underline; }
+.msg-path-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  background: #1a1a2a;
+  color: #7a9abf;
+  border: 1px solid #2a3a4a;
+  user-select: none;
+}
+.msg-path-badge:hover { background: #22223a; }
+.msg-path-badge.via-mqtt { background: #2a1a0a; color: #c89060; border-color: #4a3010; }
+.msg-path-detail {
+  display: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-top: 3px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.msg-path-detail.open { display: block; }
+.path-detail-resolved { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); color: var(--text); }
+.path-detail-resolved a { color: var(--blue); }
+.node-ping-btn {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 2px 7px;
+  background: #0a1e1a;
+  color: #40c080;
+  border: 1px solid #204030;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.node-ping-btn:hover { background: #112a22; }
+.chan-pill {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 2px 7px;
+  background: var(--bg);
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.chan-pill:hover { background: var(--bg3); }
+.chan-pill.active { background: var(--blue-bg, #0e2a4a); color: var(--blue); border-color: var(--blue); }
+#chan-subbar { display: none; flex-wrap: wrap; gap: 4px; padding: 4px 8px 6px; }
+#chan-subbar.show { display: flex; }
+#type-subbar { display: none; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; }
+#type-subbar.show { display: flex; }
+.msg-delivery {
+  font-family: var(--mono);
+  font-size: 10px;
+  margin-left: 4px;
+  cursor: default;
+}
+.msg-delivery.status-pending     { color: var(--dim); }
+.msg-delivery.status-sent_to_air { color: #60a0d0; }
+.msg-delivery.status-confirmed   { color: #4caf50; }
+.msg-delivery.status-direct      { color: #4caf50; }
+.msg-delivery.status-heard       { color: #9c6edd; }
+.msg-delivery.status-repeated    { color: #9c6edd; }
+.msg-delivery.status-delivered   { color: #40c060; }
+.msg-delivery.status-failed      { color: var(--red); }
+.msg-path-badge.status-direct    { color: #4caf50; border-color: #2a5a2a; }
+.msg-path-badge.status-heard     { color: #9c6edd; border-color: #4a3070; }
+.msg-path-badge.status-sent_to_air { color: #60a0d0; border-color: #203050; }
+.msg-path-badge.status-failed    { color: var(--red); border-color: #5a1010; }
+.msg-sig-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid;
+  cursor: default;
+  user-select: none;
+}
+.msg-sig-badge.sig-good    { color: #4caf50; border-color: #1a4a1a; background: #0a1a0a; }
+.msg-sig-badge.sig-fair    { color: #c8a830; border-color: #4a3a00; background: #1a1200; }
+.msg-sig-badge.sig-weak    { color: #d07030; border-color: #4a2800; background: #1a0e00; }
+.msg-sig-badge.sig-bad     { color: #e05040; border-color: #5a1010; background: #1a0808; }
+.msg-sig-badge.sig-unknown { color: #7a9abf; border-color: #2a3a4a; background: #1a1a2a; }
+.msg-detail-btn {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  margin-left: 4px;
+  opacity: 0.5;
+  user-select: none;
+  flex-shrink: 0;
+}
+.msg-detail-btn:hover { opacity: 1; color: var(--text); }
+/* Message detail popup */
+.msg-detail-popup { display: none; }
+.msg-detail-popup.open { display: block; }
+.msg-detail-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 400;
+}
+.msg-detail-panel {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--bg2); border-top: 2px solid var(--border);
+  z-index: 401; max-height: 55vh; overflow-y: auto;
+  padding: 14px 16px 18px;
+}
+.msg-detail-hdr {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.msg-detail-hdr span {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.msg-detail-close {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 14px; padding: 0 4px; line-height: 1;
+}
+.msg-detail-close:hover { color: var(--text); }
+.msg-detail-table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 11px; }
+.msg-detail-table td { padding: 3px 0; vertical-align: top; }
+.msg-detail-key { color: var(--muted); white-space: nowrap; padding-right: 12px; min-width: 90px; }
+.msg-detail-table td:last-child { color: var(--text); word-break: break-word; }
+.msg-detail-body { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--text); word-break: break-word; }
+.msg.outbound { opacity: 0.85; }
+
+/* ── Compose ──────────────────────────────────────────── */
+#compose {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#compose-top {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+#compose-adapters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.adapter-toggle {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.1s;
+}
+.adapter-toggle.on.mesh    { background: #0e2a4a; border-color: var(--mesh); color: var(--mesh); }
+.adapter-toggle.on.aprs    { background: #0e2038; border-color: var(--aprs); color: var(--aprs); }
+.adapter-toggle.on.meshc   { background: #122a1a; border-color: var(--meshcore); color: var(--meshcore); }
+.adapter-toggle.on.hf      { background: #2a1e08; border-color: var(--hf); color: var(--hf); }
+.adapter-toggle.on.sms     { background: #1e0e2a; border-color: var(--sms); color: var(--sms); }
+.adapter-toggle.on.wl      { background: #2a1500; border-color: var(--wl); color: var(--wl); }
+.adapter-toggle.on.pbx { background: #2a0e0e; border-color: #c04040; color: #c04040; }
+.adapter-toggle.pbx    { border-color: #5a2020; color: #5a2020; }
+#compose-to {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  width: 140px;
+  outline: none;
+}
+#compose-to:focus { border-color: var(--blue); }
+#compose-to::placeholder { color: var(--dim); }
+#priority-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+}
+#compose textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-radius: 4px;
+  resize: none;
+  height: 64px;
+  outline: none;
+  width: 100%;
+}
+#compose textarea:focus { border-color: var(--blue); }
+#compose textarea::placeholder { color: var(--dim); }
+#compose-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#char-counter {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  margin-left: auto;
+}
+#char-counter.warn { color: var(--yellow); }
+#char-counter.over { color: var(--red); }
+#send-btn {
+  background: var(--blue);
+  border: none;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: background 0.1s;
+}
+#send-btn:hover { background: #1f6feb; }
+#send-btn:disabled { background: var(--border2); cursor: not-allowed; }
+#send-btn.emergency { background: var(--red); }
+#send-btn.emergency:hover { background: #da3633; }
+#broadcast-btn {
+  background: var(--yellow-bg);
+  border: 1px solid var(--yellow);
+  color: var(--yellow);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#broadcast-btn:hover { background: rgba(210,153,34,0.2); }
+
+/* ── Right panel — nodes / status ─────────────────────── */
+#right-panel {
+  grid-row: 3;
+  grid-column: 3;
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.panel-tab {
+  flex: 1;
+  padding: 8px 0;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  user-select: none;
+  transition: color 0.1s;
+}
+.panel-tab:hover { color: var(--text); }
+.panel-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+.panel-content { flex: 1; overflow-y: auto; padding: 8px; }
+.panel-content::-webkit-scrollbar { width: 3px; }
+.panel-content::-webkit-scrollbar-thumb { background: var(--border); }
+
+/* Node cards */
+.node-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.node-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.node-id {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+.node-stats {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.stat {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+}
+.stat span { color: var(--muted); }
+.battery-bar {
+  display: inline-block;
+  width: 28px; height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+.battery-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--green);
+  transition: width 0.3s;
+}
+.battery-fill.low { background: var(--yellow); }
+.battery-fill.critical { background: var(--red); }
+
+/* Channel health cards */
+.health-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.health-card.ok    { border-left: 3px solid var(--green); }
+.health-card.warn  { border-left: 3px solid var(--yellow); }
+.health-card.err   { border-left: 3px solid var(--red); }
+.health-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+.health-state {
+  font-family: var(--mono);
+  font-size: 10px;
+  margin-top: 2px;
+}
+.health-state.ok   { color: var(--green); }
+.health-state.warn { color: var(--yellow); }
+.health-state.err  { color: var(--red); }
+.health-detail {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  margin-top: 4px;
+  line-height: 1.6;
+}
+
+/* ── Toast notifications ──────────────────────────────── */
+#toasts {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+.toast {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 8px 14px;
+  border-radius: 4px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  animation: slideIn 0.2s ease;
+  pointer-events: all;
+}
+.toast.ok  { border-left: 3px solid var(--green); }
+.toast.err { border-left: 3px solid var(--red); }
+@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ── System stats bar ───────────────────────────────────────────────────── */
+#sysbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 12px;
+  height: 26px;
+  background: #0a0e14;
+  border-bottom: 1px solid #1c2230;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.sbar-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border-right: 1px solid #1c2230;
+  height: 100%;
+  white-space: nowrap;
+}
+.sbar-item:first-child { padding-left: 0; }
+.sbar-label { color: #2d3540; }
+.sbar-val   { color: var(--muted); }
+.sbar-bar {
+  display: inline-block;
+  width: 36px; height: 4px;
+  background: #1c2230;
+  border-radius: 2px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.sbar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+.fill-cpu  { background: #388bfd; }
+.fill-mem  { background: #3fb950; }
+.fill-disk { background: #d29922; }
+.fill-ok   { background: #3fb950; }
+.fill-warn { background: #d29922; }
+.fill-hot  { background: #f85149; }
+.sbar-sep  { flex: 1; }
+
+/* ── Mobile overlay backdrop ─────────────────────────── */
+#mobile-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 199;
+}
+#mobile-backdrop.active { display: block; }
+
+/* Mobile toggle buttons — hidden on desktop */
+.mob-btn {
+  display: none;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ── Mobile responsive layout ────────────────────────── */
+@media (max-width: 768px) {
+  /* Single-column grid; sysbar row collapses */
+  #app {
+    grid-template-columns: 1fr;
+    grid-template-rows: var(--header-h) 0 1fr;
+  }
+
+  /* Hide sysbar — too dense for small screens */
+  #sysbar { display: none; }
+
+  /* Header: tighter, scrollable if overflow */
+  #header {
+    gap: 6px;
+    padding: 0 8px;
+    overflow-x: auto;
+  }
+  /* Hide SVG radio graphic and some secondary header items to save space —
+     the icon nav is the priority; everything else here is secondary chrome
+     that can go first so the nav reliably fits without its own scrollbar. */
+  #header svg        { display: none; }
+  #header .spacer    { min-width: 0; }
+  #ws-status         { display: none; }
+  #mode-indicator    { display: none; }
+  #operator-display  { display: none; }
+  #incident-name     { display: none; }
+
+  /* Show mobile toggle buttons */
+  .mob-btn { display: block; }
+
+  /* Sidebar: fixed overlay from left, hidden by default */
+  #sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: min(280px, 85vw);
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    grid-row: unset;
+    grid-column: unset;
+    border-right: 1px solid var(--border);
+  }
+  #sidebar.mob-open {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+  }
+
+  /* Main: full width, takes over column 1 / row 3 */
+  #main {
+    grid-row: 3;
+    grid-column: 1;
+  }
+
+  /* Right panel: fixed overlay from right, hidden by default */
+  #right-panel {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: min(320px, 92vw);
+    z-index: 200;
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+    grid-row: unset;
+    grid-column: unset;
+    border-left: 1px solid var(--border);
+  }
+  #right-panel.mob-open {
+    transform: translateX(0);
+    box-shadow: -4px 0 24px rgba(0,0,0,0.5);
+  }
+
+  /* Use dynamic viewport height so the layout contracts when the on-screen
+     keyboard appears — prevents compose-bottom from hiding behind the keyboard */
+  html, body { height: 100dvh; }
+  #app { height: 100dvh; }
+
+  /* Compose area: tighter layout so send button stays visible */
+  #compose { padding: 8px; gap: 6px; }
+
+  /* Adapter toggles: scroll horizontally instead of wrapping to multiple lines */
+  #compose-adapters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    max-width: calc(100vw - 60px);
+  }
+  #compose-adapters::-webkit-scrollbar { display: none; }
+
+  /* Wrap compose-top so adapters sit on their own row, To+Priority on the next */
+  #compose-top { flex-wrap: wrap; }
+
+  /* Shrink textarea slightly to recover space for the bottom row */
+  #compose textarea { height: 48px; }
+
+  /* Bottom row: hide beacon (space-saving), keep send always visible */
+  #compose-bottom { gap: 6px; }
+  #beacon-btn { display: none; }
+  #broadcast-btn { font-size: 10px; padding: 0 8px; }
+  #send-btn { flex-shrink: 0; }
+}
+</style>
+</head>
+<body>
+<!-- Simulation mode banner — shown when window.ECH_SIM === true -->
+<div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY — NOT OPERATIONAL DATA &#9888;</div>
+
+<!-- Low-storage warning banner (fixed bottom, shown by checkStorage()) -->
+<div id="storage-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:950;padding:5px 16px;font-family:var(--mono);font-size:11px;font-weight:600;align-items:center;gap:10px;background:#2a1f00;border-top:2px solid var(--yellow);color:var(--yellow)">
+  <span>&#9888; LOW DISK SPACE: <span id="storage-banner-detail"></span> — ECH database and logs may stop recording</span>
+  <button onclick="document.getElementById('storage-banner').style.display='none'" style="margin-left:auto;background:none;border:1px solid currentColor;color:inherit;padding:1px 8px;cursor:pointer;border-radius:3px;font-size:10px">Dismiss</button>
+</div>
+
+<!-- Mobile overlay backdrop (hidden on desktop) -->
+<div id="mobile-backdrop" onclick="mobileClosePanels()"></div>
+
+<div id="app">
+
+  <!-- ── Header ───────────────────────────────────────── -->
+  <header id="header">
+    <button class="mob-btn" onclick="mobileToggleSidebar()" title="Channels">☰</button>
+    <div class="logo">▣ SM</div>
+    <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;margin:0 4px" aria-hidden="true">
+      <rect width="32" height="32" rx="6" fill="#0d1117"/>
+      <!-- Signal arcs radiating from antenna tip -->
+      <path d="M13,14 Q16,9 19,14"  fill="none" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M10,17 Q16,7 22,17"  fill="none" stroke="#3fb950" stroke-width="1.1" stroke-linecap="round" opacity="0.65"/>
+      <path d="M7,20  Q16,5 25,20"  fill="none" stroke="#3fb950" stroke-width="0.8" stroke-linecap="round" opacity="0.35"/>
+      <!-- Antenna mast -->
+      <line x1="16" y1="13" x2="16" y2="24" stroke="#f0a500" stroke-width="2"   stroke-linecap="round"/>
+      <line x1="11" y1="17" x2="21" y2="17" stroke="#f0a500" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="13" y1="21" x2="19" y2="21" stroke="#f0a500" stroke-width="1.2" stroke-linecap="round"/>
+      <!-- Base legs -->
+      <line x1="16" y1="24" x2="11" y2="29" stroke="#f0a500" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="16" y1="24" x2="21" y2="29" stroke="#f0a500" stroke-width="1.5" stroke-linecap="round"/>
+      <!-- Mesh nodes at base and flanks -->
+      <circle cx="11" cy="29" r="2"   fill="#388bfd"/>
+      <circle cx="21" cy="29" r="2"   fill="#388bfd"/>
+      <circle cx="4"  cy="22" r="1.5" fill="#388bfd" opacity="0.7"/>
+      <circle cx="28" cy="22" r="1.5" fill="#388bfd" opacity="0.7"/>
+      <!-- Mesh connections -->
+      <line x1="11" y1="29" x2="21" y2="29" stroke="#388bfd" stroke-width="0.7" opacity="0.5"/>
+      <line x1="4"  y1="22" x2="11" y2="29" stroke="#388bfd" stroke-width="0.7" opacity="0.4"/>
+      <line x1="28" y1="22" x2="21" y2="29" stroke="#388bfd" stroke-width="0.7" opacity="0.4"/>
+    </svg>
+    <div class="incident-badge" id="incident-name">EXERCISE MODE</div>
+    <span class="conn-dot" id="ws-dot"></span>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)" id="ws-status">connecting…</span>
+    <div class="spacer"></div>
+    <span id="mode-indicator" style="font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:3px;background:#122a1a;color:var(--green);margin-right:4px">STANDARD</span>
+    <span id="bot-stats-wrap" style="position:relative;margin-left:6px;display:none" title="Mesh bot — click for activity">
+      <button id="bot-stats-btn" onclick="toggleBotStats(event)"
+        style="font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:4px"
+        title="Mesh bot activity">
+        🤖 <span id="bot-total-count">0</span><span id="bot-session-dot" style="display:none;width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 5px var(--green)"></span>
+      </button>
+      <div id="bot-stats-popover" style="display:none;position:absolute;right:0;top:calc(100% + 4px);min-width:220px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 0;z-index:200;box-shadow:0 4px 16px rgba(0,0,0,.5)">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--dim);padding:0 12px 6px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);margin-bottom:4px">Bot activity</div>
+        <div id="bot-stats-body" style="font-family:var(--mono);font-size:11px;color:var(--text);padding:0 12px"></div>
+        <div style="padding:6px 12px 2px;border-top:1px solid var(--border);margin-top:4px">
+          <a href="/logs" style="font-size:10px;color:var(--blue);text-decoration:none">View all →</a>
+        </div>
+      </div>
+    </span>
+    <span id="who-online-wrap" style="position:relative;margin-left:6px">
+      <button id="who-online-btn" onclick="toggleWhoOnline(event)"
+        style="font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:4px"
+        title="Active sessions">
+        👤 <span id="who-count">—</span>
+      </button>
+      <div id="who-popover" style="display:none;position:absolute;right:0;top:calc(100% + 4px);min-width:170px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 0;z-index:200;box-shadow:0 4px 16px rgba(0,0,0,.5)">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--dim);padding:0 12px 6px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);margin-bottom:4px">Active sessions</div>
+        <div id="who-list" style="font-family:var(--mono);font-size:11px;color:var(--text)"></div>
+      </div>
+    </span>
+    <span class="operator" id="operator-display" style="margin-left:8px;cursor:pointer" title="Click to set operator callsign" onclick="promptOperator()">OP: —</span>
+    <button id="tz-btn" onclick="toggleTimezone()" style="font-family:var(--mono);font-size:10px;padding:2px 6px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer;margin-left:4px">UTC</button>
+    <div id="clock"></div>
+    <span id="ech-version" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:4px;cursor:default" title="ECH version"></span>
+    <span id="auth-user-wrap" style="display:none;align-items:center;gap:5px;margin-left:6px">
+      <span id="auth-username" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
+      <button id="logout-btn" onclick="doLogout()"
+        style="font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer"
+        title="Sign out">Sign out</button>
+    </span>
+    <button class="mob-btn" onclick="mobileToggleNodes()" title="Nodes / Status">📡</button>
+  </header>
+
+  <!-- ── System stats bar ─────────────────────────────── -->
+  <div id="sysbar">
+    <div class="sbar-item">
+      <span class="sbar-label">CPU</span>
+      <span class="sbar-bar"><span class="sbar-fill fill-cpu" id="cpu-bar" style="width:0%"></span></span>
+      <span class="sbar-val" id="cpu-val">--</span>
+    </div>
+    <div class="sbar-item">
+      <span class="sbar-label">MEM</span>
+      <span class="sbar-bar"><span class="sbar-fill fill-mem" id="mem-bar" style="width:0%"></span></span>
+      <span class="sbar-val" id="mem-val">--</span>
+    </div>
+    <div class="sbar-item">
+      <span class="sbar-label">DISK</span>
+      <span class="sbar-bar"><span class="sbar-fill fill-disk" id="disk-bar" style="width:0%"></span></span>
+      <span class="sbar-val" id="disk-val">--</span>
+    </div>
+    <div class="sbar-item" id="net-item">
+      <span class="sbar-label">NET↑</span>
+      <span class="sbar-val" id="net-tx">--</span>
+      <span class="sbar-label" style="margin-left:6px">↓</span>
+      <span class="sbar-val" id="net-rx">--</span>
+    </div>
+    <div class="sbar-item" id="temp-item" style="display:none">
+      <span class="sbar-label">TEMP</span>
+      <span class="sbar-val" id="temp-val">--</span>
+    </div>
+    <div class="sbar-sep"></div>
+    <div class="sbar-item" style="border-right:none">
+      <span class="sbar-val" id="sysbar-ts" style="color:#2d3540">--</span>
+    </div>
+  </div>
+
+  <!-- ── Sidebar ───────────────────────────────────────── -->
+  <nav id="sidebar">
+    <div class="sidebar-section" id="channels-header" onclick="toggleSidebarSection('channels')">
+      <span>Channels</span>
+      <span class="collapse-chevron">▾</span>
+    </div>
+    <div class="sidebar-collapsible" id="channels-collapsible">
+      <div class="channel-item active" data-adapter="all" onclick="filterAdapter('all', this)">
+        <span class="ch-icon" style="background:var(--bg3);color:var(--muted)">ALL</span>
+        <span class="ch-label">All traffic</span>
+        <span class="ch-badge" id="badge-all"></span>
+        <span class="ch-status-dot ok" id="dot-all"></span>
+      </div>
+      <div id="dynamic-channels"></div>
+      <div id="chan-subbar"></div>
+      <div id="type-subbar"></div>
+    </div>
+
+    <div id="quick-send-section">
+    <div class="sidebar-section" id="quicksend-header" style="margin-top:8px" onclick="toggleSidebarSection('quicksend')">
+      <span>Quick send</span>
+      <span class="collapse-chevron">▾</span>
+    </div>
+    <div class="sidebar-collapsible" id="quicksend-collapsible">
+    <div class="channel-item" onclick="sendTemplate('Net check-in, all units please respond')">
+      <span class="ch-icon" style="background:var(--bg3);color:var(--muted)">NET</span>
+      <span class="ch-label" style="font-size:11px">Net check-in</span>
+    </div>
+    <div class="channel-item" onclick="sendTemplate('ALL CLEAR — incident concluded, stand down')">
+      <span class="ch-icon" style="background:var(--green-bg);color:var(--green)">CLR</span>
+      <span class="ch-label" style="font-size:11px">All clear</span>
+    </div>
+    <div class="channel-item" onclick="sendEmergencyTemplate()">
+      <span class="ch-icon" style="background:var(--red-bg);color:var(--red)">EMG</span>
+      <span class="ch-label" style="font-size:11px;color:var(--red)">Emergency</span>
+    </div>
+    </div>
+    </div>
+
+    <div class="sidebar-footer" id="sidebar-footer-actions">
+      <button onclick="timeSyncBroadcast()" title="Sends a readable time message to the channel and sets THIS station's own radio clock — the mesh protocol has no way to set other nodes' clocks remotely">🕐 Time sync</button>
+      <button onclick="nodeAnnounce()" title="Broadcast this station's presence (advert + discovery pulse) to all connected mesh adapters">📡 Announce</button>
+      <button onclick="wxBroadcast()">🌩 WX alerts</button>
+      <button onclick="wxShare()">🌤 Share weather</button>
+      <label style="display:block;margin-top:4px">
+        <input type="file" id="vcf-import" accept=".vcf,.csv" style="display:none" onchange="importContacts(this)">
+        <span style="display:block;width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:11px;padding:6px;border-radius:4px;cursor:pointer;text-align:center" onclick="document.getElementById('vcf-import').click()">Import contacts</span>
+      </label>
+    </div>
+  </nav>
+
+  <!-- ── Main inbox + compose ─────────────────────────── -->
+  <main id="main">
+    <div id="filter-bar">
+      <input type="text" id="search" placeholder="Filter messages…" oninput="applyFilter()">
+      <select id="priority-filter" onchange="applyFilter()">
+        <option value="">All priority</option>
+        <option value="1">Elevated+</option>
+        <option value="2">Emergency</option>
+      </select>
+      <button onclick="clearMessageDisplay()" style="font-family:var(--mono);font-size:10px;padding:4px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--dim);cursor:pointer" title="Clear this browser's display only">🗑 Clear</button>
+      <button onclick="clearHistory()" style="font-family:var(--mono);font-size:10px;padding:4px 8px;border-radius:3px;border:1px solid var(--red);background:var(--bg);color:var(--red);cursor:pointer" title="Delete all messages from server database">🗑 Clear History</button>
+      <span class="msg-count" id="msg-count">0 messages</span>
+    </div>
+
+    <div id="messages"></div>
+
+    <div id="compose">
+      <div id="compose-top">
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+          <div id="compose-adapters"></div>
+          <button onclick="selectAllAdapters(true)"  title="Select all adapters"  style="width:14px;height:14px;border-radius:50%;background:var(--green);border:none;cursor:pointer;padding:0;flex-shrink:0;opacity:0.85" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.85"></button>
+          <button onclick="selectAllAdapters(false)" title="Deselect all adapters" style="width:14px;height:14px;border-radius:50%;background:var(--red);border:none;cursor:pointer;padding:0;flex-shrink:0;opacity:0.85" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.85"></button>
+        </div>
+        <input type="text" id="compose-to" placeholder="To: node ID or callsign">
+        <select id="priority-select" onchange="updateSendBtn()">
+          <option value="0">Normal</option>
+          <option value="1">Elevated</option>
+          <option value="2">Emergency</option>
+        </select>
+      </div>
+      <textarea id="compose-body" placeholder="Compose message…" oninput="updateCharCount()" onkeydown="handleComposKey(event)"></textarea>
+      <div id="compose-bottom">
+        <button id="broadcast-btn" onclick="broadcastAll()">⚡ Broadcast all</button>
+        <button id="beacon-btn" onclick="sendAPRSBeacon()" title="Send APRS position beacon via all connected APRS-IS adapters" style="background:var(--bg2);border:1px solid var(--border);color:var(--muted);border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer">📡 Beacon</button>
+        <span id="char-counter">0 / 900</span>
+        <button id="send-btn" onclick="sendMessage()">Send ↵</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── Right panel ───────────────────────────────────── -->
+  <aside id="right-panel">
+    <div class="panel-tabs">
+      <div class="panel-tab active" onclick="switchTab('nodes', this)">Nodes</div>
+      <div class="panel-tab" onclick="switchTab('health', this)">Adapters</div>
+      <div class="panel-tab" onclick="switchTab('calls', this)">Calls</div>
+      <div class="panel-tab" onclick="switchTab('winlink', this)">Winlink <span class="ch-badge" id="winlink-badge" style="margin-left:2px"></span></div>
+    </div>
+    <div style="padding:6px 8px 0;display:flex;gap:6px;align-items:center">
+      <input id="node-search" type="search" placeholder="Filter nodes…" oninput="filterNodes(this.value)"
+        style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 7px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px;outline:none">
+      <span id="node-count" style="font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap"></span>
+    </div>
+    <div class="panel-content" id="panel-nodes"></div>
+    <div class="panel-content" id="panel-health" style="display:none"></div>
+    <div class="panel-content" id="panel-calls" style="display:none"></div>
+    <div class="panel-content" id="panel-winlink" style="display:none"></div>
+  </aside>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────
+const state = {
+  messages: [],          // all received, newest first
+  filter: { adapter: 'all', channel: 'all', search: '', priority: '', msgType: 'all' },
+  unread: {},            // {adapter: count}
+  activeTab: 'nodes',
+  ws: null,
+  wsRetries: 0,
+  mutedAdapters: new Set(JSON.parse(localStorage.getItem('ech_muted') || '[]')),
+  pendingStatus: {},     // msg_id → {status, detail, path} buffered before outbound echo
+  nodeNames: {},         // node_id → display_name cache for delivery path resolution
+  adapterChannels: {},   // adapter_name → tx_channel string (populated from health data)
+};
+
+// ── Timezone toggle (declared early — tick() reads it) ────────────────────
+// Modes: 'utc' | 'local' | 'both'
+if (!localStorage.getItem('ech_tz_mode') && localStorage.getItem('ech_show_local_time') === 'true') {
+  localStorage.setItem('ech_tz_mode', 'local');
+  localStorage.removeItem('ech_show_local_time');
+}
+let _tzMode = localStorage.getItem('ech_tz_mode') || 'utc';
+
+// ── Clock ────────────────────────────────────────────────────────────────
+function tick() {
+  const now = new Date();
+  const utcStr = now.toUTCString().slice(17, 25) + ' UTC';
+  let label;
+  if (_tzMode === 'local') {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'LOCAL';
+    label = now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' ' + tz;
+  } else if (_tzMode === 'both') {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'LOCAL';
+    label = utcStr + '  ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' ' + tz;
+  } else {
+    label = utcStr;
+  }
+  document.getElementById('clock').textContent = label;
+}
+setInterval(tick, 1000); tick();
+
+// ── WebSocket ────────────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  state.ws = ws;
+
+  ws.onopen = () => {
+    setWsState(true);
+    state.wsRetries = 0;
+    toast('Connected to ECH bridge', 'ok');
+    loadHistory().then(selectDefaultFilter);
+    pollHealth();
+    setInterval(pollHealth, 15000);
+    pollWhoOnline();
+    setInterval(pollWhoOnline, 30000);
+    loadBotStats();
+    setInterval(loadBotStats, 60000);
+    applyRoleUI();
+  };
+
+  ws.onmessage = (e) => {
+    const pkt = JSON.parse(e.data);
+    if (pkt.type === 'message')           handleInbound(pkt.data);
+    if (pkt.type === 'messages_cleared')  clearMessageDisplay();
+    if (pkt.type === 'msg_status')        handleMsgStatus(pkt.data);
+    if (pkt.type === 'anomaly')           handleAnomaly(pkt.data);
+    if (pkt.type === 'adapter_error')     handleAdapterError(pkt.data);
+    if (pkt.type === 'nodes_updated')     pollHealth();
+    if (pkt.type === 'node_telemetry')    handleNodeTelemetry(pkt.data);
+    if (pkt.type === 'simulation_change') updateSimBanner(pkt.data.enabled);
+    if (pkt.type === 'bot_activity')     { const c = document.getElementById('bot-total-count'); if(c){ c.textContent = parseInt(c.textContent||0)+1; document.getElementById('bot-stats-wrap').style.display=''; } }
+  };
+
+  ws.onclose = () => {
+    setWsState(false);
+    const delay = Math.min(2000 * Math.pow(1.5, state.wsRetries++), 30000);
+    setTimeout(connectWS, delay);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function setWsState(live) {
+  document.getElementById('ws-dot').className = `conn-dot${live ? ' live' : ''}`;
+  document.getElementById('ws-status').textContent = live ? 'live' : 'reconnecting…';
+}
+
+// ── Message handling ─────────────────────────────────────────────────────
+function handleAnomaly(data) {
+  const icons = {info:'ℹ', warn:'⚠', alert:'🚨'};
+  const icon = icons[data.severity] || '⚠';
+  const sev = data.severity?.toUpperCase() || 'WARN';
+  const color = data.severity === 'alert' ? 'err' : 'ok';
+  toast(`${icon} ${sev}: ${data.rule} — ${data.node_id?.slice(0,12)} — ${data.summary?.slice(0,60)}`, color);
+}
+
+function handleAdapterError(data) {
+  if (data.error_type === 'port_conflict') {
+    const adapter = escHtml(data.adapter || '');
+    const msg = escHtml(data.message || 'Serial port conflict');
+    // Show persistent banner at top of page
+    let banner = document.getElementById('port-conflict-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'port-conflict-banner';
+      banner.style.cssText = 'background:#7b1e1e;color:#ffcccc;padding:8px 16px;font-size:0.85em;display:flex;align-items:center;gap:10px;z-index:9999;';
+      document.body.prepend(banner);
+    }
+    banner.innerHTML = `<span>🔌 <strong>Serial port conflict — ${adapter}</strong>: Another app has this port open. Close it (Arduino IDE, screen, minicom) then ECH will retry automatically.</span><button onclick="this.parentElement.remove()" style="margin-left:auto;background:none;border:1px solid #ffcccc;color:#ffcccc;padding:2px 8px;cursor:pointer;border-radius:3px;">✕</button>`;
+    toast(`🔌 PORT CONFLICT on ${adapter} — see banner for details`, 'err');
+    console.warn('PORT CONFLICT:', msg);
+  }
+}
+
+function handleMsgStatus(data) {
+  const {msg_id, status, detail, path} = data;
+  const msg = state.messages.find(m => m.id === msg_id);
+  if (!msg) {
+    // Outbound echo hasn't arrived yet — buffer and apply when message is added
+    state.pendingStatus[msg_id] = data;
+    return;
+  }
+  msg._status = status; msg.delivery_status = status;
+  msg._status_detail = detail || '';
+  msg._delivery_path = path || null;
+  const el = document.querySelector(`.msg[data-id="${CSS.escape(msg_id)}"]`);
+  if (!el) return;
+  // Replace any existing delivery badge
+  el.querySelectorAll('.msg-delivery, .msg-delivery-wrap, .msg-path-badge.delivery-path').forEach(b => b.remove());
+  const header = el.querySelector('.msg-header');
+  if (header) header.insertAdjacentHTML('beforeend', deliveryBadgeHTML(msg));
+}
+
+function handleInbound(msg) {
+  if (state.messages.find(m => m.id === msg.id)) return;  // dedup by ID
+  if (msg.msg_type && msg.msg_type !== 'text') return;     // position/telemetry: map/anomaly only
+  if (msg.raw_json && typeof msg.raw_json === 'string') {
+    try { msg._raw = JSON.parse(msg.raw_json); } catch(e) { msg._raw = {}; }
+  } else { msg._raw = msg.raw_json || {}; }
+  state.messages.unshift(msg);
+  if (state.messages.length > 2000) state.messages.length = 2000;
+
+  // Unread badge
+  const a = msg.source_adapter;
+  state.unread[a] = (state.unread[a] || 0) + 1;
+  const badge = document.getElementById(`badge-${a}`);
+  if (badge) {
+    badge.textContent = state.unread[a];
+    badge.classList.add('has-msgs');
+  }
+
+  // Insert into DOM if passes filter
+  if (msgPassesFilter(msg)) {
+    prependMsgDOM(msg);
+    updateCount();
+  }
+  if (msg.source_adapter === state.filter.adapter) { buildChanSubBar(); buildTypeSubBar(); }
+
+  // Priority alert
+  if (msg.priority >= 2) {
+    toast(`🚨 EMERGENCY from ${msg.from_display || msg.from_id}: ${msg.body.slice(0, 60)}`, 'err');
+  }
+}
+
+function msgPassesFilter(msg) {
+  if (msg.msg_type && msg.msg_type !== 'text') return false;
+  if (state.mutedAdapters.has(msg.source_adapter)) return false;
+  const f = state.filter;
+  if (f.adapter !== 'all' && msg.source_adapter !== f.adapter) return false;
+  // Channel/type filters are per-adapter settings, not a single "current
+  // view" filter — an adapter you've set to MSG-only (or a specific channel)
+  // stays that way even while viewing "All traffic" mixed with every other
+  // adapter, so one busy adapter can't bury the rest in clutter. The adapter
+  // currently being viewed/edited reads its live (not-yet-saved) selection;
+  // every other adapter reads its last-saved one from _adapterFilterMemory.
+  const live = f.adapter === msg.source_adapter;
+  const remembered = _adapterFilterMemory[msg.source_adapter];
+  const chan = live ? f.channel   : (remembered ? remembered.channel : 'all');
+  const type = live ? f.msgType   : (remembered ? remembered.msgType : 'all');
+  if (chan !== 'all' && msg.source_channel !== chan) return false;
+  if (type !== 'all' && msgTypePrefix(msg.body) !== type) return false;
+  if (f.priority && msg.priority < parseInt(f.priority)) return false;
+  if (f.search && !`${msg.from_display} ${msg.from_id} ${msg.body} ${msg.source_channel||''}`.toLowerCase().includes(f.search.toLowerCase())) return false;
+  return true;
+}
+
+// APRS bodies are prefixed by type (see aprs_is.py _packet_to_body): MSG for
+// directed/broadcast messages, OBJ for object reports (commonly AIS vessels
+// rebroadcast by a gate), POS for position beacons, STATUS for status text.
+// Non-APRS traffic (Meshtastic/MeshCore/etc.) has none of these and is
+// treated as its own implicit "text" type, unaffected by this filter.
+function msgTypePrefix(body) {
+  if (!body) return null;
+  for (const p of ['MSG ', 'OBJ ', 'POS ', 'STATUS ']) {
+    if (body.startsWith(p)) return p.trim();
+  }
+  return null;
+}
+
+function prependMsgDOM(msg) {
+  const el = buildMsgEl(msg);
+  const container = document.getElementById('messages');
+  if (container.firstChild) {
+    container.insertBefore(el, container.firstChild);
+  } else {
+    container.appendChild(el);
+  }
+  // Keep newest visible
+  if (container.scrollTop < 80) container.scrollTop = 0;
+}
+
+function buildMsgEl(msg) {
+  const div = document.createElement('div');
+  div.className = `msg priority-${msg.priority}`;
+  div.dataset.id = msg.id;
+  div.dataset.adapter = msg.source_adapter;
+  div.dataset.priority = msg.priority;
+  div.dataset.text = `${msg.from_display||msg.from_id} ${msg.body}`.toLowerCase();
+
+  // Use receive time (our clock) for display; raw.packet_timestamp is the device clock
+  const ts = new Date(msg.timestamp);
+  const timeStr = ts.toUTCString().slice(17, 22);
+
+  const adapterTag = adapterTagHTML(msg.source_adapter);
+  const channelTag = channelTagHTML(msg.source_channel, msg.source_adapter);
+  const priorityFlag = msg.priority > 0 ?
+    `<span class="msg-priority-flag flag-${msg.priority}">${msg.priority === 2 ? 'EMRG' : 'ELVT'}</span>` : '';
+
+  const _lat = (msg.lat != null && msg.lat !== '' && !isNaN(msg.lat)) ? parseFloat(msg.lat) : null;
+  const _lon = (msg.lon != null && msg.lon !== '' && !isNaN(msg.lon)) ? parseFloat(msg.lon) : null;
+  const posStr = (_lat != null && _lon != null) ?
+    `<div class="msg-pos"><a href="/map?lat=${_lat.toFixed(6)}&lon=${_lon.toFixed(6)}&zoom=14" target="_blank" rel="noopener" title="Show on map" style="color:inherit;text-decoration:none">⌖ ${_lat.toFixed(4)}, ${_lon.toFixed(4)}</a></div>` : '';
+
+  // AIS vessel link
+  const _raw = msg._raw || {};
+  const _mmsiRaw = _raw.mmsi;
+  // Strip any non-digit chars from MMSI before building links
+  const _mmsi = _mmsiRaw ? String(_mmsiRaw).replace(/\D/g, '') : null;
+  // AtoN MMSIs are exactly 9 digits starting with "99" per ITU standard
+  const _isAton = _mmsi && _mmsi.length === 9 && _mmsi.startsWith('99');
+  let aisStr = '';
+  if (_mmsi && _mmsi.length >= 7) {
+    if (_isAton) {
+      // AtoN — link to ECH map if we have coords, otherwise OpenSeaMap
+      const _atonMapUrl = (_lat != null && _lon != null)
+        ? `/map?lat=${_lat.toFixed(6)}&lon=${_lon.toFixed(6)}&zoom=14`
+        : `https://map.openseamap.org/`;
+      const _atonMapLabel = (_lat != null && _lon != null) ? 'Show on map' : 'OpenSeaMap';
+      aisStr = `<div class="msg-ais">⚓ AtoN &mdash; MMSI ${escHtml(_mmsi)} &mdash; <a href="${_atonMapUrl}" target="_blank" rel="noopener noreferrer">${_atonMapLabel}</a></div>`;
+    } else {
+      const _vfUrl = `https://www.vesselfinder.com/vessels/details/${escHtml(_mmsi)}`;
+      const _mtUrl = (_lat != null && _lon != null)
+        ? `https://www.marinetraffic.com/en/ais/home/centerx:${_lon.toFixed(6)}/centery:${_lat.toFixed(6)}/zoom:14`
+        : `https://www.marinetraffic.com/en/ais/details/ships/mmsi:${escHtml(_mmsi)}`;
+      aisStr = `<div class="msg-ais">🚢 AIS &mdash; MMSI ${escHtml(_mmsi)} &mdash; <a href="${_vfUrl}" target="_blank" rel="noopener noreferrer">VesselFinder</a> &bull; <a href="${_mtUrl}" target="_blank" rel="noopener noreferrer">MarineTraffic</a></div>`;
+    }
+  }
+
+  const isEncrypted = msg.body === '[Encrypted channel message]' || msg.body === '[Encrypted direct message]';
+  const wasDecrypted = !isEncrypted && (msg._raw || {}).decrypted_with;
+  const bodyClass = msg.priority === 2 ? 'msg-body priority-2' : isEncrypted ? 'msg-body encrypted' : 'msg-body';
+  const decryptBadge = wasDecrypted ? `<span title="Auto-decrypted with key: ${escHtml((msg._raw||{}).decrypted_with)}" style="font-size:9px;color:var(--green);margin-left:4px;cursor:help">🔓</span>` : '';
+
+  // Path / routing badge
+  let pathBadge = '';
+  const hasHop  = msg.hop_count != null && !isNaN(msg.hop_count);
+  const hasPath = msg.path && msg.path.trim();
+  const isMqtt  = msg.via_mqtt;
+  const raw     = msg._raw || {};
+  const pktTs   = raw.packet_timestamp || (msg.raw && msg.raw.packet_timestamp);
+  if (hasHop || hasPath || isMqtt) {
+    const badgeId  = `path-${msg.id}`;
+    const detailId = `pathd-${msg.id}`;
+    let label = '';
+    if (isMqtt)         label = 'MQTT';
+    else if (hasHop)    label = `${msg.hop_count} hop${msg.hop_count !== 1 ? 's' : ''}`;
+    else                label = '↗?';
+    const mqttCls = isMqtt ? ' via-mqtt' : '';
+    let detail = '';
+    if (hasHop)  detail += `hops: ${msg.hop_count}${msg.hop_start != null ? ' / '+msg.hop_start : ''}\n`;
+    if (isMqtt)  detail += `via: MQTT gateway\n`;
+    if (hasPath) detail += `path: ${msg.path}\n`;
+    const _snr = msg.snr != null ? msg.snr : raw.snr;
+    const _rssi = msg.rssi != null ? msg.rssi : raw.rssi;
+    if (_snr != null) detail += `snr: ${parseFloat(_snr).toFixed(1)} dB\n`;
+    if (_rssi != null) detail += `rssi: ${_rssi} dBm\n`;
+    if (pktTs) {
+      const devTime = new Date(pktTs * 1000).toUTCString().slice(5, 25);
+      const rxTime  = ts.toUTCString().slice(5, 25);
+      const diffSec = Math.round((ts - new Date(pktTs * 1000)) / 1000);
+      detail += `device time: ${devTime} UTC\nreceived:    ${rxTime} UTC`;
+      if (Math.abs(diffSec) > 5) detail += `\nclock diff:  ${diffSec > 0 ? '+' : ''}${diffSec}s`;
+    }
+    const isMeshCoreMsg = (msg.source_adapter || '').toLowerCase().includes('meshcore');
+    const hopTip = (isMeshCoreMsg && hasPath)
+      ? 'Click to show routing detail (resolves relay hashes to node names)'
+      : (isMeshCoreMsg && hasHop && msg.hop_count > 0 && msg.from_id !== 'local')
+      ? 'Click for detail — relay hashes weren\'t captured for this message; open message detail to traceroute'
+      : 'Click to show routing detail';
+    const resolveArgs = isMeshCoreMsg && hasPath
+      ? `,'${escHtml(msg.source_adapter)}','${escHtml(msg.path)}','${escHtml(msg.from_id||'')}'`
+      : '';
+    pathBadge = `<span id="${badgeId}" class="msg-path-badge${mqttCls}" title="${hopTip}" onclick="togglePathDetail('${detailId}'${resolveArgs})">${label}</span>
+<div id="${detailId}" class="msg-path-detail"><div class="path-detail-raw">${escHtml(detail.trim())}</div></div>`;
+  }
+
+  // Signal strength badge — always visible when SNR or RSSI is available
+  const _msgSnr  = msg.snr  != null ? msg.snr  : raw.snr;
+  const _msgRssi = msg.rssi != null ? msg.rssi : raw.rssi;
+  let sigBadge = '';
+  if (_msgSnr != null || _msgRssi != null) {
+    const snrVal = _msgSnr != null ? parseFloat(_msgSnr) : null;
+    const sigCls = snrVal == null ? 'sig-unknown'
+                 : snrVal >= -5  ? 'sig-good'
+                 : snrVal >= -10 ? 'sig-fair'
+                 : snrVal >= -15 ? 'sig-weak'
+                 : 'sig-bad';
+    const snrTxt  = snrVal != null ? `${snrVal.toFixed(1)} dB` : '';
+    const rssiTxt = _msgRssi != null ? `${_msgRssi} dBm` : '';
+    const sigLabel = snrTxt || rssiTxt;
+    const sigTitle = [snrTxt ? `SNR: ${snrTxt}` : '', rssiTxt ? `RSSI: ${rssiTxt}` : ''].filter(Boolean).join('  ');
+    sigBadge = `<span class="msg-sig-badge ${sigCls}" title="${escHtml(sigTitle)}">${escHtml(sigLabel)}</span>`;
+  }
+
+  const isOutbound = msg.from_id === 'local' || msg.source_channel === 'outbound';
+  // _status is the live transient WS event; delivery_status is the persisted DB value
+  const deliveryHTML = deliveryBadgeHTML(msg);
+  if (isOutbound) div.classList.add('outbound');
+
+  div.innerHTML = `
+    <div class="msg-ts">${timeStr}</div>
+    <div>
+      <div class="msg-header">
+        <span class="msg-from" onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Click to reply — fills the To: field and selects the right adapter">${escHtml(msg.from_display||msg.from_id)}</span>
+        ${adapterTag}
+        ${channelTag}
+        ${priorityFlag}
+        ${pathBadge}
+        ${sigBadge}
+        ${decryptBadge}
+        ${deliveryHTML}
+        ${(msg.from_id !== 'local' && msg.source_channel !== 'outbound') ? `<span onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Reply — fills the To: field and selects the right adapter" style="font-family:var(--mono);font-size:10px;color:var(--blue);cursor:pointer;padding:1px 5px;border:1px solid var(--border);border-radius:3px;white-space:nowrap">↩ Reply</span>` : ''}
+        <span class="msg-detail-btn" onclick="openMsgDetail('${escHtml(msg.id)}')" title="Message detail">⋯</span>
+      </div>
+      <div class="${bodyClass}">${isEncrypted ? '🔒 ' : ''}${escHtml(msg.body)}</div>
+      ${posStr}
+      ${aisStr}
+    </div>
+  `;
+  return div;
+}
+
+function togglePathDetail(id, adapter, path, fromId) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('open');
+  if (el.classList.contains('open') && adapter && path) resolvePathDetail(el, adapter, path, fromId);
+}
+
+// path[0] = first relay to touch the packet (closest to sender), path[-1] =
+// closest to us — see /api/adapters/{name}/resolve_path docstring.
+const _pathResolveCache = new Map();
+
+async function resolvePathDetail(el, adapter, path, fromId) {
+  if (el.dataset.resolved) return;   // already fetched for this element
+  const cacheKey = `${adapter}|${path}|${fromId || ''}`;
+  let data = _pathResolveCache.get(cacheKey);
+  if (!data) {
+    try {
+      const r = await fetch(`/api/adapters/${encodeURIComponent(adapter)}/resolve_path?path=${encodeURIComponent(path)}&from_id=${encodeURIComponent(fromId || '')}`);
+      data = await r.json();
+    } catch(e) { return; }
+    _pathResolveCache.set(cacheKey, data);
+  }
+  if (data.status !== 'ok') return;
+  el.dataset.resolved = '1';
+
+  const names = data.path.map(n => n ? (n.ambiguous ? `${n.name} (±${n.ambiguous})` : n.name) : '? unresolved').join(' → ');
+  let html = `<div class="path-detail-resolved">resolved: ${escHtml(names)}</div>`;
+
+  const known  = data.sender && data.sender.lat != null;
+  const approx = !known && data.approx && data.approx.lat != null;
+  if (known) {
+    html += `<div class="path-detail-resolved">📍 <a href="/map?lat=${data.sender.lat}&lon=${data.sender.lon}&zoom=16" target="_blank" rel="noopener">show sender on map</a></div>`;
+  } else if (approx) {
+    html += `<div class="path-detail-resolved">📍 <a href="/map?lat=${data.approx.lat}&lon=${data.approx.lon}&zoom=10" target="_blank" rel="noopener">approx area — near relay "${escHtml(data.approx.name)}"</a> (guess, not the sender's actual position)</div>`;
+  }
+  el.insertAdjacentHTML('beforeend', html);
+}
+
+function deliveryStatusInfo(status) {
+  if (status === 'sent_to_air') return {icon: '✈', label: 'sent', cls: 'sent_to_air'};
+  if (status === 'direct')      return {icon: '✓', label: 'direct', cls: 'direct'};
+  if (status === 'confirmed')   return {icon: '✓✓', label: 'confirmed', cls: 'delivered'};
+  if (status === 'failed')      return {icon: '✗', label: 'failed', cls: 'failed'};
+  if (status === 'repeated')    return {icon: '🔁', label: 'relayed', cls: 'heard'};
+  if (status === 'delivered')   return {icon: '✓✓', label: 'delivered', cls: 'delivered'};
+  if (status.startsWith('heard_')) {
+    const n = parseInt(status.split('_')[1], 10) || 1;
+    return {icon: '🔁', label: `heard ×${n}`, cls: 'heard'};
+  }
+  return {icon: '⏳', label: status, cls: 'pending'};
+}
+
+function resolveNodeName(nodeId) {
+  if (!nodeId) return '';
+  // Case-insensitive lookup: relay IDs from PUSH_SEND_CONFIRMED arrive uppercase,
+  // node IDs stored from PUSH_ADVERT are lowercase hex.
+  const lower = nodeId.toLowerCase();
+  for (const [id, name] of Object.entries(state.nodeNames)) {
+    const idL = id.toLowerCase();
+    if (idL === lower || idL.startsWith(lower) || lower.startsWith(idL)) return name;
+  }
+  return nodeId.slice(0, 8);
+}
+
+function deliveryBadgeHTML(msg) {
+  const status = msg._status || msg.delivery_status;
+  if (!status) return '';
+  const {icon, label, cls} = deliveryStatusInfo(status);
+  const tip = escHtml(msg._status_detail || status);
+  const path = msg._delivery_path;
+  if (path && path.length > 0) {
+    const detailId = `delivd-${msg.id}`;
+    const nodeList = path.map(resolveNodeName).join(' → ');
+    const detail = msg._status_detail ? `\n${escHtml(msg._status_detail)}` : '';
+    return `<span class="msg-path-badge delivery-path status-${cls}" title="${tip}" onclick="togglePathDetail('${detailId}')">${icon} ${label}</span><div id="${detailId}" class="msg-path-detail">${escHtml(nodeList)}${detail}</div>`;
+  }
+  return `<span class="msg-delivery status-${cls}" title="${tip}">${icon} ${label}</span>`;
+}
+
+// ── Message detail popup ──────────────────────────────────────────────────
+function openMsgDetail(msgId) {
+  const msg = state.messages.find(m => m.id === msgId);
+  if (!msg) return;
+  document.getElementById('msg-detail-content').innerHTML = buildMsgDetailHTML(msg);
+  document.getElementById('msg-detail-popup').classList.add('open');
+  const isMeshCore = (msg.source_adapter || '').toLowerCase().includes('meshcore');
+  if (isMeshCore && msg.path) enhanceMsgDetailPath(msg);
+}
+
+async function enhanceMsgDetailPath(msg) {
+  const cacheKey = `${msg.source_adapter}|${msg.path}|${msg.from_id || ''}`;
+  let data = _pathResolveCache.get(cacheKey);
+  if (!data) {
+    try {
+      const r = await fetch(`/api/adapters/${encodeURIComponent(msg.source_adapter)}/resolve_path?path=${encodeURIComponent(msg.path)}&from_id=${encodeURIComponent(msg.from_id || '')}`);
+      data = await r.json();
+    } catch(e) { return; }
+    _pathResolveCache.set(cacheKey, data);
+  }
+  if (data.status !== 'ok') return;
+  // Popup may have been closed/replaced by the time this resolves — only patch if still showing this message
+  const table = document.querySelector('#msg-detail-content .msg-detail-table');
+  if (!table || !document.getElementById('msg-detail-popup').classList.contains('open')) return;
+
+  const names = data.path.map(n => n ? (n.ambiguous ? `${n.name} (±${n.ambiguous})` : n.name) : '? unresolved').join(' → ');
+  let rowsHtml = `<tr><td class="msg-detail-key">Resolved path</td><td>${escHtml(names)}</td></tr>`;
+
+  const known  = data.sender && data.sender.lat != null;
+  const approx = !known && data.approx && data.approx.lat != null;
+  if (known) {
+    rowsHtml += `<tr><td class="msg-detail-key">Position</td><td>📍 <a href="/map?lat=${data.sender.lat}&lon=${data.sender.lon}&zoom=16" target="_blank" rel="noopener">show sender on map</a></td></tr>`;
+  } else if (approx) {
+    rowsHtml += `<tr><td class="msg-detail-key">Approx. area</td><td>📍 <a href="/map?lat=${data.approx.lat}&lon=${data.approx.lon}&zoom=10" target="_blank" rel="noopener">near relay "${escHtml(data.approx.name)}"</a> <span style="color:var(--muted);font-size:10px">(guess, not the sender's actual position)</span></td></tr>`;
+  }
+  table.insertAdjacentHTML('beforeend', rowsHtml);
+}
+
+function closeMsgDetail() {
+  document.getElementById('msg-detail-popup').classList.remove('open');
+}
+
+// ── Node detail popup ────────────────────────────────────────────────────
+function openNodeDetail(nodeId, adapter) {
+  const n = _allNodes.find(x => x.node_id === nodeId && x._adapter === adapter);
+  if (!n) { toast('Node not found', 'err'); return; }
+  document.getElementById('node-detail-content').innerHTML = buildNodeDetailHTML(n);
+  document.getElementById('node-detail-popup').classList.add('open');
+}
+
+function closeNodeDetail() {
+  document.getElementById('node-detail-popup').classList.remove('open');
+}
+
+function buildNodeDetailHTML(n) {
+  const rows = [];
+  rows.push(['Name', escHtml(n.display_name || '')]);
+  rows.push(['Node ID', escHtml(n.node_id || '')]);
+  rows.push(['Adapter', escHtml(n._adapter || '')]);
+  if (n.node_type) rows.push(['Type', escHtml(n.node_type)]);
+  if (n.lat != null && n.lon != null) {
+    rows.push(['Coordinates', `${n.lat.toFixed(6)}, ${n.lon.toFixed(6)} <a href="/map?lat=${encodeURIComponent(n.lat)}&lon=${encodeURIComponent(n.lon)}&zoom=16" target="_blank" rel="noopener" style="color:var(--blue);margin-left:6px">Show on map</a>`]);
+  }
+  if (n.last_heard) rows.push(['Last heard', escHtml(new Date(n.last_heard).toUTCString())]);
+  if (n.snr != null && !isNaN(n.snr)) rows.push(['SNR', `${parseFloat(n.snr).toFixed(1)} dB`]);
+  if (n.rssi != null) rows.push(['RSSI', `${n.rssi} dBm`]);
+  if (n.battery_level != null) rows.push(['Battery', `${parseInt(n.battery_level)}%`]);
+  if (n.battery_voltage != null) rows.push(['Voltage', `${parseFloat(n.battery_voltage).toFixed(2)}V`]);
+  if (n.ch_util != null) rows.push(['Channel util', `${parseFloat(n.ch_util).toFixed(1)}%`]);
+  if (n.air_util_tx != null) rows.push(['Air util TX', `${parseFloat(n.air_util_tx).toFixed(1)}%`]);
+  if (n.temperature != null) rows.push(['Temperature', `${parseFloat(n.temperature).toFixed(1)}°C`]);
+  if (n.humidity != null) rows.push(['Humidity', `${parseFloat(n.humidity).toFixed(0)}%`]);
+  if (n.pressure != null) rows.push(['Pressure', `${parseFloat(n.pressure).toFixed(0)} hPa`]);
+  if (n.uptime_secs != null) rows.push(['Uptime', `${n.uptime_secs}s`]);
+  if (n.name_source) rows.push(['Name source', escHtml(n.name_source)]);
+  const meta = n.meta || {};
+  Object.entries(meta).forEach(([k, v]) => {
+    if (v === null || v === undefined || v === '') return;
+    rows.push([escHtml(k), escHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))]);
+  });
+  const tableRows = rows.map(([k, v]) => `<tr><td class="msg-detail-key">${k}</td><td>${v}</td></tr>`).join('');
+  return `<table class="msg-detail-table"><tbody>${tableRows}</tbody></table>`;
+}
+
+function buildMsgDetailHTML(msg) {
+  const ts = new Date(msg.timestamp);
+  const raw = msg._raw || {};
+  const path = msg._delivery_path;
+  const status = msg._status || msg.delivery_status;
+  const rows = [];
+
+  rows.push(['Time', escHtml(ts.toUTCString())]);
+  rows.push(['From', `${escHtml(msg.from_display || msg.from_id)} <span style="color:var(--muted)">(${escHtml(msg.from_id)})</span>`]);
+  if (msg.to_id) rows.push(['To', escHtml(msg.to_id)]);
+  rows.push(['Adapter', escHtml(msg.source_adapter || '')]);
+  rows.push(['Channel', escHtml(msg.source_channel || '')]);
+  if (msg.priority > 0) rows.push(['Priority', msg.priority === 2 ? '🚨 EMERGENCY' : '⚠ Elevated']);
+  if (msg.hop_count != null) {
+    const isMeshCore = (msg.source_adapter || '').toLowerCase().includes('meshcore');
+    const hopNote = (isMeshCore && msg.hop_count > 0 && msg.from_id !== 'local')
+      ? ` <span style="color:var(--muted);font-size:10px">(relay node IDs not available in received channel msgs — use Traceroute below)</span>`
+      : '';
+    rows.push(['Hops', `${msg.hop_count}${hopNote}`]);
+  }
+  if (msg.path) rows.push(['Path', escHtml(msg.path)]);
+  if (status) {
+    const {icon, label} = deliveryStatusInfo(status);
+    const detail = msg._status_detail ? ` — ${escHtml(msg._status_detail)}` : '';
+    rows.push(['Delivery', `${icon} ${label}${detail}`]);
+  }
+  if (path && path.length > 0) {
+    rows.push(['Relay path', path.map(id => `${escHtml(resolveNodeName(id))} <span style="color:var(--muted)">(${id.slice(0,8)})</span>`).join(' → ')]);
+  }
+  if (raw.dest_id) {
+    rows.push(['Trace dest', `${escHtml(resolveNodeName(raw.dest_id))} <span style="color:var(--muted)">(${raw.dest_id.slice(0,8)})</span>`]);
+    if (raw.hop_count != null) rows.push(['Hops', raw.hop_count]);
+    if (raw.path && raw.path.length > 0) {
+      rows.push(['Via', raw.path.map(id => escHtml(resolveNodeName(id))).join(' → ')]);
+    }
+  }
+  if (raw.packet_timestamp) {
+    const devTs = new Date(raw.packet_timestamp * 1000);
+    rows.push(['Device time', escHtml(devTs.toUTCString())]);
+    const diffSec = Math.round((ts - devTs) / 1000);
+    if (Math.abs(diffSec) > 5) rows.push(['Clock diff', `${diffSec > 0 ? '+' : ''}${diffSec}s`]);
+  }
+  if (raw.decrypted_with) rows.push(['Decrypted', `🔓 key: ${escHtml(raw.decrypted_with)}`]);
+  const _detSnr  = msg.snr  != null ? msg.snr  : raw.snr;
+  const _detRssi = msg.rssi != null ? msg.rssi : raw.rssi;
+  if (_detSnr  != null) rows.push(['SNR',  `${parseFloat(_detSnr).toFixed(1)} dB`]);
+  if (_detRssi != null) rows.push(['RSSI', `${_detRssi} dBm`]);
+  if (msg.lat != null && msg.lon != null) rows.push(['Position', `${parseFloat(msg.lat).toFixed(5)}, ${parseFloat(msg.lon).toFixed(5)}`]);
+  rows.push(['ID', `<span style="color:var(--muted);word-break:break-all">${escHtml(msg.id)}</span>`]);
+
+  const tableRows = rows.map(([k, v]) => `<tr><td class="msg-detail-key">${escHtml(k)}</td><td>${v}</td></tr>`).join('');
+  const body = msg.body ? `<div class="msg-detail-body">${escHtml(msg.body)}</div>` : '';
+
+  // Traceroute button for received MeshCore messages
+  let traceBtn = '';
+  const isMeshCore = (msg.source_adapter || '').toLowerCase().includes('meshcore');
+  if (isMeshCore && msg.from_id !== 'local') {
+    const senderId = escHtml(msg.from_id || '');
+    const adapter = escHtml(msg.source_adapter || '');
+    traceBtn = `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+      <button onclick="sendTraceroute('${adapter}','${senderId}',this)" style="background:var(--bg3);color:var(--blue);border:1px solid var(--border);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">📡 Traceroute to sender</button>
+      <span style="color:var(--muted);font-size:11px;margin-left:8px">Result will appear in message feed as TRACE</span>
+    </div>`;
+  }
+
+  return `${body}<table class="msg-detail-table" style="margin-top:${body ? 10 : 0}px">${tableRows}</table>${traceBtn}`;
+}
+
+async function sendTraceroute(adapter, nodeId, btn) {
+  btn.disabled = true;
+  btn.textContent = '📡 Sending…';
+  try {
+    const r = await fetch('/api/ping', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({adapter, node_id: nodeId}),
+    });
+    const data = await r.json();
+    if (data.status === 'sent') {
+      btn.textContent = '📡 Trace sent — watch message feed';
+      btn.style.color = 'var(--green)';
+    } else {
+      btn.textContent = `✗ ${data.detail || 'error'}`;
+      btn.style.color = 'var(--red)';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = '✗ Request failed';
+    btn.style.color = 'var(--red)';
+    btn.disabled = false;
+  }
+}
+
+function adapterTagHTML(adapter) {
+  if (adapter.includes('wx-service') || adapter.includes('nws'))
+    return `<span class="msg-adapter-tag" style="background:#0a1a2a;color:#79c0ff">WX</span>`;
+  const m = adapterMeta(adapter);
+  const styleMap = {
+    mesh:  'background:#0e2a4a;color:var(--mesh)',
+    aprs:  'background:#0e2038;color:var(--aprs)',
+    meshc: 'background:#122a1a;color:var(--meshcore)',
+    hf:    'background:#2a1e08;color:var(--hf)',
+    sms:   'background:#1e0e2a;color:var(--sms)',
+    wl:    'background:#2a1500;color:var(--wl)',
+    rns:   'background:#0e1e2a;color:#56a0d3',
+  };
+  const style = styleMap[m.cls] || 'background:var(--bg3);color:var(--muted)';
+  return `<span class="msg-adapter-tag" style="${style}">${m.icon}</span>`;
+}
+
+function channelTagHTML(channel, adapter) {
+  if (!channel || channel === 'outbound' || channel === 'traceroute') return '';
+
+  const ch = channel.toLowerCase();
+  const isDM    = ch === 'dm';
+  const isMQTT  = ch.startsWith('mqtt:');
+  const isHF    = ch.startsWith('hf ') || ch === 'hf inbox' || ch === 'hf activity';
+  const isFreq  = ch.includes('144.390') || ch.includes('mhz') || ch.includes('khz');
+  const isVoice = ch === 'voice';
+
+  // Skip if the channel label adds nothing beyond the adapter tag
+  // (SMS/Winlink/LXMF are the full protocol — the adapter tag already says that)
+  const redundant = new Set(['sms', 'winlink', 'lxmf']);
+  if (redundant.has(ch)) return '';
+
+  let bg, color, label;
+  if (isDM) {
+    bg = '#2a1535'; color = '#c792ea'; label = 'DM';
+  } else if (isMQTT) {
+    // mqtt:US/2/e → show just the meaningful part after the prefix
+    const topic = channel.slice(5);
+    bg = '#0e1e30'; color = '#79c0ff';
+    label = topic.length > 12 ? topic.slice(0, 12) + '…' : topic;
+  } else if (isHF || isFreq) {
+    bg = '#2a1e08'; color = 'var(--hf)'; label = channel;
+  } else if (isVoice) {
+    bg = '#1a1e0e'; color = '#8db87a'; label = 'voice';
+  } else if (adapter && adapter.includes('meshcore')) {
+    // MeshCore RF channel — green tint matching the meshcore adapter color
+    bg = '#122a1a'; color = '#6abf82'; label = channel;
+  } else if (adapter && adapter.includes('meshtastic')) {
+    // Meshtastic channel — blue tint
+    bg = '#0e2a4a'; color = '#79b8ff'; label = channel;
+  } else {
+    bg = 'var(--bg3)'; color = 'var(--muted)'; label = channel;
+  }
+  return `<span class="msg-adapter-tag" style="background:${bg};color:${color};max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(channel)}">${escHtml(label)}</span>`;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── History load ─────────────────────────────────────────────────────────
+async function loadHistory() {
+  try {
+    // A flat "most recent 500 across all adapters" silently loses everything
+    // else when one high-volume adapter dominates — an internet APRS-IS
+    // gateway can run 8000+/day, meaning the last 500 rows can be 100% APRS
+    // beacons from the last hour, with meshcore/weather/etc. from the rest of
+    // the day invisible even though they're still in the database (confirmed
+    // directly against a live deployment: 8026 of 8172 messages in a 24h
+    // window were a single adapter). per_adapter_limit guarantees every
+    // adapter gets representation regardless of relative volume; since=24h
+    // scopes it to what was actually asked for ("the past day").
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const r = await fetch(`/api/messages?limit=3000&per_adapter_limit=300&since=${encodeURIComponent(since)}`);
+    if (!r.ok) {
+      toast(`Message history load failed (HTTP ${r.status})`, 'err');
+      return;
+    }
+    const data = await r.json();
+    const existingIds = new Set(state.messages.map(m => m.id));
+    let added = 0;
+    (data.messages || []).forEach(m => {
+      if (existingIds.has(m.id)) return;
+      if (m.raw_json && typeof m.raw_json === 'string') {
+        try { m._raw = JSON.parse(m.raw_json); } catch(e) { m._raw = {}; }
+      } else { m._raw = m.raw_json || {}; }
+      // Skip non-text messages saved before the text-only DB filter was active
+      if (m._raw._msg_type && m._raw._msg_type !== 'text') return;
+      if (m.delivery_status) { m._status = m.delivery_status; }
+      if (m.delivery_path)   { m._delivery_path = m.delivery_path; }
+      state.messages.push(m);
+      added++;
+    });
+    renderAll();
+    if (added === 0 && (data.total || 0) === 0) {
+      console.info('loadHistory: database is empty');
+    }
+  } catch(e) {
+    console.error('loadHistory failed:', e);
+    toast('Failed to load message history — see console', 'err');
+  }
+}
+
+function renderAll() {
+  const container = document.getElementById('messages');
+  container.innerHTML = '';
+  const filtered = state.messages.filter(msgPassesFilter);
+  filtered.forEach(m => {
+    container.appendChild(buildMsgEl(m));
+  });
+  updateCount();
+}
+
+function updateCount() {
+  const visible = document.querySelectorAll('#messages .msg').length;
+  document.getElementById('msg-count').textContent = `${visible} message${visible !== 1 ? 's' : ''}`;
+}
+
+// ── Collapsible sidebar sections (Channels / Quick send) — mainly for small
+// screens, where a long channel list can otherwise push Quick Send and the
+// footer actions (Time sync, Announce, etc.) out of reach ──────────────────
+function toggleSidebarSection(name) {
+  const collapsed = document.getElementById(`${name}-header`).classList.toggle('collapsed');
+  document.getElementById(`${name}-collapsible`).classList.toggle('collapsed', collapsed);
+  localStorage.setItem(`ech_sidebar_${name}_collapsed`, collapsed ? 'true' : 'false');
+}
+
+function restoreSidebarSections() {
+  ['channels', 'quicksend'].forEach(name => {
+    if (localStorage.getItem(`ech_sidebar_${name}_collapsed`) === 'true') {
+      document.getElementById(`${name}-header`).classList.add('collapsed');
+      document.getElementById(`${name}-collapsible`).classList.add('collapsed');
+    }
+  });
+}
+restoreSidebarSections();
+
+// ── Filters ──────────────────────────────────────────────────────────────
+// Remembers each adapter's own channel/type filter selection across
+// switches within a session — so "All traffic" -> pick APRS+MSG -> "All
+// traffic" -> back to APRS restores MSG instead of resetting to "all". Reset
+// on every page load (see selectDefaultFilter()), not persisted, since the
+// startup default below always wins on reload.
+let _adapterFilterMemory = {};
+
+// Startup default: land on APRS filtered to MSG-type traffic (directed
+// messages) rather than "All traffic" — cuts through OBJ/POS/STATUS chatter
+// from the moment the page loads. Runs once per page load, after loadHistory()
+// so buildTypeSubBar() has actual messages to detect a "MSG" pill from; a
+// WS reconnect firing ws.onopen again must NOT re-trigger this and clobber
+// whatever the operator has since selected.
+let _didSelectDefaultFilter = false;
+
+async function selectDefaultFilter() {
+  if (_didSelectDefaultFilter) return;
+  _didSelectDefaultFilter = true;
+  const el = document.querySelector('.channel-item[data-adapter*="aprs"]');
+  if (!el) return;   // no APRS adapter configured — leave the "All traffic" default alone
+  filterAdapter(el.dataset.adapter, el);
+  const msgPill = [...document.querySelectorAll('#type-subbar .chan-pill')].find(p => p.textContent.trim() === 'MSG');
+  if (msgPill) filterMsgType('MSG', msgPill);
+}
+
+function filterAdapter(adapter, el) {
+  _adapterFilterMemory[state.filter.adapter] = {channel: state.filter.channel, msgType: state.filter.msgType};
+  state.filter.adapter = adapter;
+  const remembered = _adapterFilterMemory[adapter];
+  state.filter.channel = remembered ? remembered.channel : 'all';
+  state.filter.msgType = remembered ? remembered.msgType : 'all';
+  document.querySelectorAll('.channel-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  // Clear unread for this adapter
+  if (adapter !== 'all') {
+    state.unread[adapter] = 0;
+    const badge = document.getElementById(`badge-${adapter}`);
+    if (badge) { badge.textContent = ''; badge.classList.remove('has-msgs'); }
+  }
+  buildChanSubBar();
+  buildTypeSubBar();
+  renderAll();
+}
+
+// Per-channel filter (ch0/ch1/DM/etc.) within whichever single adapter is
+// selected — mirrors the channel picker native mesh apps have, since one
+// physical adapter often carries several logical channels worth of traffic.
+function filterChannel(channel, el) {
+  state.filter.channel = channel;
+  document.querySelectorAll('.chan-pill').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  renderAll();
+}
+
+function buildChanSubBar() {
+  const bar = document.getElementById('chan-subbar');
+  const adapter = state.filter.adapter;
+  if (adapter === 'all') {
+    bar.classList.remove('show');
+    bar.innerHTML = '';
+    return;
+  }
+  const channels = [...new Set(
+    state.messages.filter(m => m.source_adapter === adapter && m.source_channel)
+      .map(m => m.source_channel)
+  )].sort();
+  if (!channels.length) {
+    bar.classList.remove('show');
+    bar.innerHTML = '';
+    return;
+  }
+  if (!channels.includes(state.filter.channel)) state.filter.channel = 'all';
+  bar.classList.add('show');
+  bar.innerHTML = [
+    `<span class="chan-pill${state.filter.channel === 'all' ? ' active' : ''}" onclick="filterChannel('all', this)">All ch</span>`,
+    ...channels.map(ch => `<span class="chan-pill${state.filter.channel === ch ? ' active' : ''}" onclick="filterChannel('${escHtml(ch)}', this)">${escHtml(ch)}</span>`),
+  ].join('');
+}
+
+// Per-type filter (MSG/OBJ/POS/STATUS) — same pill UX as the channel sub-bar,
+// but splits by what KIND of traffic a packet is rather than which channel it
+// came in on. Mainly useful on APRS, where OBJ (object rebroadcasts, often
+// AIS vessels via a gate) can otherwise bury MSG traffic.
+function filterMsgType(type, el) {
+  state.filter.msgType = type;
+  document.querySelectorAll('#type-subbar .chan-pill').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  renderAll();
+}
+
+function buildTypeSubBar() {
+  const bar = document.getElementById('type-subbar');
+  const adapter = state.filter.adapter;
+  if (adapter === 'all') {
+    bar.classList.remove('show');
+    bar.innerHTML = '';
+    return;
+  }
+  const types = [...new Set(
+    state.messages.filter(m => m.source_adapter === adapter)
+      .map(m => msgTypePrefix(m.body))
+      .filter(Boolean)
+  )].sort();
+  if (types.length < 2) {   // nothing to split on — don't show a bar with one option
+    bar.classList.remove('show');
+    bar.innerHTML = '';
+    return;
+  }
+  if (!types.includes(state.filter.msgType)) state.filter.msgType = 'all';
+  bar.classList.add('show');
+  bar.innerHTML = [
+    `<span class="chan-pill${state.filter.msgType === 'all' ? ' active' : ''}" onclick="filterMsgType('all', this)">All types</span>`,
+    ...types.map(t => `<span class="chan-pill${state.filter.msgType === t ? ' active' : ''}" onclick="filterMsgType('${escHtml(t)}', this)">${escHtml(t)}</span>`),
+  ].join('');
+}
+
+function applyFilter() {
+  state.filter.search = document.getElementById('search').value;
+  state.filter.priority = document.getElementById('priority-filter').value;
+  renderAll();
+}
+
+// ── Compose ──────────────────────────────────────────────────────────────
+function updateCharCount() {
+  const body = document.getElementById('compose-body').value;
+  const counter = document.getElementById('char-counter');
+  counter.textContent = `${body.length} / 900`;
+  counter.className = body.length > 900 ? 'over' : body.length > 700 ? 'warn' : '';
+}
+
+function updateSendBtn() {
+  const p = parseInt(document.getElementById('priority-select').value);
+  const btn = document.getElementById('send-btn');
+  btn.className = p === 2 ? 'emergency' : '';
+  btn.textContent = p === 2 ? '🚨 SEND EMERGENCY' : 'Send ↵';
+}
+
+function toggleAdapter(el) {
+  el.classList.toggle('on');
+}
+
+function selectAllAdapters(on) {
+  document.querySelectorAll('#compose-adapters .adapter-toggle').forEach(el => {
+    if (on) el.classList.add('on'); else el.classList.remove('on');
+  });
+}
+
+function toggleMuteAdapter(name) {
+  const btn = document.getElementById('mute-' + name);
+  if (state.mutedAdapters.has(name)) {
+    state.mutedAdapters.delete(name);
+    if (btn) { btn.classList.remove('muted'); btn.title = 'Mute messages from ' + name; }
+  } else {
+    state.mutedAdapters.add(name);
+    if (btn) { btn.classList.add('muted'); btn.title = 'Unmute messages from ' + name; }
+  }
+  localStorage.setItem('ech_muted', JSON.stringify([...state.mutedAdapters]));
+  renderAll();
+}
+
+function getSelectedAdapters() {
+  return [...document.querySelectorAll('.adapter-toggle.on')]
+    .map(el => el.dataset.adapter);
+}
+
+function handleComposKey(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendMessage();
+}
+
+async function sendMessage() {
+  const body = document.getElementById('compose-body').value.trim();
+  if (!body) return;
+  const adapters = getSelectedAdapters();
+  if (!adapters.length) { toast('No adapters selected', 'err'); return; }
+
+  const priority = parseInt(document.getElementById('priority-select').value);
+  const toId = document.getElementById('compose-to').value.trim() || null;
+
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+
+  const r = await fetch('/api/messages', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ body, adapters, to_id: toId, priority }),
+  });
+  const data = await r.json();
+  btn.disabled = false;
+
+  if (data.error) { toast(data.error, 'err'); return; }
+  const results  = data.results || {};
+  const msg_ids  = data.msg_ids || {};
+  const reasons  = data.failure_reasons || {};
+  const succeeded = Object.entries(results).filter(([,v]) => v).map(([k]) => k);
+  const failed    = Object.entries(results).filter(([,v]) => !v).map(([k]) => k);
+
+  if (succeeded.length > 0) {
+    // Echo each sent message into the feed immediately with pending status
+    const now = new Date().toISOString();
+    succeeded.forEach(adapter => {
+      const msgId = msg_ids[adapter];
+      if (msgId && !state.messages.find(m => m.id === msgId)) {
+        const ps = state.pendingStatus[msgId];
+        if (ps) delete state.pendingStatus[msgId];
+        const sentMsg = {
+          id: msgId, source_adapter: adapter,
+          source_channel: toId ? 'DM' : (state.adapterChannels[adapter] || 'outbound'),
+          from_id: 'local', from_display: 'SM Operator',
+          to_id: toId, body, timestamp: now, priority,
+          lat: null, lon: null, hop_count: null, hop_start: null,
+          path: null, via_mqtt: false,
+          _status: ps ? ps.status : 'pending',
+          _status_detail: ps ? (ps.detail || '') : '',
+          _delivery_path: ps ? (ps.path || null) : null,
+        };
+        state.messages.unshift(sentMsg);
+        if (msgPassesFilter(sentMsg)) { prependMsgDOM(sentMsg); updateCount(); }
+      }
+    });
+    toast(`Sent via: ${succeeded.join(', ')}`, 'ok');
+    document.getElementById('compose-body').value = '';
+    updateCharCount();
+  }
+  if (failed.length > 0) {
+    const labels = failed.map(name => {
+      const why = reasons[name];
+      if (why === 'paused')        return `${name} (paused)`;
+      if (why === 'not connected') return `${name} (offline)`;
+      if (name.includes('winlink') || name.includes('pat')) {
+        const toId = document.getElementById('compose-to').value.trim();
+        return toId ? `${name} (check Pat: sudo systemctl status pat)` : `${name} (Winlink needs a To: callsign)`;
+      }
+      return why ? `${name} (${why})` : name;
+    });
+    toast(`Could not send via: ${labels.join('; ')}`, 'err');
+  }
+  if (succeeded.length === 0 && failed.length === 0) {
+    toast('No adapters responded', 'err');
+  }
+}
+
+function sendTemplate(text) {
+  document.getElementById('compose-body').value = text;
+  updateCharCount();
+  document.getElementById('compose-body').focus();
+}
+
+async function sendAPRSBeacon() {
+  const btn = document.getElementById('beacon-btn');
+  btn.disabled = true;
+  try {
+    // Fetch channels to find APRS-IS adapters
+    const ch = await fetch('/api/channels').then(r => r.json());
+    const aprsAdapters = (ch.channels || []).filter(a =>
+      a.adapter.includes('aprs') && !a.adapter.includes('mock') && a.state === 'connected'
+    );
+    if (!aprsAdapters.length) {
+      toast('No connected APRS-IS adapters found', 'err');
+      return;
+    }
+    // Get base location from state
+    const st = await fetch('/api/state').then(r => r.json());
+    const lat = st.base_lat;
+    const lon = st.base_lon;
+    const body = {lat, lon};
+    const results = await Promise.all(aprsAdapters.map(a =>
+      fetch(`/api/adapters/${encodeURIComponent(a.adapter)}/beacon`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      }).then(r => r.json()).then(d => ({adapter: a.adapter, ...d}))
+    ));
+    const ok = results.filter(r => r.status === 'ok');
+    const fail = results.filter(r => r.status !== 'ok');
+    if (ok.length) {
+      const pkt = ok[0].packet || '';
+      toast(`Beacon sent via ${ok.map(r => r.adapter).join(', ')}${pkt ? ' — ' + pkt.slice(0, 60) : ''}`, 'ok');
+    }
+    if (fail.length) {
+      toast(`Beacon failed on ${fail.map(r => `${r.adapter}: ${r.detail}`).join('; ')}`, 'err');
+    }
+  } catch(e) {
+    toast(`Beacon error: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function sendEmergencyTemplate() {
+  document.getElementById('priority-select').value = '2';
+  updateSendBtn();
+  document.getElementById('compose-body').value = 'EMERGENCY — all units report status immediately';
+  updateCharCount();
+  document.getElementById('compose-body').focus();
+}
+
+async function broadcastAll() {
+  const body = document.getElementById('compose-body').value.trim();
+  if (!body) { toast('Enter message before broadcast', 'err'); return; }
+  document.querySelectorAll('.adapter-toggle').forEach(el => {
+    const m = adapterMeta(el.dataset.adapter);
+    if (!m.voice && !m.rxOnly) el.classList.add('on');
+  });
+  await sendMessage();
+}
+
+// Node role/type helpers — repeater-class nodes route packets but have no
+// message queue, so a DM to them silently goes nowhere; the UI says so.
+const _NODE_TYPE_LABELS = {
+  CLI: ['CLI', 'Companion — messageable', 'var(--green)'],
+  ROOM: ['ROOM', 'Room server — messageable', 'var(--green)'],
+  REP: ['RPT', 'Repeater — routes only, cannot receive messages', 'var(--yellow)'],
+  SENS: ['SENS', 'Sensor node — not messageable', 'var(--yellow)'],
+  ROUTER: ['RTR', 'Meshtastic router — usually unattended', 'var(--yellow)'],
+  REPEATER: ['RPT', 'Meshtastic repeater — routes only', 'var(--yellow)'],
+  DIGI: ['DIGI', 'APRS digipeater — autonomous', 'var(--yellow)'],
+  WX: ['WX', 'Weather station — autonomous', 'var(--yellow)'],
+  IGATE: ['IGATE', 'Internet gateway — autonomous', 'var(--yellow)'],
+  RPTR: ['RPT', 'Repeater — autonomous', 'var(--yellow)'],
+  OBJECT: ['OBJ', 'APRS object — rebroadcast by a gate, unattended', 'var(--muted)'],
+  MOBILE: ['MOB', 'Mobile station — likely operator', 'var(--green)'],
+  FIXED: ['FIX', 'Fixed station — likely operator', 'var(--green)'],
+};
+
+function nodeTypeBadge(n) {
+  const t = _NODE_TYPE_LABELS[n.node_type];
+  if (!t) return '';
+  return ` <span style="font-size:8px;padding:0 4px;border:1px solid ${t[2]};border-radius:3px;color:${t[2]}" title="${t[1]}">${t[0]}</span>`;
+}
+
+function nodeMessageable(n) {
+  // No confirmed pubkey (MeshCore sender only ever seen via decrypted channel
+  // text, never a contact/DM/advert) — there's nothing to address a DM to yet.
+  if (n.meta && n.meta.no_pubkey) return false;
+  // Unknown type → assume messageable (don't hide functionality on missing data)
+  return !['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT'].includes(n.node_type);
+}
+
+function fillTo(callsign) {
+  document.getElementById('compose-to').value = callsign;
+  document.getElementById('compose-body').focus();
+  toast(`To: ${callsign}`, 'ok');
+}
+
+function replyTo(nodeId, adapterName) {
+  // MeshCore channel messages carry no sender pubkey — only a "name: body" text
+  // prefix. If that name never matched a node we've heard directly (contact/DM/
+  // advert), ECH only knows the sender's display name, not an address a DM can
+  // reach. Filling the To: field with that name would look like a real address
+  // and then silently fail to send, so warn instead.
+  const known = _allNodes.find(n => n.node_id === nodeId && n._adapter === adapterName);
+  if (known && known.meta && known.meta.no_pubkey) {
+    toast(`Can't DM "${nodeId}" — only heard on a channel, no pubkey yet (needs a direct contact/advert first)`, 'err');
+    return;
+  }
+  document.getElementById('compose-to').value = nodeId;
+  // Select only the adapter the DM came in on so the reply goes back the same path
+  document.querySelectorAll('.adapter-toggle').forEach(btn => {
+    btn.classList.toggle('on', btn.dataset.adapter === adapterName);
+  });
+  document.getElementById('compose-body').focus();
+  toast(`Replying to ${nodeId.slice(0, 8)}… via ${adapterName}`, 'ok');
+}
+
+// ── Right panel ──────────────────────────────────────────────────────────
+function switchTab(tab, el) {
+  state.activeTab = tab;
+  document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('panel-nodes').style.display    = tab === 'nodes'    ? '' : 'none';
+  document.getElementById('panel-health').style.display   = tab === 'health'   ? '' : 'none';
+  document.getElementById('panel-calls').style.display    = tab === 'calls'    ? '' : 'none';
+  document.getElementById('panel-winlink').style.display  = tab === 'winlink'  ? '' : 'none';
+  if (tab === 'calls') loadCallLog();
+  if (tab === 'winlink') loadWinlinkPanel();
+}
+
+function showNodes() {
+  switchTab('nodes', document.querySelector('.panel-tab'));
+}
+function showHealth() {
+  switchTab('health', document.querySelectorAll('.panel-tab')[1]);
+}
+
+function handleNodeTelemetry(data) {
+  // Live telemetry from Meshtastic — patch the cached node in _allNodes and re-render
+  const idx = _allNodes.findIndex(n => n.node_id === data.node_id && n._adapter === data.adapter);
+  if (idx < 0) return;
+  const n = _allNodes[idx];
+  if (data.battery_level  != null) n.battery_level   = data.battery_level;
+  if (data.battery_voltage!= null) n.battery_voltage  = data.battery_voltage;
+  if (data.ch_util        != null) n.ch_util          = data.ch_util;
+  if (data.air_util_tx    != null) n.air_util_tx      = data.air_util_tx;
+  if (data.uptime_secs    != null) n.uptime_secs      = data.uptime_secs;
+  if (data.temperature    != null) n.temperature      = data.temperature;
+  if (data.humidity       != null) n.humidity         = data.humidity;
+  if (data.pressure       != null) n.pressure         = data.pressure;
+  _allNodes[idx] = n;
+  // Re-render current view preserving any active filter
+  const term = document.getElementById('node-search')?.value || '';
+  filterNodes(term);
+}
+
+async function pollHealth() {
+  try {
+    const r = await fetch('/api/channels');
+    const data = await r.json();
+    renderHealth(data.channels);
+    updateHealthDots(data.channels);
+    await loadAllNodes(data.channels);
+  } catch(e) {
+    console.error('Health poll failed', e);
+  }
+}
+
+// ── Logout ────────────────────────────────────────────────────────────────
+async function doLogout() {
+  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+  location.reload();
+}
+
+// ── Role-based UI ────────────────────────────────────────────────────────
+async function applyRoleUI() {
+  try {
+    const r = await fetch('/api/auth/me');
+    if (!r.ok) return;
+    const d = await r.json();
+    _myRole = d.role || '';
+    _myUsername = d.username || '';
+    // Show current user + logout button when auth is active
+    if (d.authenticated && d.username) {
+      const wrap = document.getElementById('auth-user-wrap');
+      const label = document.getElementById('auth-username');
+      if (wrap)  { wrap.style.display = 'flex'; }
+      if (label) { label.textContent = d.username; }
+    }
+    // Show toast if redirected here after an access-denied attempt
+    if (location.search.includes('access=denied')) {
+      toast('Settings & Simulation require admin access', 'err');
+      history.replaceState({}, '', '/');
+    }
+    // Viewer role: view-only everywhere except their own password and Ham
+    // Log — hide every transmit-capable control instead of letting them fill
+    // one out and hit a 403 (the server enforces this regardless; this is
+    // just so the UI doesn't dangle controls that don't actually work).
+    if (_myRole === 'viewer') {
+      const compose = document.getElementById('compose');
+      if (compose) {
+        compose.style.display = 'none';
+        const notice = document.createElement('div');
+        notice.style.cssText = 'padding:10px 14px;font-family:var(--mono);font-size:11px;color:var(--muted);border-top:1px solid var(--border)';
+        notice.textContent = 'View-only account — messaging is disabled for this role.';
+        compose.parentNode.insertBefore(notice, compose.nextSibling);
+      }
+      const quickSend = document.getElementById('quick-send-section');
+      if (quickSend) quickSend.style.display = 'none';
+      const footerActions = document.getElementById('sidebar-footer-actions');
+      if (footerActions) footerActions.style.display = 'none';
+    }
+  } catch (e) {
+    // auth disabled — nothing to do; the shared top-nav's own /api/auth/me
+    // check handles Settings/Simulation visibility independently.
+  }
+}
+
+// ── Who's online ─────────────────────────────────────────────────────────
+let _whoSessions = [];
+let _myUsername = '';
+let _myRole = '';
+
+async function pollWhoOnline() {
+  try {
+    const r = await fetch('/api/auth/sessions');
+    if (!r.ok) return;
+    const d = await r.json();
+    _whoSessions = d.sessions || [];
+    const btn = document.getElementById('who-count');
+    if (btn) btn.textContent = _whoSessions.length;
+    // Refresh list if popover is open
+    const pop = document.getElementById('who-popover');
+    if (pop && pop.style.display !== 'none') renderWhoList();
+  } catch(e) {}
+}
+
+function renderWhoList() {
+  const el = document.getElementById('who-list');
+  if (!el) return;
+  if (!_whoSessions.length) {
+    el.innerHTML = '<div style="padding:4px 12px;color:var(--dim)">No active sessions</div>';
+    return;
+  }
+  const roleColor = r => r === 'admin' ? 'var(--yellow)' : 'var(--green)';
+  const isAdmin = _myRole === 'admin';
+  el.innerHTML = _whoSessions.map(s => {
+    const exp = s.expires ? new Date(s.expires) : null;
+    const expStr = exp ? exp.toUTCString().slice(17,22) + 'Z' : '';
+    const isSelf = s.username === _myUsername;
+    const kickBtn = isAdmin && !isSelf
+      ? `<button onclick="kickUser('${escHtml(s.username)}')" title="Force logout ${escHtml(s.username)}" style="background:none;border:1px solid var(--red);color:var(--red);border-radius:3px;padding:1px 6px;cursor:pointer;font-size:9px;line-height:1.4;flex-shrink:0">✕ kick</button>`
+      : (isSelf ? `<span style="color:var(--dim);font-size:9px">(you)</span>` : '');
+    return `<div style="display:flex;align-items:center;gap:6px;padding:4px 12px">
+      <span style="color:${roleColor(s.role)};font-size:10px">${escHtml(s.role.toUpperCase())}</span>
+      <span style="flex:1">${escHtml(s.username)}</span>
+      <span style="color:var(--dim);font-size:9px" title="Expires ${escHtml(s.expires||'')}">exp ${escHtml(expStr)}</span>
+      ${kickBtn}
+    </div>`;
+  }).join('');
+}
+
+async function kickUser(username) {
+  if (!confirm(`Force logout "${username}"? They will be immediately disconnected.`)) return;
+  try {
+    const r = await fetch(`/api/auth/sessions/${encodeURIComponent(username)}`, {method: 'DELETE'});
+    const d = await r.json();
+    if (d.status === 'ok') {
+      toast(`${username} logged out (${d.sessions_revoked} session${d.sessions_revoked !== 1 ? 's' : ''} revoked)`, 'ok');
+      await pollWhoOnline();
+    } else {
+      toast(`Error: ${d.detail || 'unknown'}`, 'err');
+    }
+  } catch(e) {
+    toast('Request failed', 'err');
+  }
+}
+
+// ── Bot stats chip ────────────────────────────────────────────────────────
+let _botStats = null;
+
+let _botSessions = [];
+
+async function loadBotStats() {
+  try {
+    // Show widget once we know the bot config (enabled or not)
+    const cfg = await fetch('/api/bot/config').then(r => r.json()).catch(() => null);
+    if (cfg && cfg.enabled) document.getElementById('bot-stats-wrap').style.display = '';
+    const s = await fetch('/api/bot/stats').then(r => r.json());
+    _botStats = s;
+    document.getElementById('bot-total-count').textContent = s.total || 0;
+    if (s.total > 0) document.getElementById('bot-stats-wrap').style.display = '';
+    _botSessions = await fetch('/api/bot/sessions').then(r => r.json()).then(d => d.sessions || []).catch(() => []);
+    const dot = document.getElementById('bot-session-dot');
+    if (dot) dot.style.display = _botSessions.length > 0 ? '' : 'none';
+    if (_botSessions.length > 0) document.getElementById('bot-stats-wrap').style.display = '';
+    // Refresh popover if open
+    if (document.getElementById('bot-stats-popover').style.display !== 'none') renderBotStatsPopover();
+  } catch(e) {}
+}
+
+function renderBotStatsPopover() {
+  const s = _botStats;
+  if (!s) return;
+  const body = document.getElementById('bot-stats-body');
+  const sessions = (_botSessions || []).map(sess =>
+    `<div style="display:flex;justify-content:space-between;padding:2px 0;color:var(--green)">
+      <span>&#9679; ${escHtml(sess.from_display)}</span><span style="color:var(--dim)">${escHtml(sess.detail)}</span>
+    </div>`
+  ).join('');
+  const sessionsBlock = sessions
+    ? `<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)">${sessions}</div>`
+    : '';
+  const last = s.last ? `<div style="color:var(--dim);margin-top:4px;font-size:10px">Last: ${s.last.from_display||s.last.from_id} · ${s.last.command} · ${(s.last.timestamp||'').slice(11,19)} UTC</div>` : '';
+  const cmds = (s.by_command||[]).slice(0,6).map(x =>
+    `<div style="display:flex;justify-content:space-between;padding:1px 0"><span>${x.command}</span><span style="color:var(--dim)">${x.cnt}</span></div>`
+  ).join('');
+  body.innerHTML = `${sessionsBlock}<div style="margin-bottom:4px">Total: <strong>${s.total}</strong> · Callers: <strong>${s.unique_callers}</strong></div>${cmds}${last}`;
+}
+
+function toggleBotStats(e) {
+  e.stopPropagation();
+  const pop = document.getElementById('bot-stats-popover');
+  if (!pop) return;
+  if (pop.style.display === 'none') {
+    renderBotStatsPopover();
+    pop.style.display = '';
+    const close = ev => { if (!pop.contains(ev.target)) { pop.style.display='none'; document.removeEventListener('click',close); } };
+    document.addEventListener('click', close);
+  } else {
+    pop.style.display = 'none';
+  }
+}
+
+function toggleWhoOnline(e) {
+  e.stopPropagation();
+  const pop = document.getElementById('who-popover');
+  if (!pop) return;
+  if (pop.style.display === 'none') {
+    renderWhoList();
+    pop.style.display = '';
+    // Close when clicking outside
+    const close = ev => { if (!pop.contains(ev.target)) { pop.style.display='none'; document.removeEventListener('click',close); } };
+    document.addEventListener('click', close);
+  } else {
+    pop.style.display = 'none';
+  }
+}
+
+async function loadAllNodes(channels) {
+  const nodeAdapters = channels
+    .filter(c => c.adapter.includes('meshtastic') || c.adapter.includes('meshcore') || c.adapter.includes('aprs'))
+    .map(c => c.adapter);
+
+  const results = await Promise.all(nodeAdapters.map(a =>
+    fetch(`/api/nodes/${a}`).then(r => r.json()).then(d => d.nodes.map(n => ({...n, _adapter: a}))).catch(() => [])
+  ));
+  renderNodes(results.flat());
+}
+
+let _allNodes = [];  // full node list for filter
+
+function filterNodes(q) {
+  const term = (q || '').toLowerCase().trim();
+  const filtered = term ? _allNodes.filter(n =>
+    (n.display_name || '').toLowerCase().includes(term) ||
+    (n.node_id || '').toLowerCase().includes(term) ||
+    (n._adapter || '').toLowerCase().includes(term)
+  ) : _allNodes;
+  _renderNodeCards(filtered, term ? _allNodes.length : null);
+}
+
+function renderNodes(nodes) {
+  // Cache names for delivery path resolution
+  nodes.forEach(n => { if (n.node_id && n.display_name) state.nodeNames[n.node_id] = n.display_name; });
+  _allNodes = nodes;
+  const term = (document.getElementById('node-search')?.value || '').toLowerCase().trim();
+  const filtered = term ? nodes.filter(n =>
+    (n.display_name || '').toLowerCase().includes(term) ||
+    (n.node_id || '').toLowerCase().includes(term)
+  ) : nodes;
+  _renderNodeCards(filtered, term ? nodes.length : null);
+}
+
+function _renderNodeCards(nodes, totalCount) {
+  const cnt = document.getElementById('node-count');
+  if (cnt) cnt.textContent = totalCount != null ? `${nodes.length} / ${totalCount}` : `${nodes.length}`;
+  const el = document.getElementById('panel-nodes');
+  if (!nodes.length) { el.innerHTML = '<div style="padding:12px;font-family:var(--mono);font-size:11px;color:var(--dim)">No mesh nodes</div>'; return; }
+  const adaptersWithNodes = [...new Set(nodes.map(n => n._adapter).filter(Boolean))];
+  const clearBtn = adaptersWithNodes.length
+    ? `<div style="display:flex;gap:4px;flex-wrap:wrap;padding:4px 8px 0">${adaptersWithNodes.map(a =>
+        `<button onclick="clearAdapterNodes('${escHtml(a)}')" style="font-family:var(--mono);font-size:9px;padding:2px 6px;border:1px solid var(--border);background:var(--bg);color:var(--dim);border-radius:2px;cursor:pointer" title="Clear cached nodes for ${escHtml(a)}">✕ ${escHtml(a)}</button>`
+      ).join('')}</div>` : '';
+  const _now = Date.now();
+  function _agoStr(isoStr) {
+    if (!isoStr) return '--';
+    const sec = Math.floor((_now - new Date(isoStr)) / 1000);
+    if (isNaN(sec) || sec < 0) return 'future?';   // corrupted RTC on remote node
+    if (sec < 60)   return `${sec}s ago`;
+    if (sec < 3600) return `${Math.floor(sec/60)}m ago`;
+    if (sec < 86400) return `${Math.floor(sec/3600)}h ago`;
+    return `${Math.floor(sec/86400)}d ago`;         // cap at days; hours gets unreadable
+  }
+  el.innerHTML = nodes.map(n => {
+    const batt = (n.battery_level != null && !isNaN(n.battery_level)) ? parseInt(n.battery_level) : null;
+    const battClass = batt != null ? (batt < 20 ? 'critical' : batt < 40 ? 'low' : '') : '';
+    const adapterLabel = n._adapter?.includes('meshcore') ? 'MSHC' : n._adapter?.includes('aprs') ? 'APRS' : 'MSHT';
+    const adapterColor = n._adapter?.includes('meshcore') ? 'var(--meshcore)' : n._adapter?.includes('aprs') ? 'var(--aprs,#7c3aed)' : 'var(--mesh)';
+    const heardMs = n.last_heard ? _now - new Date(n.last_heard) : Infinity;
+    const agoStr  = _agoStr(n.last_heard);
+    const isStale = heardMs > 15 * 60 * 1000;   // >15 min = stale
+    const staleStyle = isStale ? 'opacity:0.55;' : '';
+    const staleTag = isStale ? '<span style="font-size:8px;color:var(--muted);margin-left:3px" title="Not heard in >15 minutes">stale</span>' : '';
+    const noPubkey = !!(n.meta && n.meta.no_pubkey);
+    const noPubkeyTag = noPubkey ? '<span style="font-size:8px;color:var(--muted);margin-left:3px" title="Only heard via decrypted channel text — no pubkey known yet, so DM/trace can\'t reach it until it advertises or DMs first">no pubkey</span>' : '';
+    const hasPos = n.lat != null && n.lon != null;
+    const mapBtn = hasPos ? `<a href="/map?lat=${encodeURIComponent(n.lat)}&lon=${encodeURIComponent(n.lon)}&zoom=16" target="_blank" rel="noopener" class="node-ping-btn" style="text-decoration:none;display:inline-block" title="Show this node on the map">📍 Map</a>` : '';
+    const detailBtn = `<button class="node-ping-btn" onclick="openNodeDetail('${escHtml(n.node_id)}','${escHtml(n._adapter)}')" title="Show all known details for this node">ℹ Details</button>`;
+    return `<div class="node-card" style="${staleStyle}">
+      <div class="node-name" style="display:flex;align-items:center;gap:4px">
+        <span onclick="fillTo('${escHtml(n.node_id)}')" title="Click to fill compose-to with this node ID" style="cursor:pointer;flex:1">${escHtml(n.display_name)}${nodeTypeBadge(n)}${staleTag}${noPubkeyTag}</span>
+        <span style="font-size:9px;color:${adapterColor}">${adapterLabel}</span>
+        ${mapBtn}
+        ${detailBtn}
+        ${n._adapter?.includes('meshcore') ? `${nodeMessageable(n) ? `<button class="node-ping-btn" style="margin-left:2px" onclick="fillTo('${escHtml(n.node_id)}')" title="Direct message this node (fills compose To: field)">✉ DM</button>` : ''}${noPubkey ? '' : `<button class="node-ping-btn" onclick="pingNode('${escHtml(n._adapter)}','${escHtml(n.node_id)}',this)" title="Send a directed trace via this node (probe routed through it; result appears in the feed and as a green path on the map)">📡 Trace</button>`}` : ''}
+      </div>
+      <div class="node-id">${escHtml(n.node_id)}${n.name_source ? ` <span style="font-size:8px;color:var(--muted)">[${escHtml(n.name_source)}]</span>` : ''}</div>
+      <div class="node-stats">
+        <span class="stat" title="${n.last_heard ? new Date(n.last_heard).toLocaleString() : ''}">heard <span>${agoStr}</span></span>
+        ${(n.snr != null && !isNaN(n.snr)) ? `<span class="stat">SNR <span>${parseFloat(n.snr).toFixed(1)}dB</span></span>` : ''}
+        ${n.rssi != null ? `<span class="stat">RSSI <span>${n.rssi}</span></span>` : ''}
+        ${n.battery_level != null ? `<span class="stat">bat <span><span class="battery-bar"><span class="battery-fill ${battClass}" style="width:${batt}%"></span></span>${batt}%</span></span>` : ''}
+        ${n.battery_voltage != null ? `<span class="stat">V <span>${parseFloat(n.battery_voltage).toFixed(2)}V</span></span>` : ''}
+        ${n.ch_util != null ? `<span class="stat" title="Channel utilization">chUtil <span>${parseFloat(n.ch_util).toFixed(1)}%</span></span>` : ''}
+        ${n.air_util_tx != null ? `<span class="stat" title="Air utilization TX">airTx <span>${parseFloat(n.air_util_tx).toFixed(1)}%</span></span>` : ''}
+        ${n.temperature != null ? `<span class="stat">temp <span>${parseFloat(n.temperature).toFixed(1)}°C</span></span>` : ''}
+        ${n.humidity != null ? `<span class="stat">RH <span>${parseFloat(n.humidity).toFixed(0)}%</span></span>` : ''}
+        ${n.pressure != null ? `<span class="stat">hPa <span>${parseFloat(n.pressure).toFixed(0)}</span></span>` : ''}
+        ${n.uptime_secs != null ? `<span class="stat" title="Device uptime">up <span>${n.uptime_secs >= 86400 ? Math.floor(n.uptime_secs/86400)+'d' : n.uptime_secs >= 3600 ? Math.floor(n.uptime_secs/3600)+'h' : Math.floor(n.uptime_secs/60)+'m'}</span></span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  el.innerHTML = clearBtn + el.innerHTML;
+}
+
+async function clearAdapterNodes(adapterName) {
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/clear_nodes`, {method:'POST'});
+  const d = r.ok ? await r.json() : null;
+  toast(d?.status === 'ok' ? `Cleared ${d.cleared} nodes from ${adapterName}` : 'Clear failed', d?.status === 'ok' ? 'ok' : 'err');
+}
+
+function renderHealth(channels) {
+  // Cache adapter TX channels so sendMessage() can label outbound messages correctly
+  channels.forEach(ch => {
+    const txCh = (ch.detail || {}).tx_channel;
+    if (txCh) state.adapterChannels[ch.adapter] = txCh;
+  });
+  const el = document.getElementById('panel-health');
+  // Preserve open packet log state across re-renders
+  const openLogs = new Set(
+    [...el.querySelectorAll('[id^="pktlog-"]')]
+      .filter(d => d.style.display !== 'none')
+      .map(d => d.id.slice('pktlog-'.length))
+  );
+
+  el.innerHTML = channels.map(ch => {
+    const stateClass = ch.state === 'connected' ? 'ok' : ch.state === 'error' ? 'err' : 'warn';
+    const d = ch.detail || {};
+    // Show a compact summary — skip internal/redundant keys
+    const SKIP = new Set(['channels_list','channel_name','rx_channels','channels','contacts_poll_interval','discovery_interval','channel_idx','paused']);
+    const detailHtml = Object.entries(d)
+      .filter(([k]) => !SKIP.has(k) && d[k] !== '' && d[k] !== null && d[k] !== undefined)
+      .map(([k,v]) => `<span style="color:var(--muted)">${escHtml(String(k))}:</span> ${escHtml(v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''))}`)
+      .join(' &nbsp;·&nbsp; ');
+    const lastRx = ch.last_rx ? new Date(ch.last_rx).toUTCString().slice(17,22) : 'never';
+    const isMeshCoreReal = ch.adapter.toLowerCase().includes('meshcore') && !ch.adapter.toLowerCase().includes('mock');
+    const chList = d.channels_list;
+    const chSelector = chList && chList.length >= 1 ? `
+      <div style="margin-top:4px;display:flex;align-items:center;gap:4px">
+        <span style="font-size:9px;color:var(--muted)">ch:</span>
+        <select style="font-size:9px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:2px;padding:1px 2px"
+          onchange="setAdapterChannel('${escHtml(ch.adapter)}', this.value, this)">
+          ${chList.map(c => `<option value="${c.idx}" ${c.idx===d.channel_idx?'selected':''}>${c.idx}: ${escHtml(c.name)}</option>`).join('')}
+        </select>
+      </div>` : '';
+    const discoverBtn = isMeshCoreReal ? `
+      <div style="margin-top:4px">
+        <button id="hc-disc-${escHtml(ch.adapter)}" onclick="hcDiscoverNodes('${escHtml(ch.adapter)}')"
+          style="font-size:9px;padding:2px 7px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:2px;cursor:pointer"
+          title="Send discovery pulse — solicits node advertisements">Discover</button>
+      </div>` : '';
+    const supportsRename = ch.adapter.toLowerCase().includes('meshcore') || ch.adapter.toLowerCase().includes('meshtastic');
+    const renameRow = supportsRename ? `
+      <div style="margin-top:4px;display:flex;gap:3px">
+        <input id="rename-${escHtml(ch.adapter)}" type="text" placeholder="${escHtml(d.device_name || 'new name')}"
+          style="flex:1;font-family:var(--mono);font-size:9px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:2px;padding:2px 4px"
+          onkeydown="if(event.key==='Enter')renameDevice('${escHtml(ch.adapter)}')">
+        <button onclick="renameDevice('${escHtml(ch.adapter)}')" style="font-size:9px;padding:2px 5px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:2px;cursor:pointer">✎ Rename</button>
+      </div>` : '';
+    return `<div class="health-card ${stateClass}" id="hcard-${escHtml(ch.adapter)}">
+      <div class="health-name" style="display:flex;align-items:center;justify-content:space-between">
+        <span>${escHtml(ch.adapter)}</span>
+        <button onclick="togglePacketLog('${escHtml(ch.adapter)}')" style="font-size:9px;padding:1px 5px;color:var(--muted)" title="Show raw frames">📦</button>
+      </div>
+      <div class="health-state ${stateClass}">${ch.state}</div>
+      <div class="health-detail">last rx: ${lastRx}${detailHtml ? '<br>' + detailHtml : ''}</div>
+      ${chSelector}
+      ${discoverBtn}
+      ${renameRow}
+      <div id="pktlog-${escHtml(ch.adapter)}" style="display:none;margin-top:6px;background:rgba(0,0,0,.3);border-radius:3px;padding:4px;max-height:200px;overflow-y:scroll;font-family:var(--mono);font-size:9px;color:var(--muted);word-break:break-all"></div>
+    </div>`;
+  }).join('');
+
+  // Restore open packet logs after re-render
+  openLogs.forEach(name => setTimeout(() => loadPacketLog(name), 0));
+}
+
+async function renameDevice(adapterName) {
+  const input = document.getElementById(`rename-${adapterName}`);
+  const newName = input?.value.trim();
+  if (!newName) { toast('Enter a name', 'err'); return; }
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/rename`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: newName}),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    toast(`${adapterName}: renamed to "${d.name}"`, 'ok');
+    if (input) input.value = '';
+  } else {
+    toast(`Rename failed: ${d.detail || d.status}`, 'err');
+  }
+}
+
+async function setAdapterChannel(adapterName, channelIdx, selectEl) {
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/channel`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({channel: parseInt(channelIdx, 10)}),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.status === 'ok') {
+      toast(`${adapterName}: switched to ch${d.channel_idx}${d.channel_name ? ' ('+d.channel_name+')' : ''}`, 'ok');
+    } else {
+      // The <select> already shows the newly-picked option regardless of what
+      // the server did — re-render from server truth instead of leaving a
+      // rejected channel change looking selected.
+      toast(`Channel switch failed: ${d.detail || d.status || r.status}`, 'err');
+      if (selectEl) pollHealth();
+    }
+  } catch(e) {
+    toast(`Channel switch error: ${e.message}`, 'err');
+    if (selectEl) pollHealth();
+  }
+}
+
+async function hcDiscoverNodes(adapterName) {
+  const btn = document.getElementById(`hc-disc-${adapterName}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Discovering…'; }
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/discover`, {method:'POST'});
+    const d = await r.json();
+    if (d.status === 'ok') toast(`${adapterName}: discovery pulse sent`, 'ok');
+    else toast(`Discover failed: ${d.detail || d.status}`, 'err');
+  } catch(e) {
+    toast(`Discover error: ${e.message}`, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Discover'; }
+  }
+}
+
+async function loadPacketLog(adapterName) {
+  const el = document.getElementById(`pktlog-${adapterName}`);
+  if (!el) return;
+  el.style.display = 'block';
+  el.textContent = 'Loading…';
+  try {
+    const d = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/packets?limit=50`).then(r=>r.json());
+    if (!d.packets || !d.packets.length) {
+      el.textContent = d.note || 'No packets yet';
+      return;
+    }
+    el.innerHTML = d.packets.map(p => {
+      const t = new Date(p.ts * 1000).toUTCString().slice(17, 25);
+      const fields = p.fields ? ' · ' + Object.entries(p.fields).filter(([k])=>k!=='Privilege').map(([k,v])=>`${k}=${v}`).join(' ') : '';
+      const hex = p.hex ? `<span style="color:#444;user-select:all"> ${p.hex}</span>` : '';
+      return `<div style="border-bottom:1px solid #222;padding:2px 0">`+
+        `<span style="color:var(--green)">${t}</span> `+
+        `<span style="color:var(--blue)">${escHtml(p.type_hex||p.type||'?')}</span> `+
+        `<span style="color:var(--text)">${escHtml(p.type||'')}</span> `+
+        `<span style="color:var(--muted)">${p.len?p.len+'B':''}</span>`+
+        `${hex}${escHtml(fields)}</div>`;
+    }).join('');
+    el.scrollTop = el.scrollHeight;
+  } catch(e) {
+    el.textContent = `Error: ${e.message}`;
+  }
+}
+
+async function togglePacketLog(adapterName) {
+  const el = document.getElementById(`pktlog-${adapterName}`);
+  if (!el) return;
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  await loadPacketLog(adapterName);
+}
+
+// ── Toasts ───────────────────────────────────────────────────────────────
+function toast(msg, type = '') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ── Contact import ───────────────────────────────────────────────────────
+async function importContacts(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  const r = await fetch('/api/contacts/import', { method: 'POST', body: form });
+  const data = await r.json();
+  if (data.status === 'ok') {
+    toast(`Imported ${data.imported} contact${data.imported !== 1 ? 's' : ''}`, 'ok');
+  } else {
+    toast(`Import error: ${data.detail}`, 'err');
+  }
+  input.value = '';
+}
+
+// ── Dynamic adapter detection ──────────────────────────────────────────
+// Maps adapter name patterns to display config
+function adapterMeta(name) {
+  const n = name.toLowerCase();
+  if (n.includes('meshtastic')) return {icon:'MSHT', label:'Meshtastic', cls:'mesh', toggle:'MSHT'};
+  if (n.includes('meshcore'))   return {icon:'MSHC', label:'MeshCore',   cls:'meshc',toggle:'MSHC'};
+  if (n.includes('aprs'))       return {icon:'APRS', label:'APRS',       cls:'aprs', toggle:'APRS'};
+  if (n.includes('js8') || n.includes('hf')) return {icon:'HF', label:'JS8Call HF', cls:'hf', toggle:'HF'};
+  if (n.includes('sms'))        return {icon:'SMS',  label:'SMS',        cls:'sms',  toggle:'SMS'};
+  if (n.includes('winlink') || n.includes('pat')) return {icon:'WL', label:'Winlink', cls:'wl', toggle:'WL'};
+  if (n.includes('reticulum') || n.includes('rns')) return {icon:'RNS', label:'Reticulum', cls:'rns', toggle:'RNS'};
+  if (n.includes('aredn') || n.includes('asterisk') || n.includes('ami') || n.includes('pbx'))
+    return {icon:'PBX', label:'AREDN/PBX', cls:'pbx', toggle:'PBX', voice:true};
+  if (n.includes('adsb') || n.includes('opensky') || n.includes('ais'))
+    return {icon:(n.includes('adsb')||n.includes('opensky'))?'ADSB':(n.includes('aishub')?'AISH':(n.includes('aisstream')?'AISS':'AIS')), label:n.includes('adsb')?'ADS-B':n.includes('opensky')?'OpenSky':(n.includes('aishub')?'AISHub':(n.includes('aisstream')?'AISstream':'AIS')), cls:'', toggle:'', rxOnly:true};
+  // Passive MQTT topology-comparison adapter — merges LetsMesh path data into local
+  // routing but never adds to the message feed and can't send; must not appear as a
+  // compose target (see ech/adapters/letsmesh_compare.py docstring).
+  if (n.includes('letsmesh'))
+    return {icon:'LSM', label:'LetsMesh (compare)', cls:'', toggle:'', rxOnly:true};
+  return {icon:name.slice(0,4).toUpperCase(), label:name, cls:'', toggle:name.slice(0,4).toUpperCase()};
+}
+
+let knownAdapters = [];
+
+async function buildDynamicUI() {
+  try {
+    const r = await fetch('/api/channels');
+    const data = await r.json();
+    knownAdapters = data.channels.map(c => c.adapter);
+
+    // Build sidebar channel items
+    const sidebar = document.getElementById('dynamic-channels');
+    sidebar.innerHTML = knownAdapters.map(name => {
+      const m = adapterMeta(name);
+      const iconStyle = m.cls ? '' : 'background:var(--bg3);color:var(--muted)';
+      const isMuted = state.mutedAdapters.has(name);
+      return `<div class="channel-item" data-adapter="${name}" onclick="filterAdapter('${name}', this)">
+        <span class="ch-icon ${m.cls}" style="${iconStyle}">${m.icon}</span>
+        <span class="ch-label">${m.label}${name.includes('mock') ? ' <span style="font-size:9px;color:var(--dim)">[mock]</span>' : ''}</span>
+        <span class="ch-badge" id="badge-${name}"></span>
+        <button id="mute-${name}" class="ch-mute-btn${isMuted ? ' muted' : ''}" title="${isMuted ? 'Unmute' : 'Mute'} messages from ${name}" onclick="event.stopPropagation(); toggleMuteAdapter('${name}')">🔇</button>
+        <span class="ch-status-dot" id="dot-${name}"></span>
+      </div>`;
+    }).join('');
+
+    // Build compose adapter toggles — preserve existing on/off state if already built
+    const compose = document.getElementById('compose-adapters');
+    const prevState = {};
+    compose.querySelectorAll('.adapter-toggle').forEach(el => {
+      prevState[el.dataset.adapter] = el.classList.contains('on');
+    });
+    compose.innerHTML = knownAdapters.filter(name => !adapterMeta(name).rxOnly).map(name => {
+      const m = adapterMeta(name);
+      // Preserve user's toggle state; new adapters start off
+      const startOn = name in prevState ? prevState[name] : false;
+      return `<div class="adapter-toggle ${startOn ? 'on' : ''} ${m.cls}" data-adapter="${name}" onclick="toggleAdapter(this)">${m.toggle}</div>`;
+    }).join('');
+
+    // Update health dots
+    updateHealthDots(data.channels);
+  } catch(e) {
+    console.error('buildDynamicUI failed:', e);
+  }
+}
+
+function updateHealthDots(channels) {
+  channels.forEach(ch => {
+    const dot = document.getElementById('dot-' + ch.adapter);
+    if (dot) {
+      dot.className = 'ch-status-dot ' +
+        (ch.state === 'connected' ? 'ok' : ch.state === 'error' ? 'err' : 'warn');
+    }
+  });
+}
+
+// ── Operator callsign ─────────────────────────────────────────────────────
+function promptOperator() {
+  const el = document.getElementById('operator-display');
+  const current = el.textContent.replace('OP: ','').trim().replace('—','');
+  // Replace span text with an inline input
+  el.innerHTML = `<input id="op-input" type="text" value="${current}"
+    style="width:90px;font-family:var(--mono);font-size:11px;padding:1px 4px;
+    border:1px solid var(--blue);background:var(--bg2);color:var(--text);border-radius:3px"
+    maxlength="10" placeholder="CALLSIGN" autofocus>`;
+  const input = document.getElementById('op-input');
+  input.select();
+  async function save() {
+    const cs = input.value.trim().toUpperCase();
+    el.textContent = 'OP: ' + (cs || '—');
+    await fetch('/api/state/operator', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({callsign: cs})
+    });
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') { el.textContent = 'OP: ' + (current || '—'); }
+  });
+}
+
+// ── Timezone toggle ───────────────────────────────────────────────────────
+const _TZ_MODES = ['utc','local','both'];
+const _TZ_LABELS = {utc:'UTC', local:'LOCAL', both:'BOTH'};
+
+function toggleTimezone() {
+  const idx = _TZ_MODES.indexOf(_tzMode);
+  _tzMode = _TZ_MODES[(idx + 1) % 3];
+  localStorage.setItem('ech_tz_mode', _tzMode);
+  const btn = document.getElementById('tz-btn');
+  if (btn) btn.textContent = _TZ_LABELS[_tzMode];
+  tick();
+  renderAll();
+}
+
+// initialise button label on load
+(function() {
+  const btn = document.getElementById('tz-btn');
+  if (btn) btn.textContent = _TZ_LABELS[_tzMode] || 'UTC';
+})();
+
+function formatMsgTime(isoStr) {
+  if (!isoStr) return '--';
+  const d = new Date(isoStr);
+  if (_tzMode === 'local' || _tzMode === 'both') {
+    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+  return d.toUTCString().slice(17, 25) + ' UTC';
+}
+
+// ── Clear message display ─────────────────────────────────────────────────
+function clearMessageDisplay() {
+  // Clear in-memory message list
+  state.messages = [];
+  // Clear DOM
+  const container = document.getElementById('messages');
+  if (container) container.innerHTML = '';
+  updateCount();
+  // Reset all unread badges
+  if (state.unread) {
+    Object.keys(state.unread).forEach(k => {
+      state.unread[k] = 0;
+      const badge = document.getElementById('badge-' + k);
+      if (badge) { badge.textContent = ''; badge.classList.remove('has-msgs'); }
+    });
+  }
+  // Signal other tabs/windows
+  try { localStorage.setItem('ech_clear_messages', Date.now().toString()); } catch(e) {}
+}
+
+async function clearHistory() {
+  if (!confirm('Delete all messages from the server database? This cannot be undone.')) return;
+  const r = await fetch('/api/messages/clear', {method: 'POST'});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    toast(`Clear history failed: ${d.detail || r.status}`, 'err');
+    return;
+  }
+  clearMessageDisplay();
+  toast(`Cleared ${d.cleared} messages from server`, 'ok');
+}
+
+// Listen for clear signal from other tabs or WS
+window.addEventListener('storage', (e) => {
+  if (e.key === 'ech_clear_messages') {
+    state.messages = [];
+    const container = document.getElementById('messages');
+    if (container) container.innerHTML = '';
+    updateCount();
+  }
+});
+window.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'clear_messages') clearMessageDisplay();
+});
+
+// ── System stats ─────────────────────────────────────────────────────────
+let _prevNet = null;
+let _sysbarEnabled = localStorage.getItem('sysbar_enabled') !== 'false';
+
+function _fmtBytes(b) {
+  if (b == null) return '--';
+  if (b < 1024)       return b + 'B';
+  if (b < 1024**2)    return (b/1024).toFixed(1) + 'KB';
+  if (b < 1024**3)    return (b/1024**2).toFixed(1) + 'MB';
+  return (b/1024**3).toFixed(2) + 'GB';
+}
+
+function _fmtRate(bytes, secs) {
+  if (bytes == null || secs <= 0) return '--';
+  return _fmtBytes(Math.round(bytes / secs)) + '/s';
+}
+
+async function updateSysbar() {
+  const bar = document.getElementById('sysbar');
+  if (!bar) return;
+  if (!_sysbarEnabled) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+
+  try {
+    const s = await fetch('/api/system/stats').then(r => r.json());
+    if (s.error) return;
+
+    const now = Date.now() / 1000;
+
+    // CPU
+    const cpuPct = s.cpu_pct || 0;
+    const cpuFill = document.getElementById('cpu-bar');
+    const cpuVal  = document.getElementById('cpu-val');
+    if (cpuFill) cpuFill.style.width = cpuPct + '%';
+    if (cpuFill) cpuFill.className = 'sbar-fill ' + (cpuPct > 90 ? 'fill-hot' : cpuPct > 70 ? 'fill-warn' : 'fill-cpu');
+    if (cpuVal)  cpuVal.textContent = cpuPct.toFixed(0) + '%';
+
+    // Memory
+    const memPct  = s.mem_pct || 0;
+    const memFill = document.getElementById('mem-bar');
+    const memVal  = document.getElementById('mem-val');
+    if (memFill) memFill.style.width = memPct + '%';
+    if (memFill) memFill.className = 'sbar-fill ' + (memPct > 90 ? 'fill-hot' : memPct > 75 ? 'fill-warn' : 'fill-mem');
+    if (memVal)  memVal.textContent = s.mem_used_mb + '/' + s.mem_total_mb + 'MB';
+
+    // Disk
+    const diskPct  = s.disk_pct || 0;
+    const diskFill = document.getElementById('disk-bar');
+    const diskVal  = document.getElementById('disk-val');
+    if (diskFill) diskFill.style.width = diskPct + '%';
+    if (diskFill) diskFill.className = 'sbar-fill ' + (diskPct > 90 ? 'fill-hot' : diskPct > 75 ? 'fill-warn' : 'fill-disk');
+    if (diskVal)  diskVal.textContent = s.disk_used_gb + '/' + s.disk_total_gb + 'GB';
+
+    // Network rates (delta since last poll)
+    const netTxEl = document.getElementById('net-tx');
+    const netRxEl = document.getElementById('net-rx');
+    if (_prevNet && netTxEl && netRxEl) {
+      const dt = now - _prevNet.ts;
+      const txRate = _fmtRate(s.net_bytes_sent - _prevNet.tx, dt);
+      const rxRate = _fmtRate(s.net_bytes_recv - _prevNet.rx, dt);
+      netTxEl.textContent = txRate;
+      netRxEl.textContent = rxRate;
+    }
+    _prevNet = { ts: now, tx: s.net_bytes_sent, rx: s.net_bytes_recv };
+
+    // Temperature (if available)
+    const tempItem = document.getElementById('temp-item');
+    const tempVal  = document.getElementById('temp-val');
+    if (tempItem && tempVal && s.temps && Object.keys(s.temps).length > 0) {
+      const t = Object.values(s.temps)[0];
+      tempVal.textContent = t.toFixed(0) + '°C';
+      tempVal.style.color = t > 80 ? 'var(--red)' : t > 65 ? 'var(--yellow)' : 'var(--muted)';
+      tempItem.style.display = 'flex';
+    }
+
+    // Timestamp
+    const ts = document.getElementById('sysbar-ts');
+    if (ts) ts.textContent = new Date().toUTCString().slice(17, 25) + ' UTC';
+
+  } catch(e) { /* silent fail - don't break UI if psutil missing */ }
+}
+
+function setSysbarEnabled(enabled) {
+  _sysbarEnabled = enabled;
+  localStorage.setItem('sysbar_enabled', enabled ? 'true' : 'false');
+  updateSysbar();
+}
+
+// ── Weather & Time ────────────────────────────────────────────────────────
+async function wxBroadcast() {
+  const adapters = getSelectedAdapters();
+  const params = new URLSearchParams();
+  adapters.forEach(a => params.append('adapters', a));
+  const url = '/api/weather/broadcast' + (adapters.length ? '?' + params : '');
+  const r = await fetch(url, {method:'POST'});
+  toast(r.ok ? 'NWS alerts broadcast' + (adapters.length ? ' via: '+adapters.join(', ') : ' to all') : 'WX broadcast failed', r.ok ? 'ok' : 'err');
+}
+async function wxShare() {
+  const adapters = getSelectedAdapters();
+  const params = new URLSearchParams();
+  adapters.forEach(a => params.append('adapters', a));
+  const url = '/api/weather/share' + (adapters.length ? '?' + params : '');
+  const r = await fetch(url, {method:'POST'});
+  const d = r.ok ? await r.json() : null;
+  if (!r.ok) { toast('Share failed', 'err'); return; }
+  const sent = Object.entries(d.sent || {}).filter(([,ok]) => ok).map(([n]) => n);
+  toast(`Weather shared via ${sent.length ? sent.join(', ') : 'no adapters'}`, sent.length ? 'ok' : 'err');
+}
+async function timeSyncBroadcast() {
+  const adapters = getSelectedAdapters();
+  const params = new URLSearchParams();
+  adapters.forEach(a => params.append('adapters', a));
+  const url = '/api/time-sync' + (adapters.length ? '?' + params : '');
+  const r = await fetch(url, {method:'POST'});
+  const d = r.ok ? await r.json() : null;
+  const synced = d ? Object.keys(d.synced || {}).filter(k => d.synced[k]) : [];
+  toast(r.ok ? `Time message sent${synced.length ? ' · own radio clock set: ' + synced.join(', ') : ''} (mesh protocols can't set other nodes' clocks remotely)` : 'Failed', r.ok ? 'ok' : 'err');
+}
+async function pingNode(adapter, nodeId, btn) {
+  if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+  try {
+    const r = await fetch('/api/ping', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({adapter, node_id: nodeId}),
+    });
+    const d = await r.json();
+    if (d.status === 'sent') {
+      toast(d.detail || `Trace probe sent — replies appear in the feed and as green paths on the map`, 'ok');
+    } else {
+      toast(`Traceroute failed: ${d.detail || d.status}`, 'err');
+    }
+  } catch(e) {
+    toast('Traceroute error', 'err');
+  } finally {
+    if (btn) { btn.textContent = '📡 Trace'; btn.disabled = false; }
+  }
+}
+async function nodeAnnounce() {
+  const adapters = getSelectedAdapters();
+  const params = new URLSearchParams();
+  adapters.forEach(a => params.append('adapters', a));
+  const url = '/api/announce' + (adapters.length ? '?' + params : '');
+  const r = await fetch(url, {method:'POST'});
+  const d = r.ok ? await r.json() : null;
+  const ok = d ? Object.keys(d.results || {}).filter(k => d.results[k]) : [];
+  toast(r.ok ? `Announced on: ${ok.length ? ok.join(', ') : 'no adapters'}` : 'Announce failed', ok.length ? 'ok' : 'err');
+}
+
+// ── PBX / Calls ───────────────────────────────────────────────────────────
+async function pbxCallNode(nodeId, btn) {
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+  try {
+    const destination = nodeId.replace(/[^0-9*#]/g, '') || nodeId;
+    const r = await fetch('/api/pbx/call', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({destination}),
+    });
+    const d = await r.json();
+    toast(d.status === 'ok' ? `Calling ${destination}…` : `Call failed: ${d.detail || d.status}`,
+          d.status === 'ok' ? 'ok' : 'err');
+  } catch(e) {
+    toast('PBX error', 'err');
+  } finally {
+    if (btn) { btn.textContent = '📞'; btn.disabled = false; }
+  }
+}
+
+async function pbxPage() {
+  const r = await fetch('/api/pbx/announce', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({}),
+  });
+  const d = r.ok ? await r.json() : null;
+  toast(d?.status === 'ok' ? 'PBX page sent' : `Page failed: ${d?.detail || 'error'}`,
+        d?.status === 'ok' ? 'ok' : 'err');
+}
+
+async function pbxSpeak() {
+  const extension = document.getElementById('tts-ext').value.trim();
+  const text = document.getElementById('tts-text').value.trim();
+  if (!extension || !text) { toast('Extension and text required', 'err'); return; }
+  const r = await fetch('/api/pbx/speak', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ extension, text }),
+  });
+  const d = r.ok ? await r.json() : null;
+  toast(d?.status === 'ok' ? `Calling ext ${extension}…` : `Speak failed: ${d?.detail || 'error'}`,
+        d?.status === 'ok' ? 'ok' : 'err');
+  if (d?.status === 'ok') document.getElementById('tts-text').value = '';
+}
+
+async function loadCallLog() {
+  const el = document.getElementById('panel-calls');
+  try {
+    const r = await fetch('/api/pbx/status');
+    if (!r.ok) { el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--dim)">PBX not configured</div>'; return; }
+    const d = await r.json();
+    if (!d.enabled) { el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--dim)">No PBX adapter configured.<br>Add type: asterisk (or mock_asterisk) in config.yaml.</div>'; return; }
+    const active = d.active_calls || [];
+    const recent = d.recent_calls || [];
+    const canTransmit = _myRole !== 'viewer';
+    let html = `<div style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted)">
+      PBX: <b>${escHtml(d.adapter)}</b> · <span style="color:${d.connected?'var(--green)':'var(--red)'}">${d.connected?'connected':'offline'}</span>
+      ${canTransmit ? `&emsp;<button onclick="pbxPage()" style="font-size:10px;padding:2px 6px">📢 Page all</button>` : ''}
+    </div>
+    ${canTransmit ? `<div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:4px;align-items:center">
+      <input type="text" id="tts-ext" placeholder="ext" style="width:44px;font-size:11px;padding:3px 5px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+      <input type="text" id="tts-text" placeholder="Text to speak…" style="flex:1;font-size:11px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+      <button onclick="pbxSpeak()" style="font-size:10px;padding:3px 8px" title="Ring the extension and read this text aloud">🗣 Speak</button>
+    </div>` : ''}
+    <div id="pbx-endpoint-status"></div>`;
+    if (active.length) {
+      html += `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--yellow)">● ACTIVE (${active.length})</div>`;
+      active.forEach(c => {
+        html += `<div style="padding:4px 10px;font-size:11px;border-bottom:1px solid var(--border)">
+          📞 ${escHtml(c.callerid)} → ext ${escHtml(c.exten)} <span style="color:var(--muted)">[${c.direction}]</span>
+        </div>`;
+      });
+    }
+    if (recent.length) {
+      html += `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted)">RECENT CALLS</div>`;
+      recent.forEach(c => {
+        const icon = c.status === 'answered' ? '📞' : '📵';
+        const col  = c.status === 'answered' ? 'var(--text)' : 'var(--red)';
+        html += `<div style="padding:4px 10px 4px;font-size:11px;border-bottom:1px solid var(--border);color:${col}">
+          ${icon} ${escHtml(c.callerid||'')} → ${escHtml(c.exten||'')}
+          <span style="color:var(--muted);float:right">${c.duration_s||0}s</span>
+          ${canTransmit ? `<button onclick="pbxCallNode('${escHtml(c.callerid||'')}',this)" style="font-size:9px;padding:1px 4px;margin-left:4px" title="Call back">↩</button>` : ''}
+        </div>`;
+      });
+    }
+    if (!active.length && !recent.length) {
+      html += '<div style="padding:12px;font-size:11px;color:var(--dim)">No calls yet</div>';
+    }
+    el.innerHTML = html;
+    loadEndpointStatus();
+    loadVoicemailSection(el);
+  } catch(e) {
+    el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red)">Error loading call log</div>';
+  }
+}
+
+async function loadEndpointStatus() {
+  const el = document.getElementById('pbx-endpoint-status');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/pbx/endpoints');
+    if (!r.ok) return;
+    const d = await r.json();
+    const eps = d.endpoints || [];
+    if (!eps.length) return;
+    el.innerHTML = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted)">EXTENSIONS</div>` +
+      eps.map(e => `<div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px">
+        <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${e.online ? 'var(--green)' : 'var(--dim)'}"></span>
+        <span style="flex:1">ext ${escHtml(e.extension)}</span>
+        <span style="color:var(--muted);font-size:10px">${escHtml(e.device_state || 'unknown')}</span>
+      </div>`).join('');
+  } catch(e) {}
+}
+
+async function loadVoicemailSection(el) {
+  try {
+    const r = await fetch('/api/pbx/voicemail');
+    if (!r.ok) return;
+    const d = await r.json();
+    const boxes = Object.entries(d.mailboxes || {});
+    if (!boxes.length) return;
+    let vmHtml = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--yellow)">📧 VOICEMAIL</div>`;
+    for (const [mailbox, count] of boxes) {
+      const msgs = await fetch(`/api/pbx/voicemail/${encodeURIComponent(mailbox)}`)
+        .then(r => r.json()).then(d => d.messages || []).catch(() => []);
+      vmHtml += `<div style="padding:4px 10px;font-size:10px;color:var(--muted);font-weight:600">ext ${escHtml(mailbox)} (${count})</div>`;
+      msgs.forEach(m => {
+        const ts  = m.origtime ? new Date(m.origtime * 1000).toUTCString().slice(5, 22) : '';
+        const dur = m.duration ? `${m.duration}s` : '';
+        const audio = m.has_audio
+          ? `<audio controls preload="none" style="display:block;width:100%;height:26px;margin-top:3px" src="/api/pbx/voicemail/${encodeURIComponent(mailbox)}/${encodeURIComponent(m.id)}/audio"></audio>`
+          : '';
+        vmHtml += `<div style="padding:4px 10px;font-size:11px;border-bottom:1px solid var(--border)">
+          📧 ${escHtml(m.callerid || 'unknown')} <span style="color:var(--muted)">${escHtml(ts)} · ${dur}</span>
+          ${audio}
+        </div>`;
+      });
+    }
+    el.insertAdjacentHTML('beforeend', vmHtml);
+  } catch(e) {}
+}
+
+// ── Winlink mail panel ──────────────────────────────────────────────────
+let _winlinkLastUnread = 0;
+
+async function loadWinlinkPanel() {
+  const el = document.getElementById('panel-winlink');
+  el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--muted)">Loading…</div>';
+  try {
+    const d = await fetch('/api/winlink/inbox').then(r => r.json());
+    updateWinlinkBadge(d.unread || 0);
+    if (!d.count && !d.callsign) {
+      el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--dim)">No Winlink adapter configured.<br>Add type: pat_winlink in config.yaml.</div>';
+      return;
+    }
+    let html = `<div style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);display:flex;justify-content:space-between;align-items:center">
+      <span>${escHtml(d.callsign||'')} · ${d.count} message${d.count===1?'':'s'}${d.unread ? `, <span style="color:var(--blue)">${d.unread} unread</span>` : ''}</span>
+      <button onclick="loadWinlinkPanel()" style="font-size:10px;padding:2px 6px">↻ Refresh</button>
+    </div>`;
+    if (!d.messages || !d.messages.length) {
+      html += '<div style="padding:12px;font-size:11px;color:var(--dim)">Inbox empty</div>';
+    } else {
+      d.messages.forEach(m => {
+        html += `<div style="padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer" onclick="readWinlinkMessage('${escHtml(m.mid)}')">
+          <div style="display:flex;justify-content:space-between;gap:6px">
+            <span style="font-size:11px;font-weight:${m.unread?'700':'400'};color:${m.unread?'var(--text)':'var(--muted)'}">${m.unread ? '● ' : ''}${escHtml(m.subject || '(no subject)')}</span>
+            <span style="font-size:9px;color:var(--dim);white-space:nowrap">${escHtml((m.date||'').replace('T',' ').slice(0,16))}</span>
+          </div>
+          <div style="font-size:10px;color:var(--dim);font-family:var(--mono)">${escHtml(m.from||'')}</div>
+        </div>`;
+      });
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red)">Error loading Winlink inbox</div>';
+  }
+}
+
+async function readWinlinkMessage(mid) {
+  try {
+    const m = await fetch(`/api/winlink/inbox/${encodeURIComponent(mid)}`).then(r => r.json());
+    const body = (m.body || '(no body)').replace(/</g, '&lt;');
+    document.getElementById('msg-detail-content').innerHTML = `
+      <div style="margin-bottom:8px"><b>${escHtml(m.subject||'(no subject)')}</b></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">From: ${escHtml(m.from||'')} &emsp; ${escHtml((m.date||'').replace('T',' ').slice(0,16))}</div>
+      <div style="white-space:pre-wrap;font-size:12px;font-family:var(--mono)">${body}</div>
+    `;
+    document.getElementById('msg-detail-popup').classList.add('open');
+  } catch(e) { toast('Could not load message: ' + e.message, 'err'); }
+}
+
+function updateWinlinkBadge(unread) {
+  const badge = document.getElementById('winlink-badge');
+  if (!badge) return;
+  badge.textContent = unread > 0 ? unread : '';
+  badge.classList.toggle('has-msgs', unread > 0);
+  if (unread > _winlinkLastUnread) {
+    toast(`✉ ${unread} unread Winlink message${unread===1?'':'s'}`, 'ok');
+  }
+  _winlinkLastUnread = unread;
+}
+
+async function checkWinlinkBadge() {
+  try {
+    const d = await fetch('/api/winlink/inbox').then(r => r.json());
+    if (d.callsign) updateWinlinkBadge(d.unread || 0);
+  } catch(e) {}
+}
+checkWinlinkBadge();
+setInterval(checkWinlinkBadge, 120_000);  // background poll so the badge/toast fire even with the tab closed
+
+// ── Simulation banner ────────────────────────────────────────────────────
+function updateSimBanner(enabled) {
+  document.body.classList.toggle('sim-mode', !!enabled);
+}
+if (window.ECH_SIM) updateSimBanner(true);
+
+// ── Low-disk-space warning ────────────────────────────────────────────────────
+async function checkStorage() {
+  try {
+    const r = await fetch('/api/system/storage');
+    if (!r.ok) return;
+    const d = await r.json();
+    const banner = document.getElementById('storage-banner');
+    const detail = document.getElementById('storage-banner-detail');
+    if (!banner || !detail) return;
+    if (d.warning || d.critical) {
+      banner.style.background    = d.critical ? '#2d0f0f'    : '#2a1f00';
+      banner.style.borderTopColor= d.critical ? 'var(--red)' : 'var(--yellow)';
+      banner.style.color         = d.critical ? 'var(--red)' : 'var(--yellow)';
+      detail.textContent = `${d.free_gb} GB free (${d.free_pct}% of ${d.total_gb} GB)`;
+      banner.style.display = 'flex';
+    }
+  } catch(_) {}
+}
+checkStorage();
+setInterval(checkStorage, 300_000);  // re-check every 5 minutes
+
+// ── Boot ─────────────────────────────────────────────────────────────────
+// Sequenced (not fire-and-forget) so the sidebar's channel items exist
+// before ws.onopen's selectDefaultFilter() looks for the APRS one.
+buildDynamicUI().then(connectWS);
+// Pre-fill compose To/adapter from map ?to= / ?adapter= query params
+(function() {
+  const p = new URLSearchParams(location.search);
+  const toId = p.get('to');
+  const adpt = p.get('adapter');
+  if (toId) {
+    const el = document.getElementById('compose-to');
+    if (el) { el.value = toId; }
+    // If an adapter is specified, activate only that adapter in the compose bar
+    if (adpt) {
+      document.querySelectorAll('.adapter-toggle').forEach(btn => {
+        const on = btn.dataset.adapter === adpt;
+        btn.classList.toggle('on', on);
+      });
+    }
+    document.getElementById('compose-body')?.focus();
+    // Clean URL without reload
+    history.replaceState({}, '', location.pathname);
+  }
+})();
+updateSysbar();
+setInterval(updateSysbar, 5000);
+// Poll ECH state for mode indicator
+async function updateModeIndicator() {
+  try {
+    const s = await fetch('/api/state').then(r=>r.json());
+    const el = document.getElementById('mode-indicator');
+    if (el) {
+      el.textContent = (s.mode||'standard').toUpperCase();
+      el.style.background = s.mode==='emergency' ? 'rgba(248,81,73,.15)' : '#122a1a';
+      el.style.color = s.mode==='emergency' ? 'var(--red)' : 'var(--green)';
+      if (s.incident_name) document.getElementById('incident-name') && (document.getElementById('incident-name').textContent = s.incident_name);
+    }
+    const inc = document.getElementById('incident-name');
+    if (inc) inc.textContent = s.incident_name || 'EXERCISE';
+    const op = document.getElementById('operator-display');
+    if (op) op.textContent = 'OP: ' + (s.operator_callsign || '—');
+  } catch(e) {}
+}
+updateModeIndicator();
+setInterval(updateModeIndicator, 30000);
+
+fetch('/api/version').then(r => r.json()).then(d => {
+  const el = document.getElementById('ech-version');
+  if (el) el.textContent = 'v' + d.version;
+}).catch(() => {});
+
+function mobileToggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const rp = document.getElementById('right-panel');
+  const bd = document.getElementById('mobile-backdrop');
+  const opening = !sb.classList.contains('mob-open');
+  sb.classList.toggle('mob-open', opening);
+  rp.classList.remove('mob-open');
+  bd.classList.toggle('active', opening);
+}
+function mobileToggleNodes() {
+  const rp = document.getElementById('right-panel');
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('mobile-backdrop');
+  const opening = !rp.classList.contains('mob-open');
+  rp.classList.toggle('mob-open', opening);
+  sb.classList.remove('mob-open');
+  bd.classList.toggle('active', opening);
+}
+function mobileClosePanels() {
+  document.getElementById('sidebar').classList.remove('mob-open');
+  document.getElementById('right-panel').classList.remove('mob-open');
+  document.getElementById('mobile-backdrop').classList.remove('active');
+}
+</script>
+<div id="msg-detail-popup" class="msg-detail-popup" aria-modal="true">
+  <div class="msg-detail-overlay" onclick="closeMsgDetail()"></div>
+  <div class="msg-detail-panel">
+    <div class="msg-detail-hdr">
+      <span>Message Detail</span>
+      <button class="msg-detail-close" onclick="closeMsgDetail()" title="Close">✕</button>
+    </div>
+    <div id="msg-detail-content"></div>
+  </div>
+</div>
+<div id="node-detail-popup" class="msg-detail-popup" aria-modal="true">
+  <div class="msg-detail-overlay" onclick="closeNodeDetail()"></div>
+  <div class="msg-detail-panel">
+    <div class="msg-detail-hdr">
+      <span>Node Detail</span>
+      <button class="msg-detail-close" onclick="closeNodeDetail()" title="Close">✕</button>
+    </div>
+    <div id="node-detail-content"></div>
+  </div>
+</div>
+</body>
+</html>

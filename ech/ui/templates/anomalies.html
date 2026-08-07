@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SM — Anomaly Monitor</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxjaXJjbGUgY3g9IjkiIGN5PSI5IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iOSIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48Y2lyY2xlIGN4PSIyMyIgY3k9IjkiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjIzIiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjIzIiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMjMiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iMjMiIGN5PSIyMyIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48cGF0aCBkPSJNNCwxNiBRNywxMCAxMCwxNiBRMTMsMjIgMTYsMTYgUTE5LDEwIDIyLDE2IFEyNSwyMiAyOCwxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjIuNSIgZmlsbD0iIzNmYjk1MCIvPjwvc3ZnPg==">
+
+<style>
+:root {
+  --bg:#0d1117;--bg2:#161b22;--bg3:#1c2230;--border:#30363d;--border2:#444c56;
+  --text:#e6edf3;--muted:#8b949e;--dim:#484f58;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;
+  --mono:'IBM Plex Mono','Cascadia Code','Consolas','Liberation Mono',monospace;--sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+#sim-banner{display:none;position:fixed;top:0;left:0;right:0;height:26px;background:#431407;border-bottom:2px solid #c2410c;color:#fb923c;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-align:center;line-height:24px;z-index:2000;text-transform:uppercase}
+body.sim-mode #sim-banner{display:block}
+body.sim-mode{padding-top:26px}
+body.sim-mode #findings-container{height:calc(100vh - 186px)}
+
+#header{display:flex;align-items:center;gap:16px;padding:0 20px;height:48px;
+  background:var(--bg2);border-bottom:1px solid var(--border)}
+.logo{font-family:var(--mono);font-size:13px;color:var(--green);letter-spacing:.08em}
+.back-link{font-family:var(--mono);font-size:11px;color:var(--blue);text-decoration:none}
+.back-link:hover{text-decoration:underline}
+.spacer{flex:1}
+#clock{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.badge{display:inline-flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:10px;min-width:24px}
+.badge-alert{background:rgba(248,81,73,.15);color:var(--red);border:1px solid var(--red)}
+.badge-warn{background:rgba(210,153,34,.12);color:var(--yellow);border:1px solid var(--yellow)}
+.badge-info{background:rgba(56,139,253,.12);color:var(--blue);border:1px solid var(--blue)}
+
+#toolbar{display:flex;align-items:center;gap:10px;padding:10px 20px;
+  border-bottom:1px solid var(--border);background:var(--bg2)}
+.filter-btn{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:4px;
+  border:1px solid var(--border);background:var(--bg3);color:var(--muted);cursor:pointer}
+.filter-btn.active{border-color:var(--blue);color:var(--blue)}
+.filter-btn:hover{color:var(--text)}
+#search-box{background:var(--bg);border:1px solid var(--border);color:var(--text);
+  font-family:var(--mono);font-size:12px;padding:4px 10px;border-radius:4px;outline:none;width:200px}
+#search-box:focus{border-color:var(--blue)}
+.action-btn{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:4px;
+  cursor:pointer;border:1px solid}
+.btn-green{background:rgba(63,185,80,.1);border-color:var(--green);color:var(--green)}
+.btn-yellow{background:rgba(210,153,34,.1);border-color:var(--yellow);color:var(--yellow)}
+.summary-bar{display:flex;gap:16px;padding:10px 20px;border-bottom:1px solid var(--border);
+  background:var(--bg)}
+.summary-item{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.summary-item span{font-weight:500}
+.summary-item .alert-num{color:var(--red)}
+.summary-item .warn-num{color:var(--yellow)}
+.summary-item .info-num{color:var(--blue)}
+
+#findings-container{overflow-y:auto;height:calc(100vh - 160px);padding:12px 20px}
+#findings-container::-webkit-scrollbar{width:4px}
+#findings-container::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+.finding-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+  margin-bottom:8px;overflow:hidden;transition:border-color .15s}
+.finding-card:hover{border-color:var(--border2)}
+.finding-card.severity-alert{border-left:3px solid var(--red)}
+.finding-card.severity-warn{border-left:3px solid var(--yellow)}
+.finding-card.severity-info{border-left:3px solid var(--blue)}
+.finding-card.acknowledged{opacity:.5}
+
+.finding-header{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer}
+.finding-rule{font-family:var(--mono);font-weight:500;font-size:12px;color:var(--text)}
+.finding-adapter{font-family:var(--mono);font-size:10px;background:var(--bg3);
+  padding:2px 6px;border-radius:3px;color:var(--muted)}
+.finding-node{font-family:var(--mono);font-size:11px;color:var(--blue)}
+.finding-ts{font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:auto}
+.finding-summary{font-size:13px;color:var(--muted);padding:0 14px 4px;line-height:1.4}
+.finding-actions{display:flex;gap:8px;padding:8px 14px 10px}
+.finding-evidence{background:var(--bg3);border-top:1px solid var(--border);
+  padding:10px 14px;font-family:var(--mono);font-size:11px;color:var(--muted);
+  display:none;line-height:1.8}
+.finding-evidence.open{display:block}
+.evidence-key{color:var(--dim)}
+.evidence-val{color:var(--text)}
+
+.action-sm{font-family:var(--mono);font-size:10px;padding:3px 10px;border-radius:3px;
+  border:1px solid;cursor:pointer;transition:all .1s}
+.ack-btn{background:rgba(63,185,80,.08);border-color:var(--green);color:var(--green)}
+.ack-btn:hover{background:rgba(63,185,80,.2)}
+.bcast-btn{background:rgba(210,153,34,.08);border-color:var(--yellow);color:var(--yellow)}
+.bcast-btn:hover{background:rgba(210,153,34,.2)}
+.expand-btn{background:var(--bg);border-color:var(--border);color:var(--muted)}
+.expand-btn:hover{border-color:var(--blue);color:var(--blue)}
+.verify-btn{background:rgba(56,139,253,.08);border-color:var(--blue);color:var(--blue)}
+.verify-btn:hover{background:rgba(56,139,253,.2)}
+.verify-btn:disabled{opacity:.6;cursor:wait}
+
+.empty-state{text-align:center;padding:60px 20px;font-family:var(--mono);
+  font-size:13px;color:var(--dim)}
+.empty-state .icon{font-size:36px;margin-bottom:12px}
+
+#toast-area{position:fixed;bottom:16px;right:20px;display:flex;flex-direction:column;gap:6px;z-index:99}
+.toast{font-family:var(--mono);font-size:11px;padding:8px 14px;border-radius:4px;
+  background:var(--bg3);border:1px solid var(--border2);color:var(--text);
+  animation:slideIn .2s ease}
+.toast.ok{border-left:3px solid var(--green)}
+.toast.err{border-left:3px solid var(--red)}
+@keyframes slideIn{from{transform:translateX(20px);opacity:0}to{transform:none;opacity:1}}
+</style>
+</head>
+<body>
+<div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY &#9888;</div>
+<div id="header">
+  <a class="back-link" href="/">← SM</a>
+  <div class="logo">▣ SM / Anomaly Monitor</div>
+  <div class="spacer"></div>
+  <span id="active-badge" class="badge badge-alert" style="display:none">0 ACTIVE</span>
+  <div id="clock"></div>
+</div>
+
+<div id="toolbar">
+  <button class="filter-btn active" data-filter="active" onclick="setFilter('active',this)">Active</button>
+  <button class="filter-btn" data-filter="alert" onclick="setFilter('alert',this)">ALERT</button>
+  <button class="filter-btn" data-filter="warn" onclick="setFilter('warn',this)">WARN</button>
+  <button class="filter-btn" data-filter="info" onclick="setFilter('info',this)">INFO</button>
+  <input type="text" id="search-box" placeholder="Filter by node, rule, adapter…" oninput="renderFindings()">
+  <div class="spacer"></div>
+  <button class="action-btn" style="border-color:var(--red);color:var(--red)" onclick="clearAllFindings()">✕ Clear all</button>
+  <button class="action-btn" style="border-color:var(--border);color:var(--muted)" onclick="loadFindings()">↻ Refresh</button>
+</div>
+
+<div class="summary-bar">
+  <div class="summary-item">ALERT: <span class="alert-num" id="cnt-alert">0</span></div>
+  <div class="summary-item">WARN: <span class="warn-num" id="cnt-warn">0</span></div>
+  <div class="summary-item">INFO: <span class="info-num" id="cnt-info">0</span></div>
+  <div class="summary-item">Total: <span id="cnt-total">0</span></div>
+  <div class="summary-item" style="margin-left:auto">Auto-refreshes every 15s</div>
+</div>
+
+<div id="findings-container">
+  <div class="empty-state" id="empty-state" style="display:none">
+    <div class="icon">✓</div>
+    No anomaly findings match your filter
+  </div>
+  <div id="findings-list"></div>
+</div>
+
+<div id="toast-area"></div>
+
+<script>
+let allFindings = [];
+let currentFilter = 'active';
+
+// ── Clock ──────────────────────────────────────────────────────────────
+function tick() {
+  document.getElementById('clock').textContent =
+    new Date().toUTCString().slice(17,25) + ' UTC';
+}
+setInterval(tick, 1000); tick();
+
+// ── Data load ──────────────────────────────────────────────────────────
+async function loadFindings() {
+  try {
+    const r = await fetch('/api/anomalies?acknowledged=false&limit=500');
+    const data = await r.json();
+    allFindings = data.findings;
+    updateSummary();
+    renderFindings();
+
+    const activeCnt = allFindings.length;
+    const badge = document.getElementById('active-badge');
+    if (activeCnt > 0) {
+      badge.textContent = `${activeCnt} ACTIVE`;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e) {
+    toast('Failed to load findings', 'err');
+  }
+}
+
+function updateSummary() {
+  const counts = {alert:0, warn:0, info:0};
+  allFindings.forEach(f => { if (counts[f.severity] !== undefined) counts[f.severity]++; });
+  document.getElementById('cnt-alert').textContent = counts.alert;
+  document.getElementById('cnt-warn').textContent  = counts.warn;
+  document.getElementById('cnt-info').textContent  = counts.info;
+  document.getElementById('cnt-total').textContent = allFindings.length;
+}
+
+// ── Filter & render ────────────────────────────────────────────────────
+function setFilter(filter, el) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderFindings();
+}
+
+function renderFindings() {
+  const search = document.getElementById('search-box').value.toLowerCase();
+  let filtered = allFindings;
+
+  if (currentFilter === 'active') filtered = filtered.filter(f => !f.acknowledged);
+  else if (['alert','warn','info'].includes(currentFilter))
+    filtered = filtered.filter(f => f.severity === currentFilter);
+
+  if (search) {
+    filtered = filtered.filter(f =>
+      (f.node_id + f.rule + f.adapter + f.summary).toLowerCase().includes(search)
+    );
+  }
+
+  const container = document.getElementById('findings-list');
+  const empty = document.getElementById('empty-state');
+
+  if (filtered.length === 0) {
+    container.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  container.innerHTML = filtered.map(buildCard).join('');
+}
+
+function buildCard(f) {
+  const ts = new Date(f.timestamp).toUTCString().slice(5,25);
+  const ackClass = f.acknowledged ? ' acknowledged' : '';
+  const ev = f.evidence || {};
+  // Show tip and transport_class inline for long_range_contact findings
+  const transportBadge = ev.transport_class
+    ? `<span style="font-family:var(--mono);font-size:10px;padding:1px 6px;border-radius:3px;margin-left:6px;background:${ev.transport_class==='ducting_candidate'?'rgba(88,166,255,.15)':'rgba(210,153,34,.15)'};color:${ev.transport_class==='ducting_candidate'?'var(--blue)':'var(--yellow)'}">${esc(ev.transport_class.replace(/_/g,' '))}</span>`
+    : '';
+  const tipRow = ev.tip
+    ? `<div style="padding:6px 14px 4px;font-size:11px;font-family:var(--mono);color:var(--blue);opacity:.8">→ ${esc(ev.tip)}</div>`
+    : '';
+  const evidenceRows = Object.entries(ev)
+    .filter(([k]) => k !== 'tip')
+    .map(([k,v]) => `<div><span class="evidence-key">${esc(k)}: </span><span class="evidence-val">${esc(JSON.stringify(v))}</span></div>`)
+    .join('');
+  const bcastLabel = f.broadcast_sent ? '✓ Broadcast sent' : '📡 Broadcast warning';
+
+  // Live-trace verification: offered on routing-related findings from MeshCore
+  // adapters; renders the stored verdict prominently once a verify has run.
+  const verifiable = ['abnormal_hops', 'path_change', 'long_range', 'long_range_contact'].includes(f.rule)
+    && (f.adapter || '').toLowerCase().includes('meshcore');
+  const ver = ev.verification;
+  const verBtn = verifiable
+    ? `<button class="action-sm verify-btn" id="verify-${f.id}" onclick="verifyFinding('${f.id}',event)">${ver ? '🔍 Re-verify' : '🔍 Verify (live trace)'}</button>`
+    : '';
+  const verdictOk = ver && (ver.verdict || '').startsWith('consistent');
+  const verBlock = ver ? `
+    <div style="margin:4px 14px 8px;padding:7px 10px;border-radius:4px;font-family:var(--mono);font-size:10px;line-height:1.7;
+                border:1px solid ${verdictOk ? 'var(--green)' : 'var(--yellow)'};
+                background:${verdictOk ? 'rgba(63,185,80,.08)' : 'rgba(210,153,34,.08)'}">
+      <b style="color:${verdictOk ? 'var(--green)' : 'var(--yellow)'}">${verdictOk ? '✓' : '⚠'} ${esc(ver.verdict || '')}</b><br>
+      <span style="color:var(--muted)">${esc(ver.comparison || '')}</span><br>
+      <span style="color:var(--dim)">verified ${esc((ver.verified_at || '').slice(0, 16).replace('T', ' '))}Z</span>
+    </div>` : '';
+
+  return `<div class="finding-card severity-${f.severity}${ackClass}" id="card-${f.id}">
+    <div class="finding-header" onclick="toggleEvidence('${f.id}')">
+      <span class="badge badge-${f.severity}">${f.severity.toUpperCase()}</span>
+      <span class="finding-rule">${esc(f.rule)}</span>
+      <span class="finding-adapter">${esc(f.adapter)}</span>
+      <span class="finding-node">${esc(f.node_id.slice(0,16))}</span>
+      ${transportBadge}
+      <span class="finding-ts">${ts}</span>
+    </div>
+    <div class="finding-summary">${esc(f.summary)}</div>
+    ${tipRow}
+    ${verBlock}
+    <div class="finding-actions">
+      ${!f.acknowledged ? `<button class="action-sm ack-btn" onclick="acknowledge('${f.id}',event)">✓ Acknowledge</button>` : '<span style="font-family:var(--mono);font-size:10px;color:var(--dim)">✓ Acknowledged</span>'}
+      ${verBtn}
+      <button class="action-sm bcast-btn" onclick="broadcastFinding('${f.id}',event)" ${f.broadcast_sent?'disabled':''} title="${bcastLabel}">${bcastLabel}</button>
+      <button class="action-sm expand-btn" onclick="toggleEvidence('${f.id}')">Evidence ▾</button>
+    </div>
+    <div class="finding-evidence" id="ev-${f.id}">${evidenceRows||'<span style="color:var(--dim)">No evidence data</span>'}</div>
+  </div>`;
+}
+
+function toggleEvidence(id) {
+  const el = document.getElementById(`ev-${id}`);
+  if (el) el.classList.toggle('open');
+}
+
+// ── Actions ────────────────────────────────────────────────────────────
+async function acknowledge(id, e) {
+  e.stopPropagation();
+  const r = await fetch(`/api/anomalies/${id}/acknowledge`, {method:'POST'});
+  if (r.ok) {
+    toast('Finding acknowledged', 'ok');
+    await loadFindings();
+  } else {
+    toast('Acknowledge failed', 'err');
+  }
+}
+
+async function verifyFinding(id, e) {
+  e.stopPropagation();
+  const btn = document.getElementById(`verify-${id}`);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Tracing… (up to 25s)'; }
+  try {
+    const r = await fetch(`/api/anomalies/${id}/verify`, {method:'POST'});
+    const d = await r.json();
+    if (r.ok && d.status === 'ok') {
+      toast(d.verification.verdict, (d.verification.verdict || '').startsWith('consistent') ? 'ok' : 'err');
+      await loadFindings();
+    } else {
+      toast('Verify failed: ' + (d.detail || r.status), 'err');
+      if (btn) { btn.disabled = false; btn.textContent = '🔍 Verify (live trace)'; }
+    }
+  } catch(err) {
+    toast('Verify failed: ' + err.message, 'err');
+    if (btn) { btn.disabled = false; btn.textContent = '🔍 Verify (live trace)'; }
+  }
+}
+
+async function broadcastFinding(id, e) {
+  e.stopPropagation();
+  if (!confirm('Send warning message to mesh adapters about this finding?')) return;
+  const r = await fetch(`/api/anomalies/${id}/broadcast`, {method:'POST'});
+  if (r.ok) {
+    toast('Warning broadcast sent', 'ok');
+    await loadFindings();
+  } else {
+    toast('Broadcast failed', 'err');
+  }
+}
+
+async function clearAllFindings() {
+  if (!confirm('Acknowledge and clear all anomaly findings?')) return;
+  const r = await fetch('/api/anomalies/clear-all', {method:'POST'});
+  const d = await r.json();
+  if (d.status === 'ok') {
+    toast(`Cleared ${d.cleared} finding${d.cleared !== 1 ? 's' : ''}`, 'ok');
+    await loadFindings();
+  } else {
+    toast('Clear failed', 'err');
+  }
+}
+
+// ── WebSocket new anomaly feed ─────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onmessage = (e) => {
+    const pkt = JSON.parse(e.data);
+    if (pkt.type === 'anomaly') {
+      allFindings.unshift(pkt.data);
+      updateSummary();
+      renderFindings();
+      toast(`🔴 New ${pkt.data.severity.toUpperCase()}: ${pkt.data.rule} on ${pkt.data.node_id.slice(0,12)}`, pkt.data.severity === 'alert' ? 'err' : 'ok');
+    }
+  };
+  ws.onclose = () => setTimeout(connectWS, 3000);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function toast(msg, type='') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-area').appendChild(el);
+  setTimeout(() => el.remove(), 4500);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────
+loadFindings();
+setInterval(loadFindings, 15000);
+connectWS();
+if (window.ECH_SIM) document.body.classList.add('sim-mode');
+</script>
+</body>
+</html>

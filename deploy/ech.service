@@ -1,0 +1,25 @@
+[Unit]
+Description=SignalMatrix
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=ech
+Group=ech
+WorkingDirectory=/var/lib/ech
+ExecStart=/opt/ech/.venv/bin/ech --config /etc/ech/config.yaml
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ech
+
+# KillMode=mixed: SIGTERM → main process first, then SIGKILL to any survivors
+# TimeoutStopSec: force-kill after 10s so the port is never left held
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

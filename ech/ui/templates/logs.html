@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxjaXJjbGUgY3g9IjkiIGN5PSI5IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iOSIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48Y2lyY2xlIGN4PSIyMyIgY3k9IjkiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjIzIiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjIzIiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMjMiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iMjMiIGN5PSIyMyIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48cGF0aCBkPSJNNCwxNiBRNywxMCAxMCwxNiBRMTMsMjIgMTYsMTYgUTE5LDEwIDIyLDE2IFEyNSwyMiAyOCwxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjIuNSIgZmlsbD0iIzNmYjk1MCIvPjwvc3ZnPg==">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SM — Logs</title>
+
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--dim:#484f58;--green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;--purple:#bc8cff;--mono:'IBM Plex Mono','Cascadia Code','Consolas','Liberation Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px}
+#header{display:flex;align-items:center;gap:12px;padding:0 16px;height:44px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
+.logo{font-size:13px;color:var(--green);letter-spacing:.08em}
+.back{font-size:11px;color:var(--blue);text-decoration:none}.back:hover{text-decoration:underline}
+.spacer{flex:1}
+/* tab bar */
+#tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
+.tab{padding:8px 18px;font-size:11px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;user-select:none}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.tab-badge{font-size:9px;background:var(--bg3);color:var(--muted);border-radius:8px;padding:1px 5px;margin-left:4px;vertical-align:middle}
+.tab.active .tab-badge{background:#0e2040;color:var(--blue)}
+/* toolbar */
+.toolbar{display:flex;gap:8px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
+.filter-btn{font-size:10px;padding:3px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer;font-family:var(--mono)}
+.filter-btn.on{border-color:var(--blue);color:var(--blue)}
+.tb-search{background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:3px;outline:none;width:200px}
+.tb-select{background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:3px 6px;border-radius:3px;outline:none}
+.tb-btn{font-size:10px;padding:3px 8px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer;font-family:var(--mono)}
+.tb-btn:hover{color:var(--text)}
+/* panels */
+.panel{display:none;height:calc(100vh - 132px);overflow:hidden;flex-direction:column}
+.panel.active{display:flex}
+/* app log */
+#log-container{flex:1;overflow-y:auto;padding:6px 0;font-size:11px;line-height:1.6}
+#log-container::-webkit-scrollbar{width:4px}
+#log-container::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.log-line{padding:1px 14px;border-left:2px solid transparent;white-space:pre-wrap;word-break:break-all}
+.log-line:hover{background:var(--bg2)}
+.log-line.DEBUG{color:var(--dim);border-left-color:var(--dim)}
+.log-line.INFO{color:var(--muted)}
+.log-line.WARNING{color:var(--yellow);border-left-color:var(--yellow)}
+.log-line.ERROR{color:var(--red);border-left-color:var(--red)}
+.log-line.CRITICAL{color:var(--red);background:rgba(248,81,73,.08);border-left-color:var(--red)}
+.log-ts{color:var(--dim);margin-right:8px}
+.log-level{margin-right:8px;min-width:7ch;display:inline-block}
+.log-logger{color:var(--blue);margin-right:8px}
+/* raw packets */
+#pkt-container{flex:1;overflow-y:auto}
+#pkt-container::-webkit-scrollbar{width:4px}
+#pkt-container::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.pkt-row{display:grid;grid-template-columns:90px 140px 60px 1fr;gap:0;padding:3px 12px;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px;cursor:pointer;align-items:start}
+.pkt-row:hover{background:var(--bg2)}
+.pkt-ts{color:var(--dim)}
+.pkt-type{font-weight:500}
+.pkt-type.push{color:var(--green)}
+.pkt-type.contact{color:var(--blue)}
+.pkt-type.msg{color:var(--yellow)}
+.pkt-type.ctrl{color:var(--muted)}
+.pkt-type.advert{color:var(--purple)}
+.pkt-type.err{color:var(--red)}
+.pkt-len{color:var(--dim)}
+.pkt-hex{color:var(--dim);font-size:10px;word-break:break-all;white-space:pre-wrap}
+.pkt-hex.expanded{color:var(--muted)}
+.pkt-hex-trunc{display:inline}
+.pkt-hex-full{display:none}
+.pkt-row.open .pkt-hex-trunc{display:none}
+.pkt-row.open .pkt-hex-full{display:inline}
+#pkt-count{font-size:10px;color:var(--dim);padding:4px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+/* encrypted traffic */
+#enc-container{flex:1;overflow-y:auto}
+#enc-container::-webkit-scrollbar{width:4px}
+#enc-container::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.enc-row{display:grid;grid-template-columns:85px 100px 90px 80px 1fr;gap:0;padding:4px 12px;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px;align-items:center}
+.enc-row:hover{background:var(--bg2)}
+.enc-ts{color:var(--dim)}
+.enc-adapter{padding:1px 5px;border-radius:3px;font-size:10px}
+.enc-ch{color:var(--purple);font-size:10px}
+.enc-from{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.enc-note{color:var(--dim);font-size:10px;font-style:italic}
+#enc-count{font-size:10px;color:var(--dim);padding:4px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+.enc-key-note{padding:8px 12px;font-size:11px;color:var(--yellow);border-bottom:1px solid var(--border);flex-shrink:0}
+</style>
+</head>
+<body style="display:flex;flex-direction:column;height:100vh">
+<div id="header">
+  <a class="back" href="/">← SM</a>
+  <div class="logo">▣ SM / Logs</div>
+  <div class="spacer"></div>
+  <button class="tb-btn" onclick="downloadCurrent()">↓ Download</button>
+</div>
+
+<div id="tabs">
+  <div class="tab active" onclick="switchTab('applogs',this)">App Logs</div>
+  <div class="tab" onclick="switchTab('packets',this)">Raw Packets <span class="tab-badge" id="pkt-badge">0</span></div>
+  <div class="tab" onclick="switchTab('encrypted',this)">Encrypted Traffic <span class="tab-badge" id="enc-badge">0</span></div>
+  <div class="tab" onclick="switchTab('botactivity',this)">Bot Activity <span class="tab-badge" id="bot-badge">0</span></div>
+</div>
+
+<!-- App Logs toolbar -->
+<div class="toolbar" id="tb-applogs">
+  <span style="color:var(--dim);font-size:10px">Level:</span>
+  <button class="filter-btn on" onclick="setLevel('',this)">ALL</button>
+  <button class="filter-btn" onclick="setLevel('DEBUG',this)">DEBUG</button>
+  <button class="filter-btn" onclick="setLevel('INFO',this)">INFO</button>
+  <button class="filter-btn" onclick="setLevel('WARNING',this)">WARN</button>
+  <button class="filter-btn" onclick="setLevel('ERROR',this)">ERROR</button>
+  <div class="spacer"></div>
+  <button class="filter-btn" onclick="filterBotLogs()" title="Show only bot command activity">🤖 Bot</button>
+  <input type="text" class="tb-search" id="log-search" placeholder="Filter…" oninput="applyLogFilter()">
+  <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;cursor:pointer">
+    <input type="checkbox" id="autoscroll" checked> Auto-scroll
+  </label>
+</div>
+
+<!-- Packets toolbar -->
+<div class="toolbar" id="tb-packets" style="display:none">
+  <span style="color:var(--dim);font-size:10px">Adapter:</span>
+  <select class="tb-select" id="pkt-adapter" onchange="loadPackets()">
+    <option value="">Loading…</option>
+  </select>
+  <span style="color:var(--dim);font-size:10px;margin-left:8px">Type:</span>
+  <select class="tb-select" id="pkt-type-filter" onchange="renderPackets()">
+    <option value="">All</option>
+    <option value="PUSH_CHANNEL_MSG">PUSH_CHANNEL_MSG</option>
+    <option value="PUSH_ADVERT">PUSH_ADVERT</option>
+    <option value="CONTACT">CONTACT</option>
+    <option value="PUSH_SEND_CONFIRMED">PUSH_SEND_CONFIRMED</option>
+    <option value="NO_MORE_MSGS">NO_MORE_MSGS</option>
+  </select>
+  <div class="spacer"></div>
+  <input type="text" class="tb-search" id="pkt-search" placeholder="Filter hex or type…" oninput="renderPackets()">
+  <button class="tb-btn" onclick="loadPackets()">↻ Refresh</button>
+  <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;cursor:pointer">
+    <input type="checkbox" id="pkt-autoscroll"> Auto-scroll
+  </label>
+</div>
+
+<!-- Encrypted toolbar -->
+<div class="toolbar" id="tb-encrypted" style="display:none">
+  <span style="color:var(--dim);font-size:10px">Adapter:</span>
+  <select class="tb-select" id="enc-adapter" onchange="loadEncrypted()">
+    <option value="">All adapters</option>
+  </select>
+  <div class="spacer"></div>
+  <input type="text" class="tb-search" id="enc-search" placeholder="Filter by sender/channel…" oninput="renderEncrypted()">
+  <button class="tb-btn" onclick="loadEncrypted()">↻ Refresh</button>
+</div>
+
+<!-- App Logs panel -->
+<div class="panel active" id="panel-applogs">
+  <div id="log-container"></div>
+</div>
+
+<!-- Raw Packets panel -->
+<div class="panel" id="panel-packets">
+  <div id="pkt-count">Loading…</div>
+  <div id="pkt-container"></div>
+</div>
+
+<!-- Bot Activity toolbar -->
+<div class="toolbar" id="tb-botactivity" style="display:none">
+  <span style="color:var(--dim);font-size:10px">Command:</span>
+  <select class="tb-select" id="bot-cmd-filter" onchange="loadBotActivity()">
+    <option value="">All commands</option>
+    <option value="ping">ping</option>
+    <option value="weather">weather</option>
+    <option value="solar">solar</option>
+    <option value="overhead">overhead</option>
+    <option value="satpass">satpass</option>
+    <option value="ships">ships</option>
+    <option value="fcc">fcc</option>
+    <option value="metar">metar</option>
+    <option value="alerts">alerts</option>
+    <option value="sun">sun</option>
+    <option value="nodes">nodes</option>
+    <option value="aprs">aprs</option>
+    <option value="anomalies">anomalies</option>
+    <option value="trivia">trivia</option>
+    <option value="dad">dad</option>
+    <option value="help">help</option>
+  </select>
+  <div class="spacer"></div>
+  <input type="text" class="tb-search" id="bot-search" placeholder="Filter caller/response…" oninput="renderBotActivity()">
+  <button class="tb-btn" onclick="loadBotActivity()">↻ Refresh</button>
+</div>
+
+<!-- Encrypted Traffic panel -->
+<div class="panel" id="panel-encrypted">
+  <div class="enc-key-note" id="enc-key-note" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <span>🔒 Channel messages encrypted with PSK — metadata shown, bodies hidden without key</span>
+    <button class="tb-btn" onclick="toggleKeyForm()" id="enc-key-toggle-btn">+ Add channel key</button>
+  </div>
+  <div id="enc-key-form" style="display:none;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface2);flex-shrink:0">
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Add a PSK so ECH can decrypt messages on that channel index. Keys are stored in server config.</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:11px;color:var(--dim)">Channel idx:</label>
+      <input type="number" id="enc-key-idx" value="0" min="0" max="9" style="width:52px;background:var(--surface3);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">
+      <label style="font-size:11px;color:var(--dim)">Key (hex):</label>
+      <input type="text" id="enc-key-hex" placeholder="e.g. 1a2b3c4d…" style="width:220px;background:var(--surface3);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 8px;font-size:12px;font-family:var(--mono)">
+      <button class="tb-btn" onclick="saveChannelKey()" style="background:var(--accent)">Save key</button>
+      <span id="enc-key-status" style="font-size:11px;color:var(--green)"></span>
+    </div>
+    <div style="margin-top:6px;font-size:10px;color:var(--dim)">Key is written to server config — requires ECH restart to take effect for decryption.</div>
+  </div>
+  <div id="enc-count">Loading…</div>
+  <div id="enc-container"></div>
+</div>
+
+<!-- Bot Activity panel -->
+<div class="panel" id="panel-botactivity">
+  <div id="bot-stats-bar" style="display:flex;gap:20px;padding:8px 14px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--muted);flex-shrink:0">
+    <span>Total: <strong id="bot-stat-total">—</strong></span>
+    <span>Unique callers: <strong id="bot-stat-callers">—</strong></span>
+    <span id="bot-stat-top"></span>
+  </div>
+  <div id="bot-act-count" style="font-size:10px;color:var(--dim);padding:4px 12px;border-bottom:1px solid var(--border);flex-shrink:0">Loading…</div>
+  <div id="bot-act-container" style="overflow-y:auto;flex:1"></div>
+</div>
+
+<script>
+// ── Tab switching ──────────────────────────────────────────────────────────
+let currentTab = 'applogs';
+
+function switchTab(name, el) {
+  currentTab = name;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  document.querySelectorAll('[id^="tb-"]').forEach(t => t.style.display = 'none');
+  document.getElementById('tb-' + name).style.display = 'flex';
+  if (name === 'packets') { populateAdapterSelects().then(loadPackets); }
+  if (name === 'encrypted') { populateAdapterSelects().then(loadEncrypted); }
+  if (name === 'botactivity') loadBotActivity();
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
+  return d.toISOString().slice(11, 23);
+}
+
+// ── App Logs ───────────────────────────────────────────────────────────────
+let allLogs = [];
+let currentLevel = '';
+let logSearchText = '';
+
+async function loadLogs() {
+  const url = currentLevel ? `/api/logs?limit=1000&level=${currentLevel}` : '/api/logs?limit=1000';
+  const data = await fetch(url).then(r => r.json());
+  allLogs = (data.logs || []).reverse();
+  renderLogs();
+}
+
+function renderLogs() {
+  const container = document.getElementById('log-container');
+  const filtered = allLogs.filter(l => {
+    if (logSearchText && !(l.logger + ' ' + l.message).toLowerCase().includes(logSearchText)) return false;
+    return true;
+  });
+  container.innerHTML = filtered.map(l => {
+    const ts = l.timestamp ? l.timestamp.slice(11, 23) : '';
+    return `<div class="log-line ${l.level}"><span class="log-ts">${ts}</span><span class="log-level">${l.level}</span><span class="log-logger">${esc(l.logger)}</span>${esc(l.message)}</div>`;
+  }).join('');
+  if (document.getElementById('autoscroll').checked) container.scrollTop = container.scrollHeight;
+}
+
+function setLevel(level, btn) {
+  currentLevel = level;
+  document.querySelectorAll('#tb-applogs .filter-btn').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  loadLogs();
+}
+
+function applyLogFilter() {
+  logSearchText = document.getElementById('log-search').value.toLowerCase();
+  renderLogs();
+}
+
+function filterBotLogs() {
+  document.getElementById('log-search').value = 'MeshBot: cmd=';
+  applyLogFilter();
+}
+
+// ── Raw Packets ────────────────────────────────────────────────────────────
+let allPackets = [];
+
+const PKT_CLASS = {
+  PUSH_CHANNEL_MSG: 'msg', PUSH_ADVERT: 'advert', PUSH_SEND_CONFIRMED: 'push',
+  PUSH_MSG_WAITING: 'push', PUSH_PATH: 'push',
+  CONTACT: 'contact', CONTACT_START: 'contact', CONTACT_END: 'contact',
+  NO_MORE_MSGS: 'ctrl', OK: 'ctrl', ERROR: 'err',
+  SELF_INFO: 'contact', DEVICE_INFO: 'contact', CHANNEL_INFO: 'ctrl',
+  CONTACT_MSG: 'msg', CHANNEL_MSG: 'msg',
+};
+
+async function populateAdapterSelects() {
+  try {
+    const data = await fetch('/api/channels').then(r => r.json());
+    const names = (data.channels || []).map(c => c.adapter);
+    // Packets adapter select — only adapters with _packet_log (meshcore/meshtastic)
+    const pktSel = document.getElementById('pkt-adapter');
+    const encSel = document.getElementById('enc-adapter');
+    const pktHas = names.filter(n => /meshcore|meshtastic/i.test(n));
+    if (pktHas.length > 0) {
+      pktSel.innerHTML = pktHas.map(n => `<option value="${n}">${n}</option>`).join('');
+    } else {
+      pktSel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
+    }
+    // Encrypted adapter select
+    const encOpts = ['<option value="">All adapters</option>'];
+    pktHas.forEach(n => encOpts.push(`<option value="${n}">${n}</option>`));
+    encSel.innerHTML = encOpts.join('');
+  } catch (e) { /* keep defaults */ }
+}
+
+async function loadPackets() {
+  const adapter = document.getElementById('pkt-adapter').value;
+  if (!adapter) return;
+  try {
+    const data = await fetch(`/api/adapters/${adapter}/packets`).then(r => r.json());
+    allPackets = Array.isArray(data) ? data : (data.packets || []);
+    // Sort oldest first for display
+    allPackets.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    document.getElementById('pkt-badge').textContent = allPackets.length;
+    if (data.note) {
+      document.getElementById('pkt-container').innerHTML =
+        `<div style="color:var(--dim);padding:20px 14px">${esc(data.note)}</div>`;
+      document.getElementById('pkt-count').textContent = data.note;
+      return;
+    }
+    renderPackets();
+  } catch (e) {
+    document.getElementById('pkt-count').textContent = 'Error loading packets: ' + e.message;
+  }
+}
+
+function renderPackets() {
+  const typeFilter = document.getElementById('pkt-type-filter').value;
+  const hexSearch  = document.getElementById('pkt-search').value.toLowerCase();
+  const filtered = allPackets.filter(p => {
+    if (typeFilter && p.type !== typeFilter) return false;
+    if (hexSearch && !(p.hex || '').toLowerCase().includes(hexSearch) && !(p.type || '').toLowerCase().includes(hexSearch)) return false;
+    return true;
+  });
+
+  document.getElementById('pkt-count').textContent =
+    `${filtered.length} of ${allPackets.length} packets  (${document.getElementById('pkt-adapter').value})`;
+
+  const rows = filtered.map((p, i) => {
+    const cls   = PKT_CLASS[p.type] || 'ctrl';
+    const ts    = fmtTime(p.ts);
+    const hex   = p.hex || '';
+    const preview = hex.slice(0, 48) + (hex.length > 48 ? '…' : '');
+    const full    = hex;
+    const dir   = p.dir === 'tx' ? '<span style="color:var(--yellow)">TX</span>' : '<span style="color:var(--blue)">RX</span>';
+    return `<div class="pkt-row" onclick="this.classList.toggle('open')" data-i="${i}">
+      <span class="pkt-ts">${ts}</span>
+      <span class="pkt-type ${cls}">${esc(p.type||'?')} ${dir}</span>
+      <span class="pkt-len">${p.len||0}B</span>
+      <span class="pkt-hex"><span class="pkt-hex-trunc">${esc(preview)}</span><span class="pkt-hex-full">${esc(full)}</span></span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('pkt-container').innerHTML = rows ||
+    '<div style="color:var(--dim);padding:20px 14px">No packets match filter</div>';
+
+  if (document.getElementById('pkt-autoscroll').checked) {
+    const c = document.getElementById('pkt-container');
+    c.scrollTop = c.scrollHeight;
+  }
+}
+
+// ── Encrypted Traffic ──────────────────────────────────────────────────────
+let allEncrypted = [];
+
+function toggleKeyForm() {
+  const f = document.getElementById('enc-key-form');
+  const btn = document.getElementById('enc-key-toggle-btn');
+  const shown = f.style.display !== 'none';
+  f.style.display = shown ? 'none' : 'flex';
+  f.style.flexDirection = 'column';
+  btn.textContent = shown ? '+ Add channel key' : '✕ Close';
+  if (!shown) document.getElementById('enc-key-hex').focus();
+}
+
+async function saveChannelKey() {
+  const idx = parseInt(document.getElementById('enc-key-idx').value) || 0;
+  const hex = document.getElementById('enc-key-hex').value.trim().replace(/\s/g, '');
+  const status = document.getElementById('enc-key-status');
+  if (!hex || hex.length < 8) { status.style.color='var(--red)'; status.textContent = 'Key too short'; return; }
+  if (!/^[0-9a-fA-F]+$/.test(hex)) { status.style.color='var(--red)'; status.textContent = 'Invalid hex'; return; }
+  status.textContent = 'Saving…'; status.style.color = 'var(--muted)';
+  try {
+    const r = await fetch('/api/config/channels', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({idx, key_hex: hex.toLowerCase()})
+    });
+    if (r.ok) {
+      status.style.color = 'var(--green)';
+      status.textContent = `Saved (ch ${idx}). Restart ECH to apply.`;
+    } else {
+      const err = await r.json().catch(() => ({}));
+      status.style.color = 'var(--red)';
+      status.textContent = err.detail || `Error ${r.status}`;
+    }
+  } catch(e) {
+    status.style.color = 'var(--red)'; status.textContent = e.message;
+  }
+}
+
+async function loadEncrypted() {
+  const adapter = document.getElementById('enc-adapter').value;
+  const url = '/api/messages?limit=500' + (adapter ? `&adapter=${adapter}` : '');
+  try {
+    const data = await fetch(url).then(r => r.json());
+    allEncrypted = (data.messages || []).filter(m => m.body === '[Encrypted channel message]');
+    // Oldest first
+    allEncrypted.reverse();
+    document.getElementById('enc-badge').textContent = allEncrypted.length;
+    renderEncrypted();
+  } catch (e) {
+    document.getElementById('enc-count').textContent = 'Error: ' + e.message;
+  }
+}
+
+function renderEncrypted() {
+  const search = document.getElementById('enc-search').value.toLowerCase();
+  const filtered = allEncrypted.filter(m => {
+    if (!search) return true;
+    return (m.from_display + m.from_id + (m.source_channel||'')).toLowerCase().includes(search);
+  });
+
+  document.getElementById('enc-count').textContent =
+    `${filtered.length} encrypted messages` + (filtered.length < allEncrypted.length ? ` (${allEncrypted.length} total)` : '');
+
+  const adapterColors = {
+    meshcore: 'background:#122a1a;color:#6abf82',
+    'meshcore-mock': 'background:#122a1a;color:#484f58',
+    meshtastic: 'background:#0e2a4a;color:#79b8ff',
+  };
+
+  const rows = filtered.map(m => {
+    const ts = fmtTime(m.timestamp);
+    const adp = m.source_adapter || '';
+    const style = adapterColors[adp] || 'background:var(--bg3);color:var(--muted)';
+    const ch = m.source_channel || '';
+    const raw = m.raw_json ? (typeof m.raw_json === 'string' ? (() => { try { return JSON.parse(m.raw_json); } catch { return {}; } })() : m.raw_json) : {};
+    const snr = raw.snr != null ? ` SNR ${raw.snr.toFixed(1)}dB` : '';
+    const hops = m.hop_count != null ? ` ${m.hop_count}hop` : '';
+    return `<div class="enc-row">
+      <span class="enc-ts">${ts}</span>
+      <span class="enc-adapter" style="${style}">${esc(adp)}</span>
+      <span class="enc-ch">${esc(ch)}</span>
+      <span class="enc-from" title="${esc(m.from_id)}">${esc(m.from_display || m.from_id || '?')}</span>
+      <span class="enc-note">🔒 encrypted${snr}${hops}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('enc-container').innerHTML = rows ||
+    '<div style="color:var(--dim);padding:20px 14px">No encrypted messages found</div>';
+}
+
+// ── Bot Activity ───────────────────────────────────────────────────────────
+let allBotActivity = [];
+
+async function loadBotActivity() {
+  const cmd = document.getElementById('bot-cmd-filter').value;
+  const url = cmd ? `/api/bot/activity?limit=200&command=${encodeURIComponent(cmd)}` : '/api/bot/activity?limit=200';
+  const data = await fetch(url).then(r => r.json());
+  allBotActivity = data.activity || [];
+  document.getElementById('bot-badge').textContent = allBotActivity.length;
+  renderBotActivity();
+  // Load stats
+  const stats = await fetch('/api/bot/stats').then(r => r.json());
+  document.getElementById('bot-stat-total').textContent = stats.total || 0;
+  document.getElementById('bot-stat-callers').textContent = stats.unique_callers || 0;
+  if (stats.by_command && stats.by_command.length) {
+    const top = stats.by_command.slice(0, 3).map(x => `${x.command}(${x.cnt})`).join(' · ');
+    document.getElementById('bot-stat-top').textContent = 'Top: ' + top;
+  }
+}
+
+function renderBotActivity() {
+  const search = (document.getElementById('bot-search').value || '').toLowerCase();
+  const filtered = allBotActivity.filter(a => {
+    if (!search) return true;
+    return (a.from_display + a.from_id + a.command + a.args + a.response).toLowerCase().includes(search);
+  });
+  document.getElementById('bot-act-count').textContent =
+    `${filtered.length} command${filtered.length !== 1 ? 's' : ''}` +
+    (filtered.length < allBotActivity.length ? ` (${allBotActivity.length} total)` : '');
+
+  const CMD_COLORS = {
+    ping: '#4caf50', weather: '#79b8ff', wx: '#79b8ff', solar: '#f0b030',
+    overhead: '#d070e0', satpass: '#d070e0', ships: '#40b0c0', fcc: '#c89060',
+    metar: '#79b8ff', alerts: '#e05040', sun: '#f0b030', nodes: '#56d364',
+    aprs: '#79c0ff', anomalies: '#e05040', trivia: '#c89060', dad: '#56d364',
+    help: '#8b949e',
+  };
+
+  const rows = filtered.map(a => {
+    const ts = fmtTime(a.timestamp);
+    const color = CMD_COLORS[a.command] || 'var(--muted)';
+    const adpShort = (a.adapter || '').split('-')[0].slice(0, 10);
+    const args = a.args ? ` <span style="color:var(--dim)">${esc(a.args)}</span>` : '';
+    return `<div style="display:grid;grid-template-columns:80px 140px 90px 1fr;gap:0;padding:4px 12px;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px;font-family:var(--mono);align-items:start">
+      <span style="color:var(--dim)">${ts}</span>
+      <span style="color:var(--text)" title="${esc(a.from_id)}">${esc(a.from_display || a.from_id || '?')}</span>
+      <span><span style="color:${color};font-weight:600">${esc(a.command)}</span>${args}</span>
+      <span style="color:var(--muted)">${esc(a.response)}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('bot-act-container').innerHTML = rows ||
+    '<div style="color:var(--dim);padding:20px 14px">No bot activity recorded yet</div>';
+}
+
+function handleLiveBotActivity(a) {
+  allBotActivity.unshift(a);
+  if (allBotActivity.length > 200) allBotActivity.length = 200;
+  const badge = document.getElementById('bot-badge');
+  badge.textContent = parseInt(badge.textContent || 0) + 1;
+  if (currentTab === 'botactivity') renderBotActivity();
+}
+
+// ── Download ───────────────────────────────────────────────────────────────
+function downloadCurrent() {
+  let text, filename;
+  if (currentTab === 'applogs') {
+    text = allLogs.map(l => `${l.timestamp} ${l.level} ${l.logger} ${l.message}`).join('\n');
+    filename = `ech-logs-${new Date().toISOString().slice(0,10)}.txt`;
+  } else if (currentTab === 'packets') {
+    text = allPackets.map(p => `${fmtTime(p.ts)} ${p.dir||'rx'} ${p.type} ${p.len}B ${p.hex}`).join('\n');
+    filename = `ech-packets-${document.getElementById('pkt-adapter').value}-${new Date().toISOString().slice(0,10)}.txt`;
+  } else {
+    text = allEncrypted.map(m => `${m.timestamp} ${m.source_adapter} ${m.source_channel} ${m.from_display||m.from_id}`).join('\n');
+    filename = `ech-encrypted-${new Date().toISOString().slice(0,10)}.txt`;
+  }
+  const a = document.createElement('a');
+  a.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(text);
+  a.download = filename;
+  a.click();
+}
+
+// ── WebSocket (live log streaming) ─────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onmessage = e => {
+    const pkt = JSON.parse(e.data);
+    if (pkt.type === 'bot_activity') { handleLiveBotActivity(pkt.data); return; }
+    if (pkt.type === 'log') {
+      const l = pkt.data;
+      if (currentLevel && l.level !== currentLevel) return;
+      if (logSearchText && !(l.logger + ' ' + l.message).toLowerCase().includes(logSearchText)) return;
+      allLogs.push(l);
+      if (currentTab !== 'applogs') return;
+      const container = document.getElementById('log-container');
+      const div = document.createElement('div');
+      div.className = `log-line ${l.level}`;
+      const ts = l.timestamp ? l.timestamp.slice(11, 23) : '';
+      div.innerHTML = `<span class="log-ts">${ts}</span><span class="log-level">${l.level}</span><span class="log-logger">${esc(l.logger)}</span>${esc(l.message)}`;
+      container.appendChild(div);
+      if (document.getElementById('autoscroll').checked) container.scrollTop = container.scrollHeight;
+    }
+  };
+  ws.onclose = () => setTimeout(connectWS, 3000);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+loadLogs();
+setInterval(loadLogs, 30000);
+setInterval(() => { if (currentTab === 'packets') loadPackets(); }, 15000);
+setInterval(() => { if (currentTab === 'encrypted') loadEncrypted(); }, 30000);
+setInterval(() => { if (currentTab === 'botactivity') loadBotActivity(); }, 30000);
+connectWS();
+</script>
+</body>
+</html>

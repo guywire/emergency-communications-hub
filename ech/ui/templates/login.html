@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxjaXJjbGUgY3g9IjkiIGN5PSI5IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iOSIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48Y2lyY2xlIGN4PSIyMyIgY3k9IjkiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjIzIiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjIzIiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMjMiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iMjMiIGN5PSIyMyIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48cGF0aCBkPSJNNCwxNiBRNywxMCAxMCwxNiBRMTMsMjIgMTYsMTYgUTE5LDEwIDIyLDE2IFEyNSwyMiAyOCwxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjIuNSIgZmlsbD0iIzNmYjk1MCIvPjwvc3ZnPg==">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SM — Login</title>
+
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--green:#3fb950;--red:#f85149;--blue:#388bfd;--mono:'IBM Plex Mono','Cascadia Code','Consolas','Liberation Mono',monospace;--sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);display:flex;align-items:center;justify-content:center}
+.login-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:40px;width:340px;text-align:center}
+.logo{font-family:var(--mono);font-size:24px;color:var(--green);margin-bottom:4px;letter-spacing:.08em}
+.subtitle{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:32px;letter-spacing:.05em}
+label{display:block;text-align:left;font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:4px;margin-top:16px}
+input{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 12px;border-radius:6px;outline:none}
+input:focus{border-color:var(--blue)}
+.login-btn{width:100%;margin-top:24px;background:var(--green);border:none;color:#0d1117;font-family:var(--mono);font-size:13px;font-weight:500;padding:10px;border-radius:6px;cursor:pointer;letter-spacing:.04em}
+.login-btn:hover{opacity:.9}
+.error{font-family:var(--mono);font-size:11px;color:var(--red);margin-top:12px;display:none}
+.hint{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:16px}
+.tls-hint{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.tls-hint a{color:var(--blue);text-decoration:none}.tls-hint a:hover{text-decoration:underline}
+.cert-warn{color:#d29922}
+</style>
+</head>
+<body>
+<div class="login-card">
+  <div class="logo">▣ SM</div>
+  <div class="subtitle">SignalMatrix</div>
+  <form id="login-form" method="POST" action="/api/auth/login">
+    <input type="hidden" id="next-input" name="next" value="/">
+    <label>Username</label>
+    <input type="text" name="username" id="username" placeholder="username" autocomplete="username">
+    <label>Password</label>
+    <input type="password" name="password" id="password" placeholder="password" autocomplete="current-password">
+    <button type="submit" class="login-btn">Sign in</button>
+  </form>
+  <div class="error" id="error-msg" style="display:none">Invalid username or password</div>
+  <div class="hint">First login will prompt you to set a new password</div>
+  <div class="tls-hint" id="tls-hint" style="display:none"></div>
+</div>
+<script>
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('next')) document.getElementById('next-input').value = params.get('next');
+  if (params.get('error')) document.getElementById('error-msg').style.display = 'block';
+
+  // Show HTTPS / cert guidance
+  const hint = document.getElementById('tls-hint');
+  const isHttps = window.location.protocol === 'https:';
+  if (isHttps) {
+    hint.innerHTML = '<span class="cert-warn">&#9888;</span> Browser showing a cert warning? ' +
+      '<a href="/tls-setup">HTTPS setup &amp; CA cert trust instructions</a> &mdash; ' +
+      'or <a href="/ca.crt" download>download CA cert directly</a>.';
+  } else {
+    hint.innerHTML = '&#128274; HTTPS available &mdash; ' +
+      '<a href="/tls-setup">setup instructions &amp; CA cert download</a>.';
+  }
+  hint.style.display = '';
+})();
+</script>
+</body>
+</html>

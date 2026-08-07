@@ -1,0 +1,34 @@
+{
+  "title": "ECH Mesh Network",
+  "uid": "ech-mesh",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Total Mesh Nodes", "gridPos": {"x":0,"y":0,"w":4,"h":4},
+      "targets": [{"expr": "count(ech_node_last_heard_seconds)", "datasource": "Prometheus"}]
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Node SNR (dB)", "gridPos": {"x":0,"y":4,"w":12,"h":8},
+      "targets": [{"expr": "ech_node_snr_db", "legendFormat": "{{display_name}} ({{adapter}})", "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"unit": "dB"}}
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Node RSSI (dBm)", "gridPos": {"x":12,"y":4,"w":12,"h":8},
+      "targets": [{"expr": "ech_node_rssi_dbm", "legendFormat": "{{display_name}}", "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"unit": "dBm"}}
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Node Battery (%)", "gridPos": {"x":0,"y":12,"w":12,"h":8},
+      "targets": [{"expr": "ech_node_battery_pct", "legendFormat": "{{display_name}}", "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"unit": "percent","min":0,"max":100,"thresholds":{"steps":[{"color":"red","value":0},{"color":"yellow","value":20},{"color":"green","value":50}]}}}
+    },
+    {
+      "id": 5, "type": "table", "title": "Node Last Heard", "gridPos": {"x":12,"y":12,"w":12,"h":8},
+      "targets": [{"expr": "time() - ech_node_last_heard_seconds", "legendFormat": "{{display_name}}", "instant": true, "datasource": "Prometheus"}],
+      "fieldConfig": {"defaults": {"unit": "s", "displayName": "Seconds since last heard"}}
+    }
+  ]
+}

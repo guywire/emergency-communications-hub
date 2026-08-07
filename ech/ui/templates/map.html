@@ -1,0 +1,1696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxjaXJjbGUgY3g9IjkiIGN5PSI5IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iOSIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48Y2lyY2xlIGN4PSIyMyIgY3k9IjkiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjIzIiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjIzIiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMjMiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iMjMiIGN5PSIyMyIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48cGF0aCBkPSJNNCwxNiBRNywxMCAxMCwxNiBRMTMsMjIgMTYsMTYgUTE5LDEwIDIyLDE2IFEyNSwyMiAyOCwxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjIuNSIgZmlsbD0iIzNmYjk1MCIvPjwvc3ZnPg==">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SM — Node Map</title>
+<link rel="stylesheet" href="/static/leaflet/leaflet.css">
+
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--green:#3fb950;--blue:#388bfd;--yellow:#d29922;--red:#f85149;--mono:'IBM Plex Mono','Cascadia Code','Consolas','Liberation Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--mono)}
+#sim-banner{display:none;position:fixed;top:0;left:0;right:0;height:26px;background:#431407;border-bottom:2px solid #c2410c;color:#fb923c;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-align:center;line-height:24px;z-index:2000;text-transform:uppercase}
+body.sim-mode #sim-banner{display:block}
+body.sim-mode{padding-top:26px}
+body.sim-mode #map{height:calc(100vh - 70px)}
+#header{display:flex;align-items:center;gap:16px;padding:0 16px;height:44px;background:var(--bg2);border-bottom:1px solid var(--border);z-index:1000;position:relative}
+.logo{font-size:13px;color:var(--green);letter-spacing:.08em}
+.back{font-size:11px;color:var(--blue);text-decoration:none}.back:hover{text-decoration:underline}
+.spacer{flex:1}
+#controls{display:flex;gap:8px;align-items:center}
+.ctrl-btn{font-size:10px;padding:3px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer}.ctrl-btn:hover{border-color:var(--blue);color:var(--blue)}
+.ctrl-btn.on{color:var(--green);border-color:var(--green);background:rgba(63,185,80,.08)}
+.ctrl-btn.on:hover{color:var(--green);border-color:var(--green)}
+.ctrl-btn:disabled{opacity:.4;cursor:default}
+.ctrl-btn:disabled:hover{border-color:var(--border);color:var(--muted)}
+.ctrl-sep{width:1px;align-self:stretch;background:var(--border);margin:4px 2px}
+#map{height:calc(100vh - 44px);width:100%}
+/* Dark tile overlay */
+.leaflet-tile{filter:brightness(0.7) invert(1) hue-rotate(180deg) saturate(0.5)}
+/* Remove Leaflet divIcon default white box + margin that causes markers to jump */
+.node-dot{background:transparent!important;border:none!important}
+/* Dark popup — overrides Leaflet's white card */
+.leaflet-popup-content-wrapper{background:rgba(22,27,34,.96);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.5);color:var(--text)}
+.leaflet-popup-tip{background:rgba(22,27,34,.96)}
+.leaflet-popup-close-button{color:var(--muted)!important;font-size:16px}
+.leaflet-popup-close-button:hover{color:var(--text)!important}
+.leaflet-popup-content{margin:10px 12px}
+/* Node popup content */
+.node-popup{font-family:var(--mono);font-size:11px;color:var(--text);min-width:180px;max-width:260px}
+.node-popup .node-name{font-weight:500;font-size:12px;margin-bottom:4px;color:var(--text)}
+.node-popup .node-stat{color:var(--muted);line-height:1.8}
+.node-popup .node-last-msg{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:10px;color:var(--text);word-break:break-word;line-height:1.5}
+.node-popup .node-last-msg .msg-ts{color:var(--muted);font-size:9px;display:block;margin-bottom:2px}
+.node-popup .node-ext-links{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:10px;line-height:1.8}
+.node-popup .node-ext-links a{color:var(--blue);text-decoration:none}.node-popup .node-ext-links a:hover{text-decoration:underline}
+#legend{position:absolute;bottom:30px;right:10px;z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:10px;min-width:140px}
+.legend-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+#node-count{font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY &#9888;</div>
+<div id="header">
+  <a class="back" href="/">← ECH</a>
+  <div class="logo">▣ SM / Node Map</div>
+  <a href="/hamlog" title="Go to Ham Logger"
+     style="font-family:var(--mono);font-size:10px;color:var(--muted);text-decoration:none;padding:2px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg3);margin-left:6px"
+     onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">&#9783; Ham Log</a>
+  <span id="node-count">Loading…</span>
+  <div class="spacer"></div>
+  <div id="controls">
+    <button class="ctrl-btn" onclick="loadNodes()" title="Reload node/marker data">↻ Refresh</button>
+    <button class="ctrl-btn" id="follow-btn" onclick="toggleFollow()" title="Auto-pan to follow this device's GPS position">📍 Follow</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn on" id="bucket-repeater-btn"  onclick="toggleNodeBucket('repeater')"  title="Toggle repeater/infrastructure nodes (routers, digipeaters, IGates)">🔁 RPT</button>
+    <button class="ctrl-btn on" id="bucket-companion-btn" onclick="toggleNodeBucket('companion')" title="Toggle companion/operator nodes (messageable devices, mobile/fixed stations)">👤 CMPN</button>
+    <button class="ctrl-btn on" id="bucket-other-btn"     onclick="toggleNodeBucket('other')"     title="Toggle other node types (sensors, weather stations, unknown, AIS/ADS-B, etc.)">❓ OTHR</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn on" id="proto-meshtastic-btn" onclick="toggleNodeProtocol('meshtastic')" title="Toggle Meshtastic nodes — button border/text matches its map marker color">MSHT</button>
+    <button class="ctrl-btn on" id="proto-meshcore-btn"   onclick="toggleNodeProtocol('meshcore')"   title="Toggle MeshCore nodes — button border/text matches its map marker color">MSHC</button>
+    <button class="ctrl-btn on" id="proto-aprs-btn"       onclick="toggleNodeProtocol('aprs')"       title="Toggle APRS nodes — button border/text matches its map marker color">APRS</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn on" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADSB</button>
+    <button class="ctrl-btn on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS</button>
+    <button class="ctrl-btn on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Traffic</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn" id="strips-btn" onclick="toggleStripReports()" title="Strip reports with a known MGRS or LAT/LON field (mesh bot 'strip' command)">📋 STRIPS</button>
+    <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">📓 HAM LOG</button>
+    <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show ham stations transmitting near your base position (PSKReporter, 300km radius)">📻 PSK</button>
+    <button class="ctrl-btn" id="pota-btn" onclick="togglePOTA()" title="Show active Parks on the Air activators near your base position">🏞 POTA</button>
+    <button class="ctrl-btn" id="sota-btn" onclick="toggleSOTA()" title="Show active Summits on the Air activators near your base position">⛰ SOTA</button>
+    <button class="ctrl-btn" id="iota-btn" onclick="toggleIOTA()" title="Show active Islands on the Air activators near your base position (filtered from the DX cluster)">🏝 IOTA</button>
+    <button class="ctrl-btn" id="bota-btn" onclick="toggleBOTA()" title="Show active Bunkers on the Air activators near your base position (filtered from the DX cluster — low volume, empty is normal)">🪖 BOTA</button>
+    <button class="ctrl-btn" id="dx-btn" onclick="toggleDXCluster()" title="Show general DX cluster spots near your base position — precise for US calls (FCC address), approximate country-center for others">🌐 DX</button>
+    <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ GRID</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI</button>
+    <button class="ctrl-btn" id="water-btn" onclick="toggleWaterBodies()" title="Water body quality + boating/kayak conditions (EPA ATTAINS + NDBC buoys)">🌊 WATER</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn" id="draw-btn" onclick="toggleDrawMode()" title="Draw a repeater path: click each repeater in order, then Send Trace">✏ Draw Path</button>
+  </div>
+</div>
+<div id="map"></div>
+<div id="draw-panel" style="display:none;position:absolute;top:56px;left:10px;z-index:1000;background:rgba(22,27,34,.94);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:11px;min-width:200px;max-width:260px">
+  <div style="font-weight:500;margin-bottom:6px;color:var(--text)">✏ Draw Path</div>
+  <div style="color:var(--muted);margin-bottom:8px">Click repeaters in order (source → … → destination), then Send.</div>
+  <ol id="draw-path-list" style="margin:0 0 8px 16px;padding:0;color:var(--text)"></ol>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button class="ctrl-btn" onclick="undoDrawPath()">↶ Undo</button>
+    <button class="ctrl-btn" onclick="clearDrawPath()">✕ Clear</button>
+    <button class="ctrl-btn" id="draw-send-btn" onclick="sendDrawPath()" disabled>▶ Send Trace</button>
+  </div>
+</div>
+<div id="legend">
+  <div style="font-weight:500;margin-bottom:6px;font-size:11px">Node Types</div>
+  <div class="legend-item"><div class="legend-dot" id="legend-dot-meshtastic" style="background:#3fb950"></div>Meshtastic</div>
+  <div class="legend-item"><div class="legend-dot" id="legend-dot-meshcore" style="background:#f78c6c"></div>MeshCore</div>
+  <div class="legend-item"><div class="legend-dot" id="legend-dot-aprs" style="background:#7c3aed"></div>APRS</div>
+  <div class="legend-item"><div class="legend-dot" id="legend-dot-reticulum" style="background:#c792ea"></div>Reticulum</div>
+  <div class="legend-item"><div class="legend-dot" id="legend-dot-mqtt" style="background:#e2a44f"></div>MQTT</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Alert / WL</div>
+  <div class="legend-item"><span id="legend-dot-adsb" style="color:#f0b429;font-size:13px;line-height:1;margin-right:6px">✈</span>ADS-B Aircraft</div>
+  <div class="legend-item"><span id="legend-dot-ais" style="color:#56d3c8;font-size:13px;line-height:1;margin-right:6px">⚓</span>AIS Vessels</div>
+  <div class="legend-item" id="legend-hamlog" style="display:none"><div class="legend-dot" style="background:#ffd700;border:1px solid #997a00"></div>Ham Log QSO</div>
+</div>
+
+<script src="/static/leaflet/leaflet.js"></script>
+<script>
+const map = L.map('map', {zoomControl:true}).setView([44.1, -69.1], 10);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors',
+  maxZoom: 18,
+}).addTo(map);
+
+// Pan to ?lat=...&lon=...&zoom=... from message coordinate links
+(function () {
+  const p = new URLSearchParams(window.location.search);
+  const lat = parseFloat(p.get('lat')), lon = parseFloat(p.get('lon'));
+  if (!isNaN(lat) && !isNaN(lon)) {
+    const zoom = parseInt(p.get('zoom') || '14', 10);
+    map.setView([lat, lon], zoom);
+    // Temporary pulsing pin that fades after 8 s
+    const pin = L.circleMarker([lat, lon], {
+      radius: 10, color: '#f0883e', fillColor: '#f0883e',
+      fillOpacity: 0.5, weight: 2,
+    }).addTo(map);
+    setTimeout(() => map.removeLayer(pin), 8000);
+  }
+})();
+
+const markers = {};
+let followMode = false;
+let _showAircraft = true;
+let _showVessels  = true;
+
+// Node-type filter buckets — repeater/infrastructure, companion/operator, other (default catch-all)
+const _REPEATER_TYPES  = new Set(['REP', 'REPEATER', 'ROUTER', 'DIGI', 'RPTR', 'IGATE']);
+const _COMPANION_TYPES = new Set(['CLI', 'ROOM', 'MOBILE', 'FIXED']);
+let _showBuckets = new Set(['repeater', 'companion', 'other']);
+
+function nodeBucket(node) {
+  const t = node.node_type || '';
+  if (_REPEATER_TYPES.has(t))  return 'repeater';
+  if (_COMPANION_TYPES.has(t)) return 'companion';
+  return 'other';
+}
+
+function toggleNodeBucket(bucket) {
+  if (_showBuckets.has(bucket)) _showBuckets.delete(bucket);
+  else _showBuckets.add(bucket);
+  document.getElementById(`bucket-${bucket}-btn`).classList.toggle('on', _showBuckets.has(bucket));
+  loadNodes();
+}
+
+// Protocol filter — MSHT/MSHC/APRS toggles, independent of the RPT/CMPN/OTHR
+// node-role buckets above (a repeater can be any of these three protocols).
+// Buttons are colored to match adapterColor() so the toggle itself doubles
+// as a legend.
+let _showProtocols = new Set(['meshtastic', 'meshcore', 'aprs']);
+
+function nodeProtocol(node) {
+  const a = (node._adapter || '').toLowerCase();
+  if (a.includes('meshtastic')) return 'meshtastic';
+  if (a.includes('meshcore'))   return 'meshcore';
+  if (a.includes('aprs'))       return 'aprs';
+  return null;   // anything else (reticulum, mqtt, js8, etc.) is unaffected by this filter
+}
+
+function toggleNodeProtocol(proto) {
+  if (_showProtocols.has(proto)) _showProtocols.delete(proto);
+  else _showProtocols.add(proto);
+  document.getElementById(`proto-${proto}-btn`).classList.toggle('on', _showProtocols.has(proto));
+  _applyProtoButtonColor(proto);
+  loadNodes();
+}
+
+// Colors a protocol toggle button to match its marker color while "on";
+// clears the inline override while "off" so the muted .ctrl-btn default
+// still reads as visually disabled instead of staying colored either way.
+function _applyProtoButtonColor(proto) {
+  const btn = document.getElementById(`proto-${proto}-btn`);
+  if (!btn) return;
+  if (_showProtocols.has(proto)) {
+    const color = adapterColor(proto);
+    btn.style.borderColor = color;
+    btn.style.color = color;
+  } else {
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  }
+}
+
+// Populated from /api/map-colors on load; falls back to the hardcoded
+// defaults below for any mode the admin hasn't customized.
+let _mapColorOverrides = {};
+
+function adapterColor(adapter) {
+  const a = adapter.toLowerCase();
+  if (a.includes('meshtastic')) return _mapColorOverrides.meshtastic || '#3fb950';
+  if (a.includes('meshcore'))   return _mapColorOverrides.meshcore || '#f78c6c';
+  if (a.includes('aprs'))       return _mapColorOverrides.aprs || '#7c3aed';
+  if (a.includes('reticulum') || a.includes('rns')) return _mapColorOverrides.reticulum || '#c792ea';
+  if (a.includes('mqtt'))       return _mapColorOverrides.mqtt || '#e2a44f';
+  if (a.includes('winlink') || a.includes('pat'))   return _mapColorOverrides.winlink || '#f85149';
+  if (a.includes('js8') || a.includes('hf'))        return _mapColorOverrides.js8 || '#ffcb6b';
+  if (a.includes('adsb') || a.includes('ads-b') || a.includes('opensky')) return _mapColorOverrides.adsb || '#f0b429';
+  if (a.includes('ais'))                            return _mapColorOverrides.ais || '#56d3c8';
+  return '#8b949e';
+}
+
+function nodeIsVessel(node) {
+  const id = (node.node_id || '').toLowerCase();
+  return id.startsWith('mmsi:') || !!(node.meta && node.meta.mmsi);
+}
+
+function makeNodeIcon(node, color, size=12) {
+  const id = (node.node_id || '').toLowerCase();
+  if (id.startsWith('icao:')) {
+    const sz = size + 4;
+    // ✈ emoji points right (≈90° compass); rotate so it faces track_deg
+    const track = (node.meta && node.meta.track_deg != null) ? node.meta.track_deg : null;
+    const rot = track != null ? (track - 90) : -45;
+    return L.divIcon({
+      className: 'node-dot',
+      html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center;transform:rotate(${rot}deg)">✈</div>`,
+      iconSize: [sz, sz],
+      iconAnchor: [sz/2, sz/2],
+    });
+  }
+  if (nodeIsVessel(node)) {
+    const sz = size + 2;
+    const course = (node.meta && node.meta.course_deg != null) ? node.meta.course_deg : null;
+    if (course != null) {
+      // Moving vessel: show directional arrow rotated by COG (▲ points North at 0°)
+      return L.divIcon({
+        className: 'node-dot',
+        html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center;transform:rotate(${course}deg)">▲</div>`,
+        iconSize: [sz, sz],
+        iconAnchor: [sz/2, sz/2],
+      });
+    }
+    // No COG (at anchor / stationary): show anchor icon
+    return L.divIcon({
+      className: 'node-dot',
+      html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center">⚓</div>`,
+      iconSize: [sz, sz],
+      iconAnchor: [sz/2, sz/2],
+    });
+  }
+  return makeIcon(color, size);
+}
+
+function makeIcon(color, size=12) {
+  return L.divIcon({
+    className: 'node-dot',   // clears Leaflet's default white box + margin
+    html: `<div style="width:${size}px;height:${size}px;background:${color};border:2px solid rgba(255,255,255,.4);border-radius:50%;box-shadow:0 0 6px ${color}80"></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size/2, size/2],
+  });
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function _heardAgo(isoStr) {
+  if (!isoStr) return '';
+  const sec = (Date.now() - new Date(isoStr)) / 1000;
+  if (sec < 60)   return `${Math.round(sec)}s ago`;
+  if (sec < 3600) return `${Math.round(sec/60)}m ago`;
+  if (sec < 86400) return `${Math.round(sec/3600)}h ago`;
+  return `${Math.round(sec/86400)}d ago`;
+}
+
+function popupContent(node, isAlert, lastMsg) {
+  const isOnline = node.is_online !== false;
+  const heardAgo = _heardAgo(node.last_heard);
+  const heard = node.last_heard ? new Date(node.last_heard).toUTCString().slice(5,22) : '--';
+  const offlineBadge = !isOnline && heardAgo
+    ? `<span style="font-family:var(--mono);font-size:9px;color:#888;margin-left:4px">(last heard ${heardAgo})</span>` : '';
+  let msgBlock = '';
+  if (lastMsg) {
+    const ts = lastMsg.timestamp ? new Date(lastMsg.timestamp).toUTCString().slice(5,22) : '';
+    const body = esc(lastMsg.body || '').slice(0, 200);
+    msgBlock = `<div class="node-last-msg"><span class="msg-ts">${ts}</span>${body}</div>`;
+  } else {
+    msgBlock = `<div class="node-last-msg" id="lastmsg-${esc(node.node_id)}"><span style="color:var(--muted);font-size:9px">Loading last message…</span></div>`;
+  }
+  const isMeshCore = (node._adapter || '').toLowerCase().includes('meshcore');
+  // Node role: repeaters/digis/WX/sensors can't receive messages — say so
+  // instead of offering a Message button that silently goes nowhere.
+  const NON_MSG = ['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT'];
+  const ntype = node.node_type || '';
+  const messageable = !NON_MSG.includes(ntype);
+  const typeBadge = ntype
+    ? `<span style="font-family:var(--mono);font-size:9px;padding:0 4px;margin-left:4px;border:1px solid ${messageable ? '#3fb950' : '#d29922'};border-radius:3px;color:${messageable ? '#3fb950' : '#d29922'}">${esc(ntype)}</span>` : '';
+  const msgUrl = `/?to=${encodeURIComponent(node.node_id)}&adapter=${encodeURIComponent(node._adapter || '')}`;
+  const msgAction = messageable
+    ? `<a href="${msgUrl}" target="_top" style="flex:1;text-align:center;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.4);color:#388bfd;border-radius:3px;text-decoration:none">📨 Message</a>`
+    : `<span style="flex:1;text-align:center;font-family:var(--mono);font-size:9px;padding:4px 2px;border:1px solid var(--border);color:var(--muted);border-radius:3px" title="This node type routes packets but has no message inbox">not messageable</span>`;
+  const actionBtns = `<div style="display:flex;gap:5px;margin-top:8px">
+    ${msgAction}
+    ${isMeshCore ? `<button onclick="mapTrace('${esc(node._adapter)}','${esc(node.node_id)}',this)" style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);color:#3fb950;border-radius:3px;cursor:pointer">📡 Trace</button>` : ''}
+  </div>`;
+
+  // External lookup links — AIS vessels and ADS-B aircraft
+  const meta = node.meta || {};
+  let extLinks = '';
+  if (meta.mmsi) {
+    const mmsi = esc(String(meta.mmsi).replace(/\D/g, ''));
+    const isAton = mmsi.length === 9 && mmsi.startsWith('99');
+    const vesselName = meta.vessel_name ? ` — ${esc(meta.vessel_name)}` : '';
+    const shipType   = meta.ship_type   ? `<div class="node-stat">${esc(meta.ship_type)}</div>` : '';
+    const navStatus  = meta.nav_status  ? `<div class="node-stat">${esc(meta.nav_status)}${meta.speed_kts != null ? `, ${meta.speed_kts}kts` : ''}</div>` : (meta.speed_kts != null ? `<div class="node-stat">${meta.speed_kts}kts</div>` : '');
+    const dest       = meta.destination ? `<div class="node-stat">→ ${esc(meta.destination)}</div>` : '';
+    if (isAton) {
+      const osmUrl = (node.lat != null && node.lon != null)
+        ? `https://map.openseamap.org/?zoom=14&lat=${node.lat}&lon=${node.lon}`
+        : 'https://www.openseamap.org/';
+      const centerJs = (node.lat != null && node.lon != null)
+        ? `map.setView([${node.lat},${node.lon}],15);` : '';
+      extLinks = `<div class="node-ext-links">⚓ AtoN MMSI ${mmsi}${vesselName}<br>`
+        + (centerJs ? `<a href="javascript:void(0)" onclick="${centerJs}">Center here</a> &bull; ` : '')
+        + `<a href="${osmUrl}" target="_blank" rel="noopener">OpenSeaMap</a>`
+        + `</div>`;
+    } else {
+      const mtUrl = (node.lat != null && node.lon != null)
+        ? `https://www.marinetraffic.com/en/ais/home/centerx:${node.lon}/centery:${node.lat}/zoom:14`
+        : `https://www.marinetraffic.com/en/ais/details/ships/mmsi:${mmsi}`;
+      extLinks = `<div class="node-ext-links">🚢 MMSI ${mmsi}${vesselName}`
+        + `${shipType}${navStatus}${dest}`
+        + `<a href="https://www.vesselfinder.com/vessels/details/${mmsi}" target="_blank" rel="noopener">VesselFinder</a>`
+        + ` &bull; <a href="${mtUrl}" target="_blank" rel="noopener">MarineTraffic</a>`
+        + `</div>`;
+    }
+  } else if (meta.icao) {
+    const icao   = esc(meta.icao);
+    const flight = meta.flight ? meta.flight.trim() : '';
+    const alt    = meta.altitude_ft != null ? `${Number(meta.altitude_ft).toLocaleString()}ft` : '';
+    const spd    = meta.speed_kts   != null ? `${Math.round(meta.speed_kts)}kts` : '';
+    const sqk    = meta.squawk      ? `sqk:${esc(meta.squawk)}` : '';
+    const stats  = [alt, spd, sqk].filter(Boolean).join('  ');
+    extLinks = `<div class="node-ext-links">`
+      + `✈ ICAO: ${icao.toUpperCase()}${stats ? '  ' + stats : ''}<br>`
+      + (flight ? `<a href="https://flightaware.com/live/flight/${esc(flight)}" target="_blank" rel="noopener">FlightAware (${esc(flight)})</a> &bull; ` : '')
+      + `<a href="https://globe.adsbexchange.com/?icao=${icao}" target="_blank" rel="noopener">ADS-B Exchange</a>`
+      + `</div>`;
+  }
+
+  return `<div class="node-popup" data-node-id="${esc(node.node_id)}">
+    <div class="node-name">${esc(node.display_name)}${typeBadge}${offlineBadge}</div>
+    <div class="node-stat">Adapter: ${esc(node._adapter)}</div>
+    ${node.snr  != null ? `<div class="node-stat">SNR: ${node.snr}dB</div>` : ''}
+    ${node.rssi != null ? `<div class="node-stat">RSSI: ${node.rssi}dBm</div>` : ''}
+    ${node.battery_level != null ? `<div class="node-stat">Battery: ${node.battery_level}%</div>` : ''}
+    <div class="node-stat">Last heard: ${heard}</div>
+    ${isAlert ? '<div style="color:var(--red);font-weight:500;margin-top:4px">⚠ ANOMALY ACTIVE</div>' : ''}
+    ${extLinks}
+    ${msgBlock}
+    ${actionBtns}
+  </div>`;
+}
+
+// Draw the route a trace probe is ATTEMPTING (blue dashed): base → each
+// positioned relay → target. Unpositioned hops are skipped, so the line is
+// indicative. Returns true if something was drawn.
+function drawAttemptedRoute(routePoints) {
+  const chain = [];
+  if (_baseLL) chain.push(_baseLL);
+  for (const p of (routePoints || [])) {
+    if (p && p.lat != null && p.lon != null) chain.push([p.lat, p.lon]);
+  }
+  if (chain.length < 2) return false;
+  const line = L.polyline(chain, {
+    color: '#79c0ff', weight: 2.5, opacity: 0.9, dashArray: '2 7', interactive: false,
+  }).addTo(map);
+  _trafficLines.push({line, born: Date.now(), ttl: _TRACE_FADE_MS});
+  return true;
+}
+
+// ── Manual path drawing (click repeaters in order, then send a directed trace) ─
+let _drawMode = false;
+let _drawPath = [];         // [{node_id, display_name, lat, lon, adapter}]
+let _drawLine = null;       // in-progress purple polyline
+let _drawDots = [];         // numbered click markers
+
+function toggleDrawMode() {
+  _drawMode = !_drawMode;
+  document.getElementById('draw-btn').classList.toggle('on', _drawMode);
+  document.getElementById('draw-panel').style.display = _drawMode ? 'block' : 'none';
+  if (!_drawMode) clearDrawPath();
+}
+
+function addDrawPathNode(node) {
+  if (!_drawMode) return;
+  if (!(node._adapter || '').toLowerCase().includes('meshcore')) {
+    toast('Only MeshCore nodes can be traced');
+    return;
+  }
+  if (node.lat == null || node.lon == null) {
+    toast(`${node.display_name} has no position — path line will skip it`);
+  }
+  const last = _drawPath[_drawPath.length - 1];
+  if (last && last.node_id === node.node_id) return;   // ignore accidental double-click
+  _drawPath.push({
+    node_id: node.node_id, display_name: node.display_name,
+    lat: node.lat, lon: node.lon, adapter: node._adapter,
+  });
+  renderDrawPath();
+}
+
+function renderDrawPath() {
+  const list = document.getElementById('draw-path-list');
+  list.innerHTML = _drawPath.map(p => `<li>${esc(p.display_name)}</li>`).join('');
+  document.getElementById('draw-send-btn').disabled = _drawPath.length < 1;
+
+  if (_drawLine) { _drawLine.remove(); _drawLine = null; }
+  _drawDots.forEach(d => d.remove());
+  _drawDots = [];
+
+  const positioned = _drawPath.filter(p => p.lat != null && p.lon != null);
+  if (positioned.length >= 2) {
+    _drawLine = L.polyline(positioned.map(p => [p.lat, p.lon]), {
+      color: '#c792ea', weight: 3, opacity: 0.85, dashArray: '4 5',
+    }).addTo(map);
+  }
+  positioned.forEach((p, i) => {
+    const dot = L.marker([p.lat, p.lon], {
+      icon: L.divIcon({
+        className: 'node-dot',
+        html: `<div style="width:18px;height:18px;background:#c792ea;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-family:monospace;box-shadow:0 0 6px #c792ea">${i + 1}</div>`,
+        iconSize: [18, 18], iconAnchor: [9, 9],
+      }),
+      interactive: false,
+    }).addTo(map);
+    _drawDots.push(dot);
+  });
+}
+
+function undoDrawPath() {
+  _drawPath.pop();
+  renderDrawPath();
+}
+
+function clearDrawPath() {
+  _drawPath = [];
+  renderDrawPath();
+}
+
+async function sendDrawPath() {
+  if (_drawPath.length < 1) return;
+  const target = _drawPath[_drawPath.length - 1];
+  const via = _drawPath.slice(0, -1).map(p => p.node_id);
+  const btn = document.getElementById('draw-send-btn');
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await fetch('/api/ping', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({adapter: target.adapter, node_id: target.node_id, via}),
+    });
+    const dir = await r.json();
+    if (dir.status === 'sent') {
+      const drawn = drawAttemptedRoute(dir.route_points);
+      armTraceTimeout(dir.tag, target.display_name);
+      toast(`Probing your drawn path (${dir.hops} hop${dir.hops === 1 ? '' : 's'})${drawn ? ' — drawn blue' : ''}; a reply draws green${dir.path_truncated ? ' (truncated to 5 repeaters)' : ''}`);
+      toggleDrawMode();
+    } else {
+      toast(`Trace failed: ${dir.detail || dir.status}`);
+    }
+  } catch(e) {
+    toast('Trace failed: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '▶ Send Trace';
+  }
+}
+
+async function mapTrace(adapter, nodeId, btn) {
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+  try {
+    // Probe along the best route available: the device's stored route, or a
+    // multi-hop chain ECH inferred from observed traffic when the radio holds
+    // no routes (all-flood contacts). No undirected "flood" probe — field
+    // evidence showed those can never be answered on this firmware.
+    const r = await fetch('/api/ping', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({adapter, node_id: nodeId}),
+    });
+    const dir = await r.json();
+    const ok = dir.status === 'sent';
+    if (btn) { btn.textContent = ok ? '✓ Sent' : '✗ Fail'; btn.disabled = false; }
+    if (ok) {
+      const drawn = drawAttemptedRoute(dir.route_points);
+      const src = dir.route_src ? ` (${dir.route_src})` : '';
+      armTraceTimeout(dir.tag, dir.via);
+      toast(`Probing ${dir.hops} hop${dir.hops === 1 ? '' : 's'}${src}${drawn ? ' — attempted route drawn blue' : ''}; a reply draws green`, 'ok');
+    } else {
+      toast(`Trace failed: ${dir.detail || dir.status}`, 'err');
+    }
+  } catch(e) {
+    if (btn) { btn.textContent = '✗ Err'; btn.disabled = false; }
+    toast('Trace failed: ' + e.message, 'err');
+  }
+}
+
+async function fetchLastMsg(nodeId) {
+  try {
+    const r = await fetch(`/api/messages?from_id=${encodeURIComponent(nodeId)}&limit=1`);
+    const d = await r.json();
+    return (d.messages && d.messages.length) ? d.messages[0] : null;
+  } catch(e) { return null; }
+}
+
+let _baseLL = null;   // ECH base position from live state
+
+async function loadNodes() {
+  try {
+    const r = await fetch('/api/channels');
+    const data = await r.json();
+    const allNodes = [];
+
+    for (const ch of data.channels) {
+      if (ch.state !== 'connected') continue;
+      try {
+        const nr = await fetch(`/api/nodes/${ch.adapter}`);
+        const nd = await nr.json();
+        nd.nodes.forEach(n => allNodes.push({...n, _adapter: ch.adapter}));
+      } catch(e) {}
+    }
+
+    const anoms = await fetch('/api/anomalies?acknowledged=false').then(r=>r.json()).catch(()=>({findings:[]}));
+    const alertNodes = new Set(anoms.findings.filter(f=>f.severity==='alert').map(f=>f.node_id));
+
+    // Merge duplicate reports of the same real-world node/aircraft across
+    // adapters (e.g. local ADS-B + OpenSky both seeing the same overlapping
+    // aircraft) into a single marker — keep whichever adapter's report is
+    // freshest, rather than letting whichever happens to be processed last
+    // in the loop silently overwrite the other every refresh.
+    const byId = new Map();
+    allNodes.forEach(node => {
+      const id = node.node_id;
+      if (!id) return;
+      const existing = byId.get(id);
+      if (!existing) { byId.set(id, node); return; }
+      const tNew = node.last_heard ? new Date(node.last_heard).getTime() : 0;
+      const tOld = existing.last_heard ? new Date(existing.last_heard).getTime() : 0;
+      if (tNew >= tOld) byId.set(id, node);
+    });
+    const dedupedNodes = [...byId.values()];
+
+    const seen = new Set();
+    dedupedNodes.forEach(node => {
+      if (node.lat == null || node.lon == null) return;
+      if (node.lat === 0 && node.lon === 0) return;
+      const nid = (node.node_id || '').toLowerCase();
+      const isAircraft = nid.startsWith('icao:');
+      const isVessel   = nodeIsVessel(node);
+      if (!_showAircraft && isAircraft) return;
+      if (!_showVessels  && isVessel)   return;
+      if (!_showBuckets.has(nodeBucket(node))) return;
+      const proto = nodeProtocol(node);
+      if (proto && !_showProtocols.has(proto)) return;
+      const id = node.node_id;
+      seen.add(id);
+      const isAlert  = alertNodes.has(id);
+      const isOnline = node.is_online !== false;
+      // Offline/stale nodes keep their adapter color and are signalled by the
+      // reduced marker opacity below — the old grey (#555566) override erased
+      // which network a stale node belonged to and, on the dark tiles, made
+      // dimmed markers look missing entirely.
+      const color = isAlert ? '#f85149' : isVessel ? adapterColor('ais') : adapterColor(node._adapter);
+      const size  = isAlert ? 16 : 12;
+      const popup = popupContent(node, isAlert);
+      const icon  = makeNodeIcon(node, color, size);
+
+      if (markers[id]) {
+        markers[id].setLatLng([node.lat, node.lon]);
+        markers[id].setIcon(icon);
+        markers[id].getPopup().setContent(popup);
+        markers[id].setOpacity(isOnline ? 1.0 : 0.45);
+      } else {
+        const marker = L.marker([node.lat, node.lon], {icon, opacity: isOnline ? 1.0 : 0.45})
+          .bindPopup(popup)
+          .addTo(map);
+        marker.on('popupopen', () => onPopupOpen(marker, node));
+        markers[id] = marker;
+      }
+    });
+
+    Object.keys(markers).forEach(id => {
+      if (!seen.has(id)) { markers[id].remove(); delete markers[id]; }
+    });
+
+    const total = Object.keys(markers).length;
+    document.getElementById('node-count').textContent = `${total} node${total!==1?'s':''} with position`;
+
+    if (total > 0 && followMode) {
+      const lats = allNodes.filter(n=>n.lat!=null).map(n=>n.lat);
+      const lons = allNodes.filter(n=>n.lon!=null).map(n=>n.lon);
+      if (lats.length) map.fitBounds([[Math.min(...lats)-0.01, Math.min(...lons)-0.01],[Math.max(...lats)+0.01, Math.max(...lons)+0.01]]);
+    }
+  } catch(e) {
+    console.error('loadNodes error:', e);
+  }
+}
+
+// Per-marker last message cache so popup re-opens don't re-fetch unnecessarily
+const lastMsgCache = {};
+
+async function onPopupOpen(marker, node) {
+  if (_drawMode) {
+    marker.closePopup();
+    addDrawPathNode(node);
+    return;
+  }
+  const nodeId = node.node_id;
+  // If we already cached it, just update; otherwise fetch
+  const cached = lastMsgCache[nodeId];
+  if (cached !== undefined) {
+    if (cached) updatePopupMsg(marker, node, cached);
+    return;
+  }
+  const msg = await fetchLastMsg(nodeId);
+  lastMsgCache[nodeId] = msg;
+  updatePopupMsg(marker, node, msg);
+}
+
+function updatePopupMsg(marker, node, msg) {
+  const el = marker.getPopup().getElement();
+  if (!el) return;
+  const slot = el.querySelector(`#lastmsg-${CSS.escape(node.node_id)}`);
+  if (!slot) return;
+  if (msg) {
+    const ts = msg.timestamp ? new Date(msg.timestamp).toUTCString().slice(5,22) : '';
+    const body = (msg.body || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').slice(0, 200);
+    slot.innerHTML = `<span class="msg-ts">${ts}</span>${body}`;
+  } else {
+    slot.innerHTML = '<span style="color:var(--muted);font-size:9px">No messages in log</span>';
+  }
+  marker.getPopup().update();
+}
+
+function toggleFollow() {
+  followMode = !followMode;
+  document.getElementById('follow-btn').style.color = followMode ? 'var(--green)' : '';
+  if (followMode) loadNodes();
+}
+
+function toggleAircraft() {
+  _showAircraft = !_showAircraft;
+  document.getElementById('adsb-btn').classList.toggle('on', _showAircraft);
+  loadNodes();
+}
+
+function toggleVessels() {
+  _showVessels = !_showVessels;
+  document.getElementById('ais-btn').classList.toggle('on', _showVessels);
+  loadNodes();
+}
+
+// ── Live RF traffic overlay (MeshCore 0x88 raw RX log → rf_traffic WS events) ─
+let _showTraffic = true;
+let _trafficLines = [];              // [{line, born, ttl}] — oldest first
+const _TRAFFIC_MAX_LINES = 30;
+const _TRAFFIC_FADE_MS = 10000;      // ordinary heard packets
+const _TRACE_FADE_MS   = 60000;      // operator-requested traces stay a full minute
+
+// ── Trace reply timeout — tell the operator when a probe never comes home ──
+let _pendingTraces = new Map();   // tag -> setTimeout id
+const _TRACE_TIMEOUT_MS = 25000;
+
+function armTraceTimeout(tag, label) {
+  if (tag == null) return;
+  const id = setTimeout(() => {
+    if (_pendingTraces.has(tag)) {
+      _pendingTraces.delete(tag);
+      toast(`✗ No reply${label ? ' for trace via ' + label : ''} within 25s — repeaters may not relay in that order, or are out of range`);
+    }
+  }, _TRACE_TIMEOUT_MS);
+  _pendingTraces.set(tag, id);
+}
+
+function clearTraceTimeout(tag) {
+  if (tag == null) return;
+  const id = _pendingTraces.get(tag);
+  if (id != null) { clearTimeout(id); _pendingTraces.delete(tag); }
+}
+
+function toggleTraffic() {
+  _showTraffic = !_showTraffic;
+  document.getElementById('traffic-btn').classList.toggle('on', _showTraffic);
+  if (!_showTraffic) {
+    _trafficLines.forEach(t => t.line.remove());
+    _trafficLines = [];
+  }
+}
+
+function drawTraffic(d) {
+  // Chain: origin (adverts) → relay hashes in order → our receiving node.
+  // Only nodes we can place get drawn; a hop with unknown position is skipped
+  // and the line connects the known neighbours, so the path is indicative,
+  // not a claim about exact RF geometry.
+  const chain = [d.origin, ...(d.nodes || []), d.rx]
+    .filter(n => n && n.lat != null && n.lon != null);
+  // De-dup consecutive identical points (origin can also appear in path)
+  let pts = chain.filter((n, i) => i === 0 || n.id !== chain[i-1].id)
+                 .map(n => [n.lat, n.lon]);
+  // Sanity: a single LoRa hop over ~150 km is implausible — such segments are
+  // almost always 1-byte hash collisions resolving to a far-region node that
+  // shares the hash (the "lines to Boston" artifact). Drop the offending
+  // points rather than draw geography the RF can't have traversed.
+  const _segKm = (a, b) => {
+    const R = 6371, dLat = (b[0]-a[0])*Math.PI/180, dLon = (b[1]-a[1])*Math.PI/180;
+    const s = Math.sin(dLat/2)**2 + Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(s));
+  };
+  const kept = pts.length ? [pts[0]] : [];
+  for (let i = 1; i < pts.length; i++) {
+    if (_segKm(kept[kept.length - 1], pts[i]) < 150) kept.push(pts[i]);
+  }
+  pts = kept;
+  if (pts.length < 2) return false;
+
+  const isAdvert = d.ptype === 'ADVERT';
+  const isTrace  = d.ptype === 'TRACE';
+  const line = L.polyline(pts, {
+    // adverts amber, operator traces green (and heavier), other traffic orange
+    color: isTrace ? '#3fb950' : isAdvert ? '#d29922' : '#f78c6c',
+    weight: isTrace ? 3.5 : 2.5,
+    opacity: 0.9,
+    dashArray: '7 9',
+    interactive: false,
+  }).addTo(map);
+  _trafficLines.push({line, born: Date.now(), ttl: isTrace ? _TRACE_FADE_MS : _TRAFFIC_FADE_MS});
+  while (_trafficLines.length > _TRAFFIC_MAX_LINES) {
+    _trafficLines.shift().line.remove();
+  }
+  return true;
+}
+
+// One shared ticker animates the march + fade of every live line
+setInterval(() => {
+  if (_trafficLines.length === 0) return;
+  const now = Date.now();
+  _trafficLines = _trafficLines.filter(t => {
+    const age = now - t.born;
+    const ttl = t.ttl || _TRAFFIC_FADE_MS;
+    if (age > ttl) { t.line.remove(); return false; }
+    const el = t.line.getElement();
+    if (el) el.style.strokeDashoffset = String(-(age / 40));
+    // Hold full opacity for the first 75% of life, fade over the last 25% —
+    // a long-lived trace shouldn't spend most of its minute half-invisible.
+    const fadeStart = ttl * 0.75;
+    const op = age < fadeStart ? 0.9 : 0.9 * (1 - (age - fadeStart) / (ttl - fadeStart));
+    t.line.setStyle({opacity: op});
+    return true;
+  });
+}, 120);
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onmessage = (e) => {
+    const pkt = JSON.parse(e.data);
+    if (pkt.type === 'rf_traffic') {
+      const drawn = _showTraffic ? drawTraffic(pkt.data) : false;
+      // A trace reply is an operator-requested measurement — announce it when
+      // it actually ARRIVES (the send-toast no longer promises anything).
+      if (pkt.data.ptype === 'TRACE') {
+        const names = (pkt.data.nodes || []).map(n => n ? n.name : '?').join(' → ');
+        if (pkt.data.confirmed) {
+          // The radio recognized itself as the trace's final destination —
+          // this is the authoritative "it worked" signal.
+          clearTraceTimeout(pkt.data.tag);
+          toast(`✓ Trace reply: ${pkt.data.hops} hop(s)${names ? ' via ' + names : ''}`
+                + (drawn ? ' — drawn on map' : ' — no positioned nodes to draw'));
+        } else if (pkt.data.tag != null && _pendingTraces.has(pkt.data.tag)) {
+          // Just an overheard sighting of OUR OWN probe mid-flight — real
+          // signal that it's moving, but not proof it ever got back to us.
+          toast(`📡 Your trace is in flight${names ? ' — seen via ' + names : ''}`);
+        }
+      }
+      return;
+    }
+    if (pkt.type === 'strip_report' && _stripReportsEnabled && pkt.data.lat != null) {
+      addStripMarker(pkt.data);
+      return;
+    }
+    if (pkt.type === 'message' && pkt.data.lat != null) {
+      const d = pkt.data;
+      const color = adapterColor(d.source_adapter);
+      const id = d.from_id;
+      // Invalidate last-msg cache so next popup-open re-fetches
+      delete lastMsgCache[id];
+      if (markers[id]) {
+        markers[id].setLatLng([d.lat, d.lon]);
+      } else {
+        const nodeStub = {node_id: id, display_name: d.from_display||id, _adapter: d.source_adapter};
+        const marker = L.marker([d.lat, d.lon], {icon: makeIcon(color)})
+          .bindPopup(popupContent(nodeStub, false, null))
+          .addTo(map);
+        marker.on('popupopen', () => onPopupOpen(marker, nodeStub));
+        markers[id] = marker;
+      }
+    }
+  };
+  ws.onclose = () => setTimeout(connectWS, 3000);
+}
+
+// ── PSKReporter overlay ───────────────────────────────────────────────────
+let _pskEnabled = false;
+let _pskMarkers = [];
+let _gridEnabled = false;
+let _gridLayers = [];
+
+function togglePSKReporter() {
+  _pskEnabled = !_pskEnabled;
+  const btn = document.getElementById('psk-btn');
+  btn.style.color = _pskEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _pskEnabled ? 'var(--green)' : '';
+  if (_pskEnabled) {
+    loadPSKReporter();
+    toast('PSKReporter: fetching recent spots…');
+  } else {
+    _pskMarkers.forEach(m => m.remove());
+    _pskMarkers = [];
+    toast('PSKReporter overlay off');
+  }
+}
+
+async function loadPSKReporter() {
+  if (!_pskEnabled) return;
+  try {
+    // "nearby" mode: no callsign filter — general band activity, filtered
+    // server-side to transmitters within radius_km of the base position.
+    // (The Settings page's PSK tool covers "who has heard MY callsign";
+    // this overlay answers "who's on the air near me" instead.)
+    const r = await fetch('/api/pskreporter/spots?mode=nearby&radius_km=300').catch(() => null);
+    if (!r || !r.ok) {
+      toast('PSKReporter: enable via /api/pskreporter — needs backend proxy');
+      return;
+    }
+    const data = await r.json();
+    if (data.error) {
+      toast('PSKReporter: ' + data.error, 'err');
+      return;
+    }
+    _pskMarkers.forEach(m => m.remove());
+    _pskMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.txLat == null || spot.txLon == null) return;
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#ffcb6b;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #ffcb6b;white-space:nowrap">${spot.senderCallsign||'?'}</div>`,
+        iconSize: [60, 16],
+        iconAnchor: [30, 8],
+      });
+      const m = L.marker([spot.txLat, spot.txLon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.senderCallsign}</div><div class="node-stat">Heard by: ${spot.receiverCallsign}</div><div class="node-stat">Mode: ${spot.mode} | Band: ${spot.band}</div><div class="node-stat">SNR: ${spot.sNR}dB</div><div class="node-stat">${new Date(spot.flowStartSeconds*1000).toUTCString().slice(5,22)}</div></div>`)
+        .addTo(map);
+      _pskMarkers.push(m);
+    });
+    toast(`PSKReporter: ${_pskMarkers.length} station(s) transmitting nearby`);
+  } catch(e) {
+    toast('PSKReporter fetch failed: ' + e.message);
+  }
+  if (_pskEnabled) setTimeout(loadPSKReporter, 300000);
+}
+
+// ── POTA (Parks on the Air) activator spots ─────────────────────────────
+let _potaEnabled = false;
+let _potaMarkers = [];
+
+function togglePOTA() {
+  _potaEnabled = !_potaEnabled;
+  const btn = document.getElementById('pota-btn');
+  btn.style.color = _potaEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _potaEnabled ? 'var(--green)' : '';
+  if (_potaEnabled) {
+    loadPOTA();
+    toast('POTA: fetching nearby activators…');
+  } else {
+    _potaMarkers.forEach(m => m.remove());
+    _potaMarkers = [];
+    toast('POTA overlay off');
+  }
+}
+
+async function loadPOTA() {
+  if (!_potaEnabled) return;
+  try {
+    const r = await fetch('/api/pota/spots?radius_km=500').catch(() => null);
+    if (!r || !r.ok) { toast('POTA: fetch failed'); return; }
+    const data = await r.json();
+    if (data.error) { toast('POTA: ' + data.error, 'err'); return; }
+    _potaMarkers.forEach(m => m.remove());
+    _potaMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.lat == null || spot.lon == null) return;
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#7ee787;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #7ee787;white-space:nowrap">🏞 ${spot.activator||'?'}</div>`,
+        iconSize: [80, 16],
+        iconAnchor: [40, 8],
+      });
+      const m = L.marker([spot.lat, spot.lon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.activator} @ ${spot.reference}</div><div class="node-stat">${spot.parkName||''}${spot.locationDesc ? ' ('+spot.locationDesc+')' : ''}</div><div class="node-stat">${spot.frequency} kHz ${spot.mode}</div><div class="node-stat">${spot.comments||''}</div><div class="node-stat">${spot.spotTime||''}</div></div>`)
+        .addTo(map);
+      _potaMarkers.push(m);
+    });
+    toast(`POTA: ${_potaMarkers.length} activator(s) nearby`);
+  } catch(e) {
+    toast('POTA fetch failed: ' + e.message);
+  }
+  if (_potaEnabled) setTimeout(loadPOTA, 90000);
+}
+
+// ── SOTA (Summits on the Air) activator spots ───────────────────────────
+let _sotaEnabled = false;
+let _sotaMarkers = [];
+
+function toggleSOTA() {
+  _sotaEnabled = !_sotaEnabled;
+  const btn = document.getElementById('sota-btn');
+  btn.style.color = _sotaEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _sotaEnabled ? 'var(--green)' : '';
+  if (_sotaEnabled) {
+    loadSOTA();
+    toast('SOTA: fetching nearby activators…');
+  } else {
+    _sotaMarkers.forEach(m => m.remove());
+    _sotaMarkers = [];
+    toast('SOTA overlay off');
+  }
+}
+
+async function loadSOTA() {
+  if (!_sotaEnabled) return;
+  try {
+    const r = await fetch('/api/sota/spots?radius_km=500').catch(() => null);
+    if (!r || !r.ok) { toast('SOTA: fetch failed'); return; }
+    const data = await r.json();
+    if (data.error) { toast('SOTA: ' + data.error, 'err'); return; }
+    _sotaMarkers.forEach(m => m.remove());
+    _sotaMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.lat == null || spot.lon == null) return;
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#f0b429;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #f0b429;white-space:nowrap">⛰ ${spot.activator||'?'}</div>`,
+        iconSize: [80, 16],
+        iconAnchor: [40, 8],
+      });
+      const m = L.marker([spot.lat, spot.lon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.activator} @ ${spot.summitCode}</div><div class="node-stat">${spot.summitName||''}</div><div class="node-stat">${spot.frequency} MHz ${spot.mode}</div><div class="node-stat">${spot.comments||''}</div><div class="node-stat">${spot.spotTime||''}</div></div>`)
+        .addTo(map);
+      _sotaMarkers.push(m);
+    });
+    toast(`SOTA: ${_sotaMarkers.length} activator(s) nearby`);
+  } catch(e) {
+    toast('SOTA fetch failed: ' + e.message);
+  }
+  if (_sotaEnabled) setTimeout(loadSOTA, 90000);
+}
+
+// ── IOTA (Islands on the Air) — filtered from the DX cluster feed ───────
+let _iotaEnabled = false;
+let _iotaMarkers = [];
+
+function toggleIOTA() {
+  _iotaEnabled = !_iotaEnabled;
+  const btn = document.getElementById('iota-btn');
+  btn.style.color = _iotaEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _iotaEnabled ? 'var(--green)' : '';
+  if (_iotaEnabled) {
+    loadIOTA();
+    toast('IOTA: fetching nearby activators…');
+  } else {
+    _iotaMarkers.forEach(m => m.remove());
+    _iotaMarkers = [];
+    toast('IOTA overlay off');
+  }
+}
+
+async function loadIOTA() {
+  if (!_iotaEnabled) return;
+  try {
+    const r = await fetch('/api/iota/spots?radius_km=750').catch(() => null);
+    if (!r || !r.ok) { toast('IOTA: fetch failed'); return; }
+    const data = await r.json();
+    if (data.error) { toast('IOTA: ' + data.error, 'err'); return; }
+    _iotaMarkers.forEach(m => m.remove());
+    _iotaMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.lat == null || spot.lon == null) return;
+      const dashed = spot.precise ? '' : 'border-style:dashed;';
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#79c0ff;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #79c0ff;${dashed}white-space:nowrap">🏝 ${spot.dxCall||'?'}${spot.reference ? ' '+spot.reference : ''}</div>`,
+        iconSize: [100, 16],
+        iconAnchor: [50, 8],
+      });
+      const m = L.marker([spot.lat, spot.lon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.dxCall}${spot.reference ? ' — IOTA '+spot.reference : ''}</div><div class="node-stat">${spot.info||''}</div><div class="node-stat">Spotted by: ${spot.spotter||''}</div><div class="node-stat">${spot.frequency ? (spot.frequency/1000).toFixed(3)+' MHz' : ''}</div><div class="node-stat">${spot.time||''}</div><div class="node-stat" style="color:var(--muted)">${spot.precise ? 'Precise (FCC address)' : 'Approximate (country-center)'}</div></div>`)
+        .addTo(map);
+      _iotaMarkers.push(m);
+    });
+    toast(`IOTA: ${_iotaMarkers.length} activator(s) nearby`);
+  } catch(e) {
+    toast('IOTA fetch failed: ' + e.message);
+  }
+  if (_iotaEnabled) setTimeout(loadIOTA, 90000);
+}
+
+// ── BOTA (Bunkers on the Air) — filtered from the DX cluster feed ───────
+let _botaEnabled = false;
+let _botaMarkers = [];
+
+function toggleBOTA() {
+  _botaEnabled = !_botaEnabled;
+  const btn = document.getElementById('bota-btn');
+  btn.style.color = _botaEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _botaEnabled ? 'var(--green)' : '';
+  if (_botaEnabled) {
+    loadBOTA();
+    toast('BOTA: fetching nearby activators… (low volume — empty is normal)');
+  } else {
+    _botaMarkers.forEach(m => m.remove());
+    _botaMarkers = [];
+    toast('BOTA overlay off');
+  }
+}
+
+async function loadBOTA() {
+  if (!_botaEnabled) return;
+  try {
+    const r = await fetch('/api/bota/spots?radius_km=750').catch(() => null);
+    if (!r || !r.ok) { toast('BOTA: fetch failed'); return; }
+    const data = await r.json();
+    if (data.error) { toast('BOTA: ' + data.error, 'err'); return; }
+    _botaMarkers.forEach(m => m.remove());
+    _botaMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.lat == null || spot.lon == null) return;
+      const dashed = spot.precise ? '' : 'border-style:dashed;';
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#e2a44f;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #e2a44f;${dashed}white-space:nowrap">🪖 ${spot.dxCall||'?'}${spot.reference ? ' '+spot.reference : ''}</div>`,
+        iconSize: [100, 16],
+        iconAnchor: [50, 8],
+      });
+      const m = L.marker([spot.lat, spot.lon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.dxCall}${spot.reference ? ' — BOTA '+spot.reference : ''}</div><div class="node-stat">${spot.info||''}</div><div class="node-stat">Spotted by: ${spot.spotter||''}</div><div class="node-stat">${spot.frequency ? (spot.frequency/1000).toFixed(3)+' MHz' : ''}</div><div class="node-stat">${spot.time||''}</div><div class="node-stat" style="color:var(--muted)">${spot.precise ? 'Precise (FCC address)' : 'Approximate (country-center)'}</div></div>`)
+        .addTo(map);
+      _botaMarkers.push(m);
+    });
+    toast(`BOTA: ${_botaMarkers.length} activator(s) nearby`);
+  } catch(e) {
+    toast('BOTA fetch failed: ' + e.message);
+  }
+  if (_botaEnabled) setTimeout(loadBOTA, 90000);
+}
+
+// ── General DX cluster spots ─────────────────────────────────────────────
+let _dxEnabled = false;
+let _dxMarkers = [];
+
+function toggleDXCluster() {
+  _dxEnabled = !_dxEnabled;
+  const btn = document.getElementById('dx-btn');
+  btn.style.color = _dxEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _dxEnabled ? 'var(--green)' : '';
+  if (_dxEnabled) {
+    loadDXCluster();
+    toast('DX cluster: fetching nearby spots…');
+  } else {
+    _dxMarkers.forEach(m => m.remove());
+    _dxMarkers = [];
+    toast('DX cluster overlay off');
+  }
+}
+
+async function loadDXCluster() {
+  if (!_dxEnabled) return;
+  try {
+    const r = await fetch('/api/dxcluster/spots?radius_km=500').catch(() => null);
+    if (!r || !r.ok) { toast('DX cluster: fetch failed'); return; }
+    const data = await r.json();
+    if (data.error) { toast('DX cluster: ' + data.error, 'err'); return; }
+    _dxMarkers.forEach(m => m.remove());
+    _dxMarkers = [];
+    (data.spots || []).forEach(spot => {
+      if (spot.lat == null || spot.lon == null) return;
+      const dashed = spot.precise ? '' : 'border-style:dashed;';
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#f78c6c;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #f78c6c;${dashed}white-space:nowrap">${spot.dxCall||'?'}</div>`,
+        iconSize: [70, 16],
+        iconAnchor: [35, 8],
+      });
+      const m = L.marker([spot.lat, spot.lon], {icon})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.dxCall}</div><div class="node-stat">${spot.info||''}</div><div class="node-stat">Spotted by: ${spot.spotter||''}</div><div class="node-stat">${spot.frequency ? (spot.frequency/1000).toFixed(3)+' MHz' : ''}</div><div class="node-stat">${spot.country||''}</div><div class="node-stat">${spot.time||''}</div><div class="node-stat" style="color:var(--muted)">${spot.precise ? 'Precise (FCC address)' : 'Approximate (country-center)'}</div></div>`)
+        .addTo(map);
+      _dxMarkers.push(m);
+    });
+    toast(`DX cluster: ${_dxMarkers.length} spot(s) nearby`);
+  } catch(e) {
+    toast('DX cluster fetch failed: ' + e.message);
+  }
+  if (_dxEnabled) setTimeout(loadDXCluster, 90000);
+}
+
+// ── Strip reports (mesh bot "strip" command, only those with a real coordinate) ─
+let _stripReportsEnabled = false;
+let _stripMarkers = [];
+
+function toggleStripReports() {
+  _stripReportsEnabled = !_stripReportsEnabled;
+  const btn = document.getElementById('strips-btn');
+  btn.classList.toggle('on', _stripReportsEnabled);
+  if (_stripReportsEnabled) {
+    loadStripReports();
+    toast('Strip reports on');
+  } else {
+    _stripMarkers.forEach(m => m.remove());
+    _stripMarkers = [];
+    toast('Strip reports off');
+  }
+}
+
+async function loadStripReports() {
+  if (!_stripReportsEnabled) return;
+  try {
+    const r = await fetch('/api/strip_reports?limit=200').catch(() => null);
+    if (!r || !r.ok) return;
+    const data = await r.json();
+    _stripMarkers.forEach(m => m.remove());
+    _stripMarkers = [];
+    (data.reports || []).forEach(addStripMarker);
+  } catch(e) {}
+}
+
+function addStripMarker(rep) {
+  if (rep.lat == null || rep.lon == null) return;
+  const color = rep.sent ? '#3fb950' : '#a371f7';
+  const icon = L.divIcon({
+    className: 'node-dot',
+    html: `<div style="font-size:14px;line-height:1;color:${color};text-shadow:0 0 5px ${color}">📋</div>`,
+    iconSize: [16, 16], iconAnchor: [8, 8],
+  });
+  const answers = rep.answers || {};
+  const fieldLines = Object.entries(answers).slice(0, 8)
+    .map(([k, v]) => `<div class="node-stat">${esc(k)}: ${esc(v)}</div>`).join('');
+  const popup = `<div class="node-popup">
+    <div class="node-name">📋 ${esc(rep.template || 'custom')}</div>
+    <div class="node-stat">From: ${esc(rep.from_display || rep.from_id || '')}</div>
+    <div class="node-stat">${rep.sent ? '✓ Sent' + (rep.winlink_dest ? ' → ' + esc(rep.winlink_dest) : '') : '⏳ Pending'}</div>
+    <div class="node-stat">${new Date(rep.timestamp).toUTCString().slice(5,22)}</div>
+    ${fieldLines}
+    <div class="node-ext-links"><a href="/reports" target="_blank" rel="noopener">Open in Reports →</a></div>
+  </div>`;
+  const m = L.marker([rep.lat, rep.lon], {icon}).bindPopup(popup).addTo(map);
+  _stripMarkers.push(m);
+}
+
+function toggleGridSquares() {
+  _gridEnabled = !_gridEnabled;
+  const btn = document.getElementById('grid-btn');
+  btn.style.color = _gridEnabled ? 'var(--blue)' : '';
+  btn.style.borderColor = _gridEnabled ? 'var(--blue)' : '';
+  if (_gridEnabled) {
+    drawGridSquares();
+  } else {
+    _gridLayers.forEach(l => map.removeLayer(l));
+    _gridLayers = [];
+  }
+}
+
+function drawGridSquares() {
+  const bounds = map.getBounds();
+  const minLon = Math.floor(bounds.getWest());
+  const maxLon = Math.ceil(bounds.getEast());
+  const minLat = Math.floor(bounds.getSouth());
+  const maxLat = Math.ceil(bounds.getNorth());
+
+  _gridLayers.forEach(l => map.removeLayer(l));
+  _gridLayers = [];
+
+  for (let lon = minLon; lon < maxLon; lon += 2) {
+    for (let lat = minLat; lat < maxLat; lat += 1) {
+      const grid = lonLatToMaidenhead(lon + 1, lat + 0.5);
+      const rect = L.rectangle([[lat, lon],[lat+1, lon+2]], {
+        color: '#388bfd', weight: 1, fillOpacity: 0.03, opacity: 0.3
+      }).addTo(map);
+      const label = L.marker([lat + 0.5, lon + 1], {
+        icon: L.divIcon({
+          className: '',
+          html: `<div style="font-family:monospace;font-size:10px;color:#388bfd;opacity:.6">${grid}</div>`,
+          iconSize: [40, 14], iconAnchor: [20, 7],
+        })
+      }).addTo(map);
+      _gridLayers.push(rect, label);
+    }
+  }
+}
+
+// ── Air quality choropleth + fire hotspots ─────────────────────────────────
+let _aqiEnabled = false;
+let _aqiLayers = [];
+let _aqiTimer = null;
+
+function toggleAirQuality() {
+  _aqiEnabled = !_aqiEnabled;
+  const btn = document.getElementById('aqi-btn');
+  btn.classList.toggle('on', _aqiEnabled);
+  if (_aqiEnabled) {
+    loadAirQuality();
+    toast('AQI: fetching conditions…');
+  } else {
+    _aqiLayers.forEach(l => map.removeLayer(l));
+    _aqiLayers = [];
+    if (_aqiTimer) { clearTimeout(_aqiTimer); _aqiTimer = null; }
+    toast('AQI overlay off');
+  }
+}
+
+const _SMOKE_STYLE = {
+  Light:   {color: '#999999', opacity: 0.15},
+  Medium:  {color: '#666666', opacity: 0.28},
+  Heavy:   {color: '#333333', opacity: 0.42},
+  Unknown: {color: '#888888', opacity: 0.20},
+};
+
+async function loadAirQuality() {
+  if (!_aqiEnabled) return;
+  try {
+    const [stResp, paResp, hsResp, smResp] = await Promise.all([
+      fetch('/api/airquality/stations').catch(() => null),
+      fetch('/api/airquality/purpleair').catch(() => null),
+      fetch('/api/airquality/hotspots').catch(() => null),
+      fetch('/api/airquality/smoke').catch(() => null),
+    ]);
+
+    _aqiLayers.forEach(l => map.removeLayer(l));
+    _aqiLayers = [];
+
+    // Smoke plume polygons first (bottom layer) — real HMS satellite-derived
+    // smoke coverage, so smoke drifting in from a fire hundreds of miles away
+    // (e.g. Canada) shows up even with no local fire hotspot.
+    if (smResp && smResp.ok) {
+      const sm = await smResp.json();
+      (sm.polygons || []).forEach(p => {
+        const style = _SMOKE_STYLE[p.density] || _SMOKE_STYLE.Unknown;
+        const latlngs = p.coordinates.map(c => [c[1], c[0]]);   // [lon,lat] -> [lat,lon]
+        const poly = L.polygon(latlngs, {
+          color: style.color, weight: 0, fillColor: style.color, fillOpacity: style.opacity,
+        }).bindPopup(`<div class="node-popup"><div class="node-name">Smoke plume</div><div class="node-stat">Density: ${p.density}</div><div class="node-stat">Source: NOAA HMS</div></div>`)
+          .addTo(map);
+        _aqiLayers.push(poly);
+      });
+    }
+
+    // Real AirNow monitor stations — every station actually present in the
+    // search box, not a probed grid, so coverage has no artificial holes.
+    if (stResp && stResp.ok) {
+      const data = await stResp.json();
+      (data.stations || []).forEach(st => {
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="width:14px;height:14px;border-radius:50%;background:${st.color};border:1px solid #000;box-shadow:0 0 3px #000"></div>`,
+          iconSize: [14, 14], iconAnchor: [7, 7],
+        });
+        const m = L.marker([st.lat, st.lon], {icon})
+          .bindPopup(`<div class="node-popup"><div class="node-name">${st.site_name || 'AirNow station'}</div><div class="node-stat">AQI ${st.aqi} (${st.category})</div><div class="node-stat">${st.parameter || ''}</div></div>`)
+          .addTo(map);
+        _aqiLayers.push(m);
+      });
+      if (!data.stations || !data.stations.length) {
+        toast('AQI: no station data yet (service disabled, no API key, or waiting on first poll)');
+      }
+    }
+
+    // PurpleAir — denser crowd-sourced network, drawn smaller with a purple
+    // outline so they read as distinct from official AirNow stations (which
+    // have a black outline). Uncorrected PM2.5, converted to AQI here.
+    if (paResp && paResp.ok) {
+      const pa = await paResp.json();
+      (pa.sensors || []).forEach(s => {
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="width:10px;height:10px;border-radius:50%;background:${s.color};border:2px solid #a855f7;box-shadow:0 0 3px #000"></div>`,
+          iconSize: [10, 10], iconAnchor: [5, 5],
+        });
+        const m = L.marker([s.lat, s.lon], {icon})
+          .bindPopup(`<div class="node-popup"><div class="node-name">${s.name || 'PurpleAir sensor'}</div><div class="node-stat">AQI ${s.aqi} (${s.category}, est.)</div><div class="node-stat">PM2.5 ${s.pm25} µg/m³ (uncorrected)</div></div>`)
+          .addTo(map);
+        _aqiLayers.push(m);
+      });
+    }
+
+    if (hsResp && hsResp.ok) {
+      const hs = await hsResp.json();
+      (hs.hotspots || []).forEach(h => {
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="font-size:14px;text-shadow:0 0 3px #000">🔥</div>`,
+          iconSize: [18, 18], iconAnchor: [9, 9],
+        });
+        const distLine = h.distance_mi != null
+          ? `<div class="node-stat"><b>${h.distance_mi.toFixed(0)}mi ${h.bearing || ''}</b> from base</div>` : '';
+        const m = L.marker([h.lat, h.lon], {icon})
+          .bindPopup(`<div class="node-popup"><div class="node-name">Fire hotspot</div>${distLine}<div class="node-stat">Confidence: ${h.confidence}</div><div class="node-stat">Detected: ${h.acq_date} ${h.acq_time}Z</div></div>`)
+          .addTo(map);
+        _aqiLayers.push(m);
+      });
+      if (hs.hotspots && hs.hotspots.length) {
+        toast(`AQI: ${hs.hotspots.length} fire hotspot(s), nearest ${hs.hotspots[0].distance_mi?.toFixed(0) ?? '?'}mi ${hs.hotspots[0].bearing || ''}`);
+      }
+    }
+  } catch(e) {
+    toast('AQI fetch failed: ' + e.message);
+  }
+  if (_aqiEnabled) _aqiTimer = setTimeout(loadAirQuality, 300000);
+}
+
+// ── Named water bodies (toggleable) ────────────────────────────────────────
+// One marker per EPA-assessed lake/bay/river discovered near the hub — not a
+// single anchor point. Marker color reflects live boating conditions where a
+// buoy was matched, otherwise the EPA water-quality status color.
+let _waterEnabled = false;
+let _waterLayers = [];
+
+function toggleWaterBodies() {
+  _waterEnabled = !_waterEnabled;
+  const btn = document.getElementById('water-btn');
+  btn.classList.toggle('on', _waterEnabled);
+  if (_waterEnabled) {
+    loadWaterBodies();
+    toast('Water quality icons on');
+  } else {
+    _waterLayers.forEach(l => map.removeLayer(l));
+    _waterLayers = [];
+    toast('Water quality icons off');
+  }
+}
+
+async function loadWaterBodies() {
+  if (!_waterEnabled) return;
+  _waterLayers.forEach(l => map.removeLayer(l));
+  _waterLayers = [];
+  try {
+    const r = await fetch('/api/waterbodies').catch(() => null);
+    if (r && r.ok) {
+      const data = await r.json();
+      if (data.enabled && data.bodies && data.bodies.length) {
+        data.bodies.forEach(b => {
+          const color = b.condition_color || b.color || '#888888';
+          const icon = L.divIcon({
+            className: '',
+            html: `<div style="font-size:15px;text-shadow:0 0 3px #000;filter:drop-shadow(0 0 3px ${color})">🌊</div>`,
+            iconSize: [18, 18], iconAnchor: [9, 9],
+          });
+          const qualityLine = `<div class="node-stat">EPA status: <b style="color:${b.color}">${b.status}</b></div>`;
+          const ratingLine = b.boating_rating
+            ? `<div class="node-stat">Boating: <b>${b.boating_rating}</b> / Kayak: <b>${b.kayak_rating}</b></div>`
+            : '<div class="node-stat">No live buoy nearby</div>';
+          const buoyLine = b.buoy
+            ? `<div class="node-stat">${[
+                b.buoy.wind_mph != null ? `Wind ${b.buoy.wind_mph.toFixed(0)}mph` : '',
+                b.buoy.wave_ft != null ? `Waves ${b.buoy.wave_ft.toFixed(1)}ft` : '',
+                b.buoy.water_f != null ? `Water ${b.buoy.water_f.toFixed(0)}F` : '',
+              ].filter(Boolean).join(', ')} (buoy ${b.buoy.station}, ${b.buoy.distance_mi.toFixed(0)}mi)</div>`
+            : '';
+          const fishLine = b.fishing_rating
+            ? `<div class="node-stat" style="margin-top:4px;padding-top:4px;border-top:1px solid var(--border)">Fishing: <b>${b.fishing_rating}</b> — ${b.fishing_detail || ''}</div>`
+            : '';
+          const advisoryLine = b.fish_advisory === 'Not Supporting'
+            ? `<div class="node-stat" style="color:#f85149">&#9888; Fish consumption advisory in effect</div>`
+            : '';
+          const linkLine = b.report_link
+            ? `<div class="node-stat" style="margin-top:4px"><a href="${b.report_link}" target="_blank" style="color:var(--blue)">EPA report ↗</a></div>`
+            : '';
+          const m = L.marker([b.lat, b.lon], {icon})
+            .bindPopup(`<div class="node-popup"><div class="node-name">${b.name}</div>${qualityLine}${advisoryLine}${ratingLine}${buoyLine}${fishLine}${linkLine}</div>`)
+            .addTo(map);
+          _waterLayers.push(m);
+        });
+        return;   // water_body_service active — skip the legacy single-buoy marker
+      }
+    }
+  } catch(e) { /* fall through to legacy marker */ }
+
+  // Legacy fallback: single manually-configured buoy, water_body_service not enabled.
+  try {
+    const r = await fetch('/api/marine').catch(() => null);
+    if (!r || !r.ok) return;
+    const data = await r.json();
+    if (!data.configured || data.lat == null || data.lon == null) return;
+    const color = data.color || '#79c0ff';
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="font-size:16px;text-shadow:0 0 3px #000;filter:drop-shadow(0 0 3px ${color})">⚓</div>`,
+      iconSize: [20, 20], iconAnchor: [10, 10],
+    });
+    const ratingLine = data.boating_rating
+      ? `<div class="node-stat">Boating: <b style="color:${color}">${data.boating_rating}</b> / Kayak: <b>${data.kayak_rating}</b></div>`
+      : '';
+    const fishLine = data.fishing_summary
+      ? `<div class="node-stat" style="margin-top:4px;padding-top:4px;border-top:1px solid var(--border)">${data.fishing_summary}</div>`
+      : '';
+    const m = L.marker([data.lat, data.lon], {icon})
+      .bindPopup(`<div class="node-popup"><div class="node-name">Buoy ${data.station}</div>${ratingLine}<div class="node-stat">${data.summary}</div>${fishLine}</div>`)
+      .addTo(map);
+    _waterLayers.push(m);
+  } catch(e) { /* silent — optional layer */ }
+}
+
+function lonLatToMaidenhead(lon, lat) {
+  lon += 180; lat += 90;
+  const field = String.fromCharCode(65 + Math.floor(lon/20)) +
+                String.fromCharCode(65 + Math.floor(lat/10));
+  const sq    = String(Math.floor((lon%20)/2)) +
+                String(Math.floor(lat%10));
+  return field + sq;
+}
+
+map.on('zoomend moveend', () => { if (_gridEnabled) drawGridSquares(); });
+
+// ── Ham Log QSO layer ─────────────────────────────────────────────────────
+let _hamlogEnabled = false;
+let _hamlogMarkers = [];
+
+// Approx coordinates for callsign prefixes (used when no grid stored)
+const CALL_COORDS = (function() {
+  const c = {};
+  // USA call districts — district centre coordinates
+  const usDist = [
+    ['1',42.5,-71.5], ['2',40.7,-74.0], ['3',39.9,-75.2], ['4',33.7,-84.4],
+    ['5',32.3,-97.3], ['6',36.8,-119.4],['7',47.0,-121.0],['8',41.5,-82.0],
+    ['9',41.9,-87.6], ['0',39.7,-104.9],
+  ];
+  for (const [d,lat,lon] of usDist) {
+    for (const p of ['W','K','N']) c[p+d] = [lat,lon];
+  }
+  c['KL'] = c['AL'] = [64.2,-153.0];   // Alaska
+  c['KH'] = c['AH'] = [21.3,-157.8];   // Hawaii
+  c['KP'] = c['WP'] = [18.2,-66.5];    // Puerto Rico
+  // Canada
+  c['VE1'] = c['VA1'] = [44.6,-63.6];  // Atlantic
+  c['VE2'] = c['VA2'] = [46.8,-71.2];  // Quebec
+  c['VE3'] = c['VA3'] = [43.7,-79.4];  // Ontario
+  c['VE4'] = c['VA4'] = [49.9,-97.1];  // Manitoba
+  c['VE5'] = c['VA5'] = [50.4,-104.6]; // Saskatchewan
+  c['VE6'] = c['VA6'] = [53.5,-113.5]; // Alberta
+  c['VE7'] = c['VA7'] = [49.3,-123.1]; // BC
+  c['VE8'] = [62.4,-114.4];            // NWT
+  c['VE9'] = [46.1,-64.8];             // NB
+  c['VO']  = [47.6,-52.7];             // Newfoundland
+  c['VY']  = [60.7,-135.1];            // Yukon
+  // UK & Ireland
+  c['G']  = c['M']  = [51.5,-0.1];    // England
+  c['GM'] = c['MM'] = [55.9,-3.2];    // Scotland
+  c['GW'] = c['MW'] = [51.5,-3.2];    // Wales
+  c['GI'] = c['MI'] = [54.6,-5.9];    // N.Ireland
+  c['EI'] = [53.3,-6.3];              // Ireland
+  c['GJ'] = [49.2,-2.1];              // Jersey
+  c['GU'] = [49.5,-2.5];              // Guernsey
+  c['GD'] = [54.2,-4.5];              // Isle of Man
+  // W.Europe
+  c['DL'] = c['DJ'] = c['DK'] = [51.2,10.5];   // Germany
+  c['F']  = c['TM'] = [46.6,2.0];              // France
+  c['I']  = c['IZ'] = c['IK'] = [41.9,12.5];  // Italy
+  c['EA'] = c['EB'] = [40.4,-3.7];             // Spain
+  c['CT'] = c['CS'] = [38.7,-9.1];             // Portugal
+  c['PA'] = c['PD'] = c['PH'] = [52.4,4.9];   // Netherlands
+  c['ON'] = [50.8,4.4];   // Belgium
+  c['OZ'] = [55.7,12.6];  // Denmark
+  c['SM'] = c['SA'] = c['SK'] = [59.3,18.1]; // Sweden
+  c['OH'] = c['OF'] = [60.2,24.9]; // Finland
+  c['LA'] = c['LB'] = [59.9,10.8]; // Norway
+  c['OE'] = [48.2,16.4]; // Austria
+  c['HB9'] = [46.9,7.4]; // Switzerland
+  c['SP'] = c['SN'] = [52.2,21.0]; // Poland
+  c['OK'] = c['OL'] = [50.1,14.4]; // Czech
+  c['OM'] = [48.1,17.1]; // Slovakia
+  c['HA'] = c['HG'] = [47.5,19.1]; // Hungary
+  c['YO'] = [44.4,26.1]; // Romania
+  c['LZ'] = [42.7,23.3]; // Bulgaria
+  c['SV'] = [37.9,23.7]; // Greece
+  c['UR'] = c['UT'] = c['US'] = [50.4,30.5]; // Ukraine
+  c['UA'] = c['UB'] = [55.8,37.6]; // Russia
+  c['ES'] = [59.4,24.7]; // Estonia
+  c['YL'] = [56.9,24.1]; // Latvia
+  c['LY'] = [54.7,25.3]; // Lithuania
+  c['9A'] = [45.8,16.0]; // Croatia
+  c['S5'] = [46.1,14.5]; // Slovenia
+  c['TA'] = c['TC'] = [39.9,32.9]; // Turkey
+  // Asia/Pacific
+  c['JA'] = c['JE'] = c['JH'] = [36.2,138.3]; // Japan
+  c['BG'] = c['BY'] = c['BT'] = [39.9,116.4]; // China
+  c['VK'] = [-25.0,133.0]; // Australia
+  c['ZL'] = [-41.3,174.8]; // New Zealand
+  c['HL'] = c['DS'] = [37.5,127.0]; // S.Korea
+  c['VU'] = c['AT'] = [28.6,77.2];  // India
+  c['HS'] = c['E2'] = [13.8,100.5]; // Thailand
+  // Americas
+  c['PY'] = c['PP'] = c['PT'] = [-15.8,-47.9]; // Brazil
+  c['LU'] = c['LO'] = [-34.6,-58.4]; // Argentina
+  c['XE'] = c['XF'] = [23.6,-102.6]; // Mexico
+  c['TI'] = [9.9,-84.1];  // Costa Rica
+  c['YV'] = c['YW'] = [10.5,-66.9]; // Venezuela
+  c['CE'] = c['CA'] = [-33.5,-70.7]; // Chile
+  c['OA'] = c['OC'] = [-12.0,-77.0]; // Peru
+  c['CO'] = c['CM'] = [23.1,-82.4]; // Cuba
+  c['CX'] = [-34.9,-56.2]; // Uruguay
+  // Africa/Middle East
+  c['ZS'] = c['ZR'] = [-25.7,28.2]; // S.Africa
+  c['4X'] = c['4Z'] = [31.8,35.2]; // Israel
+  c['A4'] = [23.6,58.6]; // Oman
+  c['HZ'] = [24.7,46.7]; // Saudi Arabia
+  c['9K'] = [29.4,47.9]; // Kuwait
+  return c;
+})();
+
+// US state centroid coordinates
+const STATE_COORDS = {
+  AL:[32.78,-86.83], AK:[64.20,-153.40], AZ:[34.27,-111.66], AR:[34.75,-92.28],
+  CA:[37.27,-119.27], CO:[39.00,-105.55], CT:[41.60,-72.73], DE:[38.99,-75.51],
+  FL:[28.63,-82.35], GA:[32.69,-83.44], HI:[20.27,-156.37], ID:[44.35,-114.61],
+  IL:[40.04,-89.20], IN:[39.90,-86.28], IA:[42.08,-93.50], KS:[38.49,-98.38],
+  KY:[37.53,-85.30], LA:[31.07,-91.96], ME:[45.37,-69.24], MD:[38.81,-77.27],
+  MA:[42.27,-71.81], MI:[44.35,-85.41], MN:[46.39,-94.64], MS:[32.74,-89.67],
+  MO:[38.46,-92.29], MT:[46.88,-110.36], NE:[41.49,-99.90], NV:[39.36,-116.64],
+  NH:[43.68,-71.58], NJ:[40.19,-74.67], NM:[34.41,-106.11], NY:[42.95,-75.52],
+  NC:[35.56,-79.39], ND:[47.45,-100.47], OH:[40.29,-82.79], OK:[35.59,-97.49],
+  OR:[43.93,-120.56], PA:[40.90,-77.83], RI:[41.68,-71.55], SC:[33.92,-80.90],
+  SD:[44.44,-100.22], TN:[35.86,-86.35], TX:[31.47,-99.33], UT:[39.32,-111.09],
+  VT:[44.04,-72.71], VA:[37.77,-78.17], WA:[47.38,-120.45], WV:[38.64,-80.62],
+  WI:[44.27,-90.14], WY:[43.00,-107.55],
+};
+
+// Country centroid fallback (when no state match)
+const COUNTRY_COORDS = {
+  'USA':[37.09,-95.71], 'UNITED STATES':[37.09,-95.71], 'US':[37.09,-95.71],
+  'CANADA':[56.13,-106.35], 'AUSTRALIA':[-25.27,133.78],
+  'UNITED KINGDOM':[51.51,-0.13], 'UK':[51.51,-0.13], 'ENGLAND':[51.51,-0.13],
+  'GERMANY':[51.17,10.45], 'FRANCE':[46.23,2.21], 'ITALY':[41.87,12.57],
+  'SPAIN':[40.46,-3.75], 'JAPAN':[36.20,138.25], 'BRAZIL':[-14.24,-51.93],
+  'MEXICO':[23.63,-102.55], 'RUSSIA':[61.52,105.32], 'CHINA':[35.86,104.20],
+  'INDIA':[20.59,78.96], 'ARGENTINA':[-38.42,-63.62], 'SOUTH AFRICA':[-30.56,22.94],
+  'NEW ZEALAND':[-40.90,174.89],
+};
+
+function callToLatLon(callsign) {
+  if (!callsign) return null;
+  const cs = callsign.toUpperCase().trim();
+  for (let len = 4; len >= 1; len--) {
+    const pre = cs.slice(0, len);
+    if (CALL_COORDS[pre]) return CALL_COORDS[pre];
+  }
+  return null;
+}
+
+// Resolve lat/lon from stored country+state fields, falling back to callsign prefix
+function qsoLatLon(country, state, callsign) {
+  const c = (country || '').toUpperCase().trim();
+  const s = (state || '').toUpperCase().trim();
+  // US state centroid
+  const isUS = !c || c === 'USA' || c === 'US' || c.startsWith('UNITED STATES');
+  if (isUS && s && STATE_COORDS[s]) return STATE_COORDS[s];
+  // Country centroid
+  if (c && COUNTRY_COORDS[c]) return COUNTRY_COORDS[c];
+  // Callsign prefix fallback
+  return callToLatLon(callsign);
+}
+
+function toggleHamLog() {
+  _hamlogEnabled = !_hamlogEnabled;
+  const btn = document.getElementById('hamlog-btn');
+  const leg = document.getElementById('legend-hamlog');
+  btn.style.color = _hamlogEnabled ? '#ffd700' : '';
+  btn.style.borderColor = _hamlogEnabled ? '#ffd700' : '';
+  leg.style.display = _hamlogEnabled ? '' : 'none';
+  if (_hamlogEnabled) {
+    loadHamLog();
+    toast('Ham Log: loading worked stations…');
+  } else {
+    _hamlogMarkers.forEach(m => m.remove());
+    _hamlogMarkers = [];
+    toast('Ham Log layer off');
+  }
+}
+
+async function loadHamLog() {
+  if (!_hamlogEnabled) return;
+  try {
+    const r = await fetch('/api/hamlog/qsos?limit=2000&source=manual').catch(() => null);
+    if (!r || !r.ok) { toast('Ham Log: fetch failed'); return; }
+    const data = await r.json();
+    // Only show manually-logged contacts, not APRS/mock/adapter imports
+    const qsos = (data.qsos || []).filter(q => q.source === 'manual');
+
+    _hamlogMarkers.forEach(m => m.remove());
+    _hamlogMarkers = [];
+
+    // Group by callsign to show combined popup
+    const byCall = {};
+    for (const q of qsos) {
+      if (!byCall[q.callsign]) byCall[q.callsign] = [];
+      byCall[q.callsign].push(q);
+    }
+
+    let plotted = 0;
+    for (const [cs, qs] of Object.entries(byCall)) {
+      const country = qs[0].country || '';
+      const state   = qs[0].state   || '';
+      const latlon  = qsoLatLon(country, state, cs);
+      if (!latlon) continue;
+      // Deterministic jitter based on callsign so markers don't move on refresh
+      let _h = 0;
+      for (const c of cs) _h = (Math.imul(31, _h) + c.charCodeAt(0)) | 0;
+      const jLat = latlon[0] + ((_h & 0xFF) / 255 - 0.5) * 0.6;
+      const jLon = latlon[1] + (((_h >> 8) & 0xFF) / 255 - 0.5) * 0.6;
+      const bandList = [...new Set(qs.map(q => q.band))].join(', ');
+      const modeList = [...new Set(qs.map(q => q.mode))].join(', ');
+      const names    = [...new Set(qs.map(q => q.name).filter(Boolean))].join(', ');
+      const locLabel = state ? `${state}${country ? ', '+country : ''}` : country;
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="font-family:monospace;font-size:9px;color:#ffd700;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #997a00;white-space:nowrap">${cs}</div>`,
+        iconSize: [60, 16], iconAnchor: [30, 8],
+      });
+      const popup = `<div class="node-popup">
+        <div class="node-name">${cs}</div>
+        <div class="node-stat">QSOs: ${qs.length}</div>
+        <div class="node-stat">Bands: ${bandList}</div>
+        <div class="node-stat">Modes: ${modeList}</div>
+        ${locLabel ? `<div class="node-stat">Location: ${locLabel}</div>` : ''}
+        ${names ? `<div class="node-stat">Name: ${names}</div>` : ''}
+        <div class="node-stat" style="color:var(--muted);font-size:9px">Location approximate</div>
+      </div>`;
+      const m = L.marker([jLat, jLon], {icon}).bindPopup(popup).addTo(map);
+      _hamlogMarkers.push(m);
+      plotted++;
+    }
+    toast(`Ham Log: ${plotted} worked station${plotted!==1?'s':''} plotted`);
+  } catch(e) {
+    toast('Ham Log error: ' + e.message);
+  }
+}
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;bottom:50px;left:50%;transform:translateX(-50%);background:rgba(22,27,34,.95);border:1px solid #30363d;color:#e6edf3;font-family:monospace;font-size:11px;padding:6px 14px;border-radius:4px;z-index:2000';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+fetch('/api/map-colors').then(r => r.json()).then(d => {
+  _mapColorOverrides = d.colors || {};
+  for (const [mode, color] of Object.entries(_mapColorOverrides)) {
+    const el = document.getElementById(`legend-dot-${mode}`);
+    if (!el) continue;
+    if (el.classList.contains('legend-dot')) el.style.background = color;
+    else el.style.color = color;
+  }
+  // Color the MSHT/MSHC/APRS toggle buttons to match their marker color —
+  // uses adapterColor() (override or default) so it's always in sync even
+  // with no saved override.
+  ['meshtastic', 'meshcore', 'aprs'].forEach(_applyProtoButtonColor);
+}).catch(() => {}).finally(() => {
+  loadNodes();
+  setInterval(loadNodes, 30000);
+});
+loadWaterBodies();
+connectWS();
+// Base position for the rx end of stored-route lines
+fetch('/api/state').then(r => r.json()).then(st => {
+  if (st.base_lat != null && st.base_lon != null) _baseLL = [st.base_lat, st.base_lon];
+}).catch(() => {});
+if (window.ECH_SIM) document.body.classList.add('sim-mode');
+</script>
+</body>
+</html>

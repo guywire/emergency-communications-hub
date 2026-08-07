@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+*.egg
+
+# ECH runtime data — never commit
+ech.db
+*.db
+/var/
+
+# Work status / deployment notes — may contain server credentials
+WORK_STATUS.md
+
+# Deploy credentials — never commit
+deploy/local.env
+deploy/_live_config*.yaml
+
+# Config with real credentials — operators must create from template
+# /etc/ech/config.yaml is NOT tracked; copy config.yaml and edit locally
+# Do NOT commit files containing real callsigns, passcodes, or passwords
+
+# Logs
+*.log
+/var/log/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Claude Code local tool state — machine-specific, not project config
+.claude/
+
+# Test caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tarballs and local backups
+*.tar.gz
+*.tar
+*.zip
+
+# Temp working docs and inspection dirs
+Tempmeshcore_inspect/
+New folder/
+ech/core/state.py.v2
+ECH_meshcore_further_advice.txt
+ECV_v3_fixes.txt
+ECH_REQUIREMENTS_AND_PROGRESS.md
+ECH ADAPTER ENHANCEMENT REQUIREMENT.txt
