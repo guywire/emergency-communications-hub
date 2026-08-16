@@ -52,7 +52,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 .node-popup .node-last-msg .msg-ts{color:var(--muted);font-size:9px;display:block;margin-bottom:2px}
 .node-popup .node-ext-links{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:10px;line-height:1.8}
 .node-popup .node-ext-links a{color:var(--blue);text-decoration:none}.node-popup .node-ext-links a:hover{text-decoration:underline}
-#legend{position:absolute;bottom:30px;right:10px;z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:10px;min-width:140px}
+#legend{position:absolute;bottom:30px;left:10px;z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:10px;min-width:140px}
 .legend-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
 .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 #node-count{font-size:11px;color:var(--muted)}
@@ -877,6 +877,7 @@ function togglePSKReporter() {
   const btn = document.getElementById('psk-btn');
   btn.style.color = _pskEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _pskEnabled ? 'var(--green)' : '';
+  btn.classList.toggle('on', _pskEnabled);
   if (_pskEnabled) {
     loadPSKReporter();
     toast('PSKReporter: fetching recent spots…');
@@ -935,6 +936,7 @@ function togglePOTA() {
   const btn = document.getElementById('pota-btn');
   btn.style.color = _potaEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _potaEnabled ? 'var(--green)' : '';
+  btn.classList.toggle('on', _potaEnabled);
   if (_potaEnabled) {
     loadPOTA();
     toast('POTA: fetching nearby activators…');
@@ -983,6 +985,7 @@ function toggleSOTA() {
   const btn = document.getElementById('sota-btn');
   btn.style.color = _sotaEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _sotaEnabled ? 'var(--green)' : '';
+  btn.classList.toggle('on', _sotaEnabled);
   if (_sotaEnabled) {
     loadSOTA();
     toast('SOTA: fetching nearby activators…');
@@ -1031,6 +1034,7 @@ function toggleIOTA() {
   const btn = document.getElementById('iota-btn');
   btn.style.color = _iotaEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _iotaEnabled ? 'var(--green)' : '';
+  btn.classList.toggle('on', _iotaEnabled);
   if (_iotaEnabled) {
     loadIOTA();
     toast('IOTA: fetching nearby activators…');
@@ -1080,6 +1084,7 @@ function toggleBOTA() {
   const btn = document.getElementById('bota-btn');
   btn.style.color = _botaEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _botaEnabled ? 'var(--green)' : '';
+  btn.classList.toggle('on', _botaEnabled);
   if (_botaEnabled) {
     loadBOTA();
     toast('BOTA: fetching nearby activators… (low volume — empty is normal)');
@@ -1129,6 +1134,7 @@ function toggleDXCluster() {
   const btn = document.getElementById('dx-btn');
   btn.style.color = _dxEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _dxEnabled ? 'var(--green)' : '';
+  btn.classList.toggle('on', _dxEnabled);
   if (_dxEnabled) {
     loadDXCluster();
     toast('DX cluster: fetching nearby spots…');
@@ -1227,6 +1233,7 @@ function toggleGridSquares() {
   const btn = document.getElementById('grid-btn');
   btn.style.color = _gridEnabled ? 'var(--blue)' : '';
   btn.style.borderColor = _gridEnabled ? 'var(--blue)' : '';
+  btn.classList.toggle('on', _gridEnabled);
   if (_gridEnabled) {
     drawGridSquares();
   } else {
@@ -1639,6 +1646,7 @@ function toggleHamLog() {
   const leg = document.getElementById('legend-hamlog');
   btn.style.color = _hamlogEnabled ? '#ffd700' : '';
   btn.style.borderColor = _hamlogEnabled ? '#ffd700' : '';
+  btn.classList.toggle('on', _hamlogEnabled);
   leg.style.display = _hamlogEnabled ? '' : 'none';
   if (_hamlogEnabled) {
     loadHamLog();
