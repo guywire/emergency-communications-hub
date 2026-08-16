@@ -345,15 +345,18 @@ function popupContent(node, isAlert, lastMsg) {
   const isMeshCore = (node._adapter || '').toLowerCase().includes('meshcore');
   // Node role: repeaters/digis/WX/sensors can't receive messages — say so
   // instead of offering a Message button that silently goes nowhere.
-  const NON_MSG = ['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT', 'WAYPOINT'];
+  const NON_MSG = ['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT', 'WAYPOINT', 'RMS'];
   const ntype = node.node_type || '';
   const messageable = !NON_MSG.includes(ntype);
   const typeBadge = ntype
     ? `<span style="font-family:var(--mono);font-size:9px;padding:0 4px;margin-left:4px;border:1px solid ${messageable ? '#3fb950' : '#d29922'};border-radius:3px;color:${messageable ? '#3fb950' : '#d29922'}">${esc(ntype)}</span>` : '';
   const msgUrl = `/?to=${encodeURIComponent(node.node_id)}&adapter=${encodeURIComponent(node._adapter || '')}`;
+  const notMsgTitle = ntype === 'RMS'
+    ? 'This is a Winlink RMS relay gateway, not an addressable recipient — see the info below for how to reach it'
+    : 'This node type routes packets but has no message inbox';
   const msgAction = messageable
     ? `<a href="${msgUrl}" target="_top" style="flex:1;text-align:center;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.4);color:#388bfd;border-radius:3px;text-decoration:none">📨 Message</a>`
-    : `<span style="flex:1;text-align:center;font-family:var(--mono);font-size:9px;padding:4px 2px;border:1px solid var(--border);color:var(--muted);border-radius:3px" title="This node type routes packets but has no message inbox">not messageable</span>`;
+    : `<span style="flex:1;text-align:center;font-family:var(--mono);font-size:9px;padding:4px 2px;border:1px solid var(--border);color:var(--muted);border-radius:3px" title="${notMsgTitle}">not messageable</span>`;
   const actionBtns = `<div style="display:flex;gap:5px;margin-top:8px">
     ${msgAction}
     ${isMeshCore ? `<button onclick="mapTrace('${esc(node._adapter)}','${esc(node.node_id)}',this)" style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);color:#3fb950;border-radius:3px;cursor:pointer">📡 Trace</button>` : ''}
@@ -392,6 +395,18 @@ function popupContent(node, isAlert, lastMsg) {
   } else if (node.node_type === 'WAYPOINT') {
     extLinks = `<div class="node-ext-links">📍 ${esc(meta.description || 'Waypoint')}`
       + (meta.placed_by ? `<div class="node-stat">Placed by ${esc(meta.placed_by)}</div>` : '')
+      + `</div>`;
+  } else if (meta.rms || meta.winlink) {
+    const grid  = meta.grid ? esc(meta.grid) : '';
+    const freq  = meta.freq_mhz != null ? `${Number(meta.freq_mhz).toFixed(3)} MHz` : 'freq unknown';
+    const svc   = meta.mode ? esc(meta.mode) : '';
+    const modes = meta.modes ? esc(meta.modes) : '';
+    extLinks = `<div class="node-ext-links">📻 Winlink RMS gateway${grid ? ` — grid ${grid}` : ''}<br>`
+      + `${freq}${svc ? `, ${svc}` : ''}${modes ? ` (${modes})` : ''}`
+      + `<div class="node-stat" style="margin-top:4px">Relay infrastructure run by another station, not something ECH connects to directly — `
+      + `set a Winlink-capable radio/modem (e.g. Pat + a soundcard TNC, or a Winlink-capable HF/VHF rig) to this frequency/mode to reach it, `
+      + `or use Telnet-mode Winlink software if it's within range over IP instead of RF.</div>`
+      + `<a href="https://winlink.org/" target="_blank" rel="noopener">winlink.org</a>`
       + `</div>`;
   } else if (meta.icao) {
     const icao   = esc(meta.icao);

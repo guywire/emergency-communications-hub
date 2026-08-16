@@ -531,7 +531,12 @@ class PatWinlinkAdapter(Adapter):
                     "grid": gw.get("gridsquare", ""),
                     "freq_mhz": gw.get("freq_mhz"),
                     "mode": gw.get("service_code", ""),
+                    "modes": gw.get("modes", ""),
                     "winlink": True,
+                    # Relay infrastructure, not a message recipient — MeshNode.to_dict()
+                    # surfaces meta.node_type as the top-level node_type the map's
+                    # NON_MSG check uses to hide the (broken) "Message" button.
+                    "node_type": "RMS",
                 },
             )
             result.append(node)
