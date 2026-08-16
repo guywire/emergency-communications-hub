@@ -82,6 +82,20 @@ def _priority(subject: str, body: str) -> Priority:
     return Priority.NORMAL
 
 
+def _addr_str(v) -> str:
+    """Pat's JSON message fields (From/To/Cc) are wl2k-go fbb.Address objects
+    — {"Proto": "...", "Addr": "..."} — not plain strings; the fbb.Message
+    embed has no custom JSON tags so field names stay Go-capitalized (MID,
+    From, Date, Subject, Body, Files), confirmed against la5nta/pat's
+    api/mailbox.go source. Tolerates a plain string too in case that ever
+    changes."""
+    if isinstance(v, dict):
+        return v.get("Addr") or v.get("addr") or ""
+    if isinstance(v, str):
+        return v
+    return ""
+
+
 def _parse_pat_date(s: str) -> datetime:
     """Parse Pat's ISO-8601 date strings, falling back to now."""
     if not s:
@@ -119,8 +133,8 @@ class PatWinlinkAdapter(Adapter):
         self._ws_task: asyncio.Task | None = None
         self._rms_task: asyncio.Task | None = None
         self._seen_mids: set[str] = set()    # message IDs already processed
-        self._pat_version: str = ""
-        self._pat_status: dict = {}
+        self._pat_status: dict = {}          # last GET /api/status response (types.Status —
+                                              # no version field is exposed by Pat's API)
         self._rx_count = 0
         self._tx_count = 0
         self._rms_stations: list[dict] = []  # discovered RMS gateways
@@ -139,11 +153,8 @@ class PatWinlinkAdapter(Adapter):
             resp = await self._client.get("/api/status")
             resp.raise_for_status()
             self._pat_status = resp.json()
-            self._pat_version = self._pat_status.get("PatVersion", "")
-            log.info(
-                "Pat Winlink %s: connected to Pat %s, callsign %s",
-                self.name, self._pat_version, self._callsign,
-            )
+            log.info("Pat Winlink %s: connected to Pat at %s, callsign %s",
+                      self.name, self._pat_url, self._callsign)
         except (httpx.ConnectError, httpx.HTTPError) as exc:
             raise ConnectionError(
                 f"Pat not reachable at {self._pat_url} — "
@@ -189,27 +200,21 @@ class PatWinlinkAdapter(Adapter):
         if not self._client or not self._connected:
             return False
 
-        # Pat v1.0.0 compose payload
-        # Required fields confirmed from Pat source: to, date, subject, body
+        # Pat's postOutboundMessageHandler (api/mailbox.go) parses r.Form —
+        # application/x-www-form-urlencoded or multipart — NOT a JSON body.
+        # An earlier version of this adapter posted JSON here; Pat's form
+        # parser would have silently read empty values for every field.
         date_str = message.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
-        payload = {
+        form = {
             "to":      message.to_id,
-            "cc":      "",
-            "date":    date_str,
             "subject": message.body[:60],
             "body":    message.body,
+            "date":    date_str,
         }
         try:
-            # Try v1.0.0 endpoint first
-            resp = await self._client.post("/api/mailbox/out", json=payload)
+            resp = await self._client.post("/api/mailbox/out", data=form)
             log.debug("Pat Winlink %s: POST /api/mailbox/out → %d: %s",
                       self.name, resp.status_code, resp.text[:200])
-
-            if resp.status_code == 404:
-                # Try alternate endpoint used in some Pat versions
-                resp = await self._client.post("/mailbox/out", json=payload)
-                log.debug("Pat Winlink %s: POST /mailbox/out → %d: %s",
-                          self.name, resp.status_code, resp.text[:200])
 
             if resp.status_code not in (200, 201, 204):
                 log.error("Pat Winlink %s: outbox POST failed %d: %s",
@@ -219,12 +224,7 @@ class PatWinlinkAdapter(Adapter):
 
             self._tx_count += 1
             self._mark_tx(message)
-            try:
-                mid = resp.json().get("mid", "")
-            except Exception:
-                mid = "(no mid)"
-            log.info("Pat Winlink %s: posted to outbox → %s (mid=%s)",
-                     self.name, message.to_id, mid)
+            log.info("Pat Winlink %s: posted to outbox → %s", self.name, message.to_id)
 
             if self._auto_connect:
                 asyncio.create_task(self._trigger_connect())
@@ -308,7 +308,7 @@ class PatWinlinkAdapter(Adapter):
         try:
             msgs = await self._fetch_inbox()
             for m in msgs:
-                self._seen_mids.add(m.get("mid", ""))
+                self._seen_mids.add(m.get("MID", ""))
             log.debug("Pat Winlink %s: marked %d existing messages as seen", self.name, len(msgs))
         except Exception as exc:
             log.debug("Pat Winlink %s: could not pre-seed seen set: %s", self.name, exc)
@@ -319,7 +319,7 @@ class PatWinlinkAdapter(Adapter):
             msgs = await self._fetch_inbox()
             new_count = 0
             for msg_meta in msgs:
-                mid = msg_meta.get("mid", "")
+                mid = msg_meta.get("MID", "")
                 if mid in self._seen_mids:
                     continue
                 self._seen_mids.add(mid)
@@ -358,11 +358,11 @@ class PatWinlinkAdapter(Adapter):
     async def _emit_message(self, msg: dict) -> None:
         """Convert a Pat JSON message dict to NormalizedMessage and enqueue."""
         self._rx_count += 1
-        mid     = msg.get("mid", "")
-        subject = msg.get("subject", "").strip()
-        body    = msg.get("body", "").strip()
-        from_   = msg.get("from", "").strip()
-        date_s  = msg.get("date", "")
+        mid     = msg.get("MID", "")
+        subject = (msg.get("Subject") or "").strip()
+        body    = (msg.get("Body") or "").strip()
+        from_   = _addr_str(msg.get("From"))
+        date_s  = msg.get("Date", "")
 
         # Combine subject + body for display (Winlink is email-style)
         display_body = f"[{subject}] {body}" if subject else body
@@ -383,8 +383,8 @@ class PatWinlinkAdapter(Adapter):
             raw={
                 "mid": mid,
                 "subject": subject,
-                "attachments": [a.get("name", "") for a in msg.get("files", [])],
-                "transport": self._pat_status.get("ActiveListeners", []),
+                "attachments": [f.get("Name", "") for f in (msg.get("Files") or [])],
+                "transport": self._pat_status.get("active_listeners", []),
             },
         )
         await self._enqueue(nm)
@@ -424,23 +424,62 @@ class PatWinlinkAdapter(Adapter):
         except asyncio.CancelledError:
             pass
 
+    # Every api.winlink.org CMS Web Service call requires an access key —
+    # this one was issued by the Winlink Development Team in December 2017
+    # specifically for Pat's own use, and is committed in the clear in
+    # la5nta/pat's public source (internal/cmsapi/api.go). Confirmed the same
+    # key Pat itself sends, not a guess or a key ECH obtained independently.
+    _WINLINK_CMS_ACCESS_KEY = "1880278F11684B358F36845615BD039A"
+
     async def _discover_rms(self) -> None:
-        """Fetch active Winlink RMS gateways from the public Winlink API."""
-        url = "https://api.winlink.org/rms/list"
+        """Fetch active Winlink RMS gateways from the same public API Pat
+        itself uses (la5nta/pat internal/cmsapi: RootURL + PathGatewayStatus
+        = https://api.winlink.org/gateway/status.json — the previous
+        `/rms/list` URL this adapter used doesn't exist on that host).
+
+        Only the `key` param is sent (see _WINLINK_CMS_ACCESS_KEY) — every
+        other query param is left at the API's own defaults (mode=AnyAll,
+        serviceCodes=PUBLIC, its own history window), since the exact names
+        Pat sends for those aren't in the public godoc and guessing them
+        risked silently narrowing the result instead of erroring visibly.
+        """
+        url = "https://api.winlink.org/gateway/status.json"
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(url, params={
-                    "operatingHours": 12,
-                    "format": "json",
-                })
+                resp = await client.get(url, params={"key": self._WINLINK_CMS_ACCESS_KEY})
             resp.raise_for_status()
             data = resp.json()
-            # Response: {"RmsGateways": [...]} or a bare list
-            gateways = data.get("RmsGateways", data) if isinstance(data, dict) else data
-            if not isinstance(gateways, list):
-                return
-            self._rms_stations = gateways
-            log.info("Pat Winlink %s: discovered %d RMS gateways", self.name, len(gateways))
+            gateways = data.get("Gateways", []) if isinstance(data, dict) else []
+
+            stations: list[dict] = []
+            for gw in gateways:
+                cs  = gw.get("Callsign", "")
+                lat = gw.get("Latitude")
+                lon = gw.get("Longitude")
+                if not cs or lat is None or lon is None:
+                    continue
+                # Per-channel fields (Gridsquare/Frequency/ServiceCode/modes)
+                # live under Channels[], not flat on the gateway — a station
+                # can list several; take the first as representative.
+                channels = gw.get("Channels") or []
+                ch0 = channels[0] if channels else {}
+                freq_hz = ch0.get("Frequency")
+                stations.append({
+                    "callsign": cs,
+                    "lat": float(lat),
+                    "lon": float(lon),
+                    "gridsquare": ch0.get("Gridsquare", ""),
+                    # Frequency is a float64 in the API; treated as Hz based on
+                    # the magnitude of realistic HF/VHF channel values (e.g.
+                    # 14109000 for 14.109 MHz) — not independently confirmed
+                    # against a live response body from this session.
+                    "freq_mhz": (freq_hz / 1e6) if freq_hz else None,
+                    "service_code": ch0.get("ServiceCode", ""),
+                    "modes": ch0.get("SupportedModes", ""),
+                })
+
+            self._rms_stations = stations
+            log.info("Pat Winlink %s: discovered %d RMS gateways", self.name, len(stations))
         except Exception as exc:
             log.debug("Pat Winlink %s: RMS discovery error: %s", self.name, exc)
 
@@ -455,47 +494,43 @@ class PatWinlinkAdapter(Adapter):
             return []
         out = []
         for m in msgs:
-            mid = m.get("mid") or m.get("MID", "")
-            # Pat's own read flag if the API exposes one; otherwise fall back to
+            mid = m.get("MID", "")
+            # Pat's own Unread flag if present; otherwise fall back to
             # "ECH hasn't surfaced this one as a feed message yet" as a proxy.
-            read = m.get("read", m.get("Read"))
-            unread = (not read) if read is not None else (mid not in self._seen_mids)
+            unread_flag = m.get("Unread")
+            unread = unread_flag if unread_flag is not None else (mid not in self._seen_mids)
             out.append({
                 "mid": mid,
-                "subject": m.get("subject") or m.get("Subject", ""),
-                "from": m.get("from") or m.get("From", ""),
-                "date": m.get("date") or m.get("Date", ""),
+                "subject": m.get("Subject", ""),
+                "from": _addr_str(m.get("From")),
+                "date": m.get("Date", ""),
                 "unread": unread,
             })
         out.sort(key=lambda m: m["date"], reverse=True)
         return out
 
     async def nodes(self) -> list:
-        """Return discovered RMS gateways as MeshNode objects for the map."""
+        """Return discovered RMS gateways as MeshNode objects for the map.
+
+        _rms_stations holds the normalized dicts built in _discover_rms()
+        (callsign/lat/lon/gridsquare/freq_mhz/service_code/modes) — already
+        extracted from the real API's nested Gateway/Channels shape there,
+        so no field-name guessing needed here."""
         from ech.core.models import MeshNode
-        from datetime import datetime, timezone
         result = []
         for gw in self._rms_stations:
-            cs  = gw.get("Callsign", gw.get("callsign", ""))
-            lat = gw.get("Latitude", gw.get("lat"))
-            lon = gw.get("Longitude", gw.get("lon"))
-            if not cs or lat is None or lon is None:
-                continue
-            grid = gw.get("Gridsquare", gw.get("gridsquare", ""))
-            freq_lo = gw.get("MHzLow", gw.get("mhz_low"))
-            mode    = gw.get("ServiceCode", gw.get("service_code", ""))
             node = MeshNode(
-                node_id=f"wl-{cs}",
-                display_name=cs,
+                node_id=f"wl-{gw['callsign']}",
+                display_name=gw["callsign"],
                 short_name="RMS",
-                lat=float(lat),
-                lon=float(lon),
+                lat=gw["lat"],
+                lon=gw["lon"],
                 meta={
                     "rms": True,
-                    "callsign": cs,
-                    "grid": grid,
-                    "freq_mhz": freq_lo,
-                    "mode": mode,
+                    "callsign": gw["callsign"],
+                    "grid": gw.get("gridsquare", ""),
+                    "freq_mhz": gw.get("freq_mhz"),
+                    "mode": gw.get("service_code", ""),
                     "winlink": True,
                 },
             )
@@ -567,14 +602,16 @@ class PatWinlinkAdapter(Adapter):
     # ── Overrides ─────────────────────────────────────────────────────────
 
     def _health_detail(self) -> dict:
-        listeners = self._pat_status.get("ActiveListeners", [])
-        connected_to = self._pat_status.get("ConnectedTo", "")
+        # Field names/casing match la5nta/pat's api/types.Status JSON tags
+        # (active_listeners, connected, remote_addr) — an earlier version of
+        # this method read PascalCase names that don't exist on the wire,
+        # so these always silently rendered as empty/missing.
         return {
             "pat_url": self._pat_url,
             "callsign": self._callsign,
-            "pat_version": self._pat_version,
-            "active_listeners": listeners,
-            "connected_to": connected_to,
+            "active_listeners": self._pat_status.get("active_listeners", []),
+            "session_connected": self._pat_status.get("connected", False),
+            "connected_to": self._pat_status.get("remote_addr", ""),
             "connect_alias": self._connect_alias,
             "seen_messages": len(self._seen_mids),
             "rx_count": self._rx_count,

@@ -135,12 +135,13 @@ async def test_pat_adapter_polls_new_messages(pat_server):
     # Add a new message to the mock server after connect
     new_mid = "NEWMSG001"
     pat_server.add_message(new_mid, {
-        "mid": new_mid,
-        "subject": "Emergency drill",
-        "body": "All ARES units please check in via Winlink.",
-        "from": "W1NET",
-        "date": "2024-05-10T15:00:00Z",
-        "files": [],
+        "MID": new_mid,
+        "Subject": "Emergency drill",
+        "Body": "All ARES units please check in via Winlink.",
+        "From": {"Proto": "Winlink", "Addr": "W1NET"},
+        "Date": "2024-05-10T15:00:00Z",
+        "Files": [],
+        "Unread": True,
     })
 
     # Manually trigger a poll
@@ -236,7 +237,11 @@ async def test_pat_adapter_health(pat_server):
     await adapter.disconnect()
     assert h.state == "connected"
     assert h.detail["callsign"] == "W1TEST"
-    assert "1.0.0-mock" in h.detail.get("pat_version", "")
+    # Pat's real /api/status has no version field at all (api/types.Status —
+    # active_listeners/connected/dialing/remote_addr/http_clients/config_hash
+    # only), confirmed against la5nta/pat source — check what's actually there.
+    assert h.detail["active_listeners"] == ["telnet"]
+    assert h.detail["session_connected"] is False
 
 
 # ── Mock adapter end-to-end ───────────────────────────────────────────────

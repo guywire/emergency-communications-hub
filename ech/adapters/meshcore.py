@@ -61,8 +61,16 @@ CMD_REMOVE_CONTACT      = 0x0F   # delete a stored contact: [pubkey:32] → PACK
 CMD_SEND_TRACE_PATH     = 0x24   # real traceroute: tag(4)+auth(4)+flags(1)+[path]; returns TRACE_DATA 0x89
 CMD_GET_BATTERY         = 0x14
 CMD_DEVICE_QUERY        = 0x16
+CMD_EXPORT_PRIVATE_KEY  = 0x17   # gated behind firmware's ENABLE_PRIVATE_KEY_EXPORT compile flag —
+                                  # most stock builds ship with it off; PACKET_DISABLED (0x0F) means
+                                  # "compiled out", not "wrong command". Prefer sign_data() instead —
+                                  # not gated, works on every companion build.
 CMD_GET_CHANNEL         = 0x1F
 CMD_SET_CHANNEL         = 0x20   # set channel slot; format: idx(1)+name(32)+secret(16)
+CMD_SIGN_START          = 0x21   # begin a device-side Ed25519 signing session → PACKET_SIGN_START
+CMD_SIGN_DATA           = 0x22   # append up to 8KB of data to sign; each call → PACKET_OK/PACKET_ERROR
+CMD_SIGN_FINISH         = 0x23   # finalize; device signs the accumulated buffer with its own identity
+                                  # key (never leaves the device) → PACKET_SIGNATURE with the 64-byte sig
 
 PACKET_OK               = 0x00
 PACKET_ERROR            = 0x01
@@ -78,7 +86,11 @@ PACKET_DEVICE_INFO      = 0x0D
 PACKET_CONTACT_MSG_V3   = 0x10
 PACKET_CHANNEL_MSG_V3   = 0x11   # polled V3 format: [SNR][reserved×2][ch_idx][plen][txt_type][ts×4][text]
 PACKET_CHANNEL_INFO     = 0x12
+PACKET_SIGN_START       = 0x13   # ack for CMD_SIGN_START: [reserved:1][max_data_len:4 uint32le]
+PACKET_SIGNATURE        = 0x14   # response to CMD_SIGN_FINISH: [signature:64]
 PACKET_BATTERY          = 0x0C   # battery response: [volt_lo][volt_hi][pct?][...] uint16le mV + extra fields
+PACKET_PRIVATE_KEY      = 0x0E   # response to CMD_EXPORT_PRIVATE_KEY when firmware has it enabled: [key:64]
+PACKET_DISABLED         = 0x0F   # response when a command is compiled out of this firmware build
 
 PUSH_ADVERT             = 0x80
 PUSH_PATH_UPDATED       = 0x81   # path change notification: [pubkey:32]
@@ -95,7 +107,12 @@ FRAME_IN_HEADER  = b'>'
 # requiring a direct adapter reference at init time.
 # Written by MeshCoreAdapter during init; keyed by adapter name.
 _pubkey_registry:  dict[str, str] = {}  # adapter_name -> 64-char hex pubkey
-_privkey_registry: dict[str, str] = {}  # adapter_name -> 128-char hex privkey (serial only)
+_privkey_registry: dict[str, str] = {}  # adapter_name -> 128-char hex privkey, manually configured only
+                                         # (auto-retrieval over serial was removed — companion
+                                         # firmware has no ASCII CLI, see connect() comment below)
+# adapter_name -> live MeshCoreAdapter instance, so the MQTT adapter can call
+# sign_data() for device-side JWT signing without ever needing the raw key.
+_adapter_registry: dict[str, "MeshCoreAdapter"] = {}
 
 
 def _auto_detect_serial_port() -> str:
@@ -410,6 +427,13 @@ class MeshCoreAdapter(Adapter):
         #   _direct_hashes: relays whose transmissions we hear directly
         self._rf_adjacency: dict[str, set] = {}
         self._direct_hashes: set = set()
+        # Single-slot waiter for the CMD_SIGN_* request/response sequence (see
+        # sign_data()) — only armed while a sign operation is actually in
+        # flight, so it can't steal an unrelated OK/ERROR ack the rest of the
+        # (otherwise fire-and-forget) protocol handling relies on.
+        self._sign_waiter: asyncio.Future | None = None
+
+        _adapter_registry[self.name] = self
 
     def set_base_location(self, lat: float, lon: float) -> None:
         self._base_lat, self._base_lon = lat, lon
@@ -1173,9 +1197,11 @@ class MeshCoreAdapter(Adapter):
             ch_idx = self._channel_idx
         try:
             self._last_sent_uuid = message.id   # track for PUSH_SEND_CONFIRMED correlation
-            # Store body for relay-echo detection; prune entries older than 2 min
+            # Store body for relay-echo detection; prune entries older than 2 min.
+            # heard_count (3rd element) is bumped each time _handle_channel_msg sees
+            # this exact body come back decrypted off the air — see there for why.
             now_mono = time.monotonic()
-            self._recent_sent[message.body] = (message.id, now_mono)
+            self._recent_sent[message.body] = [message.id, now_mono, 0]
             cutoff = now_mono - 120.0
             self._recent_sent = {k: v for k, v in self._recent_sent.items() if v[1] > cutoff}
             await self._send_cmd(payload)
@@ -1598,7 +1624,8 @@ class MeshCoreAdapter(Adapter):
         0x05: "SELF_INFO", 0x06: "MSG_SENT",
         0x07: "CONTACT_MSG", 0x08: "CHANNEL_MSG", 0x0A: "NO_MORE_MSGS",
         0x0C: "BATTERY", 0x0D: "DEVICE_INFO", 0x10: "CONTACT_MSG_V3", 0x11: "CHANNEL_MSG_V3",
-        0x12: "CHANNEL_INFO", 0x80: "PUSH_ADVERT", 0x81: "PATH_UPDATE",
+        0x12: "CHANNEL_INFO", 0x13: "SIGN_START", 0x14: "SIGNATURE",
+        0x80: "PUSH_ADVERT", 0x81: "PATH_UPDATE",
         0x82: "ACK", 0x83: "PUSH_MSG_WAITING",
         # 0x84–0x87: observed in newer firmware builds; protocol not yet documented upstream
         0x84: "PUSH_CONTACT_MSG_WAITING", 0x85: "PUSH_UNKNOWN_85",
@@ -1626,6 +1653,15 @@ class MeshCoreAdapter(Adapter):
         self._packet_log.append(entry)
         if len(self._packet_log) > 500:
             self._packet_log = self._packet_log[-500:]
+
+        # sign_data() intercept — only armed while a sign op is in flight, so
+        # this never touches unrelated OK/ERROR traffic in normal operation.
+        if self._sign_waiter is not None and pkt_type in (
+            PACKET_OK, PACKET_ERROR, PACKET_SIGN_START, PACKET_SIGNATURE,
+        ):
+            if not self._sign_waiter.done():
+                self._sign_waiter.set_result((pkt_type, data))
+            return
 
         if pkt_type == PACKET_CONTACT_START:
             # Start of GET_CONTACTS response — reset temporary accumulator and block msg poll
@@ -2116,13 +2152,22 @@ class MeshCoreAdapter(Adapter):
                 )
 
         elif pkt_type == PACKET_ERROR:
+            # PACKET_ERROR fires for ANY errored command, not just sends — e.g. the
+            # background stale-contact pruner's CMD_REMOVE_CONTACT (0x0F). Blindly
+            # attributing it to self._last_sent_uuid mislabeled real, successfully
+            # relayed sends as "failed" whenever an unrelated command errored
+            # afterward (confirmed: a "ping" that LetsMesh showed reaching Boston
+            # 10 hops out was marked failed here because a contact-removal errored
+            # minutes later). Only treat it as a send failure if the command that
+            # actually errored was itself a send.
+            last_cmd, last_ts = getattr(self, "_last_cmd_sent", (None, 0.0))
+            send_cmd_hexes = {f"{CMD_SEND_CHANNEL_MSG:02x}", f"{CMD_SEND_CONTACT_MSG:02x}"}
             uid = self._last_sent_uuid
-            if uid and self._router_notify:
+            if uid and last_cmd in send_cmd_hexes and self._router_notify:
                 asyncio.ensure_future(
                     self._router_notify(self.name, uid, "failed", "device error")
                 )
-            self._last_sent_uuid = None
-            last_cmd, last_ts = getattr(self, "_last_cmd_sent", (None, 0.0))
+                self._last_sent_uuid = None
             log.warning("MeshCore %s: PACKET_ERROR received (last cmd sent: 0x%s, %.1fs ago)",
                         self.name, last_cmd or "??",
                         time.monotonic() - last_ts if last_cmd else -1.0)
@@ -2323,6 +2368,32 @@ class MeshCoreAdapter(Adapter):
             self._rf_stats["hop_samples"].append(sane_hops)
             if len(self._rf_stats["hop_samples"]) > 1000:
                 self._rf_stats["hop_samples"] = self._rf_stats["hop_samples"][-500:]
+
+        # Relay-echo detection: MeshCore gives no delivery confirmation for channel
+        # broadcasts (PUSH_SEND_CONFIRMED only correlates to DMs) — "sent" has only
+        # ever meant "our own radio accepted the TX". But if a repeater floods our
+        # message back out and we're in range to hear it decrypted again, that IS
+        # direct proof it left our radio and reached at least one hop. A device
+        # doesn't get its own outbound TX requeued back to itself, so a match here
+        # is a genuine over-the-air echo, not a local loopback.
+        echo = self._recent_sent.get(body_text)
+        if echo is not None:
+            echo[2] += 1
+            heard_count = echo[2]
+            orig_id = echo[0]
+            log.info("MeshCore %s: relay echo — sent msg %s heard back (x%d) after %s hop(s) via %s",
+                      self.name, orig_id, heard_count,
+                      sane_hops if sane_hops is not None else "?", ch_name)
+            if self._router_notify:
+                asyncio.ensure_future(
+                    self._router_notify(
+                        self.name, orig_id, f"heard_{heard_count}",
+                        f"repeater echo (hop {sane_hops if sane_hops is not None else '?'})", [],
+                    )
+                )
+            # Don't also surface the echo as a new inbound message — it's our own
+            # text coming back, not a fresh message from someone else.
+            return
 
         msg = NormalizedMessage(
             source_adapter=self.name,
@@ -2534,8 +2605,69 @@ class MeshCoreAdapter(Adapter):
         return dict(self._channels)
 
     def get_privkey_hex(self) -> str | None:
-        """Return cached private key hex string (available only on serial transport)."""
+        """Return the manually-configured private key hex string, if any.
+
+        There is no automatic retrieval on any transport: companion firmware
+        has no ASCII CLI (only the binary protocol), and CMD_EXPORT_PRIVATE_KEY
+        (0x17) is compiled out of most stock firmware builds behind
+        ENABLE_PRIVATE_KEY_EXPORT. sign_data() below is the reliable path —
+        it has no such build-time gate on any companion firmware version
+        checked (v1.15+)."""
         return _privkey_registry.get(self.name)
+
+    async def sign_data(self, data: bytes, timeout: float = 10.0) -> bytes | None:
+        """Have the device sign arbitrary data with its own Ed25519 identity
+        key via CMD_SIGN_START/CMD_SIGN_DATA/CMD_SIGN_FINISH (0x21/0x22/0x23).
+
+        This is the right way to get an MQTT/LetsMesh JWT signature: unlike
+        CMD_EXPORT_PRIVATE_KEY, the sign commands are NOT wrapped in an
+        ENABLE_* firmware flag in the companion radio source (MyMesh.cpp) —
+        only export/import are — so this works on stock firmware, and works
+        identically over serial, TCP, or BLE since all three transports route
+        through the same BaseSerialInterface command dispatch. The raw key
+        never leaves the device.
+
+        Only one sign operation may be in flight on this adapter at a time —
+        _sign_waiter is a single slot, matched against the next OK/ERROR/
+        SIGN_START/SIGNATURE frame the device sends. Companion protocol
+        commands are effectively synchronous (one in flight at a time) in
+        practice throughout this file, so that's consistent with everything
+        else here, not a new constraint.
+        """
+        if len(data) > 8000:   # device buffer is 8192 bytes (MAX_SIGN_DATA_LEN); leave headroom
+            raise ValueError("sign_data payload too large for a single MeshCore SIGN frame")
+        if self._sign_waiter is not None:
+            log.warning("MeshCore %s: sign_data() called while another sign op is in flight", self.name)
+            return None
+
+        async def _await_one() -> tuple[int, bytes] | None:
+            fut: asyncio.Future = asyncio.get_running_loop().create_future()
+            self._sign_waiter = fut
+            try:
+                return await asyncio.wait_for(fut, timeout=timeout)
+            except asyncio.TimeoutError:
+                return None
+            finally:
+                self._sign_waiter = None
+
+        await self._send_cmd(bytes([CMD_SIGN_START]))
+        resp = await _await_one()
+        if resp is None or resp[0] != PACKET_SIGN_START:
+            log.warning("MeshCore %s: SIGN_START not accepted (resp=%s)", self.name, resp)
+            return None
+
+        await self._send_cmd(bytes([CMD_SIGN_DATA]) + data)
+        resp = await _await_one()
+        if resp is None or resp[0] != PACKET_OK:
+            log.warning("MeshCore %s: SIGN_DATA rejected (resp=%s)", self.name, resp)
+            return None
+
+        await self._send_cmd(bytes([CMD_SIGN_FINISH]))
+        resp = await _await_one()
+        if resp is None or resp[0] != PACKET_SIGNATURE:
+            log.warning("MeshCore %s: device returned no signature (resp=%s)", self.name, resp)
+            return None
+        return resp[1]
 
     @property
     def tx_channel(self) -> str:

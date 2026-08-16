@@ -27,6 +27,10 @@ Config keys:
                             Overrides username/password if the pubkey is available.
   pubkey_auth_mode  str     "letsmesh" (default) — username=8-char shortkey, password=full64hex
                             "full"               — username=full64hex, password=full64hex
+  jwt_owner         str     optional — links this observer to a letsmesh.net dashboard
+                            account for pubkey_auth JWTs (only sent when tls: true)
+  jwt_email         str     optional — same account-linking purpose as jwt_owner, the
+                            email used to log into letsmesh.net (only sent when tls: true)
   tls               bool    enable TLS (default: False)
   client_id         str     MQTT client ID (default: ech-{name})
   topics            list    topics to subscribe to (default: ['#'])
@@ -53,15 +57,21 @@ Example configs:
 
   # LetsMesh broker — hardware-key JWT auth (meshcoretomqtt scheme)
   # username = "v1_{PUBKEY_HEX}"  password = Ed25519-signed JWT
-  # Obtain private_key by running "get prv.key" on the MeshCore serial console.
+  # Signed ON-DEVICE via CMD_SIGN_START/DATA/FINISH (see MeshCoreAdapter.sign_data) —
+  # the raw private key never leaves the radio and never needs to be typed
+  # into this file. Works over serial, TCP, or BLE identically. Only set
+  # private_key below as a fallback for when the meshcore adapter is
+  # disconnected at JWT-refresh time (rare — signing just fails until it
+  # reconnects, the same as any other MeshCore feature would).
   - type: mqtt
     name: letsmesh-us
     host: mqtt-us-v1.letsmesh.net
     port: 443
     tls: true
     transport: websockets
-    pubkey_auth: meshcore        # MeshCore adapter name to pull pubkey from
-    private_key: ""              # 64-byte hex private key from "get prv.key" (keep out of git)
+    pubkey_auth: meshcore        # MeshCore adapter name to pull pubkey from / sign with
+    private_key: ""              # optional fallback: 64-byte hex, exported via the MeshCore
+                                  # app (Settings -> Manage Identity Key). Keep out of git.
     token_ttl: 3600              # JWT lifetime in seconds (default 1 hour)
     topics: ["meshcore/+/+/packets"]
 """
@@ -75,6 +85,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
+from ech import __version__ as ECH_VERSION
 from ech.adapters.base import Adapter
 from ech.core.models import NormalizedMessage, Priority
 
@@ -109,6 +120,13 @@ class MQTTAdapter(Adapter):
         self._pubkey_auth_mode = config.get("pubkey_auth_mode", "letsmesh")
         self._private_key      = config.get("private_key", "").strip()  # 64-byte hex Ed25519 key
         self._token_ttl        = int(config.get("token_ttl", 3600))
+        # Optional JWT claims matching the reference meshcoretomqtt client
+        # (Cisien/meshcoretomqtt bridge/mqtt_manager.py) — owner/email link
+        # this observer to a letsmesh.net dashboard account (cosmetic, not
+        # required for auth per LetsMesh's own docs) and are only sent when
+        # tls is enabled, matching the reference client's own guard.
+        self._jwt_owner        = config.get("jwt_owner", "").strip()
+        self._jwt_email        = config.get("jwt_email", "").strip()
         self._tls              = bool(config.get("tls", False))
         self._client_id        = config.get("client_id", f"ech-{self.name}")
         self._topics           = config.get("topics", ["#"])
@@ -124,12 +142,22 @@ class MQTTAdapter(Adapter):
     def _b64url(data: bytes) -> str:
         return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
-    def _make_jwt(self, pubkey_hex: str, privkey_hex: str) -> str:
-        """Generate a meshcoretomqtt-compatible Ed25519 JWT.
+    def _jwt_header_and_payload(self, pubkey_hex: str) -> tuple[str, str]:
+        """Build the base64url header/payload halves of a meshcoretomqtt-
+        compatible Ed25519 JWT. Shared by both signing paths below — only the
+        signature (device vs. local) differs.
 
-        Format: base64url(header).base64url(payload).HEX_SIGNATURE
-        Signed with the MeshCore device's Ed25519 private key.
-        Private key is 64 bytes: seed(32) || pubkey(32).
+        Claim set matches the reference client (Cisien/meshcoretomqtt
+        bridge/mqtt_manager.py `_generate_auth_credentials`), confirmed
+        against its source rather than assumed:
+          publicKey/iat/exp  — always present
+          aud                — the broker hostname (LetsMesh's own example
+                               config sets audience to the exact server value)
+          client             — always present in the reference; ECH's JWT was
+                               previously missing this claim entirely
+          owner/email        — optional, only sent when tls is enabled
+                               (matching the reference's own guard), link this
+                               observer to a letsmesh.net dashboard account
         """
         header = self._b64url(json.dumps({"alg": "Ed25519", "typ": "JWT"},
                                          separators=(",", ":")).encode())
@@ -139,48 +167,87 @@ class MQTTAdapter(Adapter):
             "iat": iat,
             "exp": iat + self._token_ttl,
             "aud": self._host,
+            "client": f"ech-{ECH_VERSION}",
         }
+        if self._tls:
+            if self._jwt_owner:
+                payload_obj["owner"] = self._jwt_owner
+            if self._jwt_email:
+                payload_obj["email"] = self._jwt_email.lower()
         payload = self._b64url(json.dumps(payload_obj, separators=(",", ":")).encode())
+        return header, payload
+
+    def _make_jwt(self, pubkey_hex: str, privkey_hex: str) -> str:
+        """Sign locally with a raw private key from config. Format:
+        base64url(header).base64url(payload).HEX_SIGNATURE
+        Private key is 64 bytes: seed(32) || pubkey(32)."""
+        header, payload = self._jwt_header_and_payload(pubkey_hex)
         signing_input = f"{header}.{payload}".encode()
 
         from Crypto.PublicKey import ECC
         from Crypto.Signature import eddsa
-        # MeshCore private key: 64 bytes = 32-byte seed || 32-byte pubkey
         seed = bytes.fromhex(privkey_hex)[:32]
         key = ECC.construct(curve="Ed25519", seed=seed)
         sig = eddsa.new(key, "rfc8032").sign(signing_input).hex().upper()
         return f"{header}.{payload}.{sig}"
 
-    def _resolve_credentials(self) -> tuple[str | None, str | None]:
+    async def _make_device_jwt(self, pubkey_hex: str) -> str | None:
+        """Sign on-device: ask the live MeshCore adapter to sign header.payload
+        with its own Ed25519 identity key (MeshCoreAdapter.sign_data — see
+        that method's docstring). The raw key never leaves the radio. Returns
+        None if the adapter isn't connected or the sign round-trip fails, so
+        the caller can fall back to a configured private_key."""
+        from ech.adapters.meshcore import _adapter_registry
+        adapter = _adapter_registry.get(self._pubkey_auth)
+        if adapter is None or not getattr(adapter, "_connected", False):
+            return None
+        header, payload = self._jwt_header_and_payload(pubkey_hex)
+        signing_input = f"{header}.{payload}".encode()
+        try:
+            sig_bytes = await adapter.sign_data(signing_input)
+        except Exception as exc:
+            log.warning("MQTT %s: device-side signing errored: %s", self.name, exc)
+            return None
+        if sig_bytes is None:
+            return None
+        return f"{header}.{payload}.{sig_bytes.hex().upper()}"
+
+    async def _resolve_credentials(self) -> tuple[str | None, str | None]:
         """Return (username, password).
 
-        When pubkey_auth is set and a private_key is configured, generates a
-        meshcoretomqtt-compatible Ed25519 JWT (same scheme as LetsMesh):
+        When pubkey_auth is set, generates a meshcoretomqtt-compatible
+        Ed25519 JWT (same scheme as LetsMesh):
           username = "v1_{PUBKEY_HEX}"
-          password = JWT signed with device private key
-        Falls back to username/password from config if not configured.
+          password = JWT signed with the device's identity key
+        Signing prefers the live device (sign_data() over the binary
+        companion protocol — no key material ever leaves the radio) and
+        falls back to a locally-configured private_key only if the device
+        isn't reachable right now. Falls back to plain username/password
+        from config if pubkey_auth isn't set at all.
         """
         if self._pubkey_auth:
             try:
-                from ech.adapters.meshcore import _pubkey_registry, _privkey_registry
-                pubkey  = _pubkey_registry.get(self._pubkey_auth)
-                # Auto-retrieved key (serial transport) takes priority over config value
-                privkey = _privkey_registry.get(self._pubkey_auth) or self._private_key
+                from ech.adapters.meshcore import _pubkey_registry
+                pubkey = _pubkey_registry.get(self._pubkey_auth)
                 if not pubkey:
                     log.warning("MQTT %s: pubkey not yet available from adapter %r — "
                                 "will retry on reconnect", self.name, self._pubkey_auth)
                     return self._username, self._password
-                if not privkey:
-                    log.warning("MQTT %s: private key not available — for serial transport it is "
-                                "fetched automatically; for TCP add 'private_key: <128-hex-chars>' "
-                                "(run 'get prv.key' on the device serial console to get it)",
-                                self.name)
-                    return self._username, self._password
-                try:
-                    token = self._make_jwt(pubkey, privkey)
+
+                token = await self._make_device_jwt(pubkey)
+                if token is not None:
                     return f"v1_{pubkey.upper()}", token
-                except Exception as exc:
-                    log.error("MQTT %s: JWT generation failed: %s", self.name, exc)
+
+                if self._private_key:
+                    try:
+                        token = self._make_jwt(pubkey, self._private_key)
+                        return f"v1_{pubkey.upper()}", token
+                    except Exception as exc:
+                        log.error("MQTT %s: local JWT generation failed: %s", self.name, exc)
+                else:
+                    log.warning("MQTT %s: no signature available — MeshCore adapter %r isn't "
+                                "connected and no fallback private_key is configured",
+                                self.name, self._pubkey_auth)
             except ImportError:
                 log.warning("MQTT %s: pubkey_auth requires meshcore adapter", self.name)
         return self._username, self._password
@@ -207,7 +274,7 @@ class MQTTAdapter(Adapter):
             return False
         try:
             import aiomqtt
-            username, password = self._resolve_credentials()
+            username, password = await self._resolve_credentials()
             pub_kw = self._build_client_kwargs(aiomqtt, username, password, self._tls, f"{self._client_id}-pub")
             async with aiomqtt.Client(**pub_kw) as client:
                 await client.publish(
@@ -248,7 +315,7 @@ class MQTTAdapter(Adapter):
         backoff = 2.0
         while self._connected:
             try:
-                username, password = self._resolve_credentials()
+                username, password = await self._resolve_credentials()
                 if username:
                     log.debug("MQTT %s: connecting as %s…", self.name, username[:16])
                 client_kw = self._build_client_kwargs(aiomqtt, username, password, self._tls, self._client_id)
@@ -264,8 +331,10 @@ class MQTTAdapter(Adapter):
                     async for mqtt_msg in client.messages:
                         if not self._connected:
                             break
-                        # Reconnect before JWT expiry to get a fresh token
-                        if self._pubkey_auth and self._private_key:
+                        # Reconnect before JWT expiry to get a fresh token — applies whether
+                        # the token was device-signed or locally-signed, so no longer gated
+                        # on self._private_key being set.
+                        if self._pubkey_auth:
                             age = time.time() - token_born
                             if age >= self._token_ttl * 0.9:
                                 log.info("MQTT %s: JWT near expiry, reconnecting for fresh token",
@@ -434,15 +503,17 @@ class MQTTAdapter(Adapter):
     def _health_detail(self) -> dict:
         if self._pubkey_auth:
             try:
-                from ech.adapters.meshcore import _pubkey_registry, _privkey_registry
-                pk  = _pubkey_registry.get(self._pubkey_auth, "")
-                prv = _privkey_registry.get(self._pubkey_auth) or self._private_key
+                from ech.adapters.meshcore import _pubkey_registry, _adapter_registry
+                pk = _pubkey_registry.get(self._pubkey_auth, "")
+                adapter = _adapter_registry.get(self._pubkey_auth)
+                device_signing = bool(adapter and getattr(adapter, "_connected", False))
                 auth = f"jwt:v1_{pk[:8]}…" if pk else "jwt:pubkey-pending"
-                if not prv:
-                    auth += " (no privkey — TCP: add private_key to config)"
+                if device_signing:
+                    auth += " sign:device"
+                elif self._private_key:
+                    auth += " sign:config-key (device not connected)"
                 else:
-                    src = "auto" if _privkey_registry.get(self._pubkey_auth) else "config"
-                    auth += f" privkey:{src}"
+                    auth += " (no signature available — connect the MeshCore adapter or set private_key)"
             except ImportError:
                 auth = "jwt:no-meshcore"
         elif self._username:

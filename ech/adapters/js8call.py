@@ -76,6 +76,15 @@ APP_CLOSE       = "CLOSE"
 TX_SEND_MESSAGE = "TX.SEND_MESSAGE"
 STATION_GET_INFO = "STATION.GET_INFO"
 STATION_INFO    = "STATION.INFO"
+# STATION.INFO's `value` is a free-text version string (e.g. "JS8-IMPROVED
+# VER 2.x"), NOT structured CALL/GRID params — confirmed against the API
+# docs. STATION.GET_CALLSIGN / STATION.GET_GRID are the real way to learn
+# our own callsign/grid; their responses carry it as a plain string in
+# `value` too, just the right one.
+STATION_GET_CALLSIGN = "STATION.GET_CALLSIGN"
+STATION_CALLSIGN     = "STATION.CALLSIGN"
+STATION_GET_GRID     = "STATION.GET_GRID"
+STATION_GRID         = "STATION.GRID"
 PING            = "PING"
 
 SPEED_NAMES = {0: "Normal", 1: "Fast", 2: "Turbo", 4: "Slow"}
@@ -117,6 +126,7 @@ class JS8CallAdapter(Adapter):
         self._rx_count = 0
         self._tx_count = 0
         self._js8_callsign = ""   # confirmed callsign from JS8Call itself
+        self._js8_grid = ""       # confirmed grid square from JS8Call itself
         self._nodes: dict = {}    # callsign → MeshNode (for grid/position tracking)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
@@ -136,8 +146,12 @@ class JS8CallAdapter(Adapter):
 
         self._connected = True
 
-        # Query station info to confirm connection and get callsign
+        # STATION.GET_INFO's reply is just a free-text version string — use
+        # it only to confirm the connection is alive. The real callsign/grid
+        # come from their own dedicated GET_CALLSIGN/GET_GRID commands.
         await self._send(STATION_GET_INFO)
+        await self._send(STATION_GET_CALLSIGN)
+        await self._send(STATION_GET_GRID)
         await asyncio.sleep(0.2)
 
         self._run_task = asyncio.create_task(self._run(), name=f"{self.name}-run")
@@ -266,22 +280,40 @@ class JS8CallAdapter(Adapter):
             self._speed = int(params.get("SPEED", 0))
             log.debug("JS8Call %s: speed %s", self.name, SPEED_NAMES.get(self._speed, self._speed))
 
-        elif msg_type == "RX.CALL_ACTIVITY":
-            # Heard station activity — may carry grid square and SNR
-            call = params.get("FROM", "").upper().strip()
-            grid = params.get("GRID", "").strip()
-            snr  = params.get("SNR")
-            if call and grid:
-                await self._update_node_grid(call, grid, snr)
+        elif msg_type == RX_CALL_ACTIVITY:
+            # params is a dict KEYED BY CALLSIGN, not a flat FROM/GRID/SNR
+            # record — e.g. {"AB4WV": {"GRID":"","SNR":-18,"UTC":...}, ...}.
+            # Confirmed against the JS8Call API docs; reading params.get("FROM")
+            # here could never match anything since this message type has no
+            # top-level "FROM" key at all.
+            for call, info in params.items():
+                if not isinstance(info, dict):
+                    continue
+                call = call.upper().strip()
+                grid = (info.get("GRID") or "").strip()
+                snr  = info.get("SNR")
+                if call and grid:
+                    await self._update_node_grid(call, grid, snr)
 
         elif msg_type == STATION_INFO:
-            self._js8_callsign = params.get("CALL", self._callsign).upper()
-            grid  = params.get("GRID", "").strip()
+            # `value` is a free-text version string (e.g. "JS8-IMPROVED VER
+            # 2.x"), not structured CALL/GRID params — connection-confirmation
+            # only. Real callsign/grid come from GET_CALLSIGN/GET_GRID below.
+            log.info("JS8Call %s: station info: %s", self.name, value)
+
+        elif msg_type == STATION_CALLSIGN:
+            self._js8_callsign = (value or self._callsign).upper().strip()
+            log.info("JS8Call %s: callsign confirmed: %s", self.name, self._js8_callsign)
+            if self._js8_grid:   # GET_GRID's reply may have arrived first
+                await self._update_node_grid(self._js8_callsign, self._js8_grid, snr=None)
+
+        elif msg_type == STATION_GRID:
+            grid = (value or "").strip()
             if grid:
-                log.info("JS8Call %s: station info: %s grid %s", self.name, self._js8_callsign, grid)
-                await self._update_node_grid(self._js8_callsign, grid, snr=None)
-            else:
-                log.info("JS8Call %s: station info: %s", self.name, self._js8_callsign)
+                self._js8_grid = grid.upper()
+                log.info("JS8Call %s: grid confirmed: %s", self.name, self._js8_grid)
+                if self._js8_callsign:
+                    await self._update_node_grid(self._js8_callsign, self._js8_grid, snr=None)
 
         elif msg_type == APP_CLOSE:
             log.warning("JS8Call %s: JS8Call is closing", self.name)
@@ -297,8 +329,14 @@ class JS8CallAdapter(Adapter):
         """
         self._rx_count += 1
 
-        # Parse sender and text from value
-        from_id, text = self._parse_js8_value(value)
+        # Prefer the structured FROM param (present on RX.DIRECTED, confirmed
+        # against the JS8Call API docs) over parsing it out of `value` — more
+        # robust against message text that itself contains a colon. Text
+        # still comes from value's parsed remainder: params.TEXT can be
+        # empty on pure command messages (e.g. HEARTBEAT) where the
+        # human-readable content lives only in value.
+        parsed_from, text = self._parse_js8_value(value)
+        from_id = (params.get("FROM") or parsed_from).upper().strip()
         if not from_id or not text:
             return
 
@@ -483,6 +521,7 @@ class JS8CallAdapter(Adapter):
         return {
             "host": f"{self._host}:{self._port}",
             "callsign": self._js8_callsign or self._callsign,
+            "grid": self._js8_grid,
             "freq_khz": self._freq_hz // 1000 if self._freq_hz else 0,
             "dial_khz": self._dial_hz // 1000 if self._dial_hz else 0,
             "speed": SPEED_NAMES.get(self._speed, self._speed),

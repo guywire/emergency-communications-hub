@@ -55,6 +55,7 @@ PORTNUM_TEXT_MESSAGE = 1
 PORTNUM_POSITION     = 3
 PORTNUM_NODEINFO     = 4
 PORTNUM_ROUTING      = 5
+PORTNUM_WAYPOINT     = 8
 PORTNUM_TELEMETRY    = 67
 PORTNUM_TRACEROUTE   = 70
 PORTNUM_NEIGHBORINFO = 71
@@ -478,6 +479,9 @@ class MeshtasticAdapter(Adapter):
             elif portnum in ("NEIGHBORINFO_APP", str(PORTNUM_NEIGHBORINFO)):
                 await self._handle_neighborinfo(decoded, from_id)
 
+            elif portnum in ("WAYPOINT_APP", str(PORTNUM_WAYPOINT)):
+                await self._handle_waypoint(packet, decoded, from_id, channel)
+
         except Exception as exc:
             log.debug("Meshtastic %s: packet dispatch error: %s", self.name, exc)
 
@@ -579,6 +583,68 @@ class MeshtasticAdapter(Adapter):
             raw={"type": "position", "altitude": alt},
         )
         await self._enqueue(msg)
+
+    async def _handle_waypoint(self, packet, decoded, from_id, channel) -> None:
+        """Decode WAYPOINT_APP — a named point placed on the map by any node,
+        not tied to that node's own position (trailhead, muster point, hazard
+        marker, etc.). Kept as its own pseudo-node (keyed by the waypoint's
+        stable id, not the sender's) so re-broadcasts of the same waypoint
+        update one marker instead of piling up duplicates, same pattern APRS
+        objects use. A waypoint with expire in the past is a delete — the
+        Meshtastic app has no separate delete message, republishing with an
+        elapsed expire IS the deletion."""
+        wp = decoded.get("waypoint", {})
+        wid = wp.get("id")
+        lat = wp.get("latitudeI", 0) / 1e7
+        lon = wp.get("longitudeI", 0) / 1e7
+        if lat == 0.0 and lon == 0.0:
+            return
+        name = (wp.get("name") or "").strip() or f"Waypoint {wid}"
+        description = (wp.get("description") or "").strip()
+        expire = wp.get("expire") or 0
+        icon_cp = wp.get("icon") or 0
+
+        wpt_key = f"wpt:{wid}" if wid is not None else f"wpt:{from_id}:{lat:.5f}:{lon:.5f}"
+        now = datetime.now(timezone.utc)
+
+        if expire and now.timestamp() >= expire:
+            removed = self._nodes.pop(wpt_key, None)
+            if removed:
+                log.info("Meshtastic %s: waypoint %r removed (expired)", self.name, removed.display_name)
+            return
+
+        sender = self._nodes.get(from_id)
+        placed_by = sender.display_name if sender else from_id
+
+        existing = self._nodes.get(wpt_key)
+        if existing:
+            existing.display_name = name
+            existing.lat, existing.lon = lat, lon
+            existing.last_heard = now
+            existing.meta.update({"description": description, "icon_codepoint": icon_cp, "placed_by": placed_by})
+        else:
+            self._nodes[wpt_key] = MeshNode(
+                node_id=wpt_key,
+                display_name=name,
+                lat=lat, lon=lon,
+                first_seen=now, last_heard=now,
+                name_source="waypoint",
+                meta={"node_type": "WAYPOINT", "description": description,
+                      "icon_codepoint": icon_cp, "placed_by": placed_by},
+            )
+
+        body = f"📍 WAYPOINT {name}" + (f": {description}" if description else "")
+        msg = NormalizedMessage(
+            source_adapter=self.name,
+            source_channel=f"ch{channel}",
+            from_id=from_id,
+            from_display=placed_by,
+            body=body,
+            lat=lat, lon=lon,
+            raw={"type": "waypoint", "waypoint_id": wid},
+        )
+        await self._enqueue(msg)
+        log.info("Meshtastic %s: waypoint %r from %s at %.5f,%.5f", self.name, name, placed_by, lat, lon)
 
     def _handle_nodeinfo(self, decoded, from_id, snr, rssi) -> None:
         user = decoded.get("user", {})

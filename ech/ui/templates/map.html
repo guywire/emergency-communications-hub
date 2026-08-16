@@ -229,6 +229,19 @@ function nodeIsVessel(node) {
 
 function makeNodeIcon(node, color, size=12) {
   const id = (node.node_id || '').toLowerCase();
+  if (node.node_type === 'WAYPOINT') {
+    const sz = size + 6;
+    // Meshtastic sends an optional custom icon as a Unicode codepoint; fall
+    // back to a plain pin when the placer didn't set one.
+    const cp = node.meta && node.meta.icon_codepoint;
+    const glyph = cp ? String.fromCodePoint(cp) : '📍';
+    return L.divIcon({
+      className: 'node-dot',
+      html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center">${glyph}</div>`,
+      iconSize: [sz, sz],
+      iconAnchor: [sz/2, sz],
+    });
+  }
   if (id.startsWith('icao:')) {
     const sz = size + 4;
     // ✈ emoji points right (≈90° compass); rotate so it faces track_deg
@@ -301,7 +314,7 @@ function popupContent(node, isAlert, lastMsg) {
   const isMeshCore = (node._adapter || '').toLowerCase().includes('meshcore');
   // Node role: repeaters/digis/WX/sensors can't receive messages — say so
   // instead of offering a Message button that silently goes nowhere.
-  const NON_MSG = ['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT'];
+  const NON_MSG = ['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT', 'WAYPOINT'];
   const ntype = node.node_type || '';
   const messageable = !NON_MSG.includes(ntype);
   const typeBadge = ntype
@@ -345,6 +358,10 @@ function popupContent(node, isAlert, lastMsg) {
         + ` &bull; <a href="${mtUrl}" target="_blank" rel="noopener">MarineTraffic</a>`
         + `</div>`;
     }
+  } else if (node.node_type === 'WAYPOINT') {
+    extLinks = `<div class="node-ext-links">📍 ${esc(meta.description || 'Waypoint')}`
+      + (meta.placed_by ? `<div class="node-stat">Placed by ${esc(meta.placed_by)}</div>` : '')
+      + `</div>`;
   } else if (meta.icao) {
     const icao   = esc(meta.icao);
     const flight = meta.flight ? meta.flight.trim() : '';

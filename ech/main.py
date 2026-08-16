@@ -133,6 +133,11 @@ def build_adapter(cfg: dict):
         "aredn_ami":   ("ech.adapters.aredn_ami",        "AREDNAMIAdapter",    None),
         "asterisk":    ("ech.adapters.asterisk_adapter", "AsteriskAdapter",    None),
         "ax25_bbs":    ("ech.adapters.ax25_bbs_adapter",  "AX25BBSAdapter",    None),
+        "dapnet":      ("ech.adapters.dapnet",            "DAPNETAdapter",     "httpx"),
+        "aredn_meshchat": ("ech.adapters.aredn_meshchat", "AREDNMeshChatAdapter", "httpx"),
+        "m17_reflector": ("ech.adapters.m17_reflector", "M17ReflectorAdapter", None),
+        "dmr_brandmeister": ("ech.adapters.dmr_brandmeister", "DMRBrandmeisterAdapter",
+                             "dmr_utils3, bitarray, libscrc"),
     }
 
     entry = _mocks.get(adapter_type) or _real.get(adapter_type)

@@ -108,7 +108,7 @@ Based on: `ECV_v3_fixes.txt`, `ECH ADAPTER ENHANCEMENT REQUIREMENT.txt`, real-wo
 | Battery (CMD_GET_BATTERY) | PARTIAL | command exists, not polled periodically |
 | GPS from structured packets | YES | lat/lon extracted to NormalizedMessage |
 | GPS / altitude from free-text | YES | anomaly engine regex extraction |
-| Voltage | PENDING | not implemented |
+| Voltage | DONE | stale row — `_battery_mv`/`battery_v` in `_health_detail()`, same CMD_GET_BATTERY poll as O3 |
 | Environmental sensors | PENDING | not in Companion Protocol spec |
 
 ### Message Features
@@ -155,7 +155,7 @@ Based on: `ECV_v3_fixes.txt`, `ECH ADAPTER ENHANCEMENT REQUIREMENT.txt`, real-wo
 | Log channel changes | YES | INFO log |
 | Log discovery events | YES | DEBUG log |
 | Log protocol errors | YES | ERROR log |
-| Last discovery timestamp | PENDING | not yet tracked and returned |
+| Last discovery timestamp | DONE | stale row — `_last_discovery_ts` / `last_discovery_ago` in `_health_detail()` shipped with O8 |
 | Last message timestamp | PARTIAL | not in health endpoint, in messages table |
 
 ---
@@ -203,10 +203,10 @@ Based on: `ECV_v3_fixes.txt`, `ECH ADAPTER ENHANCEMENT REQUIREMENT.txt`, real-wo
 | Text messages | DONE | meshtastic_adapter.py |
 | Position/GPS | DONE | `_on_position()` handler |
 | Node info (NodeInfo portnum) | PARTIAL | basic name extraction |
-| Telemetry (DeviceMetrics, EnvironmentMetrics) | PENDING | not yet decoded |
-| NeighborInfo | PENDING | not yet decoded |
-| Traceroute | PENDING | not yet decoded |
-| Waypoints | PENDING | not yet decoded |
+| Telemetry (DeviceMetrics, EnvironmentMetrics) | DONE | stale row — `_handle_telemetry()` (O5) |
+| NeighborInfo | DONE | stale row — `_handle_neighborinfo()` (O6) |
+| Traceroute | DONE | stale row — `_handle_traceroute()`, surfaced as path-annotated message |
+| Waypoints | DONE | `_handle_waypoint()` (O70) — decoded to a marker (keyed by waypoint id, not sender, so re-broadcasts update in place) plus a feed message; map shows the waypoint's custom icon glyph or 📍 |
 | via_mqtt flag | DONE | `viaMqtt` field in packet |
 | Hop count | DONE | `hopLimit` field |
 
@@ -217,9 +217,9 @@ Based on: `ECV_v3_fixes.txt`, `ECH ADAPTER ENHANCEMENT REQUIREMENT.txt`, real-wo
 | LXMF message receive | DONE | reticulum_adapter.py |
 | Announce handling | PARTIAL | basic |
 | Identity management | PARTIAL | |
-| Path requests / discovery | PENDING | |
-| Delivery receipts | PENDING | |
-| Propagation / transport node info | PENDING | |
+| Path requests / discovery | DONE (O72) | `send()` now requests a path and waits up to `path_request_timeout` (default 10s) for `RNS.Transport.has_path()` instead of failing the first send to a peer immediately |
+| Delivery receipts | DONE (O72) | LXMF `register_delivery_callback`/`register_failed_callback` bridged to `_router_notify()` — same delivered/failed reporting meshtastic_adapter.py and meshcore.py already give other protocols |
+| Propagation / transport node info | DONE (O72) | `_health_detail()` reports propagation node path status and transport interface count |
 
 ### APRS-IS / APRS-KISS
 
@@ -229,7 +229,7 @@ Based on: `ECV_v3_fixes.txt`, `ECH ADAPTER ENHANCEMENT REQUIREMENT.txt`, real-wo
 | Position decode | DONE | |
 | Object/item decode | PARTIAL | |
 | Weather decode | PARTIAL | |
-| Telemetry decode | PENDING | |
+| Telemetry decode | DONE | stale row — `_packet_to_body()` format="telemetry"/"telemetry-message" (O9) |
 | Station directory population | PARTIAL | |
 | Directed messages to own SSID variants | DONE | aprs_is.py — checks both base call and full callsign-with-SSID |
 | APRS filter fix (no bogus m/CALLSIGN filter) | DONE | aprs_is.py — server auto-delivers messages to authenticated callsign |
@@ -238,20 +238,20 @@ Based on: `ECV_v3_fixes.txt`, `ECH ADAPTER ENHANCEMENT REQUIREMENT.txt`, real-wo
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Message receive | DONE | mock_js8call.py |
-| Heartbeat / directed messages | PARTIAL | |
-| Grid square / position | PENDING | |
-| Station network topology | PENDING | |
+| Message receive | DONE | stale row — real adapter is `js8call.py` (JSON-over-TCP to JS8Call's own API on :2442), not just the mock; RX.DIRECTED/INBOX.MESSAGE(S) handled. `RX_MSG` ("RX.MSG") dispatch is still wired up per the adapter's original docstring reference, but it doesn't appear in the JS8Call-improved fork's API docs consulted this session — left in place since it's harmless if JS8Call never actually sends it, but unconfirmed either way |
+| Heartbeat / directed messages | DONE | stale row — `_heartbeat()` PING loop keeps the TCP connection alive; directed vs. broadcast detected via `RX_DIRECTED`/`TO` param, `send()` targets a specific callsign or `@ALLCALL` |
+| Grid square / position | DONE (O74) | stale row, and a real bug fixed alongside it: `RX.CALL_ACTIVITY`'s `params` is a dict *keyed by callsign* (`{"W1ABC":{"GRID":...,"SNR":...}}`), not a flat `FROM`/`GRID`/`SNR` record — confirmed against the JS8Call API docs (two independent sources: pauloffordracing.com and the JS8Call-improved fork's docs/API.md) with a literal example. The old code read `params.get("FROM")`, which could never match anything since that key doesn't exist at that level — this handler was silently a no-op the whole time. Also `STATION.INFO`'s `value` is a free-text version string, not `CALL`/`GRID` params — the old code's `_js8_callsign`/grid never actually came from JS8Call, only ever fell back to config. Fixed by using the real `STATION.GET_CALLSIGN`/`STATION.GET_GRID` commands (plain-string `value` responses) instead |
+| Station network topology | DONE | stale row — `nodes()` returns heard stations as `MeshNode`s with grid-derived lat/lon, now actually populated per the O74 fix above |
 
 ### Pat Winlink
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Message send/receive | DONE | mock_pat_winlink.py |
-| RMS discovery | PENDING | |
-| Session status | PENDING | |
-| Transfer progress | PENDING | |
-| Inbox/outbox monitoring | PENDING | |
+| Message send/receive | DONE (O73) | `pat_winlink.py` — real adapter already existed (feature matrix only listed the mock, badly stale); found and fixed real protocol bugs against the actual `la5nta/pat` source: `send()` posted JSON, but Pat's `postOutboundMessageHandler` parses `r.Form` (now form-encoded); inbox parsing read lowercase field names (`mid`/`from`/`subject`) against Pat's actual PascalCase JSON (`MID`/`From`/`Subject` — `From` is an `{Proto,Addr}` object, not a string) — this meant every inbound message's mid resolved to `""`, so only the very first message ever surfaced and every message after it was silently deduplicated away as "already seen". `mock_pat_winlink.py`'s `MockPatServer` had the same wrong assumptions baked in, so all tests passed while the real thing was broken — fixed both sides against source, not against each other |
+| RMS discovery | DONE (O73) | was hitting a nonexistent URL (`/rms/list`); real endpoint (same one Pat itself uses) is `https://api.winlink.org/gateway/status.json`, response envelope and per-channel field nesting (`Gateways[].Channels[]`) also corrected |
+| Session status | DONE | WS `{"Lines":[...]}` events tracked in `_session_lines`/`_session_status`, surfaced in health |
+| Transfer progress | DONE | same WS Lines mechanism — connect/transfer/complete/error lines captured |
+| Inbox/outbox monitoring | DONE (O73) | `list_inbox()` for the dashboard mail panel, WS `NewMessages` event + poll loop for inbox; outbox via `send()` (now correctly form-encoded) |
 
 ---
 
@@ -336,12 +336,12 @@ Based on: `ECV_v3_fixes.txt`, `ECH ADAPTER ENHANCEMENT REQUIREMENT.txt`, real-wo
 | ID | Description | Priority | Status |
 |----|-------------|----------|--------|
 | O1 | Node departure detection (timeout-based offline inference) | P2 | DONE — `is_online` in MeshNode.to_dict() (15-min threshold); map grays out + dims offline markers; node list shows "stale" tag |
-| O2 | Individual relay node IDs in received channel msg path | P3 | BLOCKED — Companion Protocol relay IDs not in 0x08/0x11 polled packets; use SEND_TRACE_PATH (0x24) → TRACE_DATA (0x89) for explicit path probing |
+| O2 | Individual relay node IDs in received channel msg path | P3 | SUPERSEDED (2026-07-12) — polled 0x08/0x11 packets still carry no relay IDs as originally noted, but the raw RX log (0x88 LOG_DATA) correlates by SNR to the same packet and exposes its relay-hash chain; `GET /api/adapters/{name}/resolve_path` resolves those hashes to node names per-message, wired into the message feed's path-detail click (see feature matrix "Relay node names in path") |
 | O3 | Battery polling on schedule (CMD_GET_BATTERY every N min) | P2 | DONE — polling every 5 min; 0x0C response parsed to `_battery_mv`; shown in health detail |
-| O4 | JWT auth for MeshMapper/LetsMesh (requires device private key) | P2 | DONE — `mqtt_adapter.py` Ed25519 JWT via pycryptodome |
+| O4 | JWT auth for MeshMapper/LetsMesh (requires device private key) | P2 | DONE, then superseded (2026-08-15, O71) — originally local Ed25519 signing via pycryptodome off an exported/pasted key; now signs ON-DEVICE via `CMD_SIGN_START/DATA/FINISH`, no key export needed at all, works on serial/TCP/BLE alike (see O71) |
 | O5 | Meshtastic telemetry decode (DeviceMetrics, EnvironmentMetrics) | P2 | DONE — `_handle_telemetry()` decodes battery/voltage/ch_util/air_util_tx/uptime/temp/humidity/pressure; `node_telemetry` WS event updates node card live |
 | O6 | Meshtastic NeighborInfo and Traceroute decode | P2 | DONE — `_handle_neighborinfo()` decodes NEIGHBORINFO_APP (portnum 71); registers unknown neighbors; updates node.meta["neighbors"]; emits `neighbor_info` WS event |
-| O7 | Reticulum delivery receipts | P3 | PENDING |
+| O7 | Reticulum delivery receipts | P3 | DONE (2026-08-15, O72) — see Reticulum feature matrix |
 | O8 | Last discovery timestamp in health endpoint | P3 | DONE — `_last_discovery_ts` instance var; `last_discovery_ago` (seconds) in `_health_detail()` |
 | O9 | APRS telemetry decode | P3 | DONE — `_packet_to_body()` handles format="telemetry" (T# seq + 5 analog vals + digital bits) and "telemetry-message" config frames |
 | O10 | ADS-B aircraft heading/track shown as rotated icon on map | P3 | DONE — `makeNodeIcon()` uses `meta.track_deg` to rotate ✈; defaults to -45° if no track |
@@ -544,6 +544,243 @@ value/effort: AFSK1200 (drop the Direwolf dependency), RTTY, PSK31 (AUD-5).
 
 ---
 
+## Database Subsystem — Path, Health, and a Past Incident (2026-08-12)
+
+**Single connection point.** The entire app has exactly one place that opens
+a sqlite connection: `ech/core/database.py`'s `Database` class, instantiated
+once in `main.py` from `config["database"]["path"]` (default `"ech.db"` if
+unset). No other module opens its own db file — confirmed by grepping the
+whole `ech/` tree for `aiosqlite.connect`/`sqlite3.connect`.
+
+**Path resolution.** A relative path resolves against the process's CWD,
+which for the systemd units is `WorkingDirectory=/var/lib/ech`
+(`deploy/ech.service`, `deploy/ech-sim.service`) — so the *default* relative
+`"ech.db"` becomes `/var/lib/ech/ech.db`. The live server currently overrides
+this with an **absolute** path, `/opt/ech/ech.db`, set explicitly in
+`/etc/ech/config.yaml`. `ech-sim` (currently disabled) still uses the
+relative default, i.e. `/var/lib/ech/ech-sim.db` if it were ever re-enabled.
+
+**Past incident, for anyone who finds an orphaned `/mnt/usb/ech.db` again:**
+rc83 (2026-07-01, see checkpoint table) moved the db onto a USB stick via a
+`/var/lib/ech/ech.db -> /mnt/usb/ech.db` symlink, for disk-space reasons. At
+some later point the live config was switched to the absolute
+`/opt/ech/ech.db` path instead (reason/date lost — not captured in any
+session log), abandoning the symlink+USB setup without removing it. On
+2026-08-12 that stale symlink was mistaken for the live database — its
+target file (`/mnt/usb/ech.db`, last modified Jul 5, badly corrupted) was
+extensively diagnosed and partially `.dump`-recovered before the mix-up was
+caught by checking `config.yaml`'s actual `database.path` and the real
+startup log line (`Database: connected (/opt/ech/ech.db)`). The real live
+database was healthy the entire time (`PRAGMA integrity_check` = `ok`,
+current through the moment of checking). **Lesson: always confirm the live
+`database.path` and the app's own startup log before touching any db file
+directly on a box you didn't personally provision.** The orphaned symlink,
+`ech-sim.db`'s matching symlink, and all recovery artifacts were removed the
+same day.
+
+**Health check (added 2026-08-12, O68).** Since the corruption above was
+only found by accident (a `.recover` attempt on a file that turned out to be
+irrelevant), `Database` now runs `PRAGMA integrity_check` automatically:
+- `Database.integrity_check()` — runs the check, stores the result on
+  `self.last_health_check = {"ok", "checked_at", "detail"}`, logs INFO on
+  success / ERROR on failure.
+- `Database._health_check_loop()` — started from `connect()`, first run 10
+  min after startup, then every 24h.
+- `GET /api/system/db_health` — last result (no new scan triggered).
+- `POST /api/system/db_health/check` — runs one immediately (full scan,
+  can take a while on a large db — don't poll this in a tight loop).
+- Settings → System Maintenance shows current status + a "Check now" button.
+
+---
+
+## DMR / BrandMeister — Research Notes (2026-08-12, O69/O78/O79/O80/O81, SMS CODEC BUILT AND LIVE-TESTED OVER THE WIRE, BOTH FORMATS)
+
+**Update (2026-08-16, O81):** Added Motorola-format SMS support alongside
+ETSI — see `dmr_sms_codec.py`'s module docstring for the exact framing
+difference. Real hardware fragmentation is confirmed, not assumed: common
+setup guides for AnyTone radios explicitly say to select "Motorola" under
+"Brand" in BrandMeister self-care for SMS to work, i.e. ETSI-the-actual-
+standard isn't what popular hardware defaults to. Checked whether the
+operator's OpenGD77-flashed radios or any Android app could close the
+"does a real device display this correctly" gap — OpenGD77 doesn't
+implement DMR SMS in firmware at all (not a network/config issue), and
+DroidStar (the main Android software DMR client) only has confirmed SMS
+support for M17 mode, not DMR. So this remains unverified against real
+hardware — both formats round-trip correctly against ECH's own decoder and
+over a real hblink3 relay, which is the same confidence level O80 already
+established, just now for two formats instead of one.
+
+**Update (2026-08-16, O80): the SMS codec is built.** New
+`ech/adapters/dmr_sms_codec.py` — vendored and adapted from `kf7eel/hbnet`
+(`data_gateway.py`, GPL-3.0) for the SMS-specific framing (data header,
+CSBK preamble, BTF/POC fragmentation) plus `n0mjs710/dmr_utils3` for the
+underlying BPTC(196,96) matrix primitives, reused directly rather than
+re-derived. Real discovery made while reading hbnet's source: its receive-
+side `decode_full()` isn't in current `dmr_utils3` at all (confirmed against
+the actually-installed package on the test rig, not just the GitHub repo,
+which could have drifted from the pinned PyPI version) — it's hbnet's own
+local extension of `dmr_utils3.bptc.decode_full_lc` that continues past bit
+96 to recover a full 192-bit data block instead of stopping at the 96 bits
+Link Control needs. Ported that bit-index table verbatim rather than
+re-deriving it, since one wrong index would silently corrupt every message
+instead of erroring.
+
+Deliberate simplifications vs. hbnet: always ETSI TS 102 361-3 UTF-16BE
+(not hbnet's per-destination format-learning cache — no live traffic to
+learn from yet, and guessing a receiver's quirk wrong is worse than the one
+actual standard), and a hand-rolled 28-byte IPv4+UDP header instead of
+adding `scapy` — a large, privileged-capable networking framework — as a
+dependency just for two fixed-size headers.
+
+**Verification, in increasing order of confidence:**
+1. Round-trip self-tests (`tests/test_dmr_sms_codec.py`, 16 tests) — encode
+   then decode recovers the original text, including multi-block messages,
+   empty strings, and non-ASCII/emoji (UTF-16 surrogate pairs).
+2. Local send→receive loopback through the actual adapter's `send()`/
+   `_handle_dmrd()` (`tests/test_dmr_brandmeister.py`, 17 tests) — no
+   network, but exercises the real DMRD framing/reassembly code paths.
+3. **A real over-the-wire test**: two live `DMRBrandmeisterAdapter`
+   instances, each independently logged into the hblink3 test master
+   (192.168.6.38), one calling `send()` with a real text message — the
+   master relayed the DMRD burst sequence over actual UDP, the second
+   adapter reassembled and decoded it, and the recovered text matched the
+   original exactly. This is the strongest evidence available without
+   real DMR radio hardware or a live network.
+
+`send()` now actually transmits; `_handle_dmrd()` now actually decodes
+(with a bounded-size per-stream reassembly buffer, `MAX_REASSEMBLY_STREAMS`,
+so unrelated data traffic can't grow it unboundedly). New dependencies
+(`dmr_utils3`, `bitarray`, `libscrc`) added to `pyproject.toml` and given
+their own explicit install-check block in `deploy/install.sh` (the deploy
+tarball doesn't carry pyproject.toml, so new deps need this — same pattern
+already established for `adventure`/`mgrs`). `DEPENDENCIES.md` updated,
+including a stale-section fix to the MQTT/LetsMesh JWT entry found while in
+that file (was still describing the old, non-functional serial-auto-
+retrieval scheme superseded back in O71).
+
+**What's still not done:** the message received in the real over-the-wire
+test still had to be addressed by DMR ID (not a phone number) — reaching
+BrandMeister's SMS-to-phone gateway (`262995`) needs the caller to format
+the body as `SMSGTE @<number> <message>` themselves; ECH doesn't auto-format
+that. No actual BrandMeister or TGIF testing has been done — everything
+above is against the private hblink3 rig only, by design (see O78's original
+reasoning). Multi-CSBK preambles aren't built (not a normal case for short
+SMS text). No confirmation of what a *real* subscriber radio does with a
+received message ECH decoded correctly by its own reasoning — the round-trip
+proves ECH's encoder and decoder agree with each other and with a real
+relay's willingness to carry the frames, not that a Motorola/Anytone/etc.
+radio would display it correctly.
+
+**Update (2026-08-16, O79):** `ech/adapters/dmr_brandmeister.py` now exists as
+a real, registered adapter type (`dmr_brandmeister`) — not just a validated
+standalone test script. Connection lifecycle (login, keepalive, watchdog,
+disconnect) runs through the actual `Adapter` base class and `build_adapter()`
+factory, and was live-tested end-to-end against the hblink3 rig (192.168.6.38):
+`connect()` completes the full RPTL→RPTK→RPTC handshake, `health()` reports
+`connected`, keepalive RPTPINGs get answered — all confirmed on both the
+adapter's own logs and the master's. 15 unit/integration tests added
+(`tests/test_dmr_brandmeister.py`), including a local mock-master fixture
+(built from the same verified byte layout) so the suite doesn't need the
+live rig to run in CI. DMRD frame receive is implemented (parses
+src/dst/slot/frame_type per the verified bit layout) and surfaces data/CSBK
+frames as a diagnostic notice. **`send()` deliberately always returns
+`False`** and inbound data frames are NOT decoded to text — the SMS payload
+codec (BPTC/CSBK/CRC, vendored from `kf7eel/hbnet` + `dmr_utils3`) is still
+the one deferred piece; showing wrongly-decoded content would be worse than
+showing none. `send_enabled = False` on the class so the UI doesn't offer
+compose-to-DMR yet.
+
+**Update (2026-08-16, O78):** Stood up a private, isolated test rig instead of
+testing against BrandMeister or even TGIF directly — a real `hblink3` master
+(`HBLink-org/hblink3`, archived-but-usable reference implementation) running
+as a systemd service on 192.168.6.38:54000 (operator-provided Ubuntu 22.04
+box, separate from the live ECH server). Then wrote a standalone Python test
+client and validated the FULL Homebrew login handshake end-to-end against it
+— RPTL → RPTACK(challenge) → RPTK → RPTACK(auth) → RPTC → RPTACK(config,
+CONNECTED) → RPTPING → MSTPONG all confirmed both on the wire and in the
+master's own logs ("Peer 3129999 has completed the login exchange
+successfully" / "has sent repeater configuration"). This is real, tested
+proof the handshake byte layout below is correct — not just re-derived from
+docs. **Caught and fixed one real error in these notes in the process:
+`RPTACK` is 6 bytes ("RPTACK"), not 4** — confirmed against hblink3's own
+`const.py` and by the test literally working once corrected. Same fix
+applies to `MSTNAK` (6 bytes, not visually obvious either) and confirms
+`RPTPING`/`MSTPONG` really are 7 bytes each, matching what was already noted.
+The 298-byte RPTC config block figure below is also very slightly off — the
+real total is 302 bytes (RPTC 4 + RADIO_ID 4 + 294 bytes of fields), verified
+by adding up hblink3's own byte-offset table field by field.
+
+**Next step is building the real ECH adapter's login/connection-maintenance
+code against this validated reference** (still safe — no DMRD voice/data
+traffic sent yet, just RPTPING keepalives once connected), continuing to
+test against the same private hblink3 rig before ever pointing at TGIF or
+BrandMeister. The SMS/data payload codec (BPTC/CSBK/CRC) below is still the
+separate, larger remaining task — hblink3 doesn't help there since it passes
+DMRD payloads through rather than encoding/decoding SMS content itself.
+
+Researched as a Phase-13-style text-messaging adapter, same spirit as
+`dapnet.py`/`m17_reflector.py`, but genuinely more complex and higher-stakes
+(a malformed frame goes out on BrandMeister's real shared network, not just
+a private test loop) — paused deliberately at the research stage rather than
+rushed. Resume here, don't re-derive from scratch.
+
+**What's confirmed and safe to build first (low risk — no traffic transmitted):**
+The Homebrew/DMRplus peer login handshake, straight from `HBLink-org/hblink3`'s
+`hblink.py`:
+- `RPTL` (4 bytes) + `RADIO_ID` (4 bytes) — login request
+- Master replies `RPTACK` (6 bytes — corrected 2026-08-16, was miswritten as 4 here) + 4-byte salt
+- `RPTK` (4) + `RADIO_ID` (4) + SHA256(salt_bytes + passphrase) as 32 raw
+  bytes (hex digest converted back to bytes, not sent as hex text)
+- `RPTC` (4) + `RADIO_ID` (4) + a 294-byte config block (callsign 8, rx_freq 9,
+  tx_freq 9, tx_power 2, colorcode 2, lat 8, lon 9, height 3, location 20,
+  description 19, slots 1, url 124, software_id 40, package_id 40 — 302
+  bytes total on the wire; corrected 2026-08-16, was miswritten as 298 here)
+- Keepalive: `RPTPING` (7) + `RADIO_ID` (4); master replies `MSTPONG` (7) + `RADIO_ID` (4)
+- All of the above field-verified 2026-08-16 by running a real login against
+  a live `hblink3` master — see the update note above this list.
+- `DMRD` packet layout: `seq`(1) `rf_src`(3) `dst_id`(3) `peer_id`(4)
+  `bits`(1, slot/call-type/frame-type flags) `stream_id`(4) `payload`(33)
+- **Requires repeater-level credentials** (Repeater ID + password from
+  BrandMeister self-care) — NOT the same as a personal DMR ID. Confirmed
+  the operator (KN0O) already has a BrandMeister hotspot registered, so this
+  part is buildable/testable now.
+
+**What's NOT done — the actual SMS/short-data payload codec.** DMR data
+framing needs BPTC forward-error-correction (block/interleave coding, not
+simple byte packing), CRC16-header + CRC32-payload, CSBK block sequencing,
+and even an ETSI-vs-Motorola SMS text-encoding split. Traced the real
+implementation chain (`kf7eel/hbnet`'s `data_gateway.py`, GPL-3.0 — same
+license as ECH, so vendoring is clean with attribution once actually done):
+`format_sms()` → `create_sms_seq()` → `mmdvm_encapsulate()`, which in turn
+call **~10 more helper functions not yet extracted**: `gen_sms_seq`,
+`sms_format_retrieve`/`sms_format_man`, `btf_poc`, `create_crc16`,
+`gen_header2`, `csbk_gen2`, `block_sequence`, `dmr_encode`, `bytes_3`,
+`bytes_4` — plus the separate receive-side decode chain (`bptc_decode` and
+friends). The core BPTC/CRC primitives live in a proper PyPI package,
+`dmr_utils3` (github.com/n0mjs710/dmr_utils, also GPL-3.0) — depend on that
+directly rather than re-vendoring BPTC math by hand; only the SMS-specific
+framing on top of it needs to come from hbnet.
+
+**BrandMeister specifics, to avoid re-researching:**
+- Talkgroups (e.g. "265") are **irrelevant to SMS** — those are voice group-
+  call destinations. SMS routes via a **private call** to specific service
+  DMR IDs instead: `262995` = SMS gateway (format `SMSGTE @<number> <msg>`
+  for phone delivery), `262993`/`262994` = info/weather/DAPNET-routing
+  queries. Don't reach for a talkgroup number when wiring up send/receive.
+- BrandMeister's user API keys (self-care → generate key) are **account
+  management only** (hotspots, static talkgroups, repeater config) — no
+  messaging endpoint exists there. Confirmed by reading the actual feature
+  announcement, not assumed.
+
+**Decision point for next session:** vendor hbnet's SMS framing functions
+(operator's explicit choice over hand-rolling BPTC/CSBK from spec docs,
+given the shared-network stakes) — extract the ~10 helper functions above
+verbatim, wire them to `dmr_utils3` for the FEC primitives, then build
+`ech/adapters/dmr_brandmeister.py` following the `m17_reflector.py` pattern
+(UDP client, `Adapter` subclass, NormalizedMessage in/out).
+
+---
+
 ## Release Checkpoints
 
 | Version | Status | Deployed | Key Changes |
@@ -602,3 +839,26 @@ value/effort: AFSK1200 (drop the Direwolf dependency), RTTY, PSK31 (AUD-5).
 | v1.0.0-rc169 | Ready to deploy | Not yet | Directly-reachable nodes stop routing through needless relay loops: a node's own adverts now teach the topology learner it's heard DIRECTLY (a 0-relay advert marks its origin direct), so a node like LandOfLucy — heard directly but once seen relayed — traces as a bare 1-hop probe instead of a 3-hop reciprocal loop (O66) |
 | v1.0.0-rc168 | Ready to deploy | Not yet | Multi-hop traces fire consistently now: inferred routes go on the wire even when a hop's NAME is unknown (resolution is display-only at 1-byte width — the over-strict check was silently degrading most traces to bare probes), the learned topology graph persists across restarts/deploys, and trace replies resolve hop names by prefix+recency instead of substring (the successful 3-hop reply had displayed as the same repeater ×3) (O65) |
 | v1.0.0-rc170 | Ready to deploy | Not yet | UI/backend audit pass (O67): Logs page Raw Packets/Encrypted tabs were silently empty (`/api/channels` response parsed wrong — dropdown never populated); map "last message" always blank (polled MeshCore channel messages stored `from_id` as the sender's display name, not their pubkey, so it never matched the map's node_id — now resolved back to the node when unique); global icon nav bar added to every page (Messages/Map/Ham Log/Logs/Anomalies/Analytics/SKYWARN/Remote HW/Simulation/Settings); CAT control gained PTT (rigctld `T`/`t`, with an auto-unkey safety watchdog) plus a full Settings UI section, since neither existed before; Remote Hardware page gained the same Web-Serial CAT (CI-V/Kenwood) Ham Log has, broadcasting freq/mode to the server so other pages auto-fill from it too; CW/RTTY/PSK31 TX now supports `ptt: cat` to key the rig via CATController instead of requiring VOX; "Time sync" and outbound broadcast messages (weather/announce) were mislabeled/misleading — time sync only ever sets the local station's own radio clock (mesh protocols can't set remote nodes' clocks), and broadcast messages now record the real resolved channel instead of a generic "outbound" placeholder; added an `message_stats_hourly` rollup (90-day retention, independent of per-adapter message purging) so Analytics volume charts survive raw-message purging. |
+| v1.0.0-rc171–rc197 | Released | Yes | **Undocumented gap** — this range was deployed (confirmed live at rc197 on 2026-08-12) but no session log entries exist for it in this file. Do not assume nothing happened; it just wasn't recorded here. |
+| v1.0.0-rc198 | Released | Yes (2026-08-12) | Fixed MeshCore "Reconnect" button — `reconnect_adapter()` called `asyncio.sleep()` with `asyncio` never imported anywhere in `app.py`, so every click threw a `NameError` caught by a broad `except`, reported as "reconnect failed" (O68 — this session's O-numbers continue from O67 despite the rc171-197 gap above). Message-window default filter fixed: was force-switching the live view to APRS on load instead of staying on "All traffic" while still suppressing APRS OBJ/POS/STATUS chatter via the per-adapter remembered filter. Settings "Restart ECH" fixed — posted to a nonexistent `/api/system/restart`, always toasted success regardless. Added `POST /api/system/reboot` and `POST /api/system/update` (+status) for full-host reboot and `apt-get update/upgrade` from Settings, admin-gated via the existing `/api/system/` prefix. `ech-services` sudoers block (service restarts, reboot, apt-get) added to `deploy/install.sh` itself — it was previously only in `scripts/install.sh`, which `build_and_scp.ps1`'s deploy pipeline never runs. |
+| v1.0.0-rc199 | Released | Yes (2026-08-12) | DAPNET adapter (`ech/adapters/dapnet.py`) endpoint fix: connectivity probe used `GET /calls`, which turned out to be 403-forbidden for ordinary non-admin accounts even though `POST /calls` (actually sending) works fine — switched the probe to `GET /transmitters`. |
+| v1.0.0-rc200 | Released | Yes (2026-08-12) | Timezone toggle (UTC/LOCAL/BOTH) never actually affected the message feed's per-row timestamps — only the header clock. `buildMsgEl()` now uses the existing (previously unused for this) `formatMsgTime()` helper. |
+| v1.0.0-rc201 | Released | Yes (2026-08-12) | **DAPNET confirmed live**: real page sent to KN0O via `us-me` transmitter group, HTTP 201. Root cause of the earlier 403 was NOT missing account permissions — `GET /calls` (list) is gated separately from `POST /calls` (send) for non-admin accounts, confirmed by testing both directly with curl. |
+| v1.0.0-rc202 | Released | Yes (2026-08-12) | AREDN MeshChat adapter (`ech/adapters/aredn_meshchat.py`) added — talks to a MeshChat CGI backend over an AREDN mesh (`?action=messages`/`send_message`, endpoints confirmed from MeshChat's own source). Not live-tested (no AREDN mesh reachable). Flagged in its own docstring that AREDN's newer "Raven" client (github.com/kn6plv/Raven, same author) may supersede or coexist with MeshChat — checked 3 of Raven's wiki pages, found no exposed API as of this alpha-stage check. |
+| v1.0.0-rc203–rc204 | Released | Yes (2026-08-12) | M17 reflector adapter (`ech/adapters/m17_reflector.py`) — software-only UDP client for the M17 "Internet Interface" (CONN/ACKN/NACK/DISC/PING protocol, base-40 callsign encoding, custom CRC-16 poly 0x5935, packet-mode SMS protocol-type 0x05), no radio hardware. rc203 shipped with a real bug (missing required `Adapter._run()` override crashed instantiation) fixed in rc204. |
+| v1.0.0-rc205 | Released | Yes (2026-08-12) | Compose panel toggle buttons for `dapnet`/`m17` were unresponsive — not a JS bug (`toggleAdapter()` was already generic and correctly toggling the `on` class), but `.adapter-toggle.on` only had CSS color rules for specific known adapter classes; anything with the default `cls:''` toggled state with zero visible change. Added dedicated colors for m17/dapnet/meshchat + a generic blue fallback so this can't recur for any future adapter type; also fixed the identical latent gap for `reticulum`. |
+| v1.0.0-rc206 | (superseded by rc207 same day) | — | (folded into rc207) |
+| v1.0.0-rc207 | Released | Yes (2026-08-12) | **M17 confirmed live**: linked to the production M17-M17 reflector (`m17.openquad.net:17000`, module A) on the first real attempt — validated the from-scratch base-40 encoding against the M17 spec's own worked example (`AB1CD` -> `0x9fdd51`) after catching it initially backwards (spec encodes first-char-least-significant, opposite of ordinary base-N). `send()` now logs on success, not just failure — previously the only way to confirm a send worked was absence of an error log line. |
+| v1.0.0-rc208 | Released | Yes (2026-08-12) | Automated daily `PRAGMA integrity_check` (O68, see "Database Subsystem" section above) — added after a real corruption incident on an orphaned, no-longer-used db file this same session was mistaken for the live one. `Database.integrity_check()`/`_health_check_loop()`, `GET/POST /api/system/db_health[/check]`, Settings status line + "Check now" button. |
+| v1.0.0-rc209 | Released | Yes (2026-08-15) | Reply-to-name bug fixed at the actual root cause: polled MeshCore channel messages carry no sender pubkey (`from_id` is the display NAME per `_resolve_sender_node_id`), so clicking Reply on one filled the To: field with a name the radio can't DM to — it looked like it worked, then silently failed to send. `replyTo()` now detects this (MeshCore + no resolvable pubkey) and falls back to replying on the channel with an `@Name` mention instead of failing, matching the mesh bot's existing channel-reply fallback (O21). Added an `@name` mention system to the compose box (autocomplete dropdown sourced from the live node list, arrow/Tab/Enter to pick) and highlighted `@mentions` in the message feed — mentions are plain text so they work unmodified on MeshCore, APRS, or any other adapter (O77 — O69 was already taken by the 2026-08-12 DMR/BrandMeister research entry above; this was mislabeled O69 at the time and is corrected here). |
+| v1.0.0-rc210 | Released | Yes (2026-08-15) | Doc audit pass: 6 feature-matrix rows across MeshCore/Meshtastic/APRS were stale (already shipped in earlier sessions but never marked DONE — battery voltage, last-discovery timestamp, per-message relay-path resolution, Meshtastic telemetry/neighborinfo/traceroute, APRS telemetry decode); corrected against the actual code, no functional change. Meshtastic Waypoints implemented for real (O70): `_handle_waypoint()` decodes WAYPOINT_APP, keyed by the waypoint's own id (not the sender's) so re-broadcasts of the same waypoint update one marker instead of duplicating — an expired `expire` field is a delete per the Meshtastic app's own convention, no separate delete message exists. Shows as a feed message (name + description) and a persistent map pin (custom icon codepoint if the placer set one, else 📍); added to both index.html and map.html's non-messageable node-type lists alongside OBJECT/REPEATER etc. |
+| v1.0.0-rc211 | Released | Yes (2026-08-15) | MQTT/LetsMesh JWT auth reworked to sign ON-DEVICE instead of requiring an exported private key (O71). Researched against the current upstream firmware (`meshcore-dev/MeshCore` `examples/companion_radio/MyMesh.cpp`) and the reference `meshcore_py` client library: confirmed `CMD_EXPORT_PRIVATE_KEY` (0x17) is compiled out of most stock builds behind `ENABLE_PRIVATE_KEY_EXPORT`, but `CMD_SIGN_START/CMD_SIGN_DATA/CMD_SIGN_FINISH` (0x21/0x22/0x23 — sequential with ECH's own already-verified `CMD_SEND_TRACE_PATH`=0x24, a useful cross-check) carry **no** such build flag and route through the same transport-agnostic `BaseSerialInterface` dispatch as every other companion command ECH already sends over serial or TCP. Added `MeshCoreAdapter.sign_data()` (single-slot future-based request/response, mirroring the existing `_trace_futures` pattern) and an `_adapter_registry` (parallel to the existing `_pubkey_registry`) so `mqtt_adapter.py` can reach the live adapter instance. `_resolve_credentials()` now signs on-device first and only falls back to a manually-configured `private_key:` if the MeshCore adapter isn't connected — removes the previous TCP-only requirement to paste a 128-hex key into config.yaml, and works identically on serial/TCP/BLE. Also caught and removed genuinely dead code found in the process: `_privkey_registry` had no writer anywhere in the codebase (the automatic-serial-retrieval feature that used to populate it was removed in an earlier session, but the read side and several stale comments/UI strings referencing "fetched automatically" / "get prv.key" survived) — those are now corrected to describe the real (better) mechanism. |
+| v1.0.0-rc212 | Released | Yes (2026-08-15) | Reticulum's three genuinely-pending gaps closed (O72): (1) `send()` no longer fails outright the first time it talks to a peer it's only just learned the address of — requests a path and waits up to `path_request_timeout` (default 10s) for `RNS.Transport.has_path()` before giving up; (2) delivery receipts — LXMF's own `register_delivery_callback`/`register_failed_callback` bridged (RNS-thread → asyncio loop, same pattern as `_on_lxmf_delivery`) to `_router_notify()`, matching the delivered/failed reporting meshtastic_adapter.py and meshcore.py already give; (3) `_health_detail()` now reports propagation-node path status and a transport interface count — kept deliberately minimal (count only, not per-interface stats) since `RNS.Transport.interfaces` entry attributes aren't documented as stable across RNS versions and this adapter can't be tested against a live install this session. |
+| v1.0.0-rc213 | Released | Yes (2026-08-15) | Real Pat Winlink bugs found and fixed against the actual `la5nta/pat` Go source (O73) — the user has a live Pat instance, prompted a real correctness pass instead of a docs-only audit. Confirmed via source: (1) `send()` POSTed JSON to `/api/mailbox/out`, but Pat's `postOutboundMessageHandler` parses `r.Form` — every field arrived empty against real Pat; now form-encoded. (2) Inbox parsing (`_poll_inbox`, `_emit_message`, `_mark_existing_seen`, `list_inbox`) read lowercase keys (`mid`/`from`/`subject`/`date`) but Pat's `JSONMessage` has no custom JSON tags so stays Go-capitalized (`MID`/`From`/`Subject`/`Date`), and `From`/`To`/`Cc` are `{Proto,Addr}` address objects, not plain strings — net effect: every emitted message's `mid` resolved to `""`, so only the very first inbound message ever got processed and everything after it was silently deduplicated away as "already seen" forever. Added `_addr_str()` helper. (3) `_health_detail()`/`_pat_status` read `ActiveListeners`/`ConnectedTo`/`PatVersion` — real `api/types.Status` has snake_case tags (`active_listeners`, `connected`, `remote_addr`) and no version field exists at all; corrected, `PatVersion` tracking removed. (4) RMS discovery hit a nonexistent URL (`https://api.winlink.org/rms/list`) — real endpoint (the same one Pat itself calls, `internal/cmsapi`) is `https://api.winlink.org/gateway/status.json`, with a different envelope (`{"Gateways":[...]}`) and per-channel fields nested under `Channels[]` rather than flat on the gateway; `nodes()` reworked around a normalized internal shape. `mock_pat_winlink.py`'s `MockPatServer` had the identical wrong field-casing/JSON-body assumptions baked in, meaning the existing test suite validated the two wrong implementations against each other and always passed — fixed the mock against the real API shape too (both mailbox listing and the outbox POST parser), updated `tests/test_pat_winlink.py`'s seed data and health assertions to match. All 19 pat_winlink tests pass after the fix. |
+| v1.0.0-rc214 | Released | Yes (2026-08-15) | Doc-only cleanup: JS8Call's feature matrix was as stale as Pat Winlink's had been — it only ever mentioned `mock_js8call.py`, but `js8call.py` (real JSON-over-TCP adapter) already implements heartbeat/directed-messages/grid-square-position/station-topology; corrected. **Explicitly not source-verified against JS8Call's real API the way Pat was this session** — flagged as a real remaining gap if this adapter is ever actually used against live JS8Call. Also synced Open Issues O7 (Reticulum delivery receipts) to DONE, matching O72 — it had been left PENDING in that table even after being fixed. |
+| v1.0.0-rc215-deploy | Released | Yes (2026-08-15) | rc209–rc215 deployed together to 192.168.6.200 via `deploy/build_and_scp.ps1`. install.sh printed a "service may not have started" warning (a startup-timing false alarm, not a real failure) — verified independently: `systemctl is-active ech` = active, HTTPS GET / = 200 (note: the live site is HTTPS-only on :8765 with a self-signed cert — plain `http://` there gets silently closed by the TLS layer, easy to mistake for the server being down; plain HTTP is on :8766), MeshCore device (Seeed Xiao-nRF52, fw v1.16.0-07a3ca9) connected and fully initialized, all 11 configured adapters registered, no new exceptions in the logs. Two pre-existing (not caused by this deploy) live issues surfaced during verification, tracked here rather than silently left in memory only: **O75** — `letsmesh-compare`'s MQTT broker connection is rejected with `[code:135] Not authorized"`; confirmed via logs this predates rc211 (same rejection under the old, non-functional local-signing path too) — rc211's on-device signing itself completes successfully (no exception, a JWT does get built), so the CMD_SIGN_* mechanism is field-confirmed working, but the broker still rejects the resulting token for an unknown reason (this LetsMesh JWT scheme was reverse-engineered from the third-party `meshcoretomqtt` project, never an official spec, and may simply never have worked). **O76** — Pat Winlink RMS discovery (rc213) now correctly reaches the real endpoint (`GET https://api.winlink.org/gateway/status.json`, confirmed 200-reachable, previously hit a 404'ing wrong URL) but gets `400 InvalidAccessKey` — that endpoint apparently requires an API key undocumented anywhere found this session and not configured in ECH. |
+| v1.0.0-rc215 | Released | Yes (2026-08-15) | Followed through on rc214's flag and did the JS8Call source-verification pass (O74), cross-checking against pauloffordracing.com/js8call-api and the JS8Call-improved fork's docs/API.md. Two real bugs found and fixed: (1) `RX.CALL_ACTIVITY` handling read `params.get("FROM"/"GRID"/"SNR")` but the real shape is `params` keyed by callsign with each value holding that station's `GRID`/`SNR`/`UTC` — this handler could never have matched anything, confirmed by two independent sources with a literal JSON example. Rewrote to iterate `params.items()`. (2) `STATION.INFO`'s `value` is a free-text version string, not structured `CALL`/`GRID` params — `_js8_callsign`/grid never actually came from JS8Call itself, silently falling back to config every time. Switched to the real `STATION.GET_CALLSIGN`/`STATION.GET_GRID` commands, whose responses correctly carry the value as a plain string. Also made `_handle_rx_msg` prefer the structured `FROM` param over hand-parsing it out of `value` (present on `RX.DIRECTED` per both sources) while deliberately keeping text extraction from `value` unchanged — `TEXT` can be empty on pure command messages (e.g. HEARTBEAT) where the human-readable content only exists in `value`. Left `RX.MSG` dispatch in place despite not finding it in either doc source — no strong enough evidence either way to justify ripping out a branch that's harmless if unused. All 21 js8call tests still pass. |
+| v1.0.0-rc219 | Ready to deploy | Not yet | Added Motorola-format SMS support (O81) — `encode_sms()`/`_encode_text_payload()` in `dmr_sms_codec.py` now take `sms_format` ("etsi_be" default or "motorola", new `sms_format:` adapter config key), ported from hbnet's own 'motorola' branch of `format_sms()`. Prompted by research showing real popular hardware (AnyTone via BrandMeister self-care's "Brand" setting) commonly needs Motorola framing, not the ETSI standard — the operator's own OpenGD77 radios don't support DMR SMS at all, and no Android app with confirmed DMR (not M17) SMS support was found either, so this stays speculative/ready-for-whenever-real-hardware-is-available rather than confirmed against real hardware. `decode_sms_stream()` auto-detects which format an inbound message used from its header shape, so callers never need to guess. 8 new tests; both formats also re-verified with the same real over-the-wire test methodology as O80 (two live adapters through the hblink3 master) — Motorola framing round-trips correctly over real UDP too. |
+| v1.0.0-rc218 | Ready to deploy | Not yet | The SMS payload codec is built (O80) — `ech/adapters/dmr_sms_codec.py`, vendored from `kf7eel/hbnet` + `n0mjs710/dmr_utils3` (see the DMR research notes section for the full writeup, including a real discovery mid-port: hbnet's receive-side `decode_full()` isn't in current `dmr_utils3` at all — it's hbnet's own local extension, ported verbatim rather than re-derived). `send()`/`_handle_dmrd()` in `dmr_brandmeister.py` now actually transmit/decode instead of refusing. Verified three ways: 16 codec round-trip tests, a local send→receive loopback through the real adapter code, and — strongest — **a real over-the-wire test**: two live adapter instances, independently logged into the hblink3 rig, one sent a real text message, the master relayed it over actual UDP, the other decoded it back to the exact original text. New deps (`dmr_utils3`/`bitarray`/`libscrc`) added to `pyproject.toml` + `deploy/install.sh`'s explicit install-check pattern. Also fixed a stale `DEPENDENCIES.md` section (MQTT/LetsMesh JWT) found while in that file, still describing the pre-O71 non-functional key-retrieval scheme. Not deployed — nothing references this adapter type on the live server yet. |
+| v1.0.0-rc217 | Ready to deploy | Not yet | New `dmr_brandmeister` adapter (O79) — real, registered `Adapter` subclass speaking the Homebrew/DMRplus Repeater Protocol, built against the operator-provided private hblink3 test rig (192.168.6.38) from O78's validated handshake. `connect()`/keepalive/`disconnect()` live-tested end-to-end through the actual adapter lifecycle (not just a standalone script this time) — confirmed on both the adapter's and the master's logs. 15 new tests (`tests/test_dmr_brandmeister.py`) including a local mock-master fixture so CI doesn't need the live rig. DMRD frame receive parses src/dst/slot/frame_type and surfaces data/CSBK frames as a diagnostic notice. `send()` deliberately always returns `False` and `send_enabled = False` — the SMS/data payload codec (BPTC/CSBK/CRC) is still not built; decoding it wrong would be worse than not decoding it. Added a config.yaml example section. Not deployed to the live ECH server yet (nothing there references this adapter type, so it's inert until configured — no rush). |
+| v1.0.0-rc216 | Released | Yes (2026-08-15) | Chased O75 and O76. **O76 CONFIRMED FIXED, live**: found Pat's actual `AccessKey` constant (`internal/cmsapi/api.go`) — `https://api.winlink.org` requires a `?key=` query param on every CMS Web Service call, this key was issued by the Winlink Development Team in December 2017 specifically for Pat's use and is committed in the clear in Pat's public source, not a secret. Added it to `_discover_rms()`'s request. Verified live post-deploy: `GET .../gateway/status.json?key=... → 200 OK`, "discovered 1153 RMS gateways". **O75 STILL UNRESOLVED** despite two fix attempts: cross-checked ECH's JWT claim set against the actual reference client source (`Cisien/meshcoretomqtt`) and found/fixed a real gap — missing `client` claim, no `owner`/`email` support (new `jwt_owner`/`jwt_email` config keys, TLS-gated to match the reference's own guard). Deployed, then live-tested with the operator's real letsmesh.net email (`jwt_owner: KN0O`, `jwt_email: gampgamp@gmail.com` patched into `/etc/ech/config.yaml`) — broker **still** rejects with `[code:135] Not authorized`, ruling out claim-set mismatch as the root cause. This exhausts what's discoverable from public source/docs alone — the broker-side validator is closed-source and no known-working reference JWT was available to diff against. Left as-is (the claim additions are still a correct conformance fix, harmless to keep) rather than keep restarting production on further speculation. Next step needs either direct contact with LetsMesh (Discord/forum) or a real working JWT from elsewhere to compare against. |

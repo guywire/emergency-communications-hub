@@ -502,6 +502,70 @@ adapters:
 #     # bye_command: "B"           # BBS software uses a different command set
 #     # send_end_marker: "/EX"
 
+# ── DAPNET pager (real) ──────────────────────────────────────────────────────
+#   Decentralized Amateur Paging Network (hampager.de) — send-only, POCSAG
+#   pagers can't reply. Requires a DAPNET account (register at hampager.de)
+#   and at least one transmitter group covering your area (see "Transmitter
+#   Groups" on the DAPNET web UI for the short names). Send by setting the
+#   composed message's To field to the recipient's DAPNET callsign.
+#   - type: dapnet
+#     name: dapnet
+#     callsign: N0CALL
+#     password: changeme            # DAPNET account password
+#     transmitter_groups: ["dl-all"]  # replace with your region's group(s)
+#     poll_interval: 300
+
+# ── AREDN mesh chat (real) ────────────────────────────────────────────────────
+#   Talks directly to a MeshChat (github.com/kn6plv/meshchat) CGI backend
+#   reachable over an AREDN mesh — no new hardware, just points at whatever
+#   node/service-computer on the mesh is already running MeshChat. NOT a
+#   direct-message system: MeshChat is a shared channel, everyone on it sees
+#   every message. NOTE: implemented from MeshChat's source (Aug 2026), not
+#   yet live-tested against a real AREDN node — verify against yours before
+#   relying on it; see ech/adapters/aredn_meshchat.py's module docstring.
+#   - type: aredn_meshchat
+#     name: aredn-chat
+#     base_url: http://localnode.local.mesh/cgi-bin/meshchat
+#     call_sign: N0CALL
+#     channel: ""                   # blank = server's default_channel
+#     poll_interval: 30
+
+# ── M17 reflector (real) ──────────────────────────────────────────────────────
+#   Software-only text messaging over an M17 reflector's UDP "Internet
+#   Interface" — no radio hardware needed. NOTE: implemented from protocol
+#   docs + reference reflector source (Aug 2026), NOT yet live-tested against
+#   a real reflector — verify before relying on it; see the "Known unverified
+#   assumptions" list in ech/adapters/m17_reflector.py's module docstring
+#   (BROADCAST address convention, TYPE field bits, and the exact wire
+#   encoding of listen-only mode are all best-effort, not confirmed).
+#   - type: m17_reflector
+#     name: m17
+#     reflector_host: m17.example.net   # pick a reflector: m17.hblink.network, etc.
+#     reflector_port: 17000
+#     module: "M"                      # single letter A-Z — the "room" to join
+#     callsign: N0CALL
+#     listen_only: false
+
+# ── DMR / BrandMeister (real) ──────────────────────────────────────────────────
+#   Homebrew/DMRplus Repeater Protocol over UDP — no radio hardware needed,
+#   connects as a software "repeater" the same way a hotspot does. STATUS:
+#   connection layer + SMS codec are both real and live-tested against a
+#   private hblink3 test master, including a real over-the-wire send/receive
+#   round trip (2026-08-16, see ECH_REQUIREMENTS_AND_PROGRESS.md's DMR
+#   section) — but NOT verified against real DMR hardware (no radio with
+#   working SMS support was available to test with). Test against a private
+#   hblink3 master before ever pointing this at a real network — see
+#   ech/adapters/dmr_brandmeister.py's module docstring.
+#   - type: dmr_brandmeister
+#     name: dmr
+#     master_host: 192.168.6.38        # your hblink3 test master, or a real DMR master
+#     master_port: 54000
+#     passphrase: echdmrtest2026
+#     radio_id: 3129999                # repeater-level DMR ID, not a personal one
+#     callsign: N0CALL
+#     sms_format: etsi_be              # etsi_be (the standard) or motorola (what
+#                                       # common hardware, e.g. AnyTone, often expects)
+
 # ── Bridge rules (optional) ───────────────────────────────────────────────────
 # Forward messages from one adapter's output to another's send().
 # bridge_rules:

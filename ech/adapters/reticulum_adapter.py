@@ -21,6 +21,9 @@ Config keys:
   announce_interval int     seconds between LXMF announces (default: 300)
   propagation_node  str     optional propagation node dest hash for sync
   storage_path      str     LXMF router storage path (default: ~/.ech/lxmf)
+  path_request_timeout float  seconds to wait for RNS.Transport to resolve a
+                            path before giving up on a first send to a peer
+                            we haven't heard an announce from yet (default: 10)
 """
 
 from __future__ import annotations
@@ -65,6 +68,7 @@ class ReticulumAdapter(Adapter):
         self._announce_interval = int(config.get("announce_interval", 300))
         self._propagation_node  = config.get("propagation_node", None)
         self._storage_path    = config.get("storage_path", os.path.expanduser("~/.ech/lxmf"))
+        self._path_request_timeout = float(config.get("path_request_timeout", 10.0))
         self._rns = None
         self._router = None
         self._lxmf_dest = None
@@ -212,7 +216,15 @@ class ReticulumAdapter(Adapter):
             log.error("Reticulum %s: message processing error: %s", self.name, exc)
 
     async def send(self, message: NormalizedMessage) -> bool:
-        """Send an LXMF message to message.to_id (hex destination hash)."""
+        """Send an LXMF message to message.to_id (hex destination hash).
+
+        If we don't already have a path to the destination (nothing heard
+        from it yet — no announce, no prior traffic), request one and wait
+        briefly for RNS.Transport to resolve it instead of failing
+        immediately. A first message to a peer we've only just learned the
+        address of (e.g. pasted from another LXMF client) always used to
+        fail this way even when a path was a couple of seconds away.
+        """
         if not message.to_id:
             log.warning("Reticulum %s: to_id (LXMF dest hash) required", self.name)
             return False
@@ -222,12 +234,26 @@ class ReticulumAdapter(Adapter):
         try:
             import RNS, LXMF
             dest_hash = bytes.fromhex(message.to_id)
-            dest_identity = RNS.Identity.recall(dest_hash)
 
-            if dest_identity is None:
-                log.warning("Reticulum %s: unknown destination %s — path request sent",
-                            self.name, message.to_id[:16])
+            if not RNS.Transport.has_path(dest_hash):
+                log.info("Reticulum %s: no known path to %s — requesting, waiting up to %.0fs",
+                         self.name, message.to_id[:16], self._path_request_timeout)
                 RNS.Transport.request_path(dest_hash)
+                waited = 0.0
+                while waited < self._path_request_timeout and not RNS.Transport.has_path(dest_hash):
+                    await asyncio.sleep(0.5)
+                    waited += 0.5
+                if not RNS.Transport.has_path(dest_hash):
+                    log.warning("Reticulum %s: no path to %s after %.0fs — send failed",
+                                self.name, message.to_id[:16], waited)
+                    return False
+                log.info("Reticulum %s: path to %s resolved after %.1fs",
+                         self.name, message.to_id[:16], waited)
+
+            dest_identity = RNS.Identity.recall(dest_hash)
+            if dest_identity is None:
+                log.warning("Reticulum %s: path known but identity not resolved for %s",
+                            self.name, message.to_id[:16])
                 return False
 
             dest = RNS.Destination(
@@ -244,6 +270,16 @@ class ReticulumAdapter(Adapter):
                 title="ECH",
                 desired_method=LXMF.LXMessage.DIRECT,
             )
+
+            # Delivery/failure callbacks fire from an RNS thread, potentially
+            # long after handle_outbound() returns — bridge back to the
+            # router the same way meshtastic_adapter/meshcore.py report
+            # ACK/NACK for their own sends, instead of "sent" meaning nothing
+            # more than "handed to the local outbound queue".
+            msg_id = message.id
+            lxm.register_delivery_callback(self._make_delivery_cb(msg_id, "delivered"))
+            lxm.register_failed_callback(self._make_delivery_cb(msg_id, "failed"))
+
             await self._loop.run_in_executor(None, self._router.handle_outbound, lxm)
             self._tx_count += 1
             self._mark_tx(message)
@@ -253,6 +289,25 @@ class ReticulumAdapter(Adapter):
         except Exception as exc:
             log.error("Reticulum %s: send error: %s", self.name, exc)
             return False
+
+    def _make_delivery_cb(self, msg_id: str, status: str):
+        """Build an LXMF delivery/failed callback for msg_id. Runs on an RNS
+        thread, so it hops back onto the adapter's asyncio loop rather than
+        touching router state directly."""
+        def _cb(_lxm_msg) -> None:
+            if self._loop is None:
+                return
+            self._loop.call_soon_threadsafe(asyncio.ensure_future, self._notify_delivery(msg_id, status))
+        return _cb
+
+    async def _notify_delivery(self, msg_id: str, status: str) -> None:
+        if not self._router_notify:
+            return
+        try:
+            detail = "LXMF delivery confirmed" if status == "delivered" else "LXMF delivery failed"
+            await self._router_notify(self.name, msg_id, status, detail)
+        except Exception as exc:
+            log.debug("Reticulum %s: router notify error: %s", self.name, exc)
 
     async def _announce_loop(self) -> None:
         try:
@@ -303,7 +358,8 @@ class ReticulumAdapter(Adapter):
                 lxmf_addr = RNS.hexrep(self._lxmf_dest.hash, delimit=False)
             except Exception:
                 pass
-        return {
+
+        detail = {
             "lxmf_address": lxmf_addr,
             "display_name": self._display_name,
             "peers_known": len(self._peers),
@@ -311,6 +367,28 @@ class ReticulumAdapter(Adapter):
             "tx_count": self._tx_count,
             "config_dir": self._config_dir,
         }
+
+        if self._propagation_node:
+            detail["propagation_node"] = self._propagation_node
+            try:
+                import RNS
+                prop_hash = bytes.fromhex(self._propagation_node)
+                detail["propagation_node_status"] = "path known" if RNS.Transport.has_path(prop_hash) else "no path yet"
+            except Exception as exc:
+                detail["propagation_node_status"] = f"error: {exc}"
+
+        # Interface count only — RNS.Transport.interfaces entries don't have a
+        # stable documented attribute surface across versions, so anything
+        # beyond "how many" risks an AttributeError on some install; wrapped
+        # defensively and simply omitted rather than risking a broken
+        # health endpoint.
+        try:
+            import RNS
+            detail["transport_interfaces"] = len(RNS.Transport.interfaces)
+        except Exception:
+            pass
+
+        return detail
 
 
 class MockReticulumAdapter(Adapter):

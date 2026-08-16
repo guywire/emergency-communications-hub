@@ -67,10 +67,24 @@ is pure numpy and has no audio-device dependency.
 - `meshcoretomqtt` by Cisien — bridges MeshCore serial to MQTT with Ed25519 JWT auth
 - ECH replicates the exact JWT format: `base64url(header).base64url(payload).HEX_SIGNATURE`
 - Username format: `v1_{PUBKEY_64_HEX_UPPERCASE}`
-- Password: JWT signed with device Ed25519 private key (64 bytes: seed||pubkey)
-- Private key retrieved via text command `get prv.key\r\n` on serial transport (auto at startup)
-- JWT claims: `publicKey`, `iat`, `exp`, `aud` (broker hostname)
+- Password: JWT signed with the device's own Ed25519 identity key — **on-device**, via the
+  companion protocol's `CMD_SIGN_START/DATA/FINISH` (0x21/0x22/0x23; confirmed present and
+  NOT gated behind a firmware flag, unlike `CMD_EXPORT_PRIVATE_KEY`). The raw key never
+  leaves the radio and this works over serial, TCP, or BLE alike. A `private_key:` config
+  fallback (manually exported via the MeshCore app) exists only for when the MeshCore
+  adapter is disconnected at JWT-refresh time. (Superseded 2026-08-15/16 — there is no
+  serial-only auto-retrieval of the raw key; that never actually worked, since companion
+  firmware has no ASCII CLI at all.)
+- JWT claims: `publicKey`, `iat`, `exp`, `aud` (broker hostname — LetsMesh's own example
+  config sets `audience` to the exact broker hostname), `client` (always sent by the
+  reference client; ECH was missing this until 2026-08-16), and optional `owner`/`email`
+  (only sent when `tls: true`, matching the reference client's own guard — link an observer
+  to a letsmesh.net dashboard account; confirmed cosmetic, not required for auth, per
+  LetsMesh's own MQTT-observer docs)
 - LetsMesh brokers: `mqtt-us-v1.letsmesh.net:443` and `mqtt-eu-v1.letsmesh.net:443` (WSS)
+- **Known open issue (O75):** even with the corrected claim set, LetsMesh's broker still
+  rejects ECH's JWT with `[code:135] Not authorized` as of 2026-08-16 — root cause not yet
+  found; see `ECH_REQUIREMENTS_AND_PROGRESS.md`.
 
 ### Adapter — Meshtastic
 
@@ -95,6 +109,34 @@ is pure numpy and has no audio-device dependency.
 | lxmf | `lxmf` | any | LXMF messaging over Reticulum |
 
 **GitHub:** https://github.com/markqvist/Reticulum
+
+### Adapter — DMR/BrandMeister (Homebrew Repeater Protocol)
+
+| Package | PyPI name | Version | Purpose |
+|---------|-----------|---------|---------|
+| dmr_utils3 | `dmr_utils3` | ≥0.1.29 | BPTC(196,96) interleave/encode matrix primitives (`bptc.interleave_19696`/`encode_19696`, reused directly for data-block FEC, not just voice LC) and 3/4-byte DMR ID packing (`utils.bytes_3`/`bytes_4`) |
+| bitarray | `bitarray` | ≥2.3.5 | Bit-level manipulation for BPTC matrix operations (a transitive dep of dmr_utils3/hblink3, used directly too) |
+| libscrc | `libscrc` | any | CRC-16/GSM (`gsm16`) and CRC-32/POSIX (`posix`) — DMR data header and CSBK checksums (ETSI TS 102 361-1) |
+
+**Protocol reference:** `HBLink-org/hblink3` (`hblink.py`, `const.py`) — the Homebrew/DMRplus
+login handshake and DMRD frame layout were extracted directly from this source and confirmed
+live against a real hblink3 master (2026-08-16), not re-derived from docs. See
+`ech/adapters/dmr_brandmeister.py`'s module docstring for the exact byte layout.
+
+**SMS codec reference:** `kf7eel/hbnet` (`data_gateway.py`, GPL-3.0) — the SMS/short-data
+payload framing (data header, CSBK preamble, BTF/POC fragmentation, and hbnet's own extended
+BPTC(196,96) decode that recovers a full 192-bit data block rather than just the 96-bit Link
+Control subset dmr_utils3 exposes for voice) was vendored and adapted, with attribution, into
+`ech/adapters/dmr_sms_codec.py`. Simplified vs. hbnet: always ETSI UTF-16BE (no per-destination
+format learning) and a hand-rolled IPv4+UDP header instead of adding `scapy` as a dependency.
+Verified via round-trip self-tests (`tests/test_dmr_sms_codec.py`) and a manual real
+over-the-wire test — two `DMRBrandmeisterAdapter` instances relaying an SMS through a live
+hblink3 master (2026-08-16) — since there's no live DMR SMS traffic available to check against
+otherwise.
+
+**Test infrastructure:** a private hblink3 master on an operator-provided Ubuntu 22.04 box
+(separate from the live ECH server), used to validate this adapter before ever touching a real
+DMR network (TGIF, BrandMeister). See `ECH_REQUIREMENTS_AND_PROGRESS.md`'s DMR section.
 
 ### Adapter — ADS-B (PiAware / dump1090 / tar1090 / readsb)
 

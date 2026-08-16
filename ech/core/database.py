@@ -8,6 +8,7 @@ matching records management best practice for operational logs).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -269,6 +270,10 @@ class Database:
     def __init__(self, path: str | Path = "ech.db"):
         self._path = str(path)
         self._db: aiosqlite.Connection | None = None
+        self._health_task: asyncio.Task | None = None
+        # Last integrity_check() result, surfaced via /api/system/db_health.
+        # ok=None means no check has run yet this process lifetime.
+        self.last_health_check: dict = {"ok": None, "checked_at": None, "detail": None}
 
     async def connect(self) -> None:
         self._db = await aiosqlite.connect(self._path)
@@ -279,6 +284,48 @@ class Database:
         await self._db.commit()
         await self._migrate()
         log.info("Database: connected (%s)", self._path)
+        self._health_task = asyncio.create_task(self._health_check_loop(), name="db-health-check")
+
+    async def integrity_check(self) -> tuple[bool, str]:
+        """Run PRAGMA integrity_check and record the result on
+        self.last_health_check. Returns (ok, detail) — detail is 'ok' on
+        success, or the (possibly truncated) list of problems found."""
+        ok, detail = False, "check did not run"
+        try:
+            cur = await self._db.execute("PRAGMA integrity_check(50)")
+            rows = [r[0] for r in await cur.fetchall()]
+            ok = len(rows) == 1 and rows[0] == "ok"
+            detail = "ok" if ok else "; ".join(rows[:10])
+        except Exception as exc:
+            # A raised exception here (rather than a PRAGMA result row) means
+            # the corruption is severe enough to break query execution itself
+            # — treat that as a failed check too, not a crash.
+            ok, detail = False, f"integrity_check itself failed: {exc}"
+        self.last_health_check = {
+            "ok": ok,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "detail": detail,
+        }
+        if ok:
+            log.info("Database: integrity_check OK (%s)", self._path)
+        else:
+            log.error("Database: integrity_check FAILED on %s — %s", self._path, detail)
+        return ok, detail
+
+    async def _health_check_loop(self) -> None:
+        """Daily integrity check — catches corruption early instead of it
+        being discovered by accident during an unrelated full-table-scan
+        query, which is how this class of bug has been found before."""
+        _CHECK_INTERVAL = 86400.0  # 24h
+        await asyncio.sleep(600)  # let startup settle before the first run
+        while True:
+            try:
+                await self.integrity_check()
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                log.warning("Database: health check loop error: %s", exc)
+            await asyncio.sleep(_CHECK_INTERVAL)
 
     async def _migrate(self) -> None:
         # Add must_change_pw to users table if upgrading from older schema
@@ -328,6 +375,12 @@ class Database:
         await self.prune_expired_sessions()
 
     async def close(self) -> None:
+        if self._health_task:
+            self._health_task.cancel()
+            try:
+                await self._health_task
+            except asyncio.CancelledError:
+                pass
         if self._db:
             await self._db.close()
 

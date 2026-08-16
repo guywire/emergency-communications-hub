@@ -16,6 +16,7 @@ import logging
 import random
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import parse_qs
 
 from ech.adapters.base import Adapter
 from ech.core.models import NormalizedMessage, Priority
@@ -154,11 +155,25 @@ class MockPatServer:
     Used exclusively by the test suite.
 
     Endpoints implemented:
-      GET  /api/status             → version + empty status
-      GET  /api/mailbox/in         → list of fake inbox messages
-      GET  /api/mailbox/in/{mid}   → full message body
-      POST /api/mailbox/out        → accept outbox post, return mid
+      GET  /api/status             → status (field names/casing match la5nta/pat's
+                                      api/types.Status: active_listeners, connected,
+                                      dialing, remote_addr, http_clients, config_hash)
+      GET  /api/mailbox/in         → list of fake inbox messages (JSONMessage shape:
+                                      MID/Date/From/To/Cc/Subject/Files/P2POnly/Unread —
+                                      From/To/Cc are {"Proto":..,"Addr":..} objects, not
+                                      plain strings; Body only appears on the single-
+                                      message endpoint below, matching real Pat)
+      GET  /api/mailbox/in/{mid}   → full message, adds Body
+      POST /api/mailbox/out        → application/x-www-form-urlencoded body
+                                      (to/cc/subject/body/date/p2ponly) — real Pat's
+                                      postOutboundMessageHandler parses r.Form, NOT JSON
       POST /api/connect            → acknowledge connect request
+
+    These shapes were verified against the actual la5nta/pat Go source
+    (api/mailbox.go, api/types/types.go), not guessed — earlier versions of
+    both this mock and PatWinlinkAdapter shared the same wrong assumptions
+    (lowercase field names, JSON POST body), so every test passed while the
+    real thing would have silently failed against a live Pat instance.
     """
 
     def __init__(self, host: str = "127.0.0.1", port: int = 0):
@@ -173,12 +188,13 @@ class MockPatServer:
         for i in range(3):
             mid = f"TESTMID{i:04d}"
             self._messages[mid] = {
-                "mid":     mid,
-                "subject": f"Test message {i}",
-                "body":    f"Body of test message {i}. This is a Winlink test.",
-                "from":    f"W1TEST{i}",
-                "date":    datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "files":   [],
+                "MID":     mid,
+                "Subject": f"Test message {i}",
+                "Body":    f"Body of test message {i}. This is a Winlink test.",
+                "From":    {"Proto": "Winlink", "Addr": f"W1TEST{i}"},
+                "Date":    datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "Files":   [],
+                "Unread":  True,
             }
 
     def add_message(self, mid: str, msg: dict) -> None:
@@ -238,28 +254,30 @@ class MockPatServer:
     def _route(self, method: str, path: str, body: str) -> dict | list:
         if path == "/api/status":
             return {
-                "PatVersion": "1.0.0-mock",
-                "Callsign": "W1TEST",
-                "ActiveListeners": ["telnet"],
-                "ConnectedTo": "",
+                "active_listeners": ["telnet"],
+                "connected": False,
+                "dialing": False,
+                "remote_addr": "",
+                "http_clients": [],
+                "config_hash": "mock",
             }
 
         if path == "/api/mailbox/in" and method == "GET":
-            return list(self._messages.values())
+            # Listing omits Body, matching real Pat's mailboxHandler (Body/BodyHTML
+            # are only populated by messageHandler, the single-message endpoint).
+            return [{k: v for k, v in m.items() if k != "Body"} for m in self._messages.values()]
 
         if path.startswith("/api/mailbox/in/") and method == "GET":
             mid = path.split("/")[-1]
             return self._messages.get(mid, {})
 
         if path == "/api/mailbox/out" and method == "POST":
-            try:
-                msg = json.loads(body) if body.strip() else {}
-            except json.JSONDecodeError:
-                msg = {}
-            mid = str(uuid.uuid4())[:8].upper()
-            msg["mid"] = mid
+            # Real Pat's postOutboundMessageHandler parses r.Form
+            # (application/x-www-form-urlencoded or multipart) — not JSON.
+            fields = parse_qs(body)
+            msg = {k: v[0] for k, v in fields.items() if v}
             self._outbox.append(msg)
-            return {"mid": mid, "status": "queued"}
+            return {"status": "queued"}
 
         if path == "/api/connect" and method == "POST":
             return {"status": "connecting"}

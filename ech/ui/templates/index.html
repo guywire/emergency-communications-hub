@@ -31,6 +31,10 @@
   --hf:       #e2a44f;
   --sms:      #c792ea;
   --wl:       #f78c6c;
+  --rns:      #79c0ff;
+  --m17:      #39c5cf;
+  --dapnet:   #db61a2;
+  --meshchat: #a5d6ff;
   --mono:     'IBM Plex Mono', 'Cascadia Code', 'Consolas', 'Liberation Mono', monospace;
   --sans:     'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --header-h: 48px;
@@ -188,6 +192,11 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 .ch-icon.hf      { background: #2a1e08; color: var(--hf); }
 .ch-icon.sms     { background: #1e0e2a; color: var(--sms); }
 .ch-icon.wl      { background: #2a1500; color: var(--wl); }
+.ch-icon.rns     { background: #0a2540; color: var(--rns); }
+.ch-icon.m17     { background: #0a2a2c; color: var(--m17); }
+.ch-icon.dapnet  { background: #2a0e20; color: var(--dapnet); }
+.ch-icon.meshchat{ background: #0a1e33; color: var(--meshchat); }
+.ch-icon.pbx     { background: #2a0e0e; color: #c04040; }
 .ch-label { font-size: 12px; flex: 1; color: var(--text); }
 .ch-badge {
   font-family: var(--mono);
@@ -551,8 +560,19 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 .adapter-toggle.on.hf      { background: #2a1e08; border-color: var(--hf); color: var(--hf); }
 .adapter-toggle.on.sms     { background: #1e0e2a; border-color: var(--sms); color: var(--sms); }
 .adapter-toggle.on.wl      { background: #2a1500; border-color: var(--wl); color: var(--wl); }
+.adapter-toggle.on.rns     { background: #0a2540; border-color: var(--rns); color: var(--rns); }
+.adapter-toggle.on.m17     { background: #0a2a2c; border-color: var(--m17); color: var(--m17); }
+.adapter-toggle.on.dapnet  { background: #2a0e20; border-color: var(--dapnet); color: var(--dapnet); }
+.adapter-toggle.on.meshchat{ background: #0a1e33; border-color: var(--meshchat); color: var(--meshchat); }
 .adapter-toggle.on.pbx { background: #2a0e0e; border-color: #c04040; color: #c04040; }
 .adapter-toggle.pbx    { border-color: #5a2020; color: #5a2020; }
+/* Fallback for any adapter with no dedicated color class above (new adapter
+   types default to cls:'' in adapterMeta()) — without this, clicking a
+   toggle still adds the "on" class in JS (no console error) but nothing
+   visibly changes, which looks exactly like the button being unresponsive.
+   Bit for bit this is what happened to the m17/dapnet toggles before this
+   rule existed. */
+.adapter-toggle.on { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
 #compose-to {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -593,6 +613,41 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 }
 #compose textarea:focus { border-color: var(--blue); }
 #compose textarea::placeholder { color: var(--dim); }
+#compose-body-wrap { position: relative; }
+#mention-suggest {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  min-width: 160px;
+  max-width: 320px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  z-index: 20;
+  overflow: hidden;
+}
+#mention-suggest.open { display: block; }
+.mention-item {
+  padding: 5px 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mention-item .mention-item-adapter { color: var(--dim); font-size: 9px; margin-left: 6px; }
+.mention-item:hover, .mention-item.active { background: var(--blue-bg); color: var(--blue); }
+.mention-tag {
+  color: var(--blue);
+  background: var(--blue-bg);
+  border-radius: 3px;
+  padding: 0 3px;
+}
 #compose-bottom {
   display: flex;
   align-items: center;
@@ -1152,7 +1207,10 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
           <option value="2">Emergency</option>
         </select>
       </div>
-      <textarea id="compose-body" placeholder="Compose message…" oninput="updateCharCount()" onkeydown="handleComposKey(event)"></textarea>
+      <div id="compose-body-wrap">
+        <div id="mention-suggest"></div>
+        <textarea id="compose-body" placeholder="Compose message… (@name to mention)" oninput="handleComposeInput()" onkeydown="handleComposKey(event)" onblur="document.getElementById('mention-suggest').classList.remove('open')"></textarea>
+      </div>
       <div id="compose-bottom">
         <button id="broadcast-btn" onclick="broadcastAll()">⚡ Broadcast all</button>
         <button id="beacon-btn" onclick="sendAPRSBeacon()" title="Send APRS position beacon via all connected APRS-IS adapters" style="background:var(--bg2);border:1px solid var(--border);color:var(--muted);border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer">📡 Beacon</button>
@@ -1406,7 +1464,7 @@ function buildMsgEl(msg) {
 
   // Use receive time (our clock) for display; raw.packet_timestamp is the device clock
   const ts = new Date(msg.timestamp);
-  const timeStr = ts.toUTCString().slice(17, 22);
+  const timeStr = formatMsgTime(msg.timestamp).replace(/ UTC$/, '');
 
   const adapterTag = adapterTagHTML(msg.source_adapter);
   const channelTag = channelTagHTML(msg.source_channel, msg.source_adapter);
@@ -1529,7 +1587,7 @@ function buildMsgEl(msg) {
         ${(msg.from_id !== 'local' && msg.source_channel !== 'outbound') ? `<span onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Reply — fills the To: field and selects the right adapter" style="font-family:var(--mono);font-size:10px;color:var(--blue);cursor:pointer;padding:1px 5px;border:1px solid var(--border);border-radius:3px;white-space:nowrap">↩ Reply</span>` : ''}
         <span class="msg-detail-btn" onclick="openMsgDetail('${escHtml(msg.id)}')" title="Message detail">⋯</span>
       </div>
-      <div class="${bodyClass}">${isEncrypted ? '🔒 ' : ''}${escHtml(msg.body)}</div>
+      <div class="${bodyClass}">${isEncrypted ? '🔒 ' : ''}${highlightMentions(escHtml(msg.body))}</div>
       ${posStr}
       ${aisStr}
     </div>
@@ -1853,6 +1911,14 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// Highlight "@name" tokens in an already-escHtml'd message body. Runs after
+// escaping so it only ever matches literal text, never injects markup from
+// message content.
+function highlightMentions(escapedBody) {
+  return escapedBody.replace(/(^|[\s(])@([A-Za-z0-9_-]{2,32})/g,
+    (m, pre, name) => `${pre}<span class="mention-tag">@${name}</span>`);
+}
+
 // ── History load ─────────────────────────────────────────────────────────
 async function loadHistory() {
   try {
@@ -1938,22 +2004,23 @@ restoreSidebarSections();
 // startup default below always wins on reload.
 let _adapterFilterMemory = {};
 
-// Startup default: land on APRS filtered to MSG-type traffic (directed
-// messages) rather than "All traffic" — cuts through OBJ/POS/STATUS chatter
-// from the moment the page loads. Runs once per page load, after loadHistory()
-// so buildTypeSubBar() has actual messages to detect a "MSG" pill from; a
-// WS reconnect firing ws.onopen again must NOT re-trigger this and clobber
-// whatever the operator has since selected.
+// Startup default: land on "All traffic" (every adapter), but seed APRS's
+// own remembered filter to MSG-type only so OBJ/POS/STATUS chatter stays
+// suppressed from the moment the page loads — msgPassesFilter() applies a
+// non-live adapter's remembered filter even while "All traffic" is the live
+// view, so this doesn't require switching the visible channel away from
+// "All traffic". Runs once per page load; a WS reconnect firing ws.onopen
+// again must NOT re-trigger this and clobber whatever the operator has
+// since selected.
 let _didSelectDefaultFilter = false;
 
 async function selectDefaultFilter() {
   if (_didSelectDefaultFilter) return;
   _didSelectDefaultFilter = true;
   const el = document.querySelector('.channel-item[data-adapter*="aprs"]');
-  if (!el) return;   // no APRS adapter configured — leave the "All traffic" default alone
-  filterAdapter(el.dataset.adapter, el);
-  const msgPill = [...document.querySelectorAll('#type-subbar .chan-pill')].find(p => p.textContent.trim() === 'MSG');
-  if (msgPill) filterMsgType('MSG', msgPill);
+  if (!el) return;   // no APRS adapter configured — nothing to seed
+  _adapterFilterMemory[el.dataset.adapter] = {channel: 'all', msgType: 'MSG'};
+  renderAll();   // loadHistory() already rendered once before this filter was seeded
 }
 
 function filterAdapter(adapter, el) {
@@ -2034,12 +2101,21 @@ function buildTypeSubBar() {
       .map(m => msgTypePrefix(m.body))
       .filter(Boolean)
   )].sort();
+  // Always keep the currently-selected type in the list even if no message
+  // of that type is in the loaded window yet (e.g. the MSG-only startup
+  // default on an adapter that's recently been all OBJ/POS/STATUS beacons).
+  // Previously, losing the pill here reset state.filter.msgType itself back
+  // to "all", silently defeating the MSG-only default on every single
+  // incoming message for as long as zero MSG traffic had loaded.
+  if (state.filter.msgType !== 'all' && !types.includes(state.filter.msgType)) {
+    types.push(state.filter.msgType);
+    types.sort();
+  }
   if (types.length < 2) {   // nothing to split on — don't show a bar with one option
     bar.classList.remove('show');
     bar.innerHTML = '';
     return;
   }
-  if (!types.includes(state.filter.msgType)) state.filter.msgType = 'all';
   bar.classList.add('show');
   bar.innerHTML = [
     `<span class="chan-pill${state.filter.msgType === 'all' ? ' active' : ''}" onclick="filterMsgType('all', this)">All types</span>`,
@@ -2059,6 +2135,59 @@ function updateCharCount() {
   const counter = document.getElementById('char-counter');
   counter.textContent = `${body.length} / 900`;
   counter.className = body.length > 900 ? 'over' : body.length > 700 ? 'warn' : '';
+}
+
+// ── @mention autocomplete ────────────────────────────────────────────────
+// Mentions are plain "@Name" text — every adapter just sends body text as-is,
+// so this works on MeshCore, APRS, or anything else with zero adapter-side
+// changes. This just makes typing and reading them easier.
+let _mentionActiveIdx = -1;
+let _mentionMatches = [];
+
+function _mentionQueryAt(text, caret) {
+  const upTo = text.slice(0, caret);
+  const at = upTo.lastIndexOf('@');
+  if (at === -1) return null;
+  const between = upTo.slice(at + 1);
+  if (/[\s@]/.test(between)) return null;   // "@" wasn't the start of the current token
+  return { start: at, query: between.toLowerCase() };
+}
+
+function handleComposeInput() {
+  updateCharCount();
+  const el = document.getElementById('compose-body');
+  const box = document.getElementById('mention-suggest');
+  const q = _mentionQueryAt(el.value, el.selectionStart);
+  if (!q) { box.classList.remove('open'); _mentionMatches = []; return; }
+
+  const seen = new Set();
+  _mentionMatches = _allNodes
+    .filter(n => n.display_name && !seen.has(n.display_name) && seen.add(n.display_name))
+    .filter(n => n.display_name.toLowerCase().includes(q.query))
+    .slice(0, 8);
+  if (!_mentionMatches.length) { box.classList.remove('open'); return; }
+
+  _mentionActiveIdx = 0;
+  box.innerHTML = _mentionMatches.map((n, i) =>
+    `<div class="mention-item${i === 0 ? ' active' : ''}" data-idx="${i}" onmousedown="event.preventDefault();insertMention(${i})">@${escHtml(n.display_name)}<span class="mention-item-adapter">${escHtml(n._adapter || '')}</span></div>`
+  ).join('');
+  box.classList.add('open');
+}
+
+function insertMention(idx) {
+  const n = _mentionMatches[idx];
+  if (!n) return;
+  const el = document.getElementById('compose-body');
+  const q = _mentionQueryAt(el.value, el.selectionStart);
+  if (!q) return;
+  const before = el.value.slice(0, q.start);
+  const after = el.value.slice(el.selectionStart);
+  el.value = `${before}@${n.display_name} ${after}`;
+  const caret = before.length + n.display_name.length + 2;
+  el.setSelectionRange(caret, caret);
+  document.getElementById('mention-suggest').classList.remove('open');
+  el.focus();
+  updateCharCount();
 }
 
 function updateSendBtn() {
@@ -2097,6 +2226,22 @@ function getSelectedAdapters() {
 }
 
 function handleComposKey(e) {
+  const box = document.getElementById('mention-suggest');
+  if (box.classList.contains('open') && _mentionMatches.length) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const items = [...box.querySelectorAll('.mention-item')];
+      _mentionActiveIdx = (_mentionActiveIdx + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items.forEach((el, i) => el.classList.toggle('active', i === _mentionActiveIdx));
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      insertMention(_mentionActiveIdx);
+      return;
+    }
+    if (e.key === 'Escape') { box.classList.remove('open'); return; }
+  }
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendMessage();
 }
 
@@ -2250,6 +2395,7 @@ const _NODE_TYPE_LABELS = {
   IGATE: ['IGATE', 'Internet gateway — autonomous', 'var(--yellow)'],
   RPTR: ['RPT', 'Repeater — autonomous', 'var(--yellow)'],
   OBJECT: ['OBJ', 'APRS object — rebroadcast by a gate, unattended', 'var(--muted)'],
+  WAYPOINT: ['WPT', 'Meshtastic waypoint — placed marker, not a node', 'var(--muted)'],
   MOBILE: ['MOB', 'Mobile station — likely operator', 'var(--green)'],
   FIXED: ['FIX', 'Fixed station — likely operator', 'var(--green)'],
 };
@@ -2265,7 +2411,7 @@ function nodeMessageable(n) {
   // text, never a contact/DM/advert) — there's nothing to address a DM to yet.
   if (n.meta && n.meta.no_pubkey) return false;
   // Unknown type → assume messageable (don't hide functionality on missing data)
-  return !['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT'].includes(n.node_type);
+  return !['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT', 'WAYPOINT'].includes(n.node_type);
 }
 
 function fillTo(callsign) {
@@ -2276,20 +2422,34 @@ function fillTo(callsign) {
 
 function replyTo(nodeId, adapterName) {
   // MeshCore channel messages carry no sender pubkey — only a "name: body" text
-  // prefix. If that name never matched a node we've heard directly (contact/DM/
-  // advert), ECH only knows the sender's display name, not an address a DM can
-  // reach. Filling the To: field with that name would look like a real address
-  // and then silently fail to send, so warn instead.
+  // prefix, so from_id for these senders IS the display name, not an address
+  // (see _resolve_sender_node_id in meshcore.py). Putting that name in the
+  // To: field looks like a real address but silently fails to send — the
+  // radio needs an actual pubkey for a DM, which was never received. Fall
+  // back to replying on the channel with an @mention instead, the same
+  // channel-reply fallback the mesh bot already uses for these senders (O21).
   const known = _allNodes.find(n => n.node_id === nodeId && n._adapter === adapterName);
-  if (known && known.meta && known.meta.no_pubkey) {
-    toast(`Can't DM "${nodeId}" — only heard on a channel, no pubkey yet (needs a direct contact/advert first)`, 'err');
-    return;
-  }
-  document.getElementById('compose-to').value = nodeId;
-  // Select only the adapter the DM came in on so the reply goes back the same path
+  const isMeshCore = (adapterName || '').toLowerCase().includes('meshcore');
+  const looksLikeAddress = /^[0-9a-f]{6,}$/i.test(nodeId);
+  const noAddress = isMeshCore && ((known && known.meta && known.meta.no_pubkey) || (!known && !looksLikeAddress));
+
   document.querySelectorAll('.adapter-toggle').forEach(btn => {
     btn.classList.toggle('on', btn.dataset.adapter === adapterName);
   });
+
+  if (noAddress) {
+    document.getElementById('compose-to').value = '';
+    const bodyEl = document.getElementById('compose-body');
+    const mention = `@${nodeId} `;
+    if (!bodyEl.value.startsWith(mention)) bodyEl.value = mention + bodyEl.value;
+    updateCharCount();
+    bodyEl.focus();
+    bodyEl.setSelectionRange(bodyEl.value.length, bodyEl.value.length);
+    toast(`No address known for "${nodeId}" yet — replying on channel with @mention instead`, 'ok');
+    return;
+  }
+
+  document.getElementById('compose-to').value = nodeId;
   document.getElementById('compose-body').focus();
   toast(`Replying to ${nodeId.slice(0, 8)}… via ${adapterName}`, 'ok');
 }
@@ -2822,6 +2982,12 @@ function adapterMeta(name) {
   if (n.includes('sms'))        return {icon:'SMS',  label:'SMS',        cls:'sms',  toggle:'SMS'};
   if (n.includes('winlink') || n.includes('pat')) return {icon:'WL', label:'Winlink', cls:'wl', toggle:'WL'};
   if (n.includes('reticulum') || n.includes('rns')) return {icon:'RNS', label:'Reticulum', cls:'rns', toggle:'RNS'};
+  if (n.includes('dapnet'))    return {icon:'DAPN', label:'DAPNET',    cls:'dapnet', toggle:'DAPN'};
+  if (n.includes('m17'))       return {icon:'M17',  label:'M17',       cls:'m17',    toggle:'M17'};
+  // Checked before the generic 'aredn' match below — meshchat is a text
+  // adapter, not the AREDN AMI/PBX voice one, so it must not inherit
+  // voice:true (that flag excludes it from "select all" and mislabels it).
+  if (n.includes('meshchat'))  return {icon:'MCHT', label:'AREDN MeshChat', cls:'meshchat', toggle:'MCHT'};
   if (n.includes('aredn') || n.includes('asterisk') || n.includes('ami') || n.includes('pbx'))
     return {icon:'PBX', label:'AREDN/PBX', cls:'pbx', toggle:'PBX', voice:true};
   if (n.includes('adsb') || n.includes('opensky') || n.includes('ais'))

@@ -86,7 +86,26 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     </div>
   </div>
 
-
+  <!-- ── System maintenance ───────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">SYSTEM MAINTENANCE</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Reboot the host / install package updates</span>
+    </div>
+    <div class="section-body">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-red" onclick="rebootServer()">⟲ Reboot Server</button>
+        <button class="btn btn-blue" id="update-pkgs-btn" onclick="updatePackages()">⬇ Update Packages</button>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">Reboot restarts the whole machine (all services), not just ECH.</span>
+      </div>
+      <pre id="update-log" style="display:none;margin-top:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px;font-family:var(--mono);font-size:10px;color:var(--muted);max-height:220px;overflow-y:auto;white-space:pre-wrap"></pre>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">Database health:</span>
+        <span id="db-health-status" style="font-family:var(--mono);font-size:11px">checking…</span>
+        <button class="btn" style="padding:3px 10px;font-size:10px" onclick="checkDbHealth(true)">↻ Check now</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ── Base Location ────────────────────────────────────────── -->
   <div class="section">
@@ -1066,6 +1085,8 @@ async function init() {
 
   loadServices();
   setInterval(loadServices, 15000);
+  checkUpdateStatus();   // in case an update kicked off in a previous session is still running
+  checkDbHealth(false);  // show the last periodic check's result, don't trigger a new full scan
   loadAdapterLive();
   setInterval(loadAdapterLive, 10000);
   loadMQTTStatus();
@@ -1445,11 +1466,106 @@ async function saveAdapters() {
 async function restartECH() {
   if (!confirm('Restart ECH service? All connections will be dropped briefly.')) return;
   try {
-    await fetch('/api/system/restart', {method:'POST'});
-    toast('Restart requested — page will reload in 5s');
-    setTimeout(() => location.reload(), 5000);
+    const r = await fetch('/api/system/services/ech/restart', {method:'POST'});
+    const d = await r.json();
+    if (d.status === 'ok') {
+      toast('Restart requested — page will reload in 5s');
+      setTimeout(() => location.reload(), 5000);
+    } else {
+      toast(`Restart failed: ${d.stderr || d.detail || 'unknown error'}`, 'err');
+    }
   } catch(e) {
-    toast('Restart requested (check systemctl status ech)');
+    toast('Restart request failed — see console', 'err');
+    console.error('restartECH failed:', e);
+  }
+}
+
+async function rebootServer() {
+  if (!confirm('Reboot the ENTIRE server?\n\nThis is not the same as "Restart ECH" — every service on this host (Asterisk, MQTT, all adapters) will go down until the machine finishes booting back up.')) return;
+  try {
+    const r = await fetch('/api/system/reboot', {method:'POST'});
+    const d = await r.json();
+    if (d.status === 'ok') {
+      toast('Reboot requested — host will be unreachable for a minute or two');
+    } else {
+      toast(`Reboot failed: ${d.detail || 'unknown error'}`, 'err');
+    }
+  } catch(e) {
+    toast('Reboot request failed — see console', 'err');
+    console.error('rebootServer failed:', e);
+  }
+}
+
+let _updatePollTimer = null;
+
+async function updatePackages() {
+  if (!confirm('Run apt-get update && upgrade now?\n\nThis can take several minutes and may briefly spike CPU/disk on the host.')) return;
+  try {
+    const r = await fetch('/api/system/update', {method:'POST'});
+    const d = await r.json();
+    if (d.status !== 'ok') {
+      toast(`Update failed to start: ${d.detail || 'unknown error'}`, 'err');
+      return;
+    }
+    toast('Package update started');
+    checkUpdateStatus();
+  } catch(e) {
+    toast('Update request failed — see console', 'err');
+    console.error('updatePackages failed:', e);
+  }
+}
+
+async function checkUpdateStatus() {
+  try {
+    const r = await fetch('/api/system/update/status');
+    const d = await r.json();
+    const btn = document.getElementById('update-pkgs-btn');
+    const log = document.getElementById('update-log');
+    if (d.running || d.log_tail) {
+      log.style.display = 'block';
+      log.textContent = d.log_tail || '(no output yet)';
+      log.scrollTop = log.scrollHeight;
+    }
+    if (d.running) {
+      btn.disabled = true;
+      btn.textContent = '⬇ Updating…';
+      clearTimeout(_updatePollTimer);
+      _updatePollTimer = setTimeout(checkUpdateStatus, 2000);
+    } else {
+      btn.disabled = false;
+      btn.textContent = '⬇ Update Packages';
+      if (d.exit_code !== null && d.exit_code !== undefined) {
+        const ok = d.exit_code === 0;
+        toast(ok ? 'Package update finished' : `Package update exited with code ${d.exit_code}`, ok ? 'ok' : 'err');
+      }
+    }
+  } catch(e) {
+    console.error('checkUpdateStatus failed:', e);
+  }
+}
+
+async function checkDbHealth(forceNow) {
+  const el = document.getElementById('db-health-status');
+  if (!el) return;
+  try {
+    if (forceNow) el.textContent = 'checking… (full scan, may take a moment on a large db)';
+    const url = forceNow ? '/api/system/db_health/check' : '/api/system/db_health';
+    const r = await fetch(url, {method: forceNow ? 'POST' : 'GET'});
+    const d = await r.json();
+    if (d.ok === null) {
+      el.textContent = 'no check has run yet';
+      el.style.color = 'var(--dim)';
+    } else if (d.ok) {
+      el.textContent = `OK — last checked ${new Date(d.checked_at).toLocaleString()}`;
+      el.style.color = 'var(--green)';
+    } else {
+      el.textContent = `CORRUPTION DETECTED (${new Date(d.checked_at).toLocaleString()}): ${d.detail}`;
+      el.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    el.textContent = 'status check failed — see console';
+    el.style.color = 'var(--red)';
+    console.error('checkDbHealth failed:', e);
   }
 }
 
@@ -2191,9 +2307,8 @@ const MQTT_PRESETS = {
   - msh/US/2/json/LongFast/#`,
 
   letsmesh_us: `# LetsMesh US  (MeshCore network, WebSocket+TLS)
-# Auth: auto-generated Ed25519 JWT from your MeshCore device key (no token to paste)
-# For serial transport the private key is fetched automatically.
-# For TCP transport add:  private_key: <128-hex from "get prv.key">
+# Auth: JWT signed ON-DEVICE by your MeshCore radio's own identity key —
+# nothing to export or paste, works over serial, TCP, or BLE alike.
 - type: mqtt
   name: mqtt-letsmesh-us
   host: mqtt-us-v1.letsmesh.net
@@ -2452,11 +2567,13 @@ function adapterToYaml(obj) {
 
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-function toast(msg) {
+function toast(msg, type) {
   const t = document.getElementById('save-toast');
-  t.textContent = '✓ ' + msg;
+  const isErr = type === 'err';
+  t.textContent = (isErr ? '✗ ' : '✓ ') + msg;
+  t.style.background = isErr ? 'var(--red)' : 'var(--green)';
   t.style.display = 'inline';
-  setTimeout(() => t.style.display = 'none', 3000);
+  setTimeout(() => t.style.display = 'none', isErr ? 6000 : 3000);
 }
 
 // ── MeshCore tools ────────────────────────────────────────────────────────

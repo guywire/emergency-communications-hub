@@ -34,6 +34,9 @@ dependencies = [
     "rns>=0.8",                   # Reticulum adapter
     "lxmf>=0.5",                  # Reticulum adapter
     "mgrs>=1.5",                  # mesh bot 'strip' command — lat/lon to MGRS grid reference
+    "dmr_utils3>=0.1.29",         # DMR adapter — BPTC(196,96) FEC primitives, ID packing
+    "bitarray>=2.3.5",            # DMR adapter — bit-level BPTC matrix operations
+    "libscrc>=1.8",               # DMR adapter — CRC-16/GSM + CRC-32/POSIX (data header/CSBK checksums)
 ]
 
 [project.optional-dependencies]

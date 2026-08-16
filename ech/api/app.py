@@ -16,6 +16,7 @@ FastAPI application. Exposes:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, File, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
@@ -63,6 +64,13 @@ _DXC_CACHE_TTL = 60             # seconds
 # fall back to the coarse country-center only for non-US or unlookupable calls.
 # Cached indefinitely — a license's registered address rarely changes.
 _callook_cache: dict = {}       # base callsign → (lat, lon, precise: bool)
+
+# Package update (apt-get update && upgrade) runs in the background since it
+# can take minutes — tracked here so /api/system/update/status can be polled
+# instead of holding the triggering request open.
+_update_state: dict = {"running": False, "started_at": None, "finished_at": None,
+                        "exit_code": None, "log": []}
+_UPDATE_LOG_MAX_LINES = 500
 
 UI_DIR = Path(__file__).parent.parent / "ui"
 
@@ -741,7 +749,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return {"status": "error", "detail": "Not supported"}
         key = adapter.get_privkey_hex()
         if not key:
-            return {"status": "none", "detail": "No private key cached (serial only, retrieved at startup)"}
+            return {"status": "none", "detail": "No private_key configured — not needed for MQTT/JWT "
+                    "auth (that signs on-device now via sign_data()); this only reflects a manually "
+                    "configured fallback key, exported via the MeshCore app if you set one"}
         return {"status": "ok", "privkey_hex": key, "length": len(key)}
 
     @app.get("/api/adapters/{adapter_name}/key_inventory")
@@ -863,6 +873,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail=f"Adapter '{adapter_name}' not found")
         try:
+            import asyncio
             await router.stop_adapter(adapter_name)
             await asyncio.sleep(1.0)
             # Re-read adapter config from disk to pick up any changes
@@ -2420,6 +2431,100 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             }
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}
+
+    @app.post("/api/system/reboot")
+    async def reboot_system():
+        """Reboot the whole host (admin only). Requires the ech-services sudoers
+        entry to include 'systemctl reboot' — see scripts/install.sh."""
+        import asyncio as _aio
+        try:
+            p = await _aio.create_subprocess_exec(
+                "sudo", "systemctl", "reboot",
+                stdout=_aio.subprocess.PIPE,
+                stderr=_aio.subprocess.PIPE,
+            )
+            # Don't wait for completion — a successful reboot never returns,
+            # and the host will drop this connection out from under us anyway.
+            # A quick wait_for just catches the immediate sudo-permission-denied
+            # case so the UI can report it instead of hanging on a dead process.
+            try:
+                stdout, stderr = await _aio.wait_for(p.communicate(), timeout=3.0)
+                if p.returncode not in (None, 0):
+                    return {"status": "error", "detail": stderr.decode() or stdout.decode()}
+            except _aio.TimeoutError:
+                pass
+            return {"status": "ok"}
+        except Exception as exc:
+            return {"status": "error", "detail": str(exc)}
+
+    @app.post("/api/system/update")
+    async def update_packages():
+        """Kick off `apt-get update && apt-get upgrade -y` in the background
+        (admin only). Requires the ech-services sudoers entry to include those
+        two commands — see scripts/install.sh."""
+        import asyncio as _aio
+        if _update_state["running"]:
+            return {"status": "error", "detail": "Update already running"}
+
+        _update_state.update(running=True, started_at=time.time(),
+                              finished_at=None, exit_code=None, log=[])
+
+        async def _run_step(*argv: str) -> int:
+            p = await _aio.create_subprocess_exec(
+                "sudo", *argv,
+                stdout=_aio.subprocess.PIPE,
+                stderr=_aio.subprocess.STDOUT,
+            )
+            async for line in p.stdout:
+                _update_state["log"].append(line.decode(errors="replace").rstrip())
+                if len(_update_state["log"]) > _UPDATE_LOG_MAX_LINES:
+                    _update_state["log"] = _update_state["log"][-_UPDATE_LOG_MAX_LINES:]
+            await p.wait()
+            return p.returncode
+
+        async def _run():
+            try:
+                # Two separate exec calls (no shell) so the sudoers rule can
+                # whitelist each exact argv rather than a quoted shell string.
+                rc = await _run_step("/usr/bin/apt-get", "-y", "update")
+                if rc == 0:
+                    rc = await _run_step("/usr/bin/apt-get", "-y", "upgrade")
+                else:
+                    _update_state["log"].append("[ech] apt-get update failed — skipping upgrade")
+                _update_state["exit_code"] = rc
+            except Exception as exc:
+                _update_state["log"].append(f"[ech] update failed to start: {exc}")
+                _update_state["exit_code"] = -1
+            finally:
+                _update_state["running"] = False
+                _update_state["finished_at"] = time.time()
+
+        _aio.ensure_future(_run())
+        return {"status": "ok"}
+
+    @app.get("/api/system/update/status")
+    async def update_status():
+        return {
+            "running": _update_state["running"],
+            "started_at": _update_state["started_at"],
+            "finished_at": _update_state["finished_at"],
+            "exit_code": _update_state["exit_code"],
+            "log_tail": "\n".join(_update_state["log"][-100:]),
+        }
+
+    @app.get("/api/system/db_health")
+    async def db_health():
+        """Result of the last periodic (daily) SQLite integrity_check, plus
+        the live db file path — see Database._health_check_loop()."""
+        return {"path": db._path, **db.last_health_check}
+
+    @app.post("/api/system/db_health/check")
+    async def db_health_check_now():
+        """Run integrity_check immediately rather than waiting for the
+        daily loop. PRAGMA integrity_check does a full scan — can take a
+        while on a large db, and briefly competes with normal query load."""
+        ok, detail = await db.integrity_check()
+        return {"path": db._path, **db.last_health_check}
 
     @app.get("/api/system/stats")
     async def system_stats():
