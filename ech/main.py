@@ -188,17 +188,31 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
             super().__init__()
             self._db = database
             self._loop = loop
+            self._closing = False
+            self._tasks: set[asyncio.Task] = set()
         def emit(self, record):
-            if self._loop is None or self._loop.is_closed():
+            # Once shutdown starts, stop scheduling new writes — otherwise
+            # log lines from the stop sequence itself keep racing db.close()
+            # (aiosqlite raises "closed database"/"no active connection").
+            if self._closing or self._loop is None or self._loop.is_closed():
                 return
             try:
                 msg = self.format(record)
-                self._loop.call_soon_threadsafe(
-                    self._loop.create_task,
-                    self._db.save_log_entry(record.levelname, record.name, msg[:500]),
-                )
+                def _schedule():
+                    task = self._loop.create_task(
+                        self._db.save_log_entry(record.levelname, record.name, msg[:500])
+                    )
+                    self._tasks.add(task)
+                    task.add_done_callback(self._tasks.discard)
+                self._loop.call_soon_threadsafe(_schedule)
             except Exception:
                 pass
+        async def aclose(self) -> None:
+            """Stop accepting new writes and let any already-scheduled ones
+            finish before the database connection closes."""
+            self._closing = True
+            if self._tasks:
+                await asyncio.wait(self._tasks, timeout=2.0)
 
     db_handler = DBLogHandler(db, asyncio.get_running_loop())
     db_handler.setLevel(logging.INFO)
@@ -410,6 +424,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
         if 'cat_ctrl' in dir():
             await cat_ctrl.stop()
         await router.stop()
+        logging.getLogger().removeHandler(db_handler)
+        await db_handler.aclose()
         await db.close()
         log.info("ECH shutdown complete")
 

@@ -127,7 +127,9 @@ class Router:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
-        for adapter in self._adapters.values():
+        # Snapshot — stop_adapter()/register() can mutate self._adapters from a
+        # concurrent request while this loop is suspended on `await`.
+        for adapter in list(self._adapters.values()):
             await adapter.disconnect()
         log.info("Router: stopped")
 
@@ -220,8 +222,10 @@ class Router:
                 if now - _last_session_prune >= _SESSION_PRUNE_INTERVAL:
                     await self._db.prune_expired_sessions()
                     _last_session_prune = now
-                # Adapter health
-                for adapter in self._adapters.values():
+                # Adapter health — snapshot, adapters can be added/removed
+                # concurrently (simulation toggle, config changes) while this
+                # loop is suspended on `await`.
+                for adapter in list(self._adapters.values()):
                     h = await adapter.health()
                     M.update_adapter_health(
                         adapter.name,
@@ -281,7 +285,11 @@ class Router:
                 M.record_anomaly(finding.adapter, finding.rule, finding.severity.value)
                 payload = json.dumps({"type": "anomaly", "data": finding.to_dict()})
                 dead = set()
-                for ws in self._ws_clients:
+                # Snapshot before iterating — add_ws_client/remove_ws_client run from
+                # separate per-connection tasks and can mutate self._ws_clients while
+                # this loop is suspended on `await`, which raises "Set changed size
+                # during iteration" if we iterate the live set directly.
+                for ws in list(self._ws_clients):
                     try:
                         await ws.send_text(payload)
                     except Exception:
@@ -300,7 +308,8 @@ class Router:
             return
         payload = json.dumps({"type": event_type, "data": data})
         dead = set()
-        for ws in self._ws_clients:
+        # Snapshot — see comment in _drain_anomaly_queue.
+        for ws in list(self._ws_clients):
             try:
                 await ws.send_text(payload)
             except Exception:
@@ -312,7 +321,8 @@ class Router:
             return
         payload = json.dumps({"type": "message", "data": msg.to_dict()})
         dead = set()
-        for ws in self._ws_clients:
+        # Snapshot — see comment in _drain_anomaly_queue.
+        for ws in list(self._ws_clients):
             try:
                 await ws.send_text(payload)
             except Exception:
@@ -487,7 +497,7 @@ class Router:
         """Page the PBX (if configured, connected, and opted in) whenever an
         operator sends an Emergency-priority message — puts the phone system
         in the loop for the highest-severity traffic without a separate step."""
-        for adapter in self._adapters.values():
+        for adapter in list(self._adapters.values()):
             if not hasattr(adapter, "page") or not getattr(adapter, "_connected", False):
                 continue
             if not getattr(adapter, "auto_page_on_emergency", False):
@@ -515,7 +525,7 @@ class Router:
     async def all_health(self) -> list[dict]:
         return [
             (await adapter.health()).to_dict()
-            for adapter in self._adapters.values()
+            for adapter in list(self._adapters.values())
         ]
 
     async def nodes_for(self, adapter_name: str) -> list[dict]:
