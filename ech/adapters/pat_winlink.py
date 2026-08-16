@@ -459,9 +459,12 @@ class PatWinlinkAdapter(Adapter):
                 if not cs or lat is None or lon is None:
                     continue
                 # Per-channel fields (Gridsquare/Frequency/ServiceCode/modes)
-                # live under Channels[], not flat on the gateway — a station
-                # can list several; take the first as representative.
-                channels = gw.get("Channels") or []
+                # live under GatewayChannels[], not flat on the gateway and not
+                # "Channels[]" — confirmed against a real live response body
+                # (2026-08-16): gw.get("Channels") was always empty, so every
+                # gateway silently got freq/grid/mode = "" before this fix.
+                # A station can list several; take the first as representative.
+                channels = gw.get("GatewayChannels") or []
                 ch0 = channels[0] if channels else {}
                 freq_hz = ch0.get("Frequency")
                 stations.append({
@@ -469,10 +472,8 @@ class PatWinlinkAdapter(Adapter):
                     "lat": float(lat),
                     "lon": float(lon),
                     "gridsquare": ch0.get("Gridsquare", ""),
-                    # Frequency is a float64 in the API; treated as Hz based on
-                    # the magnitude of realistic HF/VHF channel values (e.g.
-                    # 14109000 for 14.109 MHz) — not independently confirmed
-                    # against a live response body from this session.
+                    # Frequency is Hz in the real response (e.g. 145090000 for
+                    # 145.090 MHz) — confirmed against a live gateway record.
                     "freq_mhz": (freq_hz / 1e6) if freq_hz else None,
                     "service_code": ch0.get("ServiceCode", ""),
                     "modes": ch0.get("SupportedModes", ""),
