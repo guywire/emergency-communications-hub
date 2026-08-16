@@ -1170,6 +1170,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
       <button onclick="nodeAnnounce()" title="Broadcast this station's presence (advert + discovery pulse) to all connected mesh adapters">📡 Announce</button>
       <button onclick="wxBroadcast()">🌩 WX alerts</button>
       <button onclick="wxShare()">🌤 Share weather</button>
+      <button onclick="aqiShare()">🔥 Share air quality</button>
       <label style="display:block;margin-top:4px">
         <input type="file" id="vcf-import" accept=".vcf,.csv" style="display:none" onchange="importContacts(this)">
         <span style="display:block;width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:11px;padding:6px;border-radius:4px;cursor:pointer;text-align:center" onclick="document.getElementById('vcf-import').click()">Import contacts</span>
@@ -3275,6 +3276,27 @@ async function wxShare() {
   if (!r.ok) { toast('Share failed', 'err'); return; }
   const sent = Object.entries(d.sent || {}).filter(([,ok]) => ok).map(([n]) => n);
   toast(`Weather shared via ${sent.length ? sent.join(', ') : 'no adapters'}`, sent.length ? 'ok' : 'err');
+}
+async function getAqiTargetAdapters() {
+  const selected = getSelectedAdapters();
+  if (selected.length) return selected;
+  try {
+    const cfg = await fetch('/api/airquality/config').then(r => r.json());
+    return cfg.auto_broadcast_adapters || [];
+  } catch (e) {
+    return [];
+  }
+}
+async function aqiShare() {
+  const adapters = await getAqiTargetAdapters();
+  const params = new URLSearchParams();
+  adapters.forEach(a => params.append('adapters', a));
+  const url = '/api/airquality/share' + (adapters.length ? '?' + params : '');
+  const r = await fetch(url, {method:'POST'});
+  const d = r.ok ? await r.json() : null;
+  if (!r.ok) { toast('Share failed', 'err'); return; }
+  const sent = Object.entries(d.sent || {}).filter(([,ok]) => ok).map(([n]) => n);
+  toast(`Air quality shared via ${sent.length ? sent.join(', ') : 'no adapters'}`, sent.length ? 'ok' : 'err');
 }
 async function timeSyncBroadcast() {
   const adapters = getSelectedAdapters();

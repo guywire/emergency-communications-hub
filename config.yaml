@@ -667,6 +667,35 @@ mesh_bot:
 #                                   # so a fire producing visible smoke isn't outside the fire search
 #   firms_source: "VIIRS_SNPP_NRT"
 #   firms_dayrange: 2              # satellite passes can miss a fire on any single day (cloud cover)
+#   # Auto-broadcast to mesh when AQI worsens into one of these categories —
+#   # empty list (default) disables auto-broadcast; manual "Share air quality"
+#   # button on the dashboard works regardless of this setting.
+#   auto_broadcast_categories: []   # e.g. ["Unhealthy", "Very Unhealthy", "Hazardous"]
+#   auto_broadcast_adapters: []     # blank = all connected adapters
+#   auto_broadcast_channel: ""      # channel name, e.g. "smoke" — blank = adapter default
+#   auto_broadcast_min_interval_sec: 1800
+#   auto_broadcast_category_cooldown_sec: 3600
+#   auto_broadcast_max_per_hour: 2
+
+# ── POTA proximity alerts (Parks on the Air) ──────────────────────────────────
+# Polls the same public activator-spot feed the map's 🏞 POTA layer uses
+# (api.pota.app — no key needed) and posts newly-detected nearby activations
+# to the mesh, e.g. a "pota" MeshCore channel. "Nearby" is a radius around the
+# base position, the same convention the map's on-demand POTA overlay already
+# uses — POTA's spot API has no bounding-box query, only radius filtering.
+# Disabled by default (opt-in — this posts external hobby data to your mesh).
+# All fields below except `enabled` are also editable live from Settings.
+# pota_service:
+#   enabled: true
+#   lat: null                      # falls back to weather_service.nws_lat/lon
+#   lon: null
+#   radius_km: 500
+#   poll_interval_sec: 300
+#   seen_ttl_sec: 21600             # 6h — re-announces the same park after this long idle
+#   auto_broadcast_adapters: []     # blank = all connected adapters
+#   auto_broadcast_channel: "pota"  # channel name — blank = adapter default
+#   auto_broadcast_min_interval_sec: 120
+#   auto_broadcast_max_per_hour: 10
 
 # ── Named water bodies (EPA ATTAINS water quality + nearest live NDBC buoy) ───
 # Auto-discovers every EPA-assessed lake/bay/estuary/river near the hub — no

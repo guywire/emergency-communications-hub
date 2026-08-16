@@ -53,10 +53,13 @@ import io
 import logging
 import math
 import re
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
 import httpx
+
+from ech.core.models import Priority
 
 log = logging.getLogger(__name__)
 
@@ -202,6 +205,21 @@ class AirQualityService:
         self._fire_source      = str(cfg.get("firms_source", "VIIRS_SNPP_NRT"))
         self._fire_dayrange    = int(cfg.get("firms_dayrange", 2))
 
+        # Auto-broadcast config — mirrors WeatherService's pattern (see
+        # ech/core/weather.py), keyed on AQI category instead of NWS severity.
+        self._auto_broadcast_categories: set[str] = set(cfg.get("auto_broadcast_categories", []))
+        self._auto_broadcast = bool(self._auto_broadcast_categories)
+        self._auto_adapters = cfg.get("auto_broadcast_adapters", [])
+        self._auto_channel  = cfg.get("auto_broadcast_channel", "")
+        self._auto_min_interval      = int(cfg.get("auto_broadcast_min_interval_sec", 1800))
+        self._auto_category_cooldown = int(cfg.get("auto_broadcast_category_cooldown_sec", 3600))
+        self._auto_max_per_hour      = int(cfg.get("auto_broadcast_max_per_hour", 2))
+        self._last_auto_broadcast: float = 0.0
+        self._last_category_broadcast: dict[str, float] = {}
+        self._hour_broadcast_ts: list[float] = []
+        self._broadcast_count = 0
+        self._db = None   # set via set_db() so broadcast cooldown state can be persisted
+
         self._router = router
         self._client: httpx.AsyncClient | None = None
         self._poll_task: asyncio.Task | None = None
@@ -214,6 +232,9 @@ class AirQualityService:
         self._last_poll: datetime | None = None
         self._poll_count = 0
         self._last_error = ""
+
+    def set_db(self, db) -> None:
+        self._db = db
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -331,6 +352,79 @@ class AirQualityService:
 
     async def _poll_current(self) -> None:
         self._current = await self._fetch_current_at(self._lat, self._lon, distance_mi=50)
+        if self._current:
+            await self._maybe_auto_broadcast()
+
+    # ── Summary / share / auto-broadcast ─────────────────────────────────
+
+    def format_summary(self) -> str:
+        """Human-readable current-conditions summary — used by both the manual
+        Share Air Quality button and auto-broadcast."""
+        if not self._current:
+            return "AQI: no current reading available."
+        aqi = self._current.get("aqi")
+        cat = self._current.get("category", "Unknown")
+        area = self._current.get("reporting_area") or ""
+        parts = [f"\U0001f525 AQI {aqi if aqi is not None else '?'} ({cat})" + (f" — {area}" if area else "")]
+        if self._hotspots:
+            parts.append(f"{len(self._hotspots)} active fire hotspot(s) nearby")
+        if self._smoke_polygons:
+            parts.append(f"{len(self._smoke_polygons)} smoke plume(s) overhead/nearby")
+        return ". ".join(parts) + "."
+
+    async def share_summary(self, adapter_names: list[str] | None = None) -> dict[str, bool]:
+        """Manual 'Share Air Quality' — sends the current summary immediately,
+        no rate limiting (operator-initiated, same as Share Weather)."""
+        if not self._router:
+            return {}
+        return await self._router.send(body=self.format_summary()[:200], adapter_names=adapter_names)
+
+    async def _maybe_auto_broadcast(self) -> None:
+        if not (self._auto_broadcast and self._router):
+            return
+        category = self._current.get("category", "Unknown")
+        if category not in self._auto_broadcast_categories:
+            return
+
+        now_ts = time.time()
+        skip_reason = None
+        if now_ts - self._last_auto_broadcast < self._auto_min_interval:
+            skip_reason = f"global min interval {self._auto_min_interval}s"
+        elif now_ts - self._last_category_broadcast.get(category, 0) < self._auto_category_cooldown:
+            skip_reason = f"category cooldown {self._auto_category_cooldown}s for {category!r}"
+        else:
+            cutoff = now_ts - 3600
+            self._hour_broadcast_ts = [t for t in self._hour_broadcast_ts if t > cutoff]
+            if len(self._hour_broadcast_ts) >= self._auto_max_per_hour:
+                skip_reason = f"hourly cap {self._auto_max_per_hour}/hr reached"
+
+        if skip_reason:
+            log.info("AirQualityService: skipping auto-broadcast (%s)", skip_reason)
+            return
+
+        summary = self.format_summary()
+        raw_hint = {"channel_name": self._auto_channel} if self._auto_channel else None
+        await self._router.send(
+            body=summary[:200],
+            adapter_names=self._auto_adapters or None,
+            priority=Priority.ELEVATED,
+            raw=raw_hint,
+        )
+        self._last_auto_broadcast = now_ts
+        self._last_category_broadcast[category] = now_ts
+        self._hour_broadcast_ts.append(now_ts)
+        self._broadcast_count += 1
+        log.info("AirQualityService: auto-broadcast sent for category=%r (%d this hour)",
+                  category, len(self._hour_broadcast_ts))
+        if self._db:
+            import json as _json
+            try:
+                await self._db.set_kv("aq_broadcast_state", _json.dumps({
+                    "last_auto": self._last_auto_broadcast,
+                    "by_category": self._last_category_broadcast,
+                }))
+            except Exception:
+                pass
 
     # ── AirNow: every monitor station in a bounding box (real coverage) ──
 

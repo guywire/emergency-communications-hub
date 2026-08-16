@@ -252,10 +252,14 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     mm_coverage_service = MeshMapperCoverageService(config, router=router)
     anomaly_engine.set_coverage_service(mm_coverage_service)
 
+    # POTA proximity alerts (new nearby activator -> mesh channel, e.g. "pota")
+    from ech.core.pota_service import PotaService
+    pota_service = PotaService(config, router=router)
+
     # ECH state — init BEFORE router.start() so adapters are paused before connecting
     from ech.core.state import ECHState
     state = ECHState(db, router=router, wx_service=wx_service, aq_service=aq_service, wb_service=wb_service,
-                     mm_coverage_service=mm_coverage_service)
+                     mm_coverage_service=mm_coverage_service, pota_service=pota_service)
     await state.init()
 
     # Load bridge rules from config before starting
@@ -291,6 +295,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     await aq_service.start()
     await wb_service.start()
     await mm_coverage_service.start()
+    await pota_service.start()
 
     # CAT radio control via rigctld (Hamlib)
     from ech.core.cat_rigctld import CATController
@@ -342,6 +347,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
                      aq_service=aq_service if 'aq_service' in dir() else None,
                      wb_service=wb_service if 'wb_service' in dir() else None,
                      mm_coverage_service=mm_coverage_service if 'mm_coverage_service' in dir() else None,
+                     pota_service=pota_service if 'pota_service' in dir() else None,
                      auth=auth, ech_state=state, mc_bridge=mc_bridge,
                      gps_reader=gps_reader, secure_cookies=secure_cookies,
                      cat_ctrl=cat_ctrl if 'cat_ctrl' in dir() else None,
@@ -397,6 +403,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
             await wb_service.stop()
         if 'mm_coverage_service' in dir():
             await mm_coverage_service.stop()
+        if 'pota_service' in dir():
+            await pota_service.stop()
         if 'wx_bot' in dir():
             await wx_bot.stop()
         if 'cat_ctrl' in dir():

@@ -42,13 +42,14 @@ class ECHState:
     All state changes are persisted and broadcast to WebSocket clients.
     """
 
-    def __init__(self, db, router=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None):
+    def __init__(self, db, router=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, pota_service=None):
         self._db = db
         self._router = router
         self._wx_service = wx_service
         self._aq_service = aq_service
         self._wb_service = wb_service
         self._mm_coverage_service = mm_coverage_service
+        self._pota_service = pota_service
         self._ws_broadcast_fn = None   # set by router after init
 
         # In-memory state (loaded from DB on start)
@@ -111,6 +112,35 @@ class ECHState:
                 log.info("ECHState: restored air quality configuration from database")
             except Exception as exc:
                 log.warning("ECHState: failed to restore air quality configuration: %s", exc)
+        aq_state_json = await self._db.get_kv("aq_broadcast_state")
+        if aq_state_json and self._aq_service:
+            try:
+                st = json.loads(aq_state_json)
+                self._aq_service._last_auto_broadcast = float(st.get("last_auto", 0.0))
+                self._aq_service._last_category_broadcast = st.get("by_category", {})
+                log.info("ECHState: restored air quality broadcast state (last_auto=%.0f)",
+                         self._aq_service._last_auto_broadcast)
+            except Exception as exc:
+                log.warning("ECHState: failed to restore air quality broadcast state: %s", exc)
+
+        # Restore persisted POTA proximity-alert configuration on startup.
+        if self._pota_service:
+            self._pota_service.set_db(self._db)
+        pota_json = await self._db.get_kv("pota_config")
+        if pota_json and self._pota_service:
+            try:
+                cfg = json.loads(pota_json)
+                await self.update_pota_config(cfg)
+                log.info("ECHState: restored POTA proximity-alert configuration from database")
+            except Exception as exc:
+                log.warning("ECHState: failed to restore POTA configuration: %s", exc)
+        pota_state_json = await self._db.get_kv("pota_broadcast_state")
+        if pota_state_json and self._pota_service:
+            try:
+                st = json.loads(pota_state_json)
+                self._pota_service._last_auto_broadcast = float(st.get("last_auto", 0.0))
+            except Exception as exc:
+                log.warning("ECHState: failed to restore POTA broadcast state: %s", exc)
 
         # Restore persisted water body configuration on startup.
         wb_json = await self._db.get_kv("wb_config")
@@ -267,6 +297,10 @@ class ECHState:
         if self._mm_coverage_service:
             self._mm_coverage_service._lat = lat
             self._mm_coverage_service._lon = lon
+        # Propagate to POTA proximity-alert service
+        if self._pota_service:
+            self._pota_service._lat = lat
+            self._pota_service._lon = lon
         # Propagate to all adapters — updates positions in mocks; MeshCore also
         # pushes this onto the radio's own advert position (CMD_SET_ADVERT_LATLON)
         # and stamps its own map node, no-op for other real adapters
@@ -330,6 +364,9 @@ class ECHState:
         if self._wb_service and lat is not None and lon is not None:
             self._wb_service._lat = float(lat)
             self._wb_service._lon = float(lon)
+        if self._pota_service and lat is not None and lon is not None:
+            self._pota_service._lat = float(lat)
+            self._pota_service._lon = float(lon)
         if self._mm_coverage_service and lat is not None and lon is not None:
             self._mm_coverage_service._lat = float(lat)
             self._mm_coverage_service._lon = float(lon)
@@ -366,6 +403,19 @@ class ECHState:
             self._aq_service._fire_dayrange = int(config["firms_dayrange"])
         if "smoke_bbox_deg" in config:
             self._aq_service._smoke_bbox_deg = float(config["smoke_bbox_deg"])
+        if "auto_broadcast_categories" in config:
+            self._aq_service._auto_broadcast_categories = set(config["auto_broadcast_categories"])
+            self._aq_service._auto_broadcast = bool(self._aq_service._auto_broadcast_categories)
+        if "auto_broadcast_adapters" in config:
+            self._aq_service._auto_adapters = list(config["auto_broadcast_adapters"])
+        if "auto_broadcast_channel" in config:
+            self._aq_service._auto_channel = config["auto_broadcast_channel"]
+        if "auto_broadcast_min_interval_sec" in config:
+            self._aq_service._auto_min_interval = int(config["auto_broadcast_min_interval_sec"])
+        if "auto_broadcast_category_cooldown_sec" in config:
+            self._aq_service._auto_category_cooldown = int(config["auto_broadcast_category_cooldown_sec"])
+        if "auto_broadcast_max_per_hour" in config:
+            self._aq_service._auto_max_per_hour = int(config["auto_broadcast_max_per_hour"])
         lat = config.get("lat")
         lon = config.get("lon")
         if lat is not None: self._aq_service._lat = float(lat)
@@ -374,6 +424,36 @@ class ECHState:
         import json
         await self._db.set_kv("aq_config", json.dumps(config))
         await self._broadcast("aq_config_change", config)
+
+    # ── POTA proximity alert config live reload ──────────────────────────
+
+    async def update_pota_config(self, config: dict) -> None:
+        """Update POTA proximity-alert service config without restarting ECH
+        (enable/disable itself still requires a restart)."""
+        if not self._pota_service:
+            return
+        if "radius_km" in config:
+            self._pota_service._radius_km = float(config["radius_km"])
+        if "poll_interval_sec" in config:
+            self._pota_service._poll_interval = int(config["poll_interval_sec"])
+        if "seen_ttl_sec" in config:
+            self._pota_service._seen_ttl = int(config["seen_ttl_sec"])
+        if "auto_broadcast_adapters" in config:
+            self._pota_service._auto_adapters = list(config["auto_broadcast_adapters"])
+        if "auto_broadcast_channel" in config:
+            self._pota_service._auto_channel = config["auto_broadcast_channel"]
+        if "auto_broadcast_min_interval_sec" in config:
+            self._pota_service._auto_min_interval = int(config["auto_broadcast_min_interval_sec"])
+        if "auto_broadcast_max_per_hour" in config:
+            self._pota_service._auto_max_per_hour = int(config["auto_broadcast_max_per_hour"])
+        lat = config.get("lat")
+        lon = config.get("lon")
+        if lat is not None: self._pota_service._lat = float(lat)
+        if lon is not None: self._pota_service._lon = float(lon)
+        # Persist
+        import json
+        await self._db.set_kv("pota_config", json.dumps(config))
+        await self._broadcast("pota_config_change", config)
 
     # ── Water body config live reload ────────────────────────────────────
 

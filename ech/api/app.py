@@ -75,7 +75,7 @@ _UPDATE_LOG_MAX_LINES = 500
 UI_DIR = Path(__file__).parent.parent / "ui"
 
 
-def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None) -> FastAPI:
+def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, pota_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None) -> FastAPI:
     global _psk_contact, _psk_default_callsign
     _op_callsign = "N0CALL"   # injected into pages as window.ECH_CALLSIGN
     # Build PSKReporter User-Agent from config: PSKReporter TOS requires a real
@@ -1226,6 +1226,13 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             "firms_source": aq_service._fire_source,
             "firms_dayrange": aq_service._fire_dayrange,
             "smoke_bbox_deg": aq_service._smoke_bbox_deg,
+            "auto_broadcast_categories": sorted(aq_service._auto_broadcast_categories),
+            "auto_broadcast_adapters": aq_service._auto_adapters,
+            "auto_broadcast_channel": aq_service._auto_channel,
+            "auto_broadcast_min_interval_sec": aq_service._auto_min_interval,
+            "auto_broadcast_category_cooldown_sec": aq_service._auto_category_cooldown,
+            "auto_broadcast_max_per_hour": aq_service._auto_max_per_hour,
+            "broadcast_count_session": aq_service._broadcast_count,
         }
 
     @app.post("/api/airquality/config")
@@ -1234,6 +1241,15 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if ech_state:
             await ech_state.update_air_quality_config(data)
         return {"status": "ok"}
+
+    @app.post("/api/airquality/share")
+    async def share_air_quality(adapters: list[str] = Query(default=None)):
+        """Broadcast current AQI/smoke conditions — mirrors /api/weather/share."""
+        if not aq_service:
+            return {"status": "error", "detail": "Air quality service not configured"}
+        summary = aq_service.format_summary()
+        results = await aq_service.share_summary(adapter_names=adapters or None)
+        return {"status": "ok", "summary": summary, "sent": results}
 
     # ── Named water bodies (map markers) ─────────────────────────────────
 
@@ -2824,6 +2840,28 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return payload
         except Exception as exc:
             return {"spots": [], "total": 0, "error": f"POTA fetch failed: {exc.__class__.__name__}"}
+
+    # ── POTA proximity alerts (auto-broadcast new nearby activators) ────────
+
+    @app.get("/api/pota/config")
+    async def get_pota_config():
+        if not pota_service:
+            return {"enabled": False}
+        return pota_service.status()
+
+    @app.post("/api/pota/config")
+    async def update_pota_config(request: Request):
+        data = await request.json()
+        if ech_state:
+            await ech_state.update_pota_config(data)
+        return {"status": "ok"}
+
+    @app.post("/api/pota/poll")
+    async def poll_pota():
+        if not pota_service:
+            return {"status": "error", "detail": "POTA service not configured"}
+        await pota_service.trigger_poll()
+        return {"status": "ok", **pota_service.status()}
 
     @app.get("/api/sota/spots")
     async def sota_spots_endpoint(radius_km: float = 500.0):

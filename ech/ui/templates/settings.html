@@ -302,9 +302,100 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
           <input type="number" id="aqi-smoke-bbox" value="15" min="1" max="40">
         </div>
       </div>
+      <div style="margin-top:14px;border:1px solid var(--border);border-radius:6px;padding:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Auto-broadcast to Mesh</div>
+        <div style="margin-bottom:8px">
+          <label style="font-size:11px;color:var(--muted)">Broadcast when AQI category is:</label>
+          <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap">
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="ab-aqi-usg"> <span style="color:#f0883e">Unhealthy (sensitive)</span></label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="ab-aqi-unhealthy"> <span style="color:#e05040">Unhealthy</span></label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="ab-aqi-veryunhealthy"> <span style="color:#8f3f97">Very Unhealthy</span></label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="ab-aqi-hazardous"> <span style="color:#7e0023">Hazardous</span></label>
+          </div>
+        </div>
+        <div style="margin-bottom:8px">
+          <label>Target adapters <span style="color:var(--dim)">(comma-separated names, blank = all connected)</span></label>
+          <input type="text" id="aqi-auto-adapters" placeholder="meshcore1, meshtastic1" style="font-family:var(--mono);font-size:11px">
+        </div>
+        <div style="margin-bottom:8px">
+          <label>Target channel <span style="color:var(--dim)">(channel name, blank = adapter default)</span></label>
+          <input type="text" id="aqi-auto-channel" placeholder="smoke" style="font-family:var(--mono);font-size:11px;width:160px">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div>
+            <label>Min interval between any broadcasts <span style="color:var(--dim)">(sec)</span></label>
+            <input type="number" id="aqi-ab-min-interval" min="60" step="60" value="1800" style="font-family:var(--mono);font-size:11px;width:80px">
+          </div>
+          <div>
+            <label>Same category cooldown <span style="color:var(--dim)">(sec)</span></label>
+            <input type="number" id="aqi-ab-category-cooldown" min="60" step="60" value="3600" style="font-family:var(--mono);font-size:11px;width:80px">
+          </div>
+          <div>
+            <label>Max broadcasts per hour</label>
+            <input type="number" id="aqi-ab-max-per-hour" min="1" max="20" value="2" style="font-family:var(--mono);font-size:11px;width:60px">
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--dim);margin-top:6px">Only broadcasts when the AQI category worsens into one of the checked levels — steady/unchanged readings don't repeat within the cooldown window.</div>
+        <div id="aqi-broadcast-count" style="font-size:10px;color:var(--muted);margin-top:4px"></div>
+      </div>
       <button class="btn btn-green" style="margin-top:16px" onclick="saveAqConfig()">Save air quality config</button>
       <button class="btn" style="margin-top:16px;margin-left:8px" onclick="pollAqNow()">Poll now</button>
       <div id="aqi-current" style="margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--muted)"></div>
+    </div>
+  </div>
+
+  <!-- ── POTA proximity alerts ──────────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('pota-body')">
+      <span class="section-title">POTA PROXIMITY ALERTS</span>
+    </div>
+    <div id="pota-body" class="section-body">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:10px">
+        Polls the same POTA activator-spot feed the map's 🏞 POTA layer uses (api.pota.app) and,
+        when a new activation appears within range of the hub that hasn't been seen recently, posts
+        it to the mesh — e.g. a "pota" MeshCore channel. "Nearby" is a radius around the base
+        position (Settings above), same convention as the map's on-demand POTA overlay, not a
+        literal rectangle. Enabling itself still requires <code>pota_service.enabled: true</code>
+        in config.yaml + a restart — everything below applies live, no restart needed.
+      </div>
+      <div class="row3">
+        <div>
+          <label>Radius (km)</label>
+          <input type="number" id="pota-radius" value="500" min="10" max="2000">
+        </div>
+        <div>
+          <label>Poll interval (seconds)</label>
+          <input type="number" id="pota-poll" value="300" min="60">
+        </div>
+        <div>
+          <label>Re-announce after <span style="color:var(--dim)">(sec of inactivity)</span></label>
+          <input type="number" id="pota-seen-ttl" value="21600" min="600">
+        </div>
+      </div>
+      <div style="margin-top:14px;border:1px solid var(--border);border-radius:6px;padding:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Auto-broadcast to Mesh</div>
+        <div style="margin-bottom:8px">
+          <label>Target adapters <span style="color:var(--dim)">(comma-separated names, blank = all connected)</span></label>
+          <input type="text" id="pota-auto-adapters" placeholder="meshcore1" style="font-family:var(--mono);font-size:11px">
+        </div>
+        <div style="margin-bottom:8px">
+          <label>Target channel <span style="color:var(--dim)">(channel name, blank = adapter default)</span></label>
+          <input type="text" id="pota-auto-channel" placeholder="pota" style="font-family:var(--mono);font-size:11px;width:160px">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label>Min interval between broadcasts <span style="color:var(--dim)">(sec)</span></label>
+            <input type="number" id="pota-ab-min-interval" min="10" step="10" value="120" style="font-family:var(--mono);font-size:11px;width:80px">
+          </div>
+          <div>
+            <label>Max broadcasts per hour</label>
+            <input type="number" id="pota-ab-max-per-hour" min="1" max="60" value="10" style="font-family:var(--mono);font-size:11px;width:60px">
+          </div>
+        </div>
+        <div id="pota-broadcast-count" style="font-size:10px;color:var(--muted);margin-top:6px"></div>
+      </div>
+      <button class="btn btn-green" style="margin-top:16px" onclick="savePotaConfig()">Save POTA alert config</button>
+      <button class="btn" style="margin-top:16px;margin-left:8px" onclick="pollPotaNow()">Poll now</button>
     </div>
   </div>
 
@@ -1146,8 +1237,32 @@ async function init() {
     document.getElementById('aqi-fire-bbox').value = aq.fire_bbox_deg || 15;
     document.getElementById('aqi-fire-dayrange').value = aq.firms_dayrange || 2;
     document.getElementById('aqi-smoke-bbox').value = aq.smoke_bbox_deg || 15;
+    const aqCats = new Set(aq.auto_broadcast_categories || []);
+    document.getElementById('ab-aqi-usg').checked = aqCats.has('Unhealthy for Sensitive Groups');
+    document.getElementById('ab-aqi-unhealthy').checked = aqCats.has('Unhealthy');
+    document.getElementById('ab-aqi-veryunhealthy').checked = aqCats.has('Very Unhealthy');
+    document.getElementById('ab-aqi-hazardous').checked = aqCats.has('Hazardous');
+    if (aq.auto_broadcast_adapters) document.getElementById('aqi-auto-adapters').value = aq.auto_broadcast_adapters.join(', ');
+    if (aq.auto_broadcast_channel != null) document.getElementById('aqi-auto-channel').value = aq.auto_broadcast_channel;
+    if (aq.auto_broadcast_min_interval_sec != null) document.getElementById('aqi-ab-min-interval').value = aq.auto_broadcast_min_interval_sec;
+    if (aq.auto_broadcast_category_cooldown_sec != null) document.getElementById('aqi-ab-category-cooldown').value = aq.auto_broadcast_category_cooldown_sec;
+    if (aq.auto_broadcast_max_per_hour != null) document.getElementById('aqi-ab-max-per-hour').value = aq.auto_broadcast_max_per_hour;
+    if (aq.broadcast_count_session != null) document.getElementById('aqi-broadcast-count').textContent = `Broadcasts this session: ${aq.broadcast_count_session}`;
   }
   loadAqStatus();
+
+  // Load POTA proximity-alert config
+  const pota = await fetch('/api/pota/config').then(r=>r.json()).catch(()=>({}));
+  if (pota.enabled !== undefined) {
+    document.getElementById('pota-radius').value = pota.radius_km || 500;
+    document.getElementById('pota-poll').value = pota.poll_interval_sec || 300;
+    document.getElementById('pota-seen-ttl').value = pota.seen_ttl_sec || 21600;
+    if (pota.auto_broadcast_adapters) document.getElementById('pota-auto-adapters').value = pota.auto_broadcast_adapters.join(', ');
+    if (pota.auto_broadcast_channel != null) document.getElementById('pota-auto-channel').value = pota.auto_broadcast_channel;
+    if (pota.auto_broadcast_min_interval_sec != null) document.getElementById('pota-ab-min-interval').value = pota.auto_broadcast_min_interval_sec;
+    if (pota.auto_broadcast_max_per_hour != null) document.getElementById('pota-ab-max-per-hour').value = pota.auto_broadcast_max_per_hour;
+    if (pota.broadcast_count_session != null) document.getElementById('pota-broadcast-count').textContent = `Broadcasts this session: ${pota.broadcast_count_session}`;
+  }
 
   // Load water body config + current status
   const wb = await fetch('/api/waterbodies/config').then(r=>r.json()).catch(()=>({}));
@@ -1238,6 +1353,13 @@ async function saveWxConfig() {
 }
 
 async function saveAqConfig() {
+  const catMap = {
+    'ab-aqi-usg': 'Unhealthy for Sensitive Groups',
+    'ab-aqi-unhealthy': 'Unhealthy',
+    'ab-aqi-veryunhealthy': 'Very Unhealthy',
+    'ab-aqi-hazardous': 'Hazardous',
+  };
+  const cats = Object.entries(catMap).filter(([id]) => document.getElementById(id).checked).map(([,label]) => label);
   const cfg = {
     airnow_api_key: document.getElementById('aqi-airnow-key').value.trim(),
     firms_api_key: document.getElementById('aqi-firms-key').value.trim(),
@@ -1247,10 +1369,35 @@ async function saveAqConfig() {
     fire_bbox_deg: parseFloat(document.getElementById('aqi-fire-bbox').value) || 15,
     firms_dayrange: parseInt(document.getElementById('aqi-fire-dayrange').value) || 2,
     smoke_bbox_deg: parseFloat(document.getElementById('aqi-smoke-bbox').value) || 15,
+    auto_broadcast_categories: cats,
+    auto_broadcast_adapters: document.getElementById('aqi-auto-adapters').value.split(',').map(s=>s.trim()).filter(Boolean),
+    auto_broadcast_channel: document.getElementById('aqi-auto-channel').value.trim(),
+    auto_broadcast_min_interval_sec: parseInt(document.getElementById('aqi-ab-min-interval').value) || 1800,
+    auto_broadcast_category_cooldown_sec: parseInt(document.getElementById('aqi-ab-category-cooldown').value) || 3600,
+    auto_broadcast_max_per_hour: parseInt(document.getElementById('aqi-ab-max-per-hour').value) || 2,
   };
   await fetch('/api/airquality/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
   toast('Air quality config saved — takes effect immediately');
   loadAqStatus();
+}
+
+async function savePotaConfig() {
+  const cfg = {
+    radius_km: parseFloat(document.getElementById('pota-radius').value) || 500,
+    poll_interval_sec: parseInt(document.getElementById('pota-poll').value) || 300,
+    seen_ttl_sec: parseInt(document.getElementById('pota-seen-ttl').value) || 21600,
+    auto_broadcast_adapters: document.getElementById('pota-auto-adapters').value.split(',').map(s=>s.trim()).filter(Boolean),
+    auto_broadcast_channel: document.getElementById('pota-auto-channel').value.trim(),
+    auto_broadcast_min_interval_sec: parseInt(document.getElementById('pota-ab-min-interval').value) || 120,
+    auto_broadcast_max_per_hour: parseInt(document.getElementById('pota-ab-max-per-hour').value) || 10,
+  };
+  await fetch('/api/pota/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
+  toast('POTA alert config saved — takes effect immediately');
+}
+
+async function pollPotaNow() {
+  const r = await fetch('/api/pota/poll', {method:'POST'}).then(r=>r.json()).catch(()=>null);
+  toast(r && r.status === 'ok' ? 'POTA poll triggered' : 'POTA poll failed');
 }
 
 async function pollAqNow() {
