@@ -3243,8 +3243,22 @@ function setSysbarEnabled(enabled) {
 }
 
 // ── Weather & Time ────────────────────────────────────────────────────────
+async function getWxTargetAdapters() {
+  // Manual selection in the compose pane wins; otherwise fall back to the
+  // same adapter list configured for automatic weather alerts (Settings ->
+  // Weather Alerts -> Target adapters), so "Share Weather" doesn't default
+  // to blasting every connected adapter just because nothing's checked.
+  const selected = getSelectedAdapters();
+  if (selected.length) return selected;
+  try {
+    const cfg = await fetch('/api/weather/config').then(r => r.json());
+    return cfg.auto_broadcast_adapters || [];
+  } catch (e) {
+    return [];
+  }
+}
 async function wxBroadcast() {
-  const adapters = getSelectedAdapters();
+  const adapters = await getWxTargetAdapters();
   const params = new URLSearchParams();
   adapters.forEach(a => params.append('adapters', a));
   const url = '/api/weather/broadcast' + (adapters.length ? '?' + params : '');
@@ -3252,7 +3266,7 @@ async function wxBroadcast() {
   toast(r.ok ? 'NWS alerts broadcast' + (adapters.length ? ' via: '+adapters.join(', ') : ' to all') : 'WX broadcast failed', r.ok ? 'ok' : 'err');
 }
 async function wxShare() {
-  const adapters = getSelectedAdapters();
+  const adapters = await getWxTargetAdapters();
   const params = new URLSearchParams();
   adapters.forEach(a => params.append('adapters', a));
   const url = '/api/weather/share' + (adapters.length ? '?' + params : '');
