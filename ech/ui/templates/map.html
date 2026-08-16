@@ -26,6 +26,13 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 .ctrl-btn:disabled{opacity:.4;cursor:default}
 .ctrl-btn:disabled:hover{border-color:var(--border);color:var(--muted)}
 .ctrl-sep{width:1px;align-self:stretch;background:var(--border);margin:4px 2px}
+#layers-menu{display:none;position:absolute;top:48px;right:10px;z-index:1500;background:rgba(22,27,34,.97);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:11px;min-width:220px;max-height:calc(100vh - 70px);overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.5)}
+#layers-menu.open{display:block}
+.layer-group-title{font-size:10px;color:var(--dim,var(--muted));text-transform:uppercase;letter-spacing:.06em;margin:10px 4px 4px;opacity:.7}
+.layer-group-title:first-child{margin-top:2px}
+.layer-row{display:flex!important;align-items:center;width:100%;text-align:left;padding:5px 6px;font-size:11px;margin-bottom:2px}
+.layer-row::before{content:'';width:11px;height:11px;border:1px solid var(--border);border-radius:2px;margin-right:8px;flex-shrink:0}
+.layer-row.on::before{background:var(--green);border-color:var(--green)}
 #map{height:calc(100vh - 44px);width:100%}
 /* Dark tile overlay */
 .leaflet-tile{filter:brightness(0.7) invert(1) hue-rotate(180deg) saturate(0.5)}
@@ -64,33 +71,36 @@ body.sim-mode #map{height:calc(100vh - 70px)}
   <div id="controls">
     <button class="ctrl-btn" onclick="loadNodes()" title="Reload node/marker data">↻ Refresh</button>
     <button class="ctrl-btn" id="follow-btn" onclick="toggleFollow()" title="Auto-pan to follow this device's GPS position">📍 Follow</button>
-    <div class="ctrl-sep"></div>
-    <button class="ctrl-btn on" id="bucket-repeater-btn"  onclick="toggleNodeBucket('repeater')"  title="Toggle repeater/infrastructure nodes (routers, digipeaters, IGates)">🔁 RPT</button>
-    <button class="ctrl-btn on" id="bucket-companion-btn" onclick="toggleNodeBucket('companion')" title="Toggle companion/operator nodes (messageable devices, mobile/fixed stations)">👤 CMPN</button>
-    <button class="ctrl-btn on" id="bucket-other-btn"     onclick="toggleNodeBucket('other')"     title="Toggle other node types (sensors, weather stations, unknown, AIS/ADS-B, etc.)">❓ OTHR</button>
-    <div class="ctrl-sep"></div>
-    <button class="ctrl-btn on" id="proto-meshtastic-btn" onclick="toggleNodeProtocol('meshtastic')" title="Toggle Meshtastic nodes — button border/text matches its map marker color">MSHT</button>
-    <button class="ctrl-btn on" id="proto-meshcore-btn"   onclick="toggleNodeProtocol('meshcore')"   title="Toggle MeshCore nodes — button border/text matches its map marker color">MSHC</button>
-    <button class="ctrl-btn on" id="proto-aprs-btn"       onclick="toggleNodeProtocol('aprs')"       title="Toggle APRS nodes — button border/text matches its map marker color">APRS</button>
-    <div class="ctrl-sep"></div>
-    <button class="ctrl-btn on" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADSB</button>
-    <button class="ctrl-btn on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS</button>
-    <button class="ctrl-btn on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Traffic</button>
-    <div class="ctrl-sep"></div>
-    <button class="ctrl-btn" id="strips-btn" onclick="toggleStripReports()" title="Strip reports with a known MGRS or LAT/LON field (mesh bot 'strip' command)">📋 STRIPS</button>
-    <button class="ctrl-btn" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">📓 HAM LOG</button>
-    <button class="ctrl-btn" id="psk-btn" onclick="togglePSKReporter()" title="Show ham stations transmitting near your base position (PSKReporter, 300km radius)">📻 PSK</button>
-    <button class="ctrl-btn" id="pota-btn" onclick="togglePOTA()" title="Show active Parks on the Air activators near your base position">🏞 POTA</button>
-    <button class="ctrl-btn" id="sota-btn" onclick="toggleSOTA()" title="Show active Summits on the Air activators near your base position">⛰ SOTA</button>
-    <button class="ctrl-btn" id="iota-btn" onclick="toggleIOTA()" title="Show active Islands on the Air activators near your base position (filtered from the DX cluster)">🏝 IOTA</button>
-    <button class="ctrl-btn" id="bota-btn" onclick="toggleBOTA()" title="Show active Bunkers on the Air activators near your base position (filtered from the DX cluster — low volume, empty is normal)">🪖 BOTA</button>
-    <button class="ctrl-btn" id="dx-btn" onclick="toggleDXCluster()" title="Show general DX cluster spots near your base position — precise for US calls (FCC address), approximate country-center for others">🌐 DX</button>
-    <button class="ctrl-btn" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ GRID</button>
-    <div class="ctrl-sep"></div>
-    <button class="ctrl-btn" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI</button>
-    <button class="ctrl-btn" id="water-btn" onclick="toggleWaterBodies()" title="Water body quality + boating/kayak conditions (EPA ATTAINS + NDBC buoys)">🌊 WATER</button>
-    <div class="ctrl-sep"></div>
     <button class="ctrl-btn" id="draw-btn" onclick="toggleDrawMode()" title="Draw a repeater path: click each repeater in order, then Send Trace">✏ Draw Path</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn" id="layers-btn" onclick="toggleLayersMenu(event)" title="Show/hide map layer filters">☰ Layers</button>
+  </div>
+  <div id="layers-menu">
+    <div class="layer-group-title">Node types</div>
+    <button class="ctrl-btn layer-row on" id="bucket-repeater-btn"  onclick="toggleNodeBucket('repeater')"  title="Toggle repeater/infrastructure nodes (routers, digipeaters, IGates)">🔁 Repeater / infrastructure</button>
+    <button class="ctrl-btn layer-row on" id="bucket-companion-btn" onclick="toggleNodeBucket('companion')" title="Toggle companion/operator nodes (messageable devices, mobile/fixed stations)">👤 Companion / operator</button>
+    <button class="ctrl-btn layer-row on" id="bucket-other-btn"     onclick="toggleNodeBucket('other')"     title="Toggle other node types (sensors, weather stations, unknown, AIS/ADS-B, etc.)">❓ Other</button>
+    <div class="layer-group-title">Protocols</div>
+    <button class="ctrl-btn layer-row on" id="proto-meshtastic-btn" onclick="toggleNodeProtocol('meshtastic')" title="Toggle Meshtastic nodes — button border/text matches its map marker color">Meshtastic (MSHT)</button>
+    <button class="ctrl-btn layer-row on" id="proto-meshcore-btn"   onclick="toggleNodeProtocol('meshcore')"   title="Toggle MeshCore nodes — button border/text matches its map marker color">MeshCore (MSHC)</button>
+    <button class="ctrl-btn layer-row on" id="proto-aprs-btn"       onclick="toggleNodeProtocol('aprs')"       title="Toggle APRS nodes — button border/text matches its map marker color">APRS</button>
+    <div class="layer-group-title">Live overlays</div>
+    <button class="ctrl-btn layer-row on" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADS-B aircraft</button>
+    <button class="ctrl-btn layer-row on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS vessels</button>
+    <button class="ctrl-btn layer-row on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Live traffic</button>
+    <div class="layer-group-title">Activity</div>
+    <button class="ctrl-btn layer-row" id="strips-btn" onclick="toggleStripReports()" title="Strip reports with a known MGRS or LAT/LON field (mesh bot 'strip' command)">📋 Strip reports</button>
+    <button class="ctrl-btn layer-row" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">📓 Ham Log QSOs</button>
+    <button class="ctrl-btn layer-row" id="psk-btn" onclick="togglePSKReporter()" title="Show ham stations transmitting near your base position (PSKReporter, 300km radius)">📻 PSK Reporter</button>
+    <button class="ctrl-btn layer-row" id="pota-btn" onclick="togglePOTA()" title="Show active Parks on the Air activators near your base position">🏞 POTA</button>
+    <button class="ctrl-btn layer-row" id="sota-btn" onclick="toggleSOTA()" title="Show active Summits on the Air activators near your base position">⛰ SOTA</button>
+    <button class="ctrl-btn layer-row" id="iota-btn" onclick="toggleIOTA()" title="Show active Islands on the Air activators near your base position (filtered from the DX cluster)">🏝 IOTA</button>
+    <button class="ctrl-btn layer-row" id="bota-btn" onclick="toggleBOTA()" title="Show active Bunkers on the Air activators near your base position (filtered from the DX cluster — low volume, empty is normal)">🪖 BOTA</button>
+    <button class="ctrl-btn layer-row" id="dx-btn" onclick="toggleDXCluster()" title="Show general DX cluster spots near your base position — precise for US calls (FCC address), approximate country-center for others">🌐 DX Cluster</button>
+    <button class="ctrl-btn layer-row" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ Grid squares</button>
+    <div class="layer-group-title">Environmental</div>
+    <button class="ctrl-btn layer-row" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI / smoke</button>
+    <button class="ctrl-btn layer-row" id="water-btn" onclick="toggleWaterBodies()" title="Water body quality + boating/kayak conditions (EPA ATTAINS + NDBC buoys)">🌊 Water bodies</button>
   </div>
 </div>
 <div id="map"></div>
@@ -141,6 +151,27 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     setTimeout(() => map.removeLayer(pin), 8000);
   }
 })();
+
+// ── Layers dropdown (replaces the old always-visible row of filter buttons) ──
+function toggleLayersMenu(evt) {
+  if (evt) evt.stopPropagation();
+  const menu = document.getElementById('layers-menu');
+  menu.classList.toggle('open');
+  document.getElementById('layers-btn').classList.toggle('on', menu.classList.contains('open'));
+}
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('layers-menu');
+  if (menu.classList.contains('open') && !menu.contains(e.target) && e.target.id !== 'layers-btn') {
+    menu.classList.remove('open');
+    document.getElementById('layers-btn').classList.remove('on');
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.getElementById('layers-menu').classList.remove('open');
+    document.getElementById('layers-btn').classList.remove('on');
+  }
+});
 
 const markers = {};
 let followMode = false;

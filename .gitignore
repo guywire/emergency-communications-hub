@@ -12,6 +12,9 @@ build/
 # ECH runtime data — never commit
 ech.db
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 /var/
 
 # Work status / deployment notes — may contain server credentials
