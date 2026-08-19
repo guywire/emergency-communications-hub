@@ -134,7 +134,20 @@ class Router:
         log.info("Router: stopped")
 
     async def _supervise(self, adapter: Adapter) -> None:
-        """Connect and restart adapter on failure with exponential back-off."""
+        """Connect and restart adapter on failure with exponential back-off.
+
+        adapter.receive() can end two ways: raising (a real error) or simply
+        returning once self._connected goes False (e.g. a watchdog inside the
+        adapter decides the link is stale and flips the flag without closing
+        its own transport/socket) — the base Adapter.receive() generator's
+        `while self._connected:` loop just exits cleanly in that second case.
+        Both paths must release whatever connect() allocated before trying
+        again, or every disconnect — clean or not — leaks it. This was a real
+        incident: M17ReflectorAdapter's watchdog didn't close its UDP
+        transport, so every silent reconnect (no exception, so the old
+        except-only cleanup never ran) orphaned one socket, exhausting the
+        process's file descriptor limit after ~1000 reconnects over 2 days.
+        """
         backoff = 2.0
         while True:
             try:
@@ -153,9 +166,14 @@ class Router:
                         "error_type": "port_conflict",
                         "message": exc_str,
                     })
+            finally:
                 adapter._connected = False
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 60.0)
+                try:
+                    await adapter.disconnect()
+                except Exception as exc:
+                    log.debug("Adapter '%s': cleanup disconnect() failed: %s", adapter.name, exc)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60.0)
 
     # ── Inbound pipeline ──────────────────────────────────────────────────
 
