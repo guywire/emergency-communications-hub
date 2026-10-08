@@ -686,9 +686,15 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
         </div>
       </div>
       <div style="margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--text)">
-        <strong>HamVOIP / AllStarLink / AREDN directory</strong>
+        <strong>HamVOIP / AllStarLink / HOIP / AREDN directory</strong>
         <span style="color:var(--dim);font-size:10px"> — click a node to fill the Destination field above</span>
-        <div id="pbx-directory-panel" style="margin-top:8px;font-size:10px;color:var(--muted)">Loading…</div>
+        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+          <input type="text" id="pbx-dir-filter" placeholder="Filter by name, number, or category…" style="width:260px;font-family:var(--mono);font-size:10px" oninput="renderPBXDirectory()">
+          <select id="pbx-dir-category" style="font-family:var(--mono);font-size:10px" onchange="renderPBXDirectory()">
+            <option value="">All categories</option>
+          </select>
+        </div>
+        <div id="pbx-directory-panel" style="margin-top:8px;font-size:10px;color:var(--muted);max-height:360px;overflow-y:auto">Loading…</div>
       </div>
       <div style="margin-top:14px;font-family:var(--mono);font-size:10px;color:var(--muted)">
         Config preset (add to config.yaml, then restart ECH):
@@ -2475,36 +2481,62 @@ async function loadPBXStatus() {
   }
 }
 
+let _pbxDirectoryCache = null;
+
 async function loadPBXDirectory() {
   const el = document.getElementById('pbx-directory-panel');
   if (!el) return;
   try {
-    const d = await fetch('/api/pbx/directory').then(r => r.json());
-    const hv = d.hamvoip || [], ar = d.aredn || [];
-    let html = '';
-    if (hv.length) {
-      const byCat = {};
-      hv.forEach(e => { (byCat[e.category || 'other'] ||= []).push(e); });
-      html += Object.entries(byCat).map(([cat, entries]) => `
-        <div style="margin-bottom:6px">
-          <div style="color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${esc(cat)}</div>
-          ${entries.map(e => `
-            <div style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer" onclick="useDirectoryEntry('${esc(e.destination)}')" title="${esc(e.description || '')}">
-              <span style="color:var(--blue)">📞</span>
-              <span style="color:var(--text)">${esc(e.name)}</span>
-              <span style="color:var(--dim)">(${esc(e.destination)})</span>
-            </div>`).join('')}
-        </div>`).join('');
+    _pbxDirectoryCache = await fetch('/api/pbx/directory').then(r => r.json());
+    const sel = document.getElementById('pbx-dir-category');
+    if (sel) {
+      const cats = [...new Set((_pbxDirectoryCache.hamvoip || []).map(e => e.category || 'other'))].sort();
+      sel.innerHTML = '<option value="">All categories</option>' +
+        cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
     }
-    if (ar.length) {
-      html += `<div style="margin-top:6px"><div style="color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">AREDN</div>` +
-        ar.map(e => `<div style="padding:2px 0" title="${esc(e.description || '')}"><span style="color:var(--muted)">🔗</span> ${esc(e.name)} <span style="color:var(--dim)">(${esc(e.destination)})</span></div>`).join('') +
-        `</div>`;
-    }
-    el.innerHTML = html || '<span style="color:var(--dim)">No entries — add radio_directory.hamvoip_entries / .aredn_entries to config.yaml</span>';
+    renderPBXDirectory();
   } catch(e) {
     el.innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`;
   }
+}
+
+// ~150+ HOIP entries (test numbers/conference bridges/RF links/audio feeds,
+// see radio_directory.py) plus the generic AllStarLink parrots make this
+// too big to just dump as one flat list — filter by text and/or category,
+// grouped by category so related entries (e.g. all US conference bridges)
+// stay together.
+function renderPBXDirectory() {
+  const el = document.getElementById('pbx-directory-panel');
+  if (!el || !_pbxDirectoryCache) return;
+  const filterText = (document.getElementById('pbx-dir-filter')?.value || '').toLowerCase().trim();
+  const filterCat = document.getElementById('pbx-dir-category')?.value || '';
+  const hv = (_pbxDirectoryCache.hamvoip || []).filter(e => {
+    if (filterCat && (e.category || 'other') !== filterCat) return false;
+    if (!filterText) return true;
+    return `${e.name} ${e.destination} ${e.category || ''}`.toLowerCase().includes(filterText);
+  });
+  const ar = _pbxDirectoryCache.aredn || [];
+  let html = '';
+  if (hv.length) {
+    const byCat = {};
+    hv.forEach(e => { (byCat[e.category || 'other'] ||= []).push(e); });
+    html += Object.entries(byCat).map(([cat, entries]) => `
+      <div style="margin-bottom:6px">
+        <div style="color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${esc(cat)} (${entries.length})</div>
+        ${entries.map(e => `
+          <div style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer" onclick="useDirectoryEntry('${esc(e.destination)}')" title="${esc(e.description || '')}">
+            <span style="color:var(--blue)">📞</span>
+            <span style="color:var(--text)">${esc(e.name)}</span>
+            <span style="color:var(--dim)">(${esc(e.destination)})</span>
+          </div>`).join('')}
+      </div>`).join('');
+  }
+  if (!filterCat && !filterText && ar.length) {
+    html += `<div style="margin-top:6px"><div style="color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">AREDN</div>` +
+      ar.map(e => `<div style="padding:2px 0" title="${esc(e.description || '')}"><span style="color:var(--muted)">🔗</span> ${esc(e.name)} <span style="color:var(--dim)">(${esc(e.destination)})</span></div>`).join('') +
+      `</div>`;
+  }
+  el.innerHTML = html || '<span style="color:var(--dim)">No matching entries</span>';
 }
 
 function useDirectoryEntry(destination) {

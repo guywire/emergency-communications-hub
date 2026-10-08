@@ -1102,25 +1102,34 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         ("*43", "Echo Test"),
         ("*86", "Time Announcement"),
     ]
-    # Curated HOIP (Hams Over IP) network extensions — dialable directly since
-    # extensions.conf's _[1-9]X. rule already routes any 4+ digit number out
-    # the hoip-iax trunk. Source: HOIP wiki conference-bridge-list and
-    # test-numbers reference pages (hamsoverip.github.io/wiki/reference/).
-    # HOIP's own directory is much larger and changes over time — check
-    # https://hamsoverip.com/phonebook for the current full list.
-    _HOIP_DIRECTORY = [
-        ("10001", "HOIP Public Chat 1"),
-        ("10021", "HOIP Hurricane Watch"),
-        ("10028", "HOIP Eastern US Storm"),
-        ("10029", "HOIP Region 1 Hams Net"),
-        ("10387", "HOIP ET Skywarn"),
-        ("3194", "HOIP Echo Test"),
-        ("3192", "HOIP Talking Clock"),
-    ]
+    # Short, human-scannable tag per radio_directory category, prefixed onto
+    # the phone-UI name — the flat YealinkIPPhoneDirectory format has no
+    # folder/group concept, so this is what lets someone scrolling the phone
+    # itself tell "conference bridge" from "RF link" from "test number" at
+    # a glance. See ech/core/radio_directory.py for where this data (HOIP's
+    # own wiki reference lists, plus the generic AllStarLink parrot nodes)
+    # actually comes from.
+    _DIRECTORY_CATEGORY_TAGS = {
+        "test": "TEST", "hoip_test": "HOIP TEST",
+        "hoip_conference_us": "CONF-US", "hoip_conference_eu": "CONF-EU", "hoip_conference_ap": "CONF-AP",
+        "hoip_rf_link_us": "RF-US", "hoip_rf_link_eu": "RF-EU", "hoip_rf_link_ap": "RF-AP",
+        "hoip_audio_feed": "AUDIO",
+    }
 
     @app.get("/phonebook.xml")
     async def pbx_phonebook():
         from xml.sax.saxutils import escape
+        from ech.core.radio_directory import get_directory
+        import yaml as _yaml
+        cfg = {}
+        if app.state.config_path:
+            try:
+                with open(app.state.config_path) as f:
+                    cfg = _yaml.safe_load(f) or {}
+            except Exception:
+                pass
+        directory = get_directory(cfg)
+
         entries = "".join(
             f'<DirectoryEntry><Name>{escape(name)}</Name><Telephone>{escape(ext)}</Telephone></DirectoryEntry>'
             for ext, name in _PBX_ROSTER
@@ -1129,10 +1138,11 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             f'<DirectoryEntry><Name>{escape(name)}</Name><Telephone>{escape(code)}</Telephone></DirectoryEntry>'
             for code, name in _PBX_FEATURE_CODES
         )
-        entries += "".join(
-            f'<DirectoryEntry><Name>{escape(name)}</Name><Telephone>{escape(ext)}</Telephone></DirectoryEntry>'
-            for ext, name in _HOIP_DIRECTORY
-        )
+        for e in directory.get("hamvoip", []):
+            tag = _DIRECTORY_CATEGORY_TAGS.get(e.get("category"))
+            name = f"[{tag}] {e['name']}" if tag else e["name"]
+            entries += (f'<DirectoryEntry><Name>{escape(name)}</Name>'
+                        f'<Telephone>{escape(e["destination"])}</Telephone></DirectoryEntry>')
         xml = f'<?xml version="1.0" encoding="UTF-8"?><YealinkIPPhoneDirectory>{entries}</YealinkIPPhoneDirectory>'
         return Response(content=xml, media_type="application/xml")
 

@@ -3528,34 +3528,57 @@ async function loadCallLog() {
   }
 }
 
-// O102: the HamVOIP/AllStarLink + AREDN directory (O98 — built for Settings'
-// PBX section) also surfaced here on the Calls tab, so an operator can look
-// up/dial a node without leaving the main dashboard.
+let _callsDirectoryCache = null;
+
+// O102: the HamVOIP/AllStarLink + HOIP + AREDN directory (O98 — built for
+// Settings' PBX section) also surfaced here on the Calls tab, so an
+// operator can look up/dial a node without leaving the main dashboard.
+// The HOIP network directory (test numbers/conference bridges/RF links/
+// audio feeds) adds ~150 entries on top of the handful of AllStarLink
+// parrots this originally shipped with — a text filter keeps that usable
+// in this sidebar's limited space instead of dumping everything at once.
 async function loadCallsDirectory(el, canTransmit) {
   try {
-    const d = await fetch('/api/pbx/directory').then(r => r.json());
-    const hv = d.hamvoip || [], ar = d.aredn || [];
-    if (!hv.length && !ar.length) return;
-    let html = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted)">📻 DIRECTORY</div>`;
-    if (hv.length) {
-      const byCat = {};
-      hv.forEach(e => { (byCat[e.category || 'other'] ||= []).push(e); });
-      html += Object.entries(byCat).map(([cat, entries]) => `
-        <div style="padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">${escHtml(cat)}</div>
-        ${entries.map(e => `
-          <div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px" title="${escHtml(e.description || '')}">
-            <span style="flex:1">${escHtml(e.name)} <span style="color:var(--dim)">(${escHtml(e.destination)})</span></span>
-            ${canTransmit ? `<button onclick="pbxCallNode('${escHtml(e.destination)}',this)" style="font-size:9px;padding:1px 4px" title="Dial">📞</button>` : ''}
-          </div>`).join('')}`).join('');
-    }
-    if (ar.length) {
-      html += `<div style="padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">AREDN</div>` +
-        ar.map(e => `<div style="padding:3px 10px;font-size:11px" title="${escHtml(e.description || '')}">
-          🔗 ${escHtml(e.name)} <span style="color:var(--dim)">(${escHtml(e.destination)})</span>
-        </div>`).join('');
-    }
-    el.insertAdjacentHTML('beforeend', html);
-  } catch(e) {}
+    _callsDirectoryCache = await fetch('/api/pbx/directory').then(r => r.json());
+  } catch(e) { return; }
+  const hv = _callsDirectoryCache.hamvoip || [], ar = _callsDirectoryCache.aredn || [];
+  if (!hv.length && !ar.length) return;
+  const filterId = `dir-filter-${Date.now()}`;
+  el.insertAdjacentHTML('beforeend', `
+    <div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted)">📻 DIRECTORY</div>
+    <div style="padding:0 10px 4px"><input type="text" id="${filterId}" placeholder="Filter…"
+      style="width:100%;font-size:10px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px"
+      oninput="renderCallsDirectory('${filterId}', ${canTransmit})"></div>
+    <div id="${filterId}-list"></div>`);
+  renderCallsDirectory(filterId, canTransmit);
+}
+
+function renderCallsDirectory(filterId, canTransmit) {
+  const listEl = document.getElementById(`${filterId}-list`);
+  if (!listEl || !_callsDirectoryCache) return;
+  const filterText = (document.getElementById(filterId)?.value || '').toLowerCase().trim();
+  const hv = (_callsDirectoryCache.hamvoip || []).filter(e =>
+    !filterText || `${e.name} ${e.destination} ${e.category || ''}`.toLowerCase().includes(filterText));
+  const ar = filterText ? [] : (_callsDirectoryCache.aredn || []);
+  let html = '';
+  if (hv.length) {
+    const byCat = {};
+    hv.forEach(e => { (byCat[e.category || 'other'] ||= []).push(e); });
+    html += Object.entries(byCat).map(([cat, entries]) => `
+      <div style="padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">${escHtml(cat)} (${entries.length})</div>
+      ${entries.map(e => `
+        <div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px" title="${escHtml(e.description || '')}">
+          <span style="flex:1">${escHtml(e.name)} <span style="color:var(--dim)">(${escHtml(e.destination)})</span></span>
+          ${canTransmit ? `<button onclick="pbxCallNode('${escHtml(e.destination)}',this)" style="font-size:9px;padding:1px 4px" title="Dial">📞</button>` : ''}
+        </div>`).join('')}`).join('');
+  }
+  if (ar.length) {
+    html += `<div style="padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">AREDN</div>` +
+      ar.map(e => `<div style="padding:3px 10px;font-size:11px" title="${escHtml(e.description || '')}">
+        🔗 ${escHtml(e.name)} <span style="color:var(--dim)">(${escHtml(e.destination)})</span>
+      </div>`).join('');
+  }
+  listEl.innerHTML = html || '<div style="padding:3px 10px;font-size:10px;color:var(--dim)">No matching entries</div>';
 }
 
 async function loadEndpointStatus() {
