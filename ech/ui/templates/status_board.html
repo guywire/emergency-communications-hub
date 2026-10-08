@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SM — Status Board</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxyZWN0IHg9IjgiIHk9IjE0IiB3aWR0aD0iMTYiIGhlaWdodD0iMiIgcng9IjEiIGZpbGw9IiMzZmI5NTAiLz48cmVjdCB4PSIxNSIgeT0iNyIgd2lkdGg9IjIiIGhlaWdodD0iMTYiIHJ4PSIxIiBmaWxsPSIjM2ZiOTUwIi8+PC9zdmc+">
+
+<style>
+:root {
+  --bg:#0d1117;--bg2:#161b22;--bg3:#1c2230;--border:#30363d;--border2:#444c56;
+  --text:#e6edf3;--muted:#8b949e;--dim:#484f58;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;
+  --mono:'IBM Plex Mono','Cascadia Code','Consolas',monospace;--sans:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+#sim-banner{display:none;position:fixed;top:0;left:0;right:0;height:26px;background:#431407;border-bottom:2px solid #c2410c;color:#fb923c;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-align:center;line-height:24px;z-index:2000;text-transform:uppercase}
+body.sim-mode #sim-banner{display:block}
+body.sim-mode{padding-top:26px}
+
+#header{display:flex;align-items:center;gap:16px;padding:0 20px;height:48px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.logo{font-family:var(--mono);font-size:13px;color:var(--green);letter-spacing:.08em}
+.back-link{font-family:var(--mono);font-size:11px;color:var(--blue);text-decoration:none}
+.spacer{flex:1}
+#clock{font-family:var(--mono);font-size:12px;color:var(--muted)}
+
+#content{max-width:1000px;margin:0 auto;padding:20px}
+.panel{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px}
+.panel-title{font-size:14px;font-weight:600;margin-bottom:10px}
+.note{font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:12px}
+
+.add-row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:3px}
+.field label{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.field input, .field select{background:var(--bg);border:1px solid var(--border);color:var(--text);
+  font-family:var(--mono);font-size:12px;padding:5px 8px;border-radius:4px;outline:none}
+.field input:focus, .field select:focus{border-color:var(--blue)}
+select option{background:var(--bg2);color:var(--text)}
+.btn{font-family:var(--mono);font-size:12px;padding:6px 14px;border-radius:4px;cursor:pointer;
+  border:1px solid var(--blue);background:rgba(56,139,253,.1);color:var(--blue)}
+.btn:hover{background:rgba(56,139,253,.25)}
+.btn-red{border-color:var(--red);color:var(--red);background:rgba(248,81,73,.08)}
+.btn-red:hover{background:rgba(248,81,73,.2)}
+.btn-sm{font-size:10px;padding:3px 8px}
+
+.category-group{margin-bottom:18px}
+.category-title{font-family:var(--mono);font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--border)}
+.entry-row{display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid var(--border)}
+.entry-row:last-child{border-bottom:none}
+.entry-name{font-weight:600;min-width:160px}
+.entry-status{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.status-open,.status-available{background:rgba(63,185,80,.15);color:var(--green)}
+.status-closed,.status-unavailable,.status-full{background:rgba(248,81,73,.15);color:var(--red)}
+.status-limited,.status-partial{background:rgba(210,153,34,.15);color:var(--yellow)}
+.status-other{background:var(--bg3);color:var(--muted)}
+.entry-details{flex:1;font-size:12px;color:var(--muted)}
+.entry-meta{font-family:var(--mono);font-size:10px;color:var(--dim);white-space:nowrap}
+.entry-actions{display:flex;gap:4px}
+
+.empty-state{text-align:center;padding:30px;font-family:var(--mono);font-size:12px;color:var(--dim)}
+</style>
+</head>
+<body>
+<div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY &#9888;</div>
+<div id="header">
+  <a class="back-link" href="/">← SM</a>
+  <div class="logo">▣ SM / Status Board</div>
+  <div class="spacer"></div>
+  <div id="clock"></div>
+</div>
+
+<div id="content">
+  <div class="panel">
+    <div class="panel-title">Local Emergency Status</div>
+    <div class="note">
+      Operator-entered status for things worth tracking at an incident — hospital bed availability, emergency
+      vehicle/equipment status, warming shelter and fallout shelter status. There is no live external feed behind
+      this (see the project requirements doc, item O93, for why) — update entries here as conditions change.
+      Entries with coordinates will appear on the map.
+    </div>
+    <div class="add-row">
+      <div class="field"><label>Category</label><input type="text" id="f-category" list="category-list" placeholder="e.g. hospital_beds" style="width:150px"></div>
+      <datalist id="category-list">
+        <option value="hospital_beds">
+        <option value="vehicle">
+        <option value="warming_shelter">
+        <option value="fallout_shelter">
+      </datalist>
+      <div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Maine Medical Center" style="width:200px"></div>
+      <div class="field"><label>Status</label>
+        <select id="f-status">
+          <option value="open">open</option>
+          <option value="closed">closed</option>
+          <option value="limited">limited</option>
+          <option value="available">available</option>
+          <option value="unavailable">unavailable</option>
+          <option value="full">full</option>
+          <option value="other">other…</option>
+        </select>
+      </div>
+      <div class="field"><label>Details</label><input type="text" id="f-details" placeholder="free text — capacity, notes, etc." style="width:260px"></div>
+      <div class="field"><label>Lat (opt.)</label><input type="text" id="f-lat" placeholder="44.16" style="width:80px"></div>
+      <div class="field"><label>Lon (opt.)</label><input type="text" id="f-lon" placeholder="-69.12" style="width:80px"></div>
+      <button class="btn" onclick="addEntry()">+ Add</button>
+    </div>
+  </div>
+
+  <div id="entries-container"></div>
+</div>
+
+<script>
+function tick() {
+  document.getElementById('clock').textContent = new Date().toUTCString().slice(17,25) + ' UTC';
+}
+setInterval(tick, 1000); tick();
+if (window.ECH_SIM) document.body.classList.add('sim-mode');
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function statusClass(s) {
+  const k = (s || '').toLowerCase();
+  return ['open','closed','available','unavailable','full','limited','partial'].includes(k) ? `status-${k}` : 'status-other';
+}
+
+async function loadEntries() {
+  const el = document.getElementById('entries-container');
+  try {
+    const d = await fetch('/api/emergency-status').then(r => r.json());
+    const entries = d.entries || [];
+    if (!entries.length) {
+      el.innerHTML = '<div class="empty-state">No status entries yet — add one above</div>';
+      return;
+    }
+    const byCat = {};
+    entries.forEach(e => { (byCat[e.category] ||= []).push(e); });
+    el.innerHTML = Object.entries(byCat).map(([cat, list]) => `
+      <div class="panel category-group">
+        <div class="category-title">${esc(cat)}</div>
+        ${list.map(e => `
+          <div class="entry-row">
+            <span class="entry-name">${esc(e.name)}</span>
+            <span class="entry-status ${statusClass(e.status)}">${esc(e.status || '—')}</span>
+            <span class="entry-details">${esc(e.details)}</span>
+            <span class="entry-meta">${e.lat != null ? '📍 ' : ''}${esc((e.updated_at||'').replace('T',' ').slice(0,16))} UTC${e.updated_by ? ' · ' + esc(e.updated_by) : ''}</span>
+            <span class="entry-actions">
+              <button class="btn btn-sm" onclick="editEntry(${e.id})">Edit</button>
+              <button class="btn btn-sm btn-red" onclick="deleteEntry(${e.id})">Delete</button>
+            </span>
+          </div>`).join('')}
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="empty-state" style="color:var(--red)">Error loading status board</div>';
+  }
+}
+
+async function addEntry() {
+  const category = document.getElementById('f-category').value.trim();
+  const name = document.getElementById('f-name').value.trim();
+  if (!category || !name) { alert('Category and name are required'); return; }
+  const lat = parseFloat(document.getElementById('f-lat').value);
+  const lon = parseFloat(document.getElementById('f-lon').value);
+  const payload = {
+    category, name,
+    status: document.getElementById('f-status').value,
+    details: document.getElementById('f-details').value.trim(),
+    lat: isNaN(lat) ? null : lat,
+    lon: isNaN(lon) ? null : lon,
+  };
+  const r = await fetch('/api/emergency-status', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
+  });
+  const d = await r.json();
+  if (d.status !== 'ok') { alert('Error: ' + (d.detail || 'unknown')); return; }
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-details').value = '';
+  document.getElementById('f-lat').value = '';
+  document.getElementById('f-lon').value = '';
+  loadEntries();
+}
+
+async function editEntry(id) {
+  const newStatus = prompt('New status (open/closed/limited/available/unavailable/full/other):');
+  if (newStatus === null) return;
+  const newDetails = prompt('New details (leave blank to clear, cancel to keep unchanged):');
+  const payload = {status: newStatus};
+  if (newDetails !== null) payload.details = newDetails;
+  await fetch(`/api/emergency-status/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
+  });
+  loadEntries();
+}
+
+async function deleteEntry(id) {
+  if (!confirm('Delete this status entry?')) return;
+  await fetch(`/api/emergency-status/${id}`, {method: 'DELETE'});
+  loadEntries();
+}
+
+loadEntries();
+setInterval(loadEntries, 30000);
+</script>
+</body>
+</html>

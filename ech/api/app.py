@@ -391,6 +391,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
   <a href="/anomalies" data-p="/anomalies" title="Anomalies">&#9888;&#65039;</a>
   <a href="/analytics" data-p="/analytics" title="Analytics">&#128202;</a>
   <a href="/skywarn" data-p="/skywarn" title="Reports (SKYWARN + Strip)">&#127786;&#65039;</a>
+  <a href="/status-board" data-p="/status-board" title="Local Emergency Status Board">&#127973;</a>
   <a href="/remote-hw" data-p="/remote-hw" title="Remote Hardware">&#128268;</a>
   <a href="/simulation" data-p="/simulation" id="ech-topnav-sim" title="Simulation">&#129514;</a>
   <a href="/settings" data-p="/settings" id="ech-topnav-settings" title="Settings">&#9881;&#65039;</a>
@@ -1611,6 +1612,13 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return HTMLResponse(content=_render_template("reports.html"), headers=_NO_CACHE)
         return HTMLResponse(content="<h1>Reports page not found</h1>")
 
+    @app.get("/status-board", response_class=HTMLResponse)
+    async def status_board_page():
+        template = UI_DIR / "templates" / "status_board.html"
+        if template.exists():
+            return HTMLResponse(content=_render_template("status_board.html"), headers=_NO_CACHE)
+        return HTMLResponse(content="<h1>Status Board page not found</h1>")
+
     # ── Strip (RI) reports ────────────────────────────────────────────────
 
     @app.get("/api/strip_reports")
@@ -1645,6 +1653,51 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         ok = await db.delete_strip_report(report_id)
         if not ok:
             raise HTTPException(status_code=404, detail="report not found")
+        return {"status": "ok"}
+
+    # ── Emergency status board (O93) ────────────────────────────────────────
+    # Operator-entered — see ech/core/database.py's emergency_status table
+    # docstring and ECH_REQUIREMENTS_AND_PROGRESS.md's O93 entry for why
+    # (no confirmed-real open API exists for hospital-bed/shelter status).
+
+    @app.get("/api/emergency-status")
+    async def get_emergency_status_api(category: str | None = None):
+        entries = await db.get_emergency_status(category=category)
+        return {"entries": entries, "total": len(entries)}
+
+    @app.post("/api/emergency-status")
+    async def add_emergency_status_api(request: Request):
+        data = await request.json()
+        category = str(data.get("category", "")).strip()
+        name = str(data.get("name", "")).strip()
+        if not category or not name:
+            return {"status": "error", "detail": "category and name are required"}
+        entry_id = await db.add_emergency_status(
+            category=category, name=name,
+            status=str(data.get("status", "")), details=str(data.get("details", "")),
+            lat=data.get("lat"), lon=data.get("lon"),
+            updated_by=str(data.get("updated_by", "")) or _op_callsign,
+        )
+        return {"status": "ok", "id": entry_id}
+
+    @app.post("/api/emergency-status/{entry_id}")
+    async def update_emergency_status_api(entry_id: int, request: Request):
+        from fastapi import HTTPException
+        data = await request.json()
+        fields = {k: data[k] for k in ("category", "name", "status", "details", "lat", "lon")
+                   if k in data}
+        fields["updated_by"] = str(data.get("updated_by", "")) or _op_callsign
+        ok = await db.update_emergency_status(entry_id, **fields)
+        if not ok:
+            raise HTTPException(status_code=404, detail="entry not found")
+        return {"status": "ok"}
+
+    @app.delete("/api/emergency-status/{entry_id}")
+    async def delete_emergency_status_api(entry_id: int):
+        from fastapi import HTTPException
+        ok = await db.delete_emergency_status(entry_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="entry not found")
         return {"status": "ok"}
 
     # ── Bot active sessions (strip/skywarn guided forms in progress) ───────

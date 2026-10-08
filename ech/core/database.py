@@ -263,6 +263,28 @@ CREATE TABLE IF NOT EXISTS strip_reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_strip_ts ON strip_reports (timestamp DESC);
+
+-- O93: local emergency-status board — operator-entered (no confirmed-real
+-- open API exists for this; see ECH_REQUIREMENTS_AND_PROGRESS.md O93 for
+-- why HAvBED/HAN/EMResource aren't integrated). category is free text by
+-- convention ("hospital_beds", "vehicle", "warming_shelter",
+-- "fallout_shelter", or anything else an operator wants to track) rather
+-- than an enum, since the set of things worth tracking at an incident is
+-- inherently open-ended. lat/lon optional, only for entries worth mapping.
+CREATE TABLE IF NOT EXISTS emergency_status (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    category      TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT '',
+    details       TEXT NOT NULL DEFAULT '',
+    lat           REAL,
+    lon           REAL,
+    updated_by    TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_emergency_status_category ON emergency_status (category);
 """
 
 
@@ -1340,6 +1362,55 @@ class Database:
             d["answers"] = _json.loads(d.pop("answers_json"))
             out.append(d)
         return out
+
+    # ── Emergency status board (O93) ────────────────────────────────────────
+
+    async def add_emergency_status(self, category: str, name: str, status: str = "",
+                                    details: str = "", lat: float | None = None,
+                                    lon: float | None = None, updated_by: str = "") -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        cur = await self._db.execute(
+            """INSERT INTO emergency_status
+               (category, name, status, details, lat, lon, updated_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (category, name, status, details, lat, lon, updated_by, now, now),
+        )
+        await self._db.commit()
+        return cur.lastrowid
+
+    async def update_emergency_status(self, entry_id: int, **fields) -> bool:
+        """Update any of category/name/status/details/lat/lon/updated_by.
+        Always bumps updated_at."""
+        allowed = {"category", "name", "status", "details", "lat", "lon", "updated_by"}
+        sets = {k: v for k, v in fields.items() if k in allowed}
+        if not sets:
+            return False
+        sets["updated_at"] = datetime.now(timezone.utc).isoformat()
+        clause = ", ".join(f"{k} = ?" for k in sets)
+        cur = await self._db.execute(
+            f"UPDATE emergency_status SET {clause} WHERE id = ?",
+            (*sets.values(), entry_id),
+        )
+        await self._db.commit()
+        return cur.rowcount > 0
+
+    async def delete_emergency_status(self, entry_id: int) -> bool:
+        cur = await self._db.execute("DELETE FROM emergency_status WHERE id = ?", (entry_id,))
+        await self._db.commit()
+        return cur.rowcount > 0
+
+    async def get_emergency_status(self, category: str | None = None) -> list[dict]:
+        if category:
+            async with self._db.execute(
+                "SELECT * FROM emergency_status WHERE category = ? ORDER BY category, name", (category,)
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with self._db.execute(
+                "SELECT * FROM emergency_status ORDER BY category, name"
+            ) as cur:
+                rows = await cur.fetchall()
+        return [dict(r) for r in rows]
 
     # ── QSO log ───────────────────────────────────────────────────────────
 

@@ -157,7 +157,7 @@ _CMD_WORDS = [
     "ping", "weather\\??", "wx", "overhead", "planes", "aircraft",
     "satpass", "sat", "solar", "space", "ships", "fcc", "trivia", "dad",
     "alerts", "metar", "sun", "nodes", "aprs", "anomalies", "tide", "tides",
-    "grid", "id", "moon", "dxcc", "contest", "help", "path", "trace",
+    "grid", "id", "moon", "dxcc", "contest", "help", "path", "trace", "status",
     "score", "leaderboard", "lb", "mud", "adventure", "skywarn", "strip", "repeat", "again",
     "smoke", "aqi", "airquality",
     "marine", "boating", "buoy", "kayak", "fish", "fishing", "solunar", "water",
@@ -799,6 +799,8 @@ class MeshBot:
                 reply = self._cmd_path(msg)
             elif cmd == "trace":
                 reply = await self._cmd_trace(msg, args)
+            elif cmd == "status":
+                reply = await self._cmd_status(args)
             elif cmd == "moon":
                 reply = self._cmd_moon()
             elif cmd == "dxcc":
@@ -1054,6 +1056,30 @@ class MeshBot:
             return f"trace: {res.get('detail', 'failed to send')}"
         return "trace: not supported on this adapter"
 
+    async def _cmd_status(self, args: str) -> str:
+        """O93: query the operator-entered local emergency status board
+        (hospital beds, shelters, vehicles, etc. — see status_board.html /
+        /api/emergency-status). `args` optionally filters by category
+        (substring match); bare 'status' lists everything, capped short to
+        fit a LoRa-sized reply."""
+        if not self._db:
+            return "status: not available"
+        try:
+            entries = await self._db.get_emergency_status()
+        except Exception:
+            return "status: error reading status board"
+        if not entries:
+            return "No status board entries yet."
+        want = args.strip().lower()
+        if want:
+            entries = [e for e in entries if want in e["category"].lower()]
+            if not entries:
+                return f"status: no entries matching category '{want}'"
+        parts = [f"{e['name']}:{e['status'] or '?'}" for e in entries[:8]]
+        more = f" (+{len(entries) - 8} more)" if len(entries) > 8 else ""
+        label = f" [{want}]" if want else ""
+        return f"Status{label}: " + ", ".join(parts) + more
+
     # ── moon ──────────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -1207,7 +1233,7 @@ class MeshBot:
         # terse list (not disabled — just not essential enough to spend budget
         # on here) to leave room for the rest.
         return ("Cmds: alerts aprs dxcc fcc fish grid help id marine metar moon "
-                "nodes overhead path ping satpass ships skywarn smoke solar strip sun tide trace water wx")
+                "nodes overhead path ping satpass ships skywarn smoke solar status strip sun tide trace water wx")
 
     def _cmd_unknown(self) -> str:
         return "Unrecognized command. Send 'help' for a list."

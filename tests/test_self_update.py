@@ -86,6 +86,9 @@ async def test_download_and_repackage_builds_install_compatible_tarball(monkeypa
 
     monkeypatch.setattr(self_update.httpx, "AsyncClient", _mock_client_factory(handler))
     monkeypatch.setattr(self_update, "DEPLOY_TARBALL", tmp_path / "ech_deploy.tar.gz")
+    # Redirect mkdtemp() into tmp_path so the leaked-dir assertion below is
+    # both accurate and isolated from the real system temp directory.
+    monkeypatch.setattr(self_update.tempfile, "gettempdir", lambda: str(tmp_path))
 
     out_path = await self_update.download_and_repackage("main")
     assert out_path.exists()
@@ -94,6 +97,12 @@ async def test_download_and_repackage_builds_install_compatible_tarball(monkeypa
         names = set(tf.getnames())
     for expected in self_update.TARBALL_MEMBERS:
         assert any(n == expected or n.startswith(expected + "/") for n in names), expected
+
+    # Regression: a real bug found live — every run left a full extracted
+    # copy of the source tree behind in /tmp forever. The working tmp_dir
+    # must be cleaned up once the repackaged tarball has been built.
+    leftover_dirs = [p for p in tmp_path.iterdir() if p.is_dir() and p.name.startswith("ech_selfupdate_")]
+    assert leftover_dirs == [], f"leaked temp dir(s): {leftover_dirs}"
 
 
 @pytest.mark.asyncio

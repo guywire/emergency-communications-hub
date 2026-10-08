@@ -60,7 +60,14 @@ GITHUB_REPO = "guywire/emergency-communications-hub"
 TARBALL_MEMBERS = ["ech", "pyproject.toml", "VERSION"]
 
 INSTALL_DIR = Path("/opt/ech")
-DEPLOY_TARBALL = Path("/tmp/ech_deploy.tar.gz")
+# Deliberately NOT /tmp/ech_deploy.tar.gz — that's deploy/build_and_scp.ps1's
+# path, written there by the "mesh" SSH user. The two mechanisms colliding on
+# the same filename, owned by a different user each time (ech vs mesh), was
+# a real bug found live: whichever ran second couldn't overwrite the other's
+# file (plain 644 perms, not writable by a non-owner), so a Windows-pipeline
+# deploy right after a self-update silently failed to upload and install.sh
+# re-installed the STALE leftover tarball instead with no clear error.
+DEPLOY_TARBALL = Path("/tmp/ech_selfupdate_deploy.tar.gz")
 SELFUPDATE_LOG = Path("/tmp/ech_selfupdate.log")
 
 _state: dict = {"running": False, "started_at": None, "finished_at": None,
@@ -118,25 +125,30 @@ async def download_and_repackage(branch: str = "main") -> Path:
         archive_bytes = resp.content
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="ech_selfupdate_"))
-    archive_path = tmp_dir / "source.tar.gz"
-    archive_path.write_bytes(archive_bytes)
-    _safe_extract(archive_path, tmp_dir)
+    try:
+        archive_path = tmp_dir / "source.tar.gz"
+        archive_path.write_bytes(archive_bytes)
+        _safe_extract(archive_path, tmp_dir)
 
-    # GitHub's archive export extracts into one top-level "{repo}-{branch}" dir.
-    extracted_dirs = [p for p in tmp_dir.iterdir() if p.is_dir()]
-    if len(extracted_dirs) != 1:
-        raise RuntimeError(f"unexpected archive layout: {[p.name for p in tmp_dir.iterdir()]}")
-    src_root = extracted_dirs[0]
+        # GitHub's archive export extracts into one top-level "{repo}-{branch}" dir.
+        extracted_dirs = [p for p in tmp_dir.iterdir() if p.is_dir()]
+        if len(extracted_dirs) != 1:
+            raise RuntimeError(f"unexpected archive layout: {[p.name for p in tmp_dir.iterdir()]}")
+        src_root = extracted_dirs[0]
 
-    missing = [m for m in TARBALL_MEMBERS if not (src_root / m).exists()]
-    if missing:
-        raise RuntimeError(f"downloaded source is missing expected path(s): {missing}")
+        missing = [m for m in TARBALL_MEMBERS if not (src_root / m).exists()]
+        if missing:
+            raise RuntimeError(f"downloaded source is missing expected path(s): {missing}")
 
-    with tarfile.open(DEPLOY_TARBALL, "w:gz") as out:
-        for member in TARBALL_MEMBERS:
-            out.add(src_root / member, arcname=member)
+        with tarfile.open(DEPLOY_TARBALL, "w:gz") as out:
+            for member in TARBALL_MEMBERS:
+                out.add(src_root / member, arcname=member)
 
-    return DEPLOY_TARBALL
+        return DEPLOY_TARBALL
+    finally:
+        # A real bug found live: this was never cleaned up, leaving a full
+        # extracted copy of the source tree in /tmp after every single run.
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _replace_file(dest: Path, content: bytes) -> None:
