@@ -53,10 +53,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from urllib.parse import urlparse
 
 import httpx
 
 from ech.adapters.base import Adapter
+from ech.core.aredn_utils import classify_mesh_address, is_mesh_typical
 from ech.core.models import NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
@@ -97,10 +99,20 @@ class AREDNMeshChatAdapter(Adapter):
         self._rx_count = 0
         self._tx_count = 0
         self._last_error: str | None = None
+        self._address_class = classify_mesh_address(urlparse(self._base_url).hostname or "")
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
     async def connect(self) -> None:
+        if not is_mesh_typical(self._address_class):
+            log.warning(
+                "AREDN MeshChat %s: base_url host classified as '%s' — doesn't "
+                "look like a typical AREDN mesh address (expected a *.local.mesh "
+                "hostname or a 10.x.x.x mesh address). Not blocking the "
+                "connection — this is informational only and may be a "
+                "legitimate custom setup.",
+                self.name, self._address_class,
+            )
         self._client = httpx.AsyncClient(timeout=10.0)
         try:
             resp = await self._client.get(self._base_url, params={"action": "config"})
@@ -232,4 +244,5 @@ class AREDNMeshChatAdapter(Adapter):
             "rx_count": self._rx_count,
             "tx_count": self._tx_count,
             "last_error": self._last_error,
+            "address_class": self._address_class,
         }

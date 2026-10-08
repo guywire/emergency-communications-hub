@@ -40,6 +40,7 @@ import logging
 from datetime import datetime, timezone
 
 from ech.adapters.base import Adapter
+from ech.core.aredn_utils import classify_mesh_address, is_mesh_typical
 from ech.core.models import NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
@@ -83,8 +84,18 @@ class AREDNAMIAdapter(Adapter):
         self._call_log: list[dict] = []
         self._packet_log: list[dict] = []
         self._action_counter = 0
+        self._address_class = classify_mesh_address(self._host)
 
     async def connect(self) -> None:
+        self._address_class = classify_mesh_address(self._host)
+        if not is_mesh_typical(self._address_class):
+            log.warning(
+                "AREDN AMI %s: host %s classified as '%s' — doesn't look like a "
+                "typical AREDN mesh address (expected a *.local.mesh hostname or "
+                "a 10.x.x.x mesh address). Not blocking the connection — this is "
+                "informational only and may be a legitimate custom setup.",
+                self.name, self._host, self._address_class,
+            )
         log.info("AREDN AMI %s: connecting to %s:%d", self.name, self._host, self._port)
         self._reader, self._writer = await asyncio.wait_for(
             asyncio.open_connection(self._host, self._port),
@@ -367,6 +378,7 @@ class AREDNAMIAdapter(Adapter):
             "active_calls":     len(self._active_calls),
             "recent_calls":     len(self._call_log),
             "local_ext":        self._local_ext,
+            "address_class":    self._address_class,
         }
 
 
