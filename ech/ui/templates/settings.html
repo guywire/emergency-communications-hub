@@ -130,6 +130,36 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     </div>
   </div>
 
+  <!-- ── Audit Log (SEC-14/SEC-15) ────────────────────────────────── -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">AUDIT LOG</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Tamper-evident trail of logins, user management, and service actions</span>
+    </div>
+    <div class="section-body">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="audit-filter-user" placeholder="username" style="width:120px;font-family:var(--mono);font-size:10px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px" onchange="loadAuditLog()">
+        <select id="audit-filter-action" onchange="loadAuditLog()" style="font-family:var(--mono);font-size:10px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px">
+          <option value="">All actions</option>
+          <option value="login">login</option>
+          <option value="logout">logout</option>
+          <option value="password_change">password_change</option>
+          <option value="password_reset">password_reset</option>
+          <option value="user_create">user_create</option>
+          <option value="user_delete">user_delete</option>
+          <option value="force_logout">force_logout</option>
+          <option value="service_restart">service_restart</option>
+          <option value="system_reboot">system_reboot</option>
+          <option value="self_update_triggered">self_update_triggered</option>
+        </select>
+        <button class="btn" onclick="loadAuditLog()">↻ Refresh</button>
+        <button class="btn" onclick="verifyAuditChain()">🔗 Verify chain integrity</button>
+      </div>
+      <div id="audit-verify-result" style="margin-top:6px;font-family:var(--mono);font-size:10px"></div>
+      <div id="audit-log-table" style="margin-top:10px;max-height:360px;overflow-y:auto;font-family:var(--mono);font-size:11px">Loading…</div>
+    </div>
+  </div>
+
   <!-- ── Base Location ────────────────────────────────────────── -->
   <div class="section">
     <div class="section-header" onclick="toggle('loc-body')">
@@ -1238,6 +1268,7 @@ async function init() {
   loadMQTTStatus();
   loadPBXStatus();
   loadPBXDirectory();
+  loadAuditLog();
   loadLiveStats();
   setInterval(loadLiveStats, 5000);
 
@@ -2553,6 +2584,52 @@ function renderPBXDirectory() {
       `</div>`;
   }
   el.innerHTML = html || '<span style="color:var(--dim)">No matching entries</span>';
+}
+
+async function loadAuditLog() {
+  const el = document.getElementById('audit-log-table');
+  if (!el) return;
+  try {
+    const user = (document.getElementById('audit-filter-user')?.value || '').trim();
+    const action = document.getElementById('audit-filter-action')?.value || '';
+    const params = new URLSearchParams({limit: '200'});
+    if (user) params.set('username', user);
+    if (action) params.set('action', action);
+    const d = await fetch(`/api/system/audit-log?${params}`).then(r => r.json());
+    const entries = d.entries || [];
+    if (!entries.length) { el.innerHTML = '<span style="color:var(--dim)">No entries</span>'; return; }
+    el.innerHTML = `<table style="width:100%;border-collapse:collapse">
+      <thead><tr style="text-align:left;color:var(--dim);font-size:10px;text-transform:uppercase">
+        <th style="padding:3px 6px">Time</th><th style="padding:3px 6px">User</th><th style="padding:3px 6px">Role</th>
+        <th style="padding:3px 6px">IP</th><th style="padding:3px 6px">Action</th><th style="padding:3px 6px">Detail</th><th style="padding:3px 6px">Result</th>
+      </tr></thead><tbody>${entries.map(e => `
+        <tr style="border-top:1px solid var(--border)">
+          <td style="padding:3px 6px;color:var(--muted)">${esc((e.ts || '').replace('T', ' ').slice(0, 19))}</td>
+          <td style="padding:3px 6px">${esc(e.username)}</td>
+          <td style="padding:3px 6px;color:var(--dim)">${esc(e.role)}</td>
+          <td style="padding:3px 6px;color:var(--dim)">${esc(e.ip)}</td>
+          <td style="padding:3px 6px">${esc(e.action)}</td>
+          <td style="padding:3px 6px;color:var(--muted)">${esc(e.detail || '')}</td>
+          <td style="padding:3px 6px;color:${e.success ? 'var(--green)' : 'var(--red)'}">${e.success ? 'ok' : 'FAILED'}</td>
+        </tr>`).join('')}</tbody></table>`;
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`;
+  }
+}
+
+async function verifyAuditChain() {
+  const el = document.getElementById('audit-verify-result');
+  el.textContent = 'Checking…';
+  try {
+    const d = await fetch('/api/system/audit-log/verify').then(r => r.json());
+    if (d.intact) {
+      el.innerHTML = `<span style="color:var(--green)">✓ Chain intact — ${d.checked} entries verified, no tampering detected</span>`;
+    } else {
+      el.innerHTML = `<span style="color:var(--red)">✗ CHAIN BROKEN at entry id ${d.break_at_id} — possible tampering, investigate immediately</span>`;
+    }
+  } catch(e) {
+    el.textContent = `Error: ${e.message}`;
+  }
 }
 
 async function discoverArednServices() {

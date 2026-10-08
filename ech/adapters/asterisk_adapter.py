@@ -468,7 +468,10 @@ class AsteriskAdapter(Adapter):
         # inherit as stdin the way the synchronous subprocess module allows.
         try:
             espeak_proc = await asyncio.create_subprocess_exec(
-                "espeak-ng", "-w", raw_wav, "-s", "150", text,
+                # "--" stops espeak-ng's own flag parsing — without it, operator
+                # text starting with "-" (e.g. "-w /some/path") would be parsed
+                # as another CLI flag instead of literal text to speak.
+                "espeak-ng", "-w", raw_wav, "-s", "150", "--", text,
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
             )
             await asyncio.wait_for(espeak_proc.wait(), timeout=10)

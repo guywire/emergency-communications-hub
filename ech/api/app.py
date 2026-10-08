@@ -263,6 +263,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'self'")
+        # X-Frame-Options is the older/wider-supported equivalent of the CSP
+        # frame-ancestors directive above — kept alongside it as defense in
+        # depth for any client that doesn't honor CSP.
+        response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         if secure_cookies:
             response.headers.setdefault(
@@ -1828,6 +1832,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if auth:
             await auth.change_password(session["username"], new_password)
         log.info("AUTH: %s changed password via forced change flow", session["username"])
+        from ech.core.audit import record as _audit_record
+        await _audit_record(db, request, session["username"], session.get("role", ""), "password_change")
         if use_redirect:
             resp = RedirectResponse(url="/", status_code=303)
         else:
@@ -1881,11 +1887,16 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             next_url = "/"
 
         token = await auth.login(username, password) if auth else None
+        from ech.core.audit import record as _audit_record
         if not token:
             _record_login_failure(client_ip)
+            await _audit_record(db, request, username, "", "login", success=False)
             if use_redirect:
                 return RedirectResponse(url="/login?error=1", status_code=303)
             raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        session_after = await auth.get_session(token) if auth else None
+        await _audit_record(db, request, username, (session_after or {}).get("role", ""), "login", success=True)
 
         if use_redirect:
             resp = RedirectResponse(url=next_url, status_code=303)
@@ -1907,8 +1918,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         from fastapi.responses import JSONResponse
         from ech.core.auth import SESSION_COOKIE
         token = request.cookies.get(SESSION_COOKIE, "")
+        session = await auth.get_session(token) if (auth and token) else None
         if auth and token:
             await auth.logout(token)
+        if session:
+            from ech.core.audit import record as _audit_record
+            await _audit_record(db, request, session["username"], session.get("role", ""), "logout")
         resp = JSONResponse({"status": "ok"})
         resp.delete_cookie(SESSION_COOKIE)
         return resp
@@ -1935,6 +1950,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         count = await db.delete_sessions_for_user(username)
         log.info("AUTH: admin '%s' force-logged-out '%s' (%d session(s) revoked)",
                  session.get("username", "?"), username, count)
+        from ech.core.audit import record as _audit_record
+        await _audit_record(db, request, session.get("username", "?"), "admin",
+                             "force_logout", detail=f"target={username}")
         return {"status": "ok", "username": username, "sessions_revoked": count}
 
     @app.get("/api/users")
@@ -1948,11 +1966,20 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return {"status": "error", "detail": "auth not configured"}
         ok = await auth.create_user(data["username"], data["password"], data.get("role","operator"),
                                      color=data.get("color", "#8b949e"))
+        acting = await auth.require_session(request)
+        from ech.core.audit import record as _audit_record
+        await _audit_record(db, request, (acting or {}).get("username", "?"), "admin",
+                             "user_create", detail=f"target={data['username']} role={data.get('role','operator')}",
+                             success=ok)
         return {"status": "ok" if ok else "error"}
 
     @app.delete("/api/users/{username}")
-    async def delete_user(username: str):
+    async def delete_user(username: str, request: Request):
         await db.delete_user(username)
+        acting = await auth.require_session(request) if auth else None
+        from ech.core.audit import record as _audit_record
+        await _audit_record(db, request, (acting or {}).get("username", "?"), "admin",
+                             "user_delete", detail=f"target={username}")
         return {"status": "ok"}
 
     @app.post("/api/users/{username}/color")
@@ -1979,6 +2006,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 await auth.admin_reset_password(username, data["password"])
             else:
                 await auth.change_password(username, data["password"])
+        acting = await auth.require_session(request) if auth else None
+        from ech.core.audit import record as _audit_record
+        await _audit_record(db, request, (acting or {}).get("username", "?"), "admin",
+                             "password_reset", detail=f"target={username}")
         return {"status": "ok"}
 
     # ── ECH State / Mode ──────────────────────────────────────────────────
@@ -2643,9 +2674,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         return {"services": list(results)}
 
     @app.post("/api/system/services/{service}/restart")
-    async def restart_service(service: str):
+    async def restart_service(service: str, request: Request):
         """Restart a named systemd service (admin only)."""
         import asyncio as _aio
+        from ech.core.audit import record as _audit_record
+        acting = await auth.require_session(request) if auth else None
+        acting_name = (acting or {}).get("username", "?")
         # Whitelist to prevent arbitrary command injection
         allowed = {"ech", "pat", "asterisk", "mosquitto", "prometheus", "avahi-daemon"}
         if service not in allowed:
@@ -2659,6 +2693,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             )
             stdout, stderr = await _aio.wait_for(p.communicate(), timeout=15.0)
             ok = p.returncode == 0
+            await _audit_record(db, request, acting_name, "admin", "service_restart",
+                                 detail=f"service={service}", success=ok)
             return {
                 "status": "ok" if ok else "error",
                 "service": service,
@@ -2666,13 +2702,18 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 "stderr": stderr.decode(),
             }
         except Exception as exc:
+            await _audit_record(db, request, acting_name, "admin", "service_restart",
+                                 detail=f"service={service} error={exc}", success=False)
             return {"status": "error", "detail": str(exc)}
 
     @app.post("/api/system/reboot")
-    async def reboot_system():
+    async def reboot_system(request: Request):
         """Reboot the whole host (admin only). Requires the ech-services sudoers
         entry to include 'systemctl reboot' — see scripts/install.sh."""
         import asyncio as _aio
+        from ech.core.audit import record as _audit_record
+        acting = await auth.require_session(request) if auth else None
+        acting_name = (acting or {}).get("username", "?")
         try:
             p = await _aio.create_subprocess_exec(
                 "sudo", "systemctl", "reboot",
@@ -2686,11 +2727,15 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             try:
                 stdout, stderr = await _aio.wait_for(p.communicate(), timeout=3.0)
                 if p.returncode not in (None, 0):
+                    await _audit_record(db, request, acting_name, "admin", "system_reboot", success=False)
                     return {"status": "error", "detail": stderr.decode() or stdout.decode()}
             except _aio.TimeoutError:
                 pass
+            await _audit_record(db, request, acting_name, "admin", "system_reboot", success=True)
             return {"status": "ok"}
         except Exception as exc:
+            await _audit_record(db, request, acting_name, "admin", "system_reboot",
+                                 detail=str(exc), success=False)
             return {"status": "error", "detail": str(exc)}
 
     @app.post("/api/system/update")
@@ -2772,12 +2817,31 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         except Exception:
             pass
         branch = str(data.get("branch", "main")).strip() or "main"
+        acting = await auth.require_session(request) if auth else None
+        from ech.core.audit import record as _audit_record
+        await _audit_record(db, request, (acting or {}).get("username", "?"), "admin",
+                             "self_update_triggered", detail=f"branch={branch}")
         return await self_update.start_update(branch)
 
     @app.get("/api/system/selfupdate/status")
     async def selfupdate_status():
         from ech.core import self_update
         return self_update.status()
+
+    @app.get("/api/system/audit-log")
+    async def get_audit_log(limit: int = 200, username: str | None = None, action: str | None = None):
+        """SEC-14/SEC-15: tamper-evident audit trail for auth events and
+        admin/service actions. Admin-only (covered by the generic
+        '/api/system/' ADMIN_PREFIXES entry — no separate check needed)."""
+        entries = await db.get_audit_log(limit=min(limit, 1000), username=username, action=action)
+        return {"entries": entries}
+
+    @app.get("/api/system/audit-log/verify")
+    async def verify_audit_log():
+        """Recompute the hash chain and report the first break found, if
+        any — the actual tamper-detection check, not just that entries
+        exist. See Database.verify_audit_chain()."""
+        return await db.verify_audit_chain()
 
     @app.get("/api/system/db_health")
     async def db_health():

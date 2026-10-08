@@ -285,6 +285,30 @@ CREATE TABLE IF NOT EXISTS emergency_status (
 );
 
 CREATE INDEX IF NOT EXISTS idx_emergency_status_category ON emergency_status (category);
+
+-- SEC-14/SEC-15: tamper-evident audit trail for auth events and
+-- admin/service actions — previously only logged at WARNING level to the
+-- app log, not to a durable, hash-chained trail. Each row's entry_hash
+-- covers prev_hash + this row's own fields, so editing or deleting a row
+-- anywhere in the chain breaks every hash after it on recompute — not
+-- unforgeable against someone with direct DB write access (no system is),
+-- but it turns silent tampering into a detectable chain break, which is
+-- the realistic bar for an incident-response log on a single-box system.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL,
+    username    TEXT NOT NULL DEFAULT '',
+    role        TEXT NOT NULL DEFAULT '',
+    ip          TEXT NOT NULL DEFAULT '',
+    action      TEXT NOT NULL,
+    detail      TEXT NOT NULL DEFAULT '',
+    success     INTEGER NOT NULL DEFAULT 1,
+    prev_hash   TEXT NOT NULL DEFAULT '',
+    entry_hash  TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_username ON audit_log (username);
 """
 
 
@@ -1145,6 +1169,70 @@ class Database:
             ) as cur:
                 rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    # ── Audit log (SEC-14/SEC-15) ────────────────────────────────────────────
+
+    async def add_audit_entry(self, username: str, role: str, ip: str, action: str,
+                               detail: str = "", success: bool = True) -> dict:
+        """Append a hash-chained audit entry. See SCHEMA's audit_log comment
+        for the tamper-evidence model — each entry_hash covers prev_hash plus
+        this row's own fields, so the chain breaks on recompute if anything
+        earlier was edited or deleted."""
+        import hashlib
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        async with self._db.execute(
+            "SELECT entry_hash FROM audit_log ORDER BY id DESC LIMIT 1"
+        ) as cur:
+            last = await cur.fetchone()
+        prev_hash = last["entry_hash"] if last else "0" * 64
+        success_int = 1 if success else 0
+        entry_hash = hashlib.sha256(
+            f"{prev_hash}|{ts}|{username}|{role}|{ip}|{action}|{detail}|{success_int}".encode()
+        ).hexdigest()
+        await self._db.execute(
+            "INSERT INTO audit_log(ts,username,role,ip,action,detail,success,prev_hash,entry_hash) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (ts, username, role, ip, action, detail[:500], success_int, prev_hash, entry_hash),
+        )
+        await self._db.commit()
+        return {"ts": ts, "username": username, "role": role, "ip": ip, "action": action,
+                "detail": detail[:500], "success": success, "prev_hash": prev_hash, "entry_hash": entry_hash}
+
+    async def get_audit_log(self, limit: int = 200, username: str | None = None,
+                             action: str | None = None) -> list[dict]:
+        clauses, params = [], []
+        if username:
+            clauses.append("username=?")
+            params.append(username)
+        if action:
+            clauses.append("action=?")
+            params.append(action)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        async with self._db.execute(
+            f"SELECT * FROM audit_log {where} ORDER BY id DESC LIMIT ?", tuple(params)
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def verify_audit_chain(self) -> dict:
+        """Recompute the hash chain from the oldest row forward and report
+        the first break found, if any — the actual tamper-detection check,
+        not just storage. Returns {"intact": bool, "checked": int, "break_at_id": int|None}."""
+        import hashlib
+        async with self._db.execute("SELECT * FROM audit_log ORDER BY id ASC") as cur:
+            rows = await cur.fetchall()
+        prev_hash = "0" * 64
+        for row in rows:
+            expected = hashlib.sha256(
+                f"{prev_hash}|{row['ts']}|{row['username']}|{row['role']}|{row['ip']}|"
+                f"{row['action']}|{row['detail']}|{row['success']}".encode()
+            ).hexdigest()
+            if row["prev_hash"] != prev_hash or row["entry_hash"] != expected:
+                return {"intact": False, "checked": len(rows), "break_at_id": row["id"]}
+            prev_hash = row["entry_hash"]
+        return {"intact": True, "checked": len(rows), "break_at_id": None}
 
     async def execute_raw(self, sql: str, params: tuple = ()) -> int:
         """Execute a raw SQL statement and return the number of rows affected."""
