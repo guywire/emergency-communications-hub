@@ -3522,9 +3522,40 @@ async function loadCallLog() {
     el.innerHTML = html;
     loadEndpointStatus();
     loadVoicemailSection(el);
+    loadCallsDirectory(el, canTransmit);
   } catch(e) {
     el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red)">Error loading call log</div>';
   }
+}
+
+// O102: the HamVOIP/AllStarLink + AREDN directory (O98 — built for Settings'
+// PBX section) also surfaced here on the Calls tab, so an operator can look
+// up/dial a node without leaving the main dashboard.
+async function loadCallsDirectory(el, canTransmit) {
+  try {
+    const d = await fetch('/api/pbx/directory').then(r => r.json());
+    const hv = d.hamvoip || [], ar = d.aredn || [];
+    if (!hv.length && !ar.length) return;
+    let html = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted)">📻 DIRECTORY</div>`;
+    if (hv.length) {
+      const byCat = {};
+      hv.forEach(e => { (byCat[e.category || 'other'] ||= []).push(e); });
+      html += Object.entries(byCat).map(([cat, entries]) => `
+        <div style="padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">${escHtml(cat)}</div>
+        ${entries.map(e => `
+          <div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px" title="${escHtml(e.description || '')}">
+            <span style="flex:1">${escHtml(e.name)} <span style="color:var(--dim)">(${escHtml(e.destination)})</span></span>
+            ${canTransmit ? `<button onclick="pbxCallNode('${escHtml(e.destination)}',this)" style="font-size:9px;padding:1px 4px" title="Dial">📞</button>` : ''}
+          </div>`).join('')}`).join('');
+    }
+    if (ar.length) {
+      html += `<div style="padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">AREDN</div>` +
+        ar.map(e => `<div style="padding:3px 10px;font-size:11px" title="${escHtml(e.description || '')}">
+          🔗 ${escHtml(e.name)} <span style="color:var(--dim)">(${escHtml(e.destination)})</span>
+        </div>`).join('');
+    }
+    el.insertAdjacentHTML('beforeend', html);
+  } catch(e) {}
 }
 
 async function loadEndpointStatus() {
