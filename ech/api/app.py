@@ -2624,6 +2624,37 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             "log_tail": "\n".join(_update_state["log"][-100:]),
         }
 
+    @app.get("/api/system/selfupdate/check")
+    async def selfupdate_check(branch: str = "main"):
+        """Latest commit on GitHub, for a 'check for updates' button — does
+        not download or install anything (see ech/core/self_update.py)."""
+        from ech.core import self_update
+        try:
+            commit = await self_update.check_latest_commit(branch)
+            return {"status": "ok", "branch": branch, **commit}
+        except Exception as exc:
+            return {"status": "error", "detail": str(exc)}
+
+    @app.post("/api/system/selfupdate")
+    async def selfupdate_start(request: Request):
+        """Update ECH's own code from GitHub and restart — runs entirely on
+        this server (O103). See ech/core/self_update.py's module docstring
+        for the self-restart handling and why this reuses install.sh
+        unmodified rather than reinventing deployment."""
+        from ech.core import self_update
+        data = {}
+        try:
+            data = await request.json()
+        except Exception:
+            pass
+        branch = str(data.get("branch", "main")).strip() or "main"
+        return await self_update.start_update(branch)
+
+    @app.get("/api/system/selfupdate/status")
+    async def selfupdate_status():
+        from ech.core import self_update
+        return self_update.status()
+
     @app.get("/api/system/db_health")
     async def db_health():
         """Result of the last periodic (daily) SQLite integrity_check, plus

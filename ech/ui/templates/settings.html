@@ -107,6 +107,29 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     </div>
   </div>
 
+  <!-- ── Software update (from GitHub) ───────────────────────────── -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">SOFTWARE UPDATE (GITHUB)</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Pull and deploy the latest ECH code — runs on this server</span>
+    </div>
+    <div class="section-body">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="selfupdate-branch" value="main" placeholder="branch" style="width:100px;font-family:var(--mono);font-size:11px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px">
+        <button class="btn" onclick="checkSelfUpdate()">🔍 Check for updates</button>
+        <button class="btn btn-red" id="selfupdate-btn" onclick="startSelfUpdate()">⬇ Update &amp; Restart ECH</button>
+      </div>
+      <div id="selfupdate-check-result" style="margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--muted)"></div>
+      <div style="margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--dim)">
+        Downloads the chosen branch from <code>github.com/guywire/emergency-communications-hub</code>, syncs the
+        application code and dependencies in place, then restarts ECH — this page will lose connection briefly;
+        status keeps updating once it reconnects. Does <b>not</b> touch <code>deploy/</code> scripts or the systemd
+        service file — a change to those still needs the full deploy pipeline.
+      </div>
+      <pre id="selfupdate-log" style="display:none;margin-top:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px;font-family:var(--mono);font-size:10px;color:var(--muted);max-height:220px;overflow-y:auto;white-space:pre-wrap"></pre>
+    </div>
+  </div>
+
   <!-- ── Base Location ────────────────────────────────────────── -->
   <div class="section">
     <div class="section-header" onclick="toggle('loc-body')">
@@ -1197,6 +1220,10 @@ async function init() {
   loadServices();
   setInterval(loadServices, 15000);
   checkUpdateStatus();   // in case an update kicked off in a previous session is still running
+  (async () => {
+    const d = await fetch('/api/system/selfupdate/status').then(r => r.json()).catch(() => null);
+    if (d && (d.running || d.log_tail)) { _selfUpdatePollCount = 0; checkSelfUpdateStatus(); }
+  })();
   checkDbHealth(false);  // show the last periodic check's result, don't trigger a new full scan
   loadAdapterLive();
   setInterval(loadAdapterLive, 10000);
@@ -1709,6 +1736,80 @@ async function checkUpdateStatus() {
     }
   } catch(e) {
     console.error('checkUpdateStatus failed:', e);
+  }
+}
+
+// ── Software update from GitHub (O103) ────────────────────────────────────
+let _selfUpdatePollTimer = null;
+let _selfUpdatePollCount = 0;
+const _SELFUPDATE_MAX_POLLS = 60;  // ~3-5 min of polling through the restart, then give up quietly
+
+async function checkSelfUpdate() {
+  const branch = (document.getElementById('selfupdate-branch').value || 'main').trim();
+  const el = document.getElementById('selfupdate-check-result');
+  el.textContent = 'Checking…';
+  try {
+    const d = await fetch(`/api/system/selfupdate/check?branch=${encodeURIComponent(branch)}`).then(r => r.json());
+    if (d.status !== 'ok') { el.textContent = `Check failed: ${d.detail || 'unknown error'}`; return; }
+    el.innerHTML = `Latest on <b>${esc(branch)}</b>: <code>${esc(d.sha)}</code> — ${esc(d.message)}` +
+      (d.date ? ` <span style="color:var(--dim)">(${esc(d.date.replace('T',' ').slice(0,16))} UTC, ${esc(d.author||'')})</span>` : '');
+  } catch(e) {
+    el.textContent = 'Check failed — see console';
+    console.error('checkSelfUpdate failed:', e);
+  }
+}
+
+async function startSelfUpdate() {
+  const branch = (document.getElementById('selfupdate-branch').value || 'main').trim();
+  if (!confirm(`Update ECH from GitHub branch "${branch}" and restart now?\n\nThe dashboard will briefly disconnect while the service restarts.`)) return;
+  try {
+    const r = await fetch('/api/system/selfupdate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({branch}),
+    });
+    const d = await r.json();
+    if (d.status !== 'ok') { toast(`Update failed to start: ${d.detail || 'unknown error'}`, 'err'); return; }
+    toast('Self-update started');
+    _selfUpdatePollCount = 0;
+    checkSelfUpdateStatus();
+  } catch(e) {
+    toast('Update request failed — see console', 'err');
+    console.error('startSelfUpdate failed:', e);
+  }
+}
+
+async function checkSelfUpdateStatus() {
+  _selfUpdatePollCount++;
+  const scheduleRetry = () => {
+    if (_selfUpdatePollCount >= _SELFUPDATE_MAX_POLLS) return;  // give up quietly
+    clearTimeout(_selfUpdatePollTimer);
+    _selfUpdatePollTimer = setTimeout(checkSelfUpdateStatus, 3000);
+  };
+  try {
+    const r = await fetch('/api/system/selfupdate/status');
+    const d = await r.json();
+    const btn = document.getElementById('selfupdate-btn');
+    const log = document.getElementById('selfupdate-log');
+    if (d.step || d.log_tail) {
+      log.style.display = 'block';
+      log.textContent = (d.step ? `[step: ${d.step}]\n` : '') + (d.log_tail || '(no output yet)');
+      log.scrollTop = log.scrollHeight;
+    }
+    if (d.running) {
+      btn.disabled = true;
+      btn.textContent = '⬇ Updating…';
+      scheduleRetry();
+    } else {
+      btn.disabled = false;
+      btn.textContent = '⬇ Update & Restart ECH';
+      // The service restart itself kills the request mid-flight on success —
+      // keep polling for a while after "running" goes false to catch the
+      // service coming back up with a fresh /api/version, not just this
+      // snapshot (which may have been taken right as the old process died).
+      scheduleRetry();
+    }
+  } catch(e) {
+    // Expected mid-restart — the connection drops. Keep retrying (bounded).
+    scheduleRetry();
   }
 }
 
