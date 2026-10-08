@@ -9,41 +9,61 @@ how tools like M17Web's browser player work — no RF, just UDP to the
 reflector).
 
 STATUS: Implemented from primary sources (protocol docs + reference
-reflector source, Aug 2026), NOT live-tested — no M17 reflector was
-reachable from the environment this was written in. Verify against a real
-reflector before relying on this. Sources used:
+reflector source, Aug 2026). **Confirmed live** (rc207, 2026-08-12):
+linked to the production m17.openquad.net:17000 module A reflector on
+first attempt; base-40 callsign encoding validated against the spec's own
+worked example. Sources used:
   https://github.com/n7tae/mrefd/blob/master/Packet-Description.md
     (UDP packet types: CONN/ACKN/NACK/DISC/LSTRN/PING/PONG, M17/M17P framing)
   https://github.com/n7tae/mrefd/blob/master/packet.cpp
     (exact byte offsets for the non-stream/M17P packet layout, confirmed
     from the reference reflector implementation's own accessor code)
+  https://github.com/n7tae/mrefd/blob/master/parrot.cpp
+    (confirms BROADCAST = 6 bytes of 0xFF: `memset(packet.GetDstAddress(),
+    0xffu, 6)`, fetched 2026-10-08)
+  https://github.com/M17-Project/libm17/blob/master/payload/call.c
+    (the OFFICIAL reference callsign codec, fetched 2026-10-08 — confirms
+    both the base-40 alphabet/ordering used here AND the '#'-prefixed
+    "extended hash-address space" scheme used for pseudo-destinations like
+    "#PARROT")
   https://github.com/M17-Project/M17_spec (M17_spec.tex)
-    (base-40 callsign encoding table; LSF field layout; Packet Mode
-    protocol-type byte 0x05 = SMS, null-terminated UTF-8 string)
+    (base-40 callsign encoding table; LSF TYPE field layout for both Stream
+    and Packet mode, fetched in full 2026-10-08; Packet Mode protocol-type
+    byte 0x05 = SMS, null-terminated UTF-8 string)
   M17 CRC: CRC-16, poly 0x5935, init 0xFFFF, MSB-first, not reflected
     (M17 spec section 2.5.4, confirmed via community references)
 
-Known unverified assumptions (flagged in code below — check against a real
-reflector/client before trusting):
-  - BROADCAST destination address = 6 bytes of 0xFF. This is the commonly
-    cited M17-ecosystem convention but was not independently confirmed
-    against mrefd's own source in this session.
-  - The exact byte encoding of the reflector's "#PARROT" self-test
-    pseudo-station (mentioned in mrefd's README as working for both Stream
-    and Packet modes) was NOT found — it's very likely NOT a plain base-40
-    encoding of the literal string "#PARROT" ('#' isn't in the M17 base-40
-    alphabet at all), so it is deliberately NOT implemented here rather than
-    guessed. To test this adapter for real: send with `to_id` unset
-    (broadcasts to the whole module) and check a reflector's web dashboard
-    (e.g. a module status page like the ones at m17.hblink.network or
-    m17-awv.kc1awv.net/modules.html) to see who else is currently linked to
-    the module you're testing against, or connect a second M17 client
-    yourself and watch for the message.
-  - The TYPE field's exact bit values for packet-mode SMS are set to a
-    conservative 0x0005 — mrefd's own packet.cpp never parses or validates
-    this field for routing (it just relays raw bytes), so this only matters
-    if a receiving client's own UI inspects it; the payload's own protocol-
-    type byte (0x05) is what actually identifies this as SMS content.
+Three items flagged as unverified assumptions as of 2026-08-12 were
+rechecked 2026-10-08 against the authoritative sources above, not
+guessed:
+  - BROADCAST = 6 bytes of 0xFF — CONFIRMED directly against mrefd's own
+    parrot.cpp (see source list above). The code's prior assumption was
+    correct.
+  - The "#PARROT" self-test destination's byte encoding — CONFIRMED and
+    now IMPLEMENTED (`encode_callsign`/`decode_callsign` below): per
+    libm17's reference codec, a leading '#' is stripped, the remainder
+    (up to 8 characters) is base-40 encoded exactly like a normal
+    callsign, then `U40_9` (= 40**9) is added so the result lands in a
+    numeric range no ordinary 9-character callsign can reach. mrefd's own
+    README confirms the usage: connect to any module, set DST to
+    "#PARROT", key up — the reflector echoes your transmission back to
+    you alone (not relayed to other clients). To actually test: send a
+    message with `to_id="#PARROT"`.
+  - The TYPE field's bit values for packet-mode SMS — this surfaced a REAL
+    BUG once the spec's actual LSF TYPE table was read in full: Packet
+    Mode's TYPE field only carries the P/S bit (byte1 LSB: 0=packet,
+    1=stream) and a 3-bit CAN in byte0 — everything else is reserved and
+    must be 0, there is NO data-type subfield in Packet Mode (unlike
+    Stream Mode, which does have one — the previous 0x0005 value appears
+    to have conflated the two). 0x0005's byte1 (0x05 = binary ...0101) has
+    LSB=1, which wrongly flagged every M17P frame this adapter ever sent
+    as STREAM mode to any receiver that actually checks the bit — mrefd
+    itself doesn't check it (confirmed: "mrefd's own packet.cpp never
+    parses or validates this field for routing"), which is exactly why
+    this went unnoticed in the rc207 live test against a real reflector.
+    Fixed to 0x0000 (P/S=0/packet, CAN=0, all reserved bits 0) — fully
+    spec-correct. The payload's own leading protocol-type byte (0x05 =
+    SMS) is unaffected and still correctly identifies the content.
 
 Config keys:
   name              str   adapter name (default: m17)
@@ -68,7 +88,20 @@ log = logging.getLogger(__name__)
 _ALPHABET = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/."
 _CHAR_TO_VAL = {c: i for i, c in enumerate(_ALPHABET)}
 
-BROADCAST_ADDR = b"\xff" * 6   # see module docstring — unverified convention
+BROADCAST_ADDR = b"\xff" * 6   # confirmed 2026-10-08 against mrefd's own parrot.cpp
+                                # (memset(..., 0xffu, 6)) — see module docstring
+
+# '#'-prefixed "extended hash-address space" (e.g. "#PARROT"), confirmed
+# 2026-10-08 against the official reference implementation, libm17's
+# payload/call.c: a callsign starting with '#' is base-40 encoded exactly
+# like a normal callsign (same reversed first-char-least-significant
+# order) over the characters AFTER the '#', then U40_9 (= 40**9, one past
+# the entire normal 9-character encodable range) is added to the result —
+# pushing it into a numeric range no ordinary callsign can ever reach.
+# Up to 8 characters after the '#' fit (one slot is spent on the marker
+# itself vs. the normal 9-character limit).
+U40_9 = 40 ** 9
+_HASH_ADDR_UPPER = U40_9 + 40 ** 8   # libm17 calls this boundary U40_9_8
 PING_INTERVAL = 3.0            # matches mrefd's own ~3s keepalive cadence
 LINK_TIMEOUT = 30.0            # per Packet-Description.md: assume dead if silent this long
 
@@ -93,16 +126,27 @@ def encode_callsign(callsign: str) -> bytes:
     into the most significant bits" — the opposite of ordinary left-to-right
     base-N encoding. Confirmed against the spec's own worked example
     (AB1CD -> 0x9fdd51) during implementation.
+
+    A leading '#' (e.g. "#PARROT", mrefd's self-test echo destination —
+    see module docstring) is handled per libm17's reference payload/call.c:
+    encode everything AFTER the '#' exactly like a normal callsign, then
+    add U40_9 so the result lands in the reserved hash-address range,
+    unreachable by any ordinary 9-character callsign.
     """
     cs = callsign.upper().strip()
-    if len(cs) > 9:
+    is_hash = cs.startswith("#")
+    body = cs[1:] if is_hash else cs
+    max_len = 8 if is_hash else 9
+    if len(body) > max_len:
         raise ValueError(f"callsign too long for M17 base-40 encoding: {callsign!r}")
     value = 0
-    for ch in reversed(cs):
+    for ch in reversed(body):
         v = _CHAR_TO_VAL.get(ch)
         if v is None:
             raise ValueError(f"character {ch!r} not valid in M17 callsigns (in {callsign!r})")
         value = value * 40 + v
+    if is_hash:
+        value += U40_9
     return value.to_bytes(6, "big")
 
 
@@ -113,6 +157,10 @@ def decode_callsign(addr: bytes) -> str:
     value = int.from_bytes(addr, "big")
     if value == 0:
         return ""
+    prefix = ""
+    if U40_9 <= value < _HASH_ADDR_UPPER:
+        prefix = "#"
+        value -= U40_9
     chars = []
     while value > 0:
         chars.append(_ALPHABET[value % 40])
@@ -120,7 +168,7 @@ def decode_callsign(addr: bytes) -> str:
     # Extraction order (least-significant digit first) already matches the
     # callsign's natural first-to-last order — do NOT reverse (see
     # encode_callsign's docstring for why the significance is flipped here).
-    return "".join(chars).strip()
+    return prefix + "".join(chars).strip()
 
 
 # ── M17 CRC-16 (poly 0x5935, init 0xFFFF, MSB-first, not reflected) ────────
@@ -256,7 +304,19 @@ class M17ReflectorAdapter(Adapter):
         text = message.body
         payload = b"\x05" + text.encode("utf-8") + b"\x00"
 
-        type_field = (0x0005).to_bytes(2, "big")   # see module docstring — TYPE bits are best-effort
+        # Confirmed 2026-10-08 against the M17 spec's own LSF TYPE field
+        # table: in Packet Mode, TYPE only defines the P/S bit (byte1 LSB,
+        # 0=packet/1=stream) and the 3-bit CAN in byte0 — everything else
+        # is reserved and must be 0. The previous value here, 0x0005, had
+        # byte1=0x05 (binary ...0101) — LSB=1, which wrongly flags this
+        # M17P (packet-mode) frame as STREAM mode to any receiver that
+        # actually checks the bit (mrefd itself doesn't, which is why this
+        # went unnoticed in the rc207 live test). 0x0000 is fully correct:
+        # P/S=0 (packet), CAN=0 (default channel). The payload's own
+        # leading protocol-type byte (0x05 = SMS, set below) is what
+        # identifies the content type — packet mode's TYPE field has no
+        # data-type field at all, unlike stream mode's.
+        type_field = (0x0000).to_bytes(2, "big")
         meta = b"\x00" * 14
         lsf_part = dst + self._own_addr + type_field + meta   # 28 bytes
         lsf_crc = _crc16_m17(lsf_part).to_bytes(2, "big")
