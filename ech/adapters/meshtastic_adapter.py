@@ -248,12 +248,19 @@ class MeshtasticAdapter(Adapter):
         try:
             dest    = message.to_id or "^all"
             is_dm   = bool(message.to_id)
+            # Bot/router replies carry the ORIGIN channel of the message being
+            # replied to (see mesh_bot.py _send()) so a reply lands back on the
+            # channel it was received on, not whichever channel this adapter
+            # happens to be tuned to right now (e.g. via the Settings channel
+            # switcher) — that mismatch used to silently misdirect replies.
+            hinted_idx = (message.raw or {}).get("channel_idx")
+            ch_idx = int(hinted_idx) if hinted_idx is not None else self._channel_idx
             pkt = await self._loop.run_in_executor(
                 None,
                 lambda: self._iface.sendText(
                     message.body,
                     destinationId=dest,
-                    channelIndex=self._channel_idx,
+                    channelIndex=ch_idx,
                     wantAck=is_dm,      # request delivery ACK only for direct messages
                 )
             )
@@ -267,7 +274,7 @@ class MeshtasticAdapter(Adapter):
                     pass
             self._mark_tx(message)
             log.debug("Meshtastic %s: TX ch%d → %s (wantAck=%s): %s",
-                      self.name, self._channel_idx, dest, is_dm, message.body[:60])
+                      self.name, ch_idx, dest, is_dm, message.body[:60])
             return True
         except Exception as exc:
             log.error("Meshtastic %s: send error: %s", self.name, exc)

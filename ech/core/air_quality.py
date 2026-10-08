@@ -13,8 +13,14 @@ drifting south) — FIRMS only reports point-in-time fire detections, it can't
 tell you where the smoke has drifted, which is what HMS is for.
 
 AirNow API (free key — https://docs.airnowapi.org/):
-  GET https://www.airnowapi.org/aq/observation/latLong/current/
+  GET https://www.airnowapi.org/aq/observation/current/ziplatlong/
     ?format=application/json&latitude=..&longitude=..&distance=..&API_KEY=..
+    (AirNow retired the old `/aq/observation/latLong/current/` path on
+    2026-10-01 — HTTP 410 "This web service has been retired"; confirmed live
+    against the real endpoint 2026-10-08. The new endpoint takes the same
+    params but returns lowerCamelCase fields, notably `nowcastAQI` instead of
+    `AQI`, `aqiCategoryName` instead of nested `Category.Name`, and no
+    state-code field at all — see _fetch_current_at().)
   GET https://www.airnowapi.org/aq/data/
     ?startDate=YYYY-MM-DDTHH&endDate=YYYY-MM-DDTHH&parameters=PM25,PM10,OZONE
     &BBOX=minLon,minLat,maxLon,maxLat&dataType=A&format=application/json
@@ -323,7 +329,7 @@ class AirQualityService:
 
     async def _fetch_current_at(self, lat: float, lon: float, distance_mi: float = 50) -> dict | None:
         resp = await self._client.get(
-            f"{AIRNOW_BASE}/aq/observation/latLong/current/",
+            f"{AIRNOW_BASE}/aq/observation/current/ziplatlong/",
             params={
                 "format": "application/json",
                 "latitude": f"{lat:.4f}",
@@ -338,14 +344,18 @@ class AirQualityService:
             return None
         # A station reports one entry per pollutant (PM2.5, Ozone, ...) — the
         # AQI is the worst of those, per EPA convention (not an average).
-        worst = max(obs, key=lambda o: o.get("AQI", -1))
-        label, color = _aqi_category(worst.get("AQI"))
+        # 2026-10-01 API migration: field is now `nowcastAQI` (was `AQI`),
+        # flat `aqiCategoryName` (was nested `Category.Name`), `parameterName`
+        # (was `ParameterName`, just lowercased), `reportingAreaName` (was
+        # `ReportingArea`); no state-code field exists anymore.
+        worst = max(obs, key=lambda o: o.get("nowcastAQI", -1))
+        label, color = _aqi_category(worst.get("nowcastAQI"))
         return {
-            "aqi": worst.get("AQI"),
-            "category": (worst.get("Category") or {}).get("Name") or label,
-            "parameter": worst.get("ParameterName"),
-            "reporting_area": worst.get("ReportingArea"),
-            "state": worst.get("StateCode"),
+            "aqi": worst.get("nowcastAQI"),
+            "category": worst.get("aqiCategoryName") or label,
+            "parameter": worst.get("parameterName"),
+            "reporting_area": worst.get("reportingAreaName"),
+            "state": None,
             "color": color,
             "lat": lat, "lon": lon,
         }

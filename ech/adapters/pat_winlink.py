@@ -124,6 +124,13 @@ class PatWinlinkAdapter(Adapter):
         self._auto_connect  = bool(config.get("auto_connect", False))
         self._connect_alias = config.get("connect_alias", "telnet")
         self._mailbox_path  = config.get("mailbox_path", None)
+        # RMS discovery (_discover_rms) pulls EVERY active Winlink gateway
+        # worldwide (1150+ at last count) with no inherent range limit, unlike
+        # ADS-B/AIS which are naturally local to the receiver. Same
+        # [[min_lat,min_lon],[max_lat,max_lon]] config shape as the
+        # aishub/aisstream adapters' `bounding_box`; None (default) keeps the
+        # old unfiltered worldwide behavior.
+        self._bbox = config.get("bounding_box")
 
         if not self._callsign:
             raise ValueError("PatWinlinkAdapter: 'callsign' is required in config")
@@ -205,9 +212,14 @@ class PatWinlinkAdapter(Adapter):
         # An earlier version of this adapter posted JSON here; Pat's form
         # parser would have silently read empty values for every field.
         date_str = message.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # An explicit subject (e.g. from a filled-in template — see
+        # winlink_forms.py / O82) takes priority over the old fallback of
+        # just truncating the body, which made every form submission's
+        # subject line an unreadable fragment of its own body text.
+        subject = (message.raw or {}).get("subject") or message.body[:60]
         form = {
             "to":      message.to_id,
-            "subject": message.body[:60],
+            "subject": subject,
             "body":    message.body,
             "date":    date_str,
         }
@@ -355,6 +367,26 @@ class PatWinlinkAdapter(Adapter):
             log.debug("Pat Winlink %s: fetch message %s/%s error: %s", self.name, folder, mid, exc)
             return None
 
+    async def fetch_message_for_display(self, folder: str, mid: str) -> dict | None:
+        """Like _fetch_message(), but normalized to the lowercase
+        mid/subject/from/date/body shape the Winlink inbox read-view (and
+        list_inbox()) already use — Pat's raw JSON stays Go-capitalized
+        (MID/Subject/From/Date/Body) with From as a {Proto,Addr} object, same
+        caveat as list_inbox()/_emit_message(). Without this, clicking a
+        message in the Winlink tab showed a blank "(no subject)"/"(no body)"
+        reader even though the underlying fetch succeeded."""
+        raw = await self._fetch_message(folder, mid)
+        if raw is None:
+            return None
+        return {
+            "mid": raw.get("MID", mid),
+            "subject": raw.get("Subject", ""),
+            "from": _addr_str(raw.get("From")),
+            "to": [_addr_str(a) for a in (raw.get("To") or [])],
+            "date": raw.get("Date", ""),
+            "body": raw.get("Body", ""),
+        }
+
     async def _emit_message(self, msg: dict) -> None:
         """Convert a Pat JSON message dict to NormalizedMessage and enqueue."""
         self._rx_count += 1
@@ -458,6 +490,10 @@ class PatWinlinkAdapter(Adapter):
                 lon = gw.get("Longitude")
                 if not cs or lat is None or lon is None:
                     continue
+                if self._bbox is not None:
+                    (min_lat, min_lon), (max_lat, max_lon) = self._bbox
+                    if not (min_lat <= lat <= max_lat and min_lon <= lon <= max_lon):
+                        continue
                 # Per-channel fields (Gridsquare/Frequency/ServiceCode/modes)
                 # live under GatewayChannels[], not flat on the gateway and not
                 # "Channels[]" — confirmed against a real live response body

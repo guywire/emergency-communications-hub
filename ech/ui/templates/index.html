@@ -586,6 +586,36 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 }
 #compose-to:focus { border-color: var(--blue); }
 #compose-to::placeholder { color: var(--dim); }
+#compose-subject {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  width: 180px;
+  outline: none;
+}
+#compose-subject:focus { border-color: var(--blue); }
+#compose-subject::placeholder { color: var(--dim); }
+
+/* Dark-themed form controls for modal content (Winlink templates, etc.) —
+   without this, <input>/<textarea>/<select> render with the browser's
+   default white background, which is jarring against the app's dark theme. */
+.wl-field {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  outline: none;
+}
+.wl-field:focus { border-color: var(--blue); }
+.wl-field::placeholder { color: var(--dim); }
+select.wl-field option { background: var(--bg2); color: var(--text); }
 #priority-select {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1202,6 +1232,8 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
           <button onclick="selectAllAdapters(false)" title="Deselect all adapters" style="width:14px;height:14px;border-radius:50%;background:var(--red);border:none;cursor:pointer;padding:0;flex-shrink:0;opacity:0.85" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.85"></button>
         </div>
         <input type="text" id="compose-to" placeholder="To: node ID or callsign">
+        <input type="text" id="compose-subject" placeholder="Subject (Winlink only, optional)" style="display:none">
+        <select id="compose-channel" class="wl-field" style="display:none" title="Channel to send on — overrides the adapter's currently-tuned channel for just this message"></select>
         <select id="priority-select" onchange="updateSendBtn()">
           <option value="0">Normal</option>
           <option value="1">Elevated</option>
@@ -2200,12 +2232,62 @@ function updateSendBtn() {
 
 function toggleAdapter(el) {
   el.classList.toggle('on');
+  updateSubjectVisibility();
+  updateChannelVisibility();
 }
 
 function selectAllAdapters(on) {
   document.querySelectorAll('#compose-adapters .adapter-toggle').forEach(el => {
     if (on) el.classList.add('on'); else el.classList.remove('on');
   });
+  updateSubjectVisibility();
+  updateChannelVisibility();
+}
+
+// Subject is only meaningful to Winlink (email-style, distinct from the
+// body) — shown only when a winlink/pat adapter is among the selected ones,
+// so the compose bar doesn't carry a field every other adapter ignores.
+function updateSubjectVisibility() {
+  const field = document.getElementById('compose-subject');
+  if (!field) return;
+  const show = getSelectedAdapters().some(n => n.includes('winlink') || n.includes('pat'));
+  field.style.display = show ? '' : 'none';
+  if (!show) field.value = '';
+}
+
+// Channel picker (mirrors the Subject field's show-only-when-relevant
+// pattern): a MeshCore/Meshtastic channel to send THIS message on, without
+// changing the adapter's persistently-tuned TX channel in Settings — same
+// channel_idx hint mechanism mesh-bot replies already use (see
+// meshcore.py/meshtastic_adapter.py send()). Options come from whichever
+// selected mesh adapter's channels_list was last seen via /api/channels
+// (cached in _lastChannelsDetail by buildDynamicUI).
+let _lastChannelsDetail = [];
+
+function updateChannelVisibility() {
+  const sel = document.getElementById('compose-channel');
+  if (!sel) return;
+  const selected = getSelectedAdapters().filter(n => n.toLowerCase().includes('meshcore') || n.toLowerCase().includes('meshtastic'));
+  if (!selected.length) {
+    sel.style.display = 'none';
+    sel.innerHTML = '';
+    return;
+  }
+  // Use the first matching selected adapter's channel list — if more than
+  // one mesh adapter is selected at once, the chosen index applies to all
+  // of them (their numbering schemes may not line up; that's on the operator).
+  const detail = _lastChannelsDetail.find(a => selected.includes(a.adapter));
+  const chList = (detail && detail.detail && detail.detail.channels_list) || [];
+  if (!chList.length) {
+    sel.style.display = 'none';
+    sel.innerHTML = '';
+    return;
+  }
+  const curVal = sel.value;
+  sel.innerHTML = `<option value="">(adapter's current channel)</option>` +
+    chList.map(c => `<option value="${c.idx}">${c.idx}: ${escHtml(c.name)}</option>`).join('');
+  if ([...sel.options].some(o => o.value === curVal)) sel.value = curVal;
+  sel.style.display = '';
 }
 
 function toggleMuteAdapter(name) {
@@ -2254,6 +2336,11 @@ async function sendMessage() {
 
   const priority = parseInt(document.getElementById('priority-select').value);
   const toId = document.getElementById('compose-to').value.trim() || null;
+  const subjectField = document.getElementById('compose-subject');
+  const subject = subjectField && subjectField.style.display !== 'none' ? subjectField.value.trim() : '';
+  const channelField = document.getElementById('compose-channel');
+  const channelIdx = channelField && channelField.style.display !== 'none' && channelField.value !== ''
+    ? parseInt(channelField.value) : undefined;
 
   const btn = document.getElementById('send-btn');
   btn.disabled = true;
@@ -2261,7 +2348,7 @@ async function sendMessage() {
   const r = await fetch('/api/messages', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ body, adapters, to_id: toId, priority }),
+    body: JSON.stringify({ body, adapters, to_id: toId, priority, subject: subject || undefined, channel_idx: channelIdx }),
   });
   const data = await r.json();
   btn.disabled = false;
@@ -2298,6 +2385,7 @@ async function sendMessage() {
     });
     toast(`Sent via: ${succeeded.join(', ')}`, 'ok');
     document.getElementById('compose-body').value = '';
+    if (subjectField) subjectField.value = '';
     updateCharCount();
   }
   if (failed.length > 0) {
@@ -3008,6 +3096,7 @@ async function buildDynamicUI() {
     const r = await fetch('/api/channels');
     const data = await r.json();
     knownAdapters = data.channels.map(c => c.adapter);
+    _lastChannelsDetail = data.channels;
 
     // Build sidebar channel items
     const sidebar = document.getElementById('dynamic-channels');
@@ -3039,6 +3128,8 @@ async function buildDynamicUI() {
 
     // Update health dots
     updateHealthDots(data.channels);
+    updateSubjectVisibility();
+    updateChannelVisibility();
   } catch(e) {
     console.error('buildDynamicUI failed:', e);
   }
@@ -3497,7 +3588,10 @@ async function loadWinlinkPanel() {
     }
     let html = `<div style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);display:flex;justify-content:space-between;align-items:center">
       <span>${escHtml(d.callsign||'')} · ${d.count} message${d.count===1?'':'s'}${d.unread ? `, <span style="color:var(--blue)">${d.unread} unread</span>` : ''}</span>
-      <button onclick="loadWinlinkPanel()" style="font-size:10px;padding:2px 6px">↻ Refresh</button>
+      <span>
+        <button onclick="openWinlinkTemplate()" style="font-size:10px;padding:2px 6px" title="Compose from a plain-text form template (ICS-213, Radiogram, SITREP)">📋 Template</button>
+        <button onclick="loadWinlinkPanel()" style="font-size:10px;padding:2px 6px">↻ Refresh</button>
+      </span>
     </div>`;
     if (!d.messages || !d.messages.length) {
       html += '<div style="padding:12px;font-size:11px;color:var(--dim)">Inbox empty</div>';
@@ -3518,17 +3612,158 @@ async function loadWinlinkPanel() {
   }
 }
 
+let _wlCurrentMsg = null;
+
 async function readWinlinkMessage(mid) {
   try {
     const m = await fetch(`/api/winlink/inbox/${encodeURIComponent(mid)}`).then(r => r.json());
+    _wlCurrentMsg = m;
     const body = (m.body || '(no body)').replace(/</g, '&lt;');
     document.getElementById('msg-detail-content').innerHTML = `
       <div style="margin-bottom:8px"><b>${escHtml(m.subject||'(no subject)')}</b></div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:8px">From: ${escHtml(m.from||'')} &emsp; ${escHtml((m.date||'').replace('T',' ').slice(0,16))}</div>
-      <div style="white-space:pre-wrap;font-size:12px;font-family:var(--mono)">${body}</div>
+      <div style="white-space:pre-wrap;font-size:12px;font-family:var(--mono);margin-bottom:12px">${body}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="replyWinlinkMessage()">↩ Reply</button>
+        <button class="btn" onclick="forwardWinlinkMessage()">➦ Forward</button>
+      </div>
     `;
     document.getElementById('msg-detail-popup').classList.add('open');
   } catch(e) { toast('Could not load message: ' + e.message, 'err'); }
+}
+
+function _wlQuote(m) {
+  const when = (m.date || '').replace('T', ' ').slice(0, 16);
+  const quotedLines = (m.body || '').split('\n').map(l => '> ' + l).join('\n');
+  return `\n\n--- Original message from ${m.from || '?'} (${when}) ---\n${quotedLines}\n`;
+}
+
+function _wlFillComposeForWinlink(to, subject, body) {
+  document.querySelectorAll('.adapter-toggle').forEach(el => {
+    if (el.dataset.adapter && (el.dataset.adapter.includes('winlink') || el.dataset.adapter.includes('pat'))) {
+      el.classList.add('on');
+    }
+  });
+  updateSubjectVisibility();
+  document.getElementById('compose-to').value = to || '';
+  document.getElementById('compose-subject').value = subject;
+  document.getElementById('compose-body').value = body;
+  updateCharCount();
+  closeMsgDetail();
+  document.getElementById('compose-body').focus();
+}
+
+function replyWinlinkMessage() {
+  const m = _wlCurrentMsg;
+  if (!m) return;
+  const subj = (m.subject || '').toLowerCase().startsWith('re:') ? m.subject : `Re: ${m.subject || ''}`;
+  _wlFillComposeForWinlink(m.from, subj, _wlQuote(m));
+  toast('Reply addressed to ' + (m.from || '(unknown sender)') + ' — add your text above the quoted original', 'ok');
+}
+
+function forwardWinlinkMessage() {
+  const m = _wlCurrentMsg;
+  if (!m) return;
+  const subj = (m.subject || '').toLowerCase().startsWith('fwd:') ? m.subject : `Fwd: ${m.subject || ''}`;
+  _wlFillComposeForWinlink('', subj, _wlQuote(m));
+  toast('Forward ready — add a recipient and review before sending', 'ok');
+}
+
+// ── Winlink templates (O82) ──────────────────────────────────────────────
+// Plain-text form templates (ICS-213/Radiogram/SITREP) — see
+// ech/core/winlink_forms.py for scope/limits (not the binary Winlink Forms
+// Catalog, which this doesn't implement). Picking a template fills the
+// compose box (To/Subject/Body) for the operator to review and send.
+let _wlTemplates = [];
+
+async function openWinlinkTemplate() {
+  const content = document.getElementById('winlink-template-content');
+  content.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--muted)">Loading templates…</div>';
+  document.getElementById('winlink-template-popup').classList.add('open');
+  try {
+    const d = await fetch('/api/winlink/templates').then(r => r.json());
+    _wlTemplates = d.templates || [];
+    renderWinlinkTemplatePicker(_wlTemplates[0]?.id);
+  } catch(e) {
+    content.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red)">Could not load templates</div>';
+  }
+}
+
+function closeWinlinkTemplate() {
+  document.getElementById('winlink-template-popup').classList.remove('open');
+}
+
+function renderWinlinkTemplatePicker(selectedId) {
+  const content = document.getElementById('winlink-template-content');
+  const tmpl = _wlTemplates.find(t => t.id === selectedId) || _wlTemplates[0];
+  if (!tmpl) { content.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--dim)">No templates available</div>'; return; }
+
+  const tmplOptions = _wlTemplates.map(t => `<option value="${t.id}" ${t.id===tmpl.id?'selected':''}>${escHtml(t.name)}</option>`).join('');
+  const fields = tmpl.fields.map(f => {
+    const datalistId = `wlf-dl-${f.key}`;
+    const datalist = (f.options && f.options.length)
+      ? `<datalist id="${datalistId}">${f.options.map(o => `<option value="${escHtml(o)}">`).join('')}</datalist>`
+      : '';
+    const input = (f.key === 'message' || f.key === 'text' || f.key === 'query')
+      ? `<textarea id="wlf-${f.key}" rows="4" class="wl-field" style="width:100%" placeholder="${escHtml(f.placeholder||'')}"></textarea>`
+      : `<input type="text" id="wlf-${f.key}" class="wl-field" style="width:100%" placeholder="${escHtml(f.placeholder||'')}" ${f.options && f.options.length ? `list="${datalistId}"` : ''}>${datalist}`;
+    return `
+    <div style="margin-bottom:8px">
+      <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:3px">${escHtml(f.label)}${f.required ? ' *' : ''}</label>
+      ${input}
+    </div>`;
+  }).join('');
+
+  content.innerHTML = `
+    <div style="padding:12px">
+      <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:4px">Template</label>
+      <select id="wlf-template-select" class="wl-field" style="width:100%;margin-bottom:4px" onchange="renderWinlinkTemplatePicker(this.value)">${tmplOptions}</select>
+      <div style="font-size:10px;color:var(--dim);margin-bottom:12px">${escHtml(tmpl.description)}</div>
+      ${fields}
+      <div id="wlf-error" style="color:var(--red);font-size:11px;margin-bottom:8px;display:none"></div>
+      <button class="btn btn-green" onclick="useWinlinkTemplate('${tmpl.id}')">Use this — fill compose box</button>
+    </div>`;
+}
+
+async function useWinlinkTemplate(templateId) {
+  const tmpl = _wlTemplates.find(t => t.id === templateId);
+  if (!tmpl) return;
+  const values = {};
+  tmpl.fields.forEach(f => { values[f.key] = document.getElementById(`wlf-${f.key}`)?.value || ''; });
+
+  const errEl = document.getElementById('wlf-error');
+  errEl.style.display = 'none';
+  try {
+    const d = await fetch(`/api/winlink/templates/${encodeURIComponent(templateId)}/render`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({values}),
+    }).then(r => r.json());
+    if (d.status !== 'ok') {
+      errEl.textContent = d.error || 'Could not render template';
+      errEl.style.display = 'block';
+      return;
+    }
+    // Force the winlink adapter on and reveal the subject field even if no
+    // winlink toggle is currently selected — the operator came from the
+    // Winlink tab, so the intent is unambiguous.
+    document.querySelectorAll('.adapter-toggle').forEach(el => {
+      if (el.dataset.adapter && (el.dataset.adapter.includes('winlink') || el.dataset.adapter.includes('pat'))) {
+        el.classList.add('on');
+      }
+    });
+    updateSubjectVisibility();
+    document.getElementById('compose-subject').value = d.subject;
+    document.getElementById('compose-body').value = d.body;
+    if (d.to) document.getElementById('compose-to').value = d.to;
+    updateCharCount();
+    closeWinlinkTemplate();
+    document.getElementById('compose-body').focus();
+    toast(d.to
+      ? `Template filled into compose box, addressed to ${d.to} — review before sending`
+      : 'Template filled into compose box — add a To: and review before sending', 'ok');
+  } catch(e) {
+    errEl.textContent = 'Error: ' + e.message;
+    errEl.style.display = 'block';
+  }
 }
 
 function updateWinlinkBadge(unread) {
@@ -3671,6 +3906,16 @@ function mobileClosePanels() {
       <button class="msg-detail-close" onclick="closeNodeDetail()" title="Close">✕</button>
     </div>
     <div id="node-detail-content"></div>
+  </div>
+</div>
+<div id="winlink-template-popup" class="msg-detail-popup" aria-modal="true">
+  <div class="msg-detail-overlay" onclick="closeWinlinkTemplate()"></div>
+  <div class="msg-detail-panel">
+    <div class="msg-detail-hdr">
+      <span>Winlink Template</span>
+      <button class="msg-detail-close" onclick="closeWinlinkTemplate()" title="Close">✕</button>
+    </div>
+    <div id="winlink-template-content"></div>
   </div>
 </div>
 </body>

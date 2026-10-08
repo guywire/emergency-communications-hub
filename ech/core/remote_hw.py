@@ -89,7 +89,16 @@ class RemoteHWRegistry:
     def register(self, role: str, adapter: str) -> RemoteHWSession:
         old = self._sessions.get(adapter)
         if old is not None and old.alive:
-            raise ValueError(f"adapter {adapter!r} already has a live remote session")
+            # A still-"alive" session usually means the previous browser tab
+            # went away without a clean WS close (refresh, lost network, lid
+            # closed) rather than a genuine second concurrent operator — the
+            # old refuse-the-new-connection behavior left operators locked
+            # out until the dead TCP connection eventually timed out server
+            # side. Replace it: close the old session (wakes its adapter-side
+            # reader with a ConnectionError, same as any other disconnect)
+            # and let the new browser connection take over immediately.
+            log.warning("RemoteHW: replacing stale %s session for adapter %r", old.role, adapter)
+            old.close()
         sess = RemoteHWSession(role, adapter)
         self._sessions[adapter] = sess
         log.info("RemoteHW: %s session registered for adapter %r", role, adapter)

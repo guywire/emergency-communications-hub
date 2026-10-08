@@ -285,8 +285,9 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     retention_cfg = config.get("retention", {})
     router._msg_retention = {
         k: int(v) for k, v in retention_cfg.items()
-        if k not in ("enabled",) and int(v) > 0
+        if k not in ("enabled", "archive_days") and int(v) > 0
     } if retention_cfg.get("enabled", True) else {}
+    router._archive_days = int(retention_cfg.get("archive_days", 30))
 
     # Now start router (adapters already have correct pause state)
     await router.start()

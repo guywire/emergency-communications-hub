@@ -23,6 +23,10 @@ retention:
   enabled: true
   aprs: 12          # APRS/AIS messages older than 12 hours
   meshcore: 36      # MeshCore messages older than 36 hours
+  meshtastic: 36    # Meshtastic messages older than 36 hours
+  archive_days: 30  # purged messages are archived to <db_dir>/message_archive/*.jsonl
+                     # (restorable) before deletion; archive files older than this are
+                     # deleted for good
 
 # ── TLS / HTTPS (optional) ────────────────────────────────────────────────────
 # Enables HTTPS so Web Serial CAT works from any browser on the LAN.
@@ -461,6 +465,11 @@ adapters:
 #     poll_interval: 300
 #     auto_connect: false
 #     connect_alias: telnet          # telnet | ardop | ax25 | vara-hf | vara-fm
+#     # RMS gateway discovery is worldwide (1000+ stations) with no inherent
+#     # range limit, unlike ADS-B/AIS — set this to keep the map's RMS markers
+#     # confined to the same area as everything else, same shape as the
+#     # aishub/aisstream adapters' bounding_box. Omit to keep showing all of them.
+#     bounding_box: [[43.0, -72.0], [47.0, -65.0]]   # [min_lat, min_lon], [max_lat, max_lon]
 
 # ── Asterisk/PBX (real) ───────────────────────────────────────────────────────
 #   Bridges VoIP/PSTN calls with ECH messaging via Asterisk AMI. Requires a

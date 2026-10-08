@@ -795,14 +795,29 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
           <input type="number" id="ret-meshcore" min="1" max="8760" value="36" style="width:100px">
         </div>
         <div style="flex:1;min-width:160px">
+          <label>Meshtastic retention (hours)</label>
+          <input type="number" id="ret-meshtastic" min="1" max="8760" value="36" style="width:100px">
+        </div>
+        <div style="flex:1;min-width:160px">
           <label>MeshCore node TTL (hours, 0=use adapter default)</label>
           <input type="number" id="ret-node-ttl" min="0" max="720" value="18" style="width:100px">
         </div>
+        <div style="flex:1;min-width:160px">
+          <label>Archive retention (days)</label>
+          <input type="number" id="ret-archive-days" min="1" max="3650" value="30" style="width:100px">
+        </div>
       </div>
-      <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
+      <p style="color:var(--muted);font-size:12px;margin:10px 0 0">Before a message is purged above, it's saved to a dated, restorable archive file (<code>message_archive/YYYY-MM-DD.jsonl</code> next to the DB). Archive files themselves are deleted once older than the days set here.</p>
+      <div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <button class="btn btn-green" onclick="saveRetention()">Save Retention</button>
         <button class="btn" onclick="purgeNow()" style="background:var(--bg3);border-color:var(--border)">Purge Now</button>
         <span id="ret-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none"></span>
+      </div>
+      <div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="margin:0">Restore archived day:</label>
+        <select id="ret-archive-date" style="width:160px"></select>
+        <button class="btn" onclick="restoreArchiveDay()" style="background:var(--bg3);border-color:var(--border)">Restore</button>
+        <span id="ret-restore-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none"></span>
       </div>
       <div style="margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--muted)">
         <strong>DB location tip:</strong> Set <code>database.path: /mnt/usb/ech.db</code> in /etc/ech/config.yaml to move the DB to the USB drive, then restart ECH. A symlink also works: <code>sudo mv /var/lib/ech/ech.db /mnt/usb/ech.db &amp;&amp; sudo ln -s /mnt/usb/ech.db /var/lib/ech/ech.db</code>
@@ -3059,20 +3074,50 @@ async function loadRetention() {
   try {
     const d = await fetch('/api/retention').then(r => r.json());
     const ret = d.retention || {};
-    document.getElementById('ret-aprs').value     = ret.aprs     ?? 12;
-    document.getElementById('ret-meshcore').value = ret.meshcore ?? 36;
-    document.getElementById('ret-node-ttl').value = d.node_ttl_hours ?? 18;
+    document.getElementById('ret-aprs').value       = ret.aprs       ?? 12;
+    document.getElementById('ret-meshcore').value   = ret.meshcore   ?? 36;
+    document.getElementById('ret-meshtastic').value = ret.meshtastic ?? 36;
+    document.getElementById('ret-node-ttl').value   = d.node_ttl_hours ?? 18;
+    document.getElementById('ret-archive-days').value = d.archive_days ?? 30;
   } catch(e) { console.warn('loadRetention:', e); }
+  loadArchiveDates();
+}
+
+async function loadArchiveDates() {
+  const sel = document.getElementById('ret-archive-date');
+  if (!sel) return;
+  try {
+    const d = await fetch('/api/retention/archive').then(r => r.json());
+    const dates = d.dates || [];
+    sel.innerHTML = dates.length
+      ? dates.map(dt => `<option value="${dt}">${dt}</option>`).join('')
+      : '<option value="">(no archived days)</option>';
+  } catch(e) { console.warn('loadArchiveDates:', e); }
+}
+
+async function restoreArchiveDay() {
+  const msg = document.getElementById('ret-restore-msg');
+  const date = document.getElementById('ret-archive-date').value;
+  if (!date) return;
+  try {
+    const d = await fetch('/api/retention/restore', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({date})}).then(r => r.json());
+    msg.textContent = d.status === 'ok' ? `Restored ${d.restored} message(s) from ${date}` : (d.error || 'Error');
+    msg.style.color = d.status === 'ok' ? 'var(--green)' : '#f06060';
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display='none', 5000);
+  } catch(e) { msg.textContent='Error: '+e.message; msg.style.display='inline'; }
 }
 
 async function saveRetention() {
   const msg = document.getElementById('ret-msg');
   const payload = {
     retention: {
-      aprs:      parseInt(document.getElementById('ret-aprs').value) || 12,
-      meshcore:  parseInt(document.getElementById('ret-meshcore').value) || 36,
+      aprs:        parseInt(document.getElementById('ret-aprs').value) || 12,
+      meshcore:    parseInt(document.getElementById('ret-meshcore').value) || 36,
+      meshtastic:  parseInt(document.getElementById('ret-meshtastic').value) || 36,
     },
     node_ttl_hours: parseInt(document.getElementById('ret-node-ttl').value) || 0,
+    archive_days: parseInt(document.getElementById('ret-archive-days').value) || 30,
   };
   try {
     const d = await fetch('/api/retention', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(r => r.json());
@@ -3088,10 +3133,12 @@ async function purgeNow() {
   try {
     const payload = {
       retention: {
-        aprs:     parseInt(document.getElementById('ret-aprs').value) || 12,
-        meshcore: parseInt(document.getElementById('ret-meshcore').value) || 36,
+        aprs:       parseInt(document.getElementById('ret-aprs').value) || 12,
+        meshcore:   parseInt(document.getElementById('ret-meshcore').value) || 36,
+        meshtastic: parseInt(document.getElementById('ret-meshtastic').value) || 36,
       },
       node_ttl_hours: parseInt(document.getElementById('ret-node-ttl').value) || 0,
+      archive_days: parseInt(document.getElementById('ret-archive-days').value) || 30,
     };
     await fetch('/api/retention', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
     const d = await fetch('/api/retention/purge', {method:'POST'}).then(r => r.json());
@@ -3099,6 +3146,7 @@ async function purgeNow() {
     msg.style.color = 'var(--green)';
     msg.style.display = 'inline';
     setTimeout(() => msg.style.display='none', 5000);
+    loadArchiveDates();
   } catch(e) { msg.textContent='Error: '+e.message; msg.style.display='inline'; }
 }
 </script>

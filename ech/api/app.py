@@ -431,15 +431,29 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         adapters  = data.get("adapters")
         to_id     = data.get("to_id")
         priority  = Priority(data.get("priority", 0))
+        subject     = (data.get("subject") or "").strip()
+        channel_idx = data.get("channel_idx")
         if not body or not body.strip():
             return {"error": "Message body is empty"}
         if len(body) > 900:
             return {"error": f"Message too long ({len(body)} chars, max 900)"}
+        # subject: consumed by pat_winlink.py's send() (Winlink's email-style
+        # Subject, distinct from the body). channel_idx: an explicit per-send
+        # channel override, consumed by meshcore.py/meshtastic_adapter.py's
+        # send() — lets the operator pick a channel for THIS message without
+        # changing the adapter's persistently-tuned TX channel in Settings.
+        # Both are harmless no-ops for adapter types that don't read them.
+        raw: dict = {}
+        if subject:
+            raw["subject"] = subject
+        if channel_idx is not None:
+            raw["channel_idx"] = int(channel_idx)
         tracked = await router.send_tracked(
             body=body,
             adapter_names=adapters,
             to_id=to_id,
             priority=priority,
+            raw=raw or None,
         )
         # Build per-adapter failure reasons from router adapter state
         failure_reasons: dict[str, str] = {}
@@ -1464,8 +1478,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     # ── Analytics ──────────────────────────────────────────────────────────
 
+    # 30-day floor requested for the Analytics page (O89) — message_stats_hourly
+    # is independently retained 90 days (purge_old_stats()) specifically so it
+    # outlives per-adapter message purging, so the data behind this chart was
+    # already there; the API cap at 14 days was the only thing hiding it.
     @app.get("/api/analytics/messages_by_adapter")
-    async def analytics_messages_by_adapter(hours: int = Query(48, le=24 * 14)):
+    async def analytics_messages_by_adapter(hours: int = Query(48, le=24 * 30)):
         buckets = await db.get_message_time_buckets(hours=hours)
         return {"hours": hours, "buckets": buckets}
 
@@ -1475,7 +1493,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         return {"hours": hours, "commands": stats}
 
     @app.get("/api/analytics/anomalies")
-    async def analytics_anomalies(hours: int = Query(48, le=24 * 14)):
+    async def analytics_anomalies(hours: int = Query(48, le=24 * 30)):
         buckets = await db.get_anomaly_time_buckets(hours=hours)
         return {"hours": hours, "buckets": buckets}
 
@@ -2262,7 +2280,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             if hasattr(adp, "_node_ttl_sec"):
                 node_ttl = int(adp._node_ttl_sec / 3600) if adp._node_ttl_sec else 0
                 break
-        return {"retention": ret, "node_ttl_hours": node_ttl}
+        return {"retention": ret, "node_ttl_hours": node_ttl, "archive_days": router._archive_days}
 
     @app.post("/api/retention")
     async def save_retention(request: Request):
@@ -2275,9 +2293,11 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             if hours > 0:
                 new_ret[k] = hours
         node_ttl = int(data.get("node_ttl_hours", 0))
+        archive_days = int(data.get("archive_days", router._archive_days)) or 30
 
         # Apply live
         router._msg_retention = new_ret
+        router._archive_days = archive_days
 
         # Update node TTL on all meshcore adapters (takes effect on next expiry cycle)
         for adp in router._adapters.values():
@@ -2290,7 +2310,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             try:
                 with open(path) as f:
                     cfg = yaml.safe_load(f) or {}
-                ret_section = {"enabled": True, **{k: v for k, v in new_ret.items()}}
+                ret_section = {"enabled": True, "archive_days": archive_days, **{k: v for k, v in new_ret.items()}}
                 cfg["retention"] = ret_section
                 # Save node_ttl_hours into each meshcore adapter config
                 for adp_cfg in cfg.get("adapters", []):
@@ -2308,7 +2328,24 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not router._msg_retention:
             return {"status": "ok", "deleted": 0, "note": "no retention rules configured"}
         deleted = await db.purge_old_messages(router._msg_retention)
+        await db.purge_old_archive(router._archive_days)
         return {"status": "ok", "deleted": deleted}
+
+    @app.get("/api/retention/archive")
+    async def list_retention_archive():
+        """Dated archive files (purged-but-restorable messages), newest first."""
+        return {"dates": await db.list_archive_dates()}
+
+    @app.post("/api/retention/restore")
+    async def restore_retention_archive(request: Request):
+        """Restore every archived message for a given date (YYYY-MM-DD) back into
+        the live messages table."""
+        data = await request.json()
+        date = str(data.get("date", ""))
+        if not date:
+            return {"status": "error", "error": "date is required"}
+        restored = await db.restore_archived_messages(date)
+        return {"status": "ok", "restored": restored}
 
     # ── Simulation management ─────────────────────────────────────────────
 
@@ -3204,12 +3241,34 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     async def winlink_inbox_message(mid: str):
         """Full body of one inbox message, for the mail panel's read view."""
         for adapter in router._adapters.values():
-            if hasattr(adapter, "_fetch_message"):
-                msg = await adapter._fetch_message("in", mid)
+            if hasattr(adapter, "fetch_message_for_display"):
+                msg = await adapter.fetch_message_for_display("in", mid)
                 if msg is None:
                     raise HTTPException(status_code=404, detail="Message not found")
                 return msg
         raise HTTPException(status_code=404, detail="No Winlink adapter configured")
+
+    @app.get("/api/winlink/templates")
+    async def winlink_templates_list():
+        """Plain-text Winlink message templates (ICS-213, Radiogram, SITREP) —
+        see ech/core/winlink_forms.py's module docstring for scope/limits."""
+        from ech.core.winlink_forms import list_templates
+        return {"templates": list_templates()}
+
+    @app.post("/api/winlink/templates/{template_id}/render")
+    async def winlink_template_render(template_id: str, request: Request):
+        from ech.core.winlink_forms import render_template
+        data = await request.json()
+        values = data.get("values", {})
+        if not isinstance(values, dict):
+            return {"status": "error", "error": "values must be an object"}
+        try:
+            rendered = render_template(template_id, values)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"Unknown template '{template_id}'")
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
+        return {"status": "ok", **rendered}
 
     @app.post("/api/winlink/connect")
     async def winlink_connect(request: Request):

@@ -101,6 +101,69 @@ def test_pat_registered_in_main():
     assert isinstance(b, MockPatWinlinkAdapter)
 
 
+# ── RMS discovery bounding box (O95) ──────────────────────────────────────
+
+_FAKE_GATEWAYS = {
+    "Gateways": [
+        {"Callsign": "W1IN", "Latitude": 44.5, "Longitude": -69.5,
+         "GatewayChannels": [{"Gridsquare": "FN54", "Frequency": 145090000,
+                               "ServiceCode": "PUBLIC", "SupportedModes": "packet"}]},
+        {"Callsign": "W9OUT", "Latitude": 40.0, "Longitude": -90.0,
+         "GatewayChannels": [{"Gridsquare": "EN50", "Frequency": 145010000,
+                               "ServiceCode": "PUBLIC", "SupportedModes": "packet"}]},
+    ]
+}
+
+
+class _FakeResp:
+    def __init__(self, data):
+        self._data = data
+    def raise_for_status(self): pass
+    def json(self): return self._data
+
+
+class _FakeClient:
+    def __init__(self, *a, **kw): pass
+    async def __aenter__(self): return self
+    async def __aexit__(self, *a): return False
+    async def get(self, url, params=None):
+        return _FakeResp(_FAKE_GATEWAYS)
+
+
+@pytest.mark.asyncio
+async def test_rms_discovery_no_bbox_keeps_all(monkeypatch):
+    import ech.adapters.pat_winlink as mod
+    monkeypatch.setattr(mod.httpx, "AsyncClient", _FakeClient)
+    a = PatWinlinkAdapter({"callsign": "W1TEST"})
+    await a._discover_rms()
+    assert {s["callsign"] for s in a._rms_stations} == {"W1IN", "W9OUT"}
+
+
+@pytest.mark.asyncio
+async def test_rms_discovery_bbox_filters_out_of_area(monkeypatch):
+    import ech.adapters.pat_winlink as mod
+    monkeypatch.setattr(mod.httpx, "AsyncClient", _FakeClient)
+    a = PatWinlinkAdapter({
+        "callsign": "W1TEST",
+        "bounding_box": [[43.0, -72.0], [47.0, -65.0]],
+    })
+    await a._discover_rms()
+    assert {s["callsign"] for s in a._rms_stations} == {"W1IN"}
+
+
+@pytest.mark.asyncio
+async def test_rms_nodes_respect_bbox(monkeypatch):
+    import ech.adapters.pat_winlink as mod
+    monkeypatch.setattr(mod.httpx, "AsyncClient", _FakeClient)
+    a = PatWinlinkAdapter({
+        "callsign": "W1TEST",
+        "bounding_box": [[43.0, -72.0], [47.0, -65.0]],
+    })
+    await a._discover_rms()
+    nodes = await a.nodes()
+    assert [n.display_name for n in nodes] == ["W1IN"]
+
+
 # ── Real adapter against MockPatServer ───────────────────────────────────
 
 @pytest.mark.asyncio
@@ -117,6 +180,29 @@ async def test_pat_adapter_connects_to_mock_server(pat_server):
     assert adapter._connected
     # All 3 seeded messages marked as seen on startup
     assert len(adapter._seen_mids) == 3
+    await adapter.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_fetch_message_for_display_normalizes_pat_casing(pat_server):
+    """O83: clicking a Winlink inbox message must get back lowercase
+    mid/subject/from/date/body — the raw Pat API is Go-capitalized
+    (MID/Subject/From/Date/Body) with From as a {Proto,Addr} object, which
+    the UI's readWinlinkMessage() can't read directly."""
+    port = pat_server.port
+    adapter = PatWinlinkAdapter({
+        "callsign": "W1TEST",
+        "pat_url": f"http://127.0.0.1:{port}",
+        "poll_interval": 9999,
+        "auto_connect": False,
+    })
+    await adapter.connect()
+    msg = await adapter.fetch_message_for_display("in", "TESTMID0000")
+    assert msg["mid"] == "TESTMID0000"
+    assert msg["subject"] == "Test message 0"
+    assert msg["from"] == "W1TEST0"
+    assert "Body of test message 0" in msg["body"]
+    assert msg["date"]
     await adapter.disconnect()
 
 
@@ -189,6 +275,35 @@ async def test_pat_adapter_send_to_outbox(pat_server):
     assert result is True
     assert len(pat_server.outbox) == 1
     assert pat_server.outbox[0]["to"] == "W1EOC"
+
+
+@pytest.mark.asyncio
+async def test_pat_adapter_send_uses_explicit_subject(pat_server):
+    """O82: a template-rendered subject (message.raw['subject']) must reach
+    Pat as-is, not get overwritten by the old 60-char body truncation —
+    otherwise every form submission's subject line is an unreadable
+    fragment of its own body text."""
+    port = pat_server.port
+    adapter = PatWinlinkAdapter({
+        "callsign": "W1TEST",
+        "pat_url": f"http://127.0.0.1:{port}",
+        "poll_interval": 9999,
+        "auto_connect": False,
+    })
+    await adapter.connect()
+
+    msg = NormalizedMessage(
+        source_adapter="winlink",
+        source_channel="Winlink",
+        from_id="W1TEST",
+        body="ICS-213 GENERAL MESSAGE\nDate/Time: ...\nTo: W1ABC\n\nShelter open.\n",
+        to_id="W1EOC",
+        raw={"subject": "ICS-213 Shelter status"},
+    )
+    await adapter.send(msg)
+    await adapter.disconnect()
+
+    assert pat_server.outbox[0]["subject"] == "ICS-213 Shelter status"
 
 
 @pytest.mark.asyncio

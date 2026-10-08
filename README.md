@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc185** (authoritative version is always the `VERSION` file — this banner is updated manually and can lag)
+**Version 1.0.0-rc229** (authoritative version is always the `VERSION` file — this banner is updated manually and can lag)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -18,14 +18,15 @@ SignalMatrix is a Python/FastAPI application that bridges multiple emergency-com
 | Feature | Notes |
 |---------|-------|
 | **Multi-network bridging** | Meshtastic, APRS (IS + KISS TNC), MeshCore, JS8Call, Winlink/PAT, SMS (SIM7x00/SIM800L), MQTT, Reticulum/LXMF, AREDN, Asterisk/PBX |
-| **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status, SKYWARN + strip reports (`/reports`), analytics charts (`/analytics`) — all in the browser |
+| **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status, SKYWARN + strip reports (`/reports`), analytics charts (`/analytics`) — all in the browser. The compose box shows a per-send MeshCore/Meshtastic channel picker and a Winlink subject field only when a relevant adapter is selected. |
 | **Ham Radio Log** | Contest logging (Field Day, POTA, SOTA, General); ADIF/Cabrillo/CSV import; ADIF/Cabrillo/POTA/SOTA export |
 | **CAT radio control** | Browser Web Serial (no software install) or server-side rigctld/Hamlib |
 | **Anomaly detection** | Automatic alerts for unusual message patterns or node behaviour |
 | **Simulation mode** | Built-in mock adapters let you train operators without live hardware |
 | **Mesh bot** | 25 on-mesh commands — weather/alerts/METAR/tides/solar, aircraft & ship tracking, satellite passes, FCC/DXCC lookups, SKYWARN spotter report intake, SHARES Region 1 strip-report intake, trivia with scoreboards, text-adventure games (see [Mesh Bot](#mesh-bot)) |
 | **SKYWARN & strip reports** | Guided report intake over the mesh (DM the bot `skywarn` or `strip`), auto-prefilled from the sending node's known position/callsign/temperature when available; combined `/reports` review page with map plotting, edit/complete/delete, and `net`/`inws`/`winlink` output formats for relaying to NWS |
-| **Analytics** | `/analytics` — messages per hour per adapter, bot command usage, anomaly trends (24h/48h/7d) |
+| **Analytics** | `/analytics` — messages per hour per adapter, bot command usage, anomaly trends (24h/48h/7d/30d), with per-series show/hide toggles on the time charts |
+| **Winlink templates** | ICS-213, ARRL Radiogram, SITREP, Winlink AI Query, and Catalog Request (weather/radar/propagation/satellite bulletins) — fill-in-the-blank, addresses and subjects itself correctly |
 | **GPS time sync** | Optional NMEA receiver auto-sets system clock and base position |
 | **Storage guard** | Warns when disk free falls below 1 GB or 5%; automatic message retention purge (configurable per adapter family) |
 
@@ -421,9 +422,17 @@ retention:
   enabled: true
   aprs: 12          # purge APRS messages older than 12 hours
   meshcore: 36      # purge MeshCore messages older than 36 hours
+  meshtastic: 36    # purge Meshtastic messages older than 36 hours
+  archive_days: 30  # purged messages are archived (restorable) before deletion
 ```
 
-The prefix (e.g. `aprs`, `meshcore`) is matched against the `source_adapter` column. Add any adapter name prefix to the `retention:` block to cover additional adapters.
+The prefix (e.g. `aprs`, `meshcore`, `meshtastic`) is matched against the `source_adapter` column. Add any adapter name prefix to the `retention:` block to cover additional adapters.
+
+Before a message is purged, it's archived to a dated, restorable file
+(`message_archive/YYYY-MM-DD.jsonl` next to the database) rather than being
+deleted outright. Archive files are themselves deleted once older than
+`archive_days`. Restore a given day's messages from **Settings → Data
+Retention**.
 
 Retention settings can also be adjusted live from the **Settings → Data Retention** section without restarting ECH.
 
@@ -656,6 +665,7 @@ bot channel) respond to bare command words. Replies to something the bot itself 
 | `moon` | Moon phase, rise and set times |
 | `id` | Bot version and identity |
 | `path` | The relay route YOUR message took to reach the bot, decoded to repeater names |
+| `trace <node name>` | Fire a real active trace probe at a named node and reply with its measured hop path (unlike `path`, which only reports your own last message's route) |
 | `dad` | A dad joke |
 | `skywarn` | SKYWARN spotter reports — see below |
 | `strip` | SHARES Region 1 "Response Creator" strip reports — see below |

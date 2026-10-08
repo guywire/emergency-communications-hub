@@ -48,6 +48,8 @@ class Router:
         self._purge_task: asyncio.Task | None = None
         # Message retention: {adapter_prefix: hours}; populated by load_config()
         self._msg_retention: dict[str, int] = {}
+        # Days purged-message archive files are kept before being deleted for good
+        self._archive_days: int = 30
 
     # ── Adapter management ────────────────────────────────────────────────
 
@@ -287,6 +289,7 @@ class Router:
                 if self._msg_retention:
                     await self._db.purge_old_messages(self._msg_retention)
                 await self._db.purge_old_stats()
+                await self._db.purge_old_archive(self._archive_days)
             except asyncio.CancelledError:
                 return
             except Exception as exc:
@@ -465,6 +468,7 @@ class Router:
         adapter_names: list[str] | None = None,
         to_id: str | None = None,
         priority: Priority = Priority.NORMAL,
+        raw: dict | None = None,
     ) -> dict[str, dict]:
         """
         Like send() but returns {adapter: {"ok": bool, "msg_id": str}} so the
@@ -492,6 +496,7 @@ class Router:
                 to_id=to_id,
                 body=body,
                 priority=priority,
+                raw=raw or {},
             )
             adapter._last_sent_uuid = msg.id
             ok = await adapter.send(msg)

@@ -879,17 +879,61 @@ class Database:
             log.info("Database: pruned %d expired session(s)", cur.rowcount)
         return cur.rowcount
 
-    async def purge_old_messages(self, retention: dict[str, int]) -> int:
+    def _archive_dir(self) -> Path:
+        d = Path(self._path).parent / "message_archive"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    async def _archive_messages(self, pattern: str, cutoff: str) -> int:
+        """Append rows about to be purged to a dated JSONL file, grouped by
+        the UTC date each message was sent, so later archive-retention purge
+        can drop whole files by date without parsing every line's timestamp."""
+        import json
+        cur = await self._db.execute(
+            "SELECT id, source_adapter, source_channel, from_id, from_display, to_id, "
+            "body, timestamp, priority, lat, lon, raw_json FROM messages "
+            "WHERE LOWER(source_adapter) LIKE ? AND timestamp < ?",
+            (f"{pattern.lower()}%", cutoff),
+        )
+        rows = await cur.fetchall()
+        if not rows:
+            return 0
+        cols = ["id", "source_adapter", "source_channel", "from_id", "from_display",
+                "to_id", "body", "timestamp", "priority", "lat", "lon", "raw_json"]
+        by_date: dict[str, list[dict]] = {}
+        for row in rows:
+            rec = dict(zip(cols, row))
+            date = str(rec["timestamp"])[:10] or "unknown-date"
+            by_date.setdefault(date, []).append(rec)
+        archive_dir = self._archive_dir()
+        for date, recs in by_date.items():
+            fpath = archive_dir / f"{date}.jsonl"
+            with open(fpath, "a", encoding="utf-8") as f:
+                for rec in recs:
+                    f.write(json.dumps(rec) + "\n")
+        return len(rows)
+
+    async def purge_old_messages(self, retention: dict[str, int], archive: bool = True) -> int:
         """Delete messages older than per-adapter retention windows.
 
         retention: {adapter_pattern: hours}  e.g. {"aprs": 12, "meshcore": 36}
         Patterns are prefix-matched against source_adapter (case-insensitive).
+        When archive=True, purged rows are appended to a dated JSONL file
+        under <db_dir>/message_archive/ before deletion, so they can be
+        restored later (see restore_archived_messages()). The archive files
+        themselves are purged separately by purge_old_archive(), on a much
+        longer retention window.
         Returns total rows deleted.
         """
         from datetime import datetime, timezone, timedelta
         total = 0
         for pattern, hours in retention.items():
             cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+            if archive:
+                try:
+                    await self._archive_messages(pattern, cutoff)
+                except OSError as exc:
+                    log.warning("Database: could not archive %s messages before purge: %s", pattern, exc)
             cur = await self._db.execute(
                 "DELETE FROM messages WHERE LOWER(source_adapter) LIKE ? AND timestamp < ?",
                 (f"{pattern.lower()}%", cutoff),
@@ -901,6 +945,60 @@ class Database:
             await self._db.commit()
             await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return total
+
+    async def purge_old_archive(self, days: int = 30) -> int:
+        """Delete whole dated archive files (see _archive_messages) older
+        than `days`. Independent of, and intended to be longer than, the
+        per-adapter message retention that fed the archive in the first
+        place. Returns number of files deleted."""
+        from datetime import datetime, timezone, timedelta
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        archive_dir = self._archive_dir()
+        deleted = 0
+        for fpath in archive_dir.glob("*.jsonl"):
+            if fpath.stem < cutoff_date:
+                try:
+                    fpath.unlink()
+                    deleted += 1
+                except OSError as exc:
+                    log.warning("Database: could not delete archive file %s: %s", fpath, exc)
+        if deleted:
+            log.info("Database: purged %d archive file(s) older than %d day(s)", deleted, days)
+        return deleted
+
+    async def restore_archived_messages(self, date: str) -> int:
+        """Re-insert every message from the archive file for `date`
+        (YYYY-MM-DD) back into the live messages table. Rows that already
+        exist (same id) are left untouched via INSERT OR IGNORE. Returns
+        the number of rows restored."""
+        import json
+        fpath = self._archive_dir() / f"{date}.jsonl"
+        if not fpath.exists():
+            return 0
+        restored = 0
+        with open(fpath, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                cur = await self._db.execute(
+                    "INSERT OR IGNORE INTO messages "
+                    "(id, source_adapter, source_channel, from_id, from_display, to_id, "
+                    "body, timestamp, priority, lat, lon, raw_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (rec["id"], rec["source_adapter"], rec["source_channel"], rec["from_id"],
+                     rec["from_display"], rec.get("to_id"), rec["body"], rec["timestamp"],
+                     rec.get("priority", 0), rec.get("lat"), rec.get("lon"), rec.get("raw_json")),
+                )
+                restored += cur.rowcount
+        if restored:
+            await self._db.commit()
+        return restored
+
+    async def list_archive_dates(self) -> list[str]:
+        """Dated archive files available to restore, newest first."""
+        return sorted((p.stem for p in self._archive_dir().glob("*.jsonl")), reverse=True)
 
     async def purge_old_stats(self, days: int = 90) -> int:
         """Trim message_stats_hourly beyond `days`. Independent of (and much

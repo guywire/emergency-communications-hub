@@ -56,9 +56,14 @@ canvas{display:block}
 .chart-tip .tip-title{color:var(--muted);font-weight:600}
 .tip-swatch{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px}
 
-.legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
-.legend-item{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px}
+.legend-item{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--muted);cursor:pointer;user-select:none}
+.legend-item:hover{color:var(--text)}
+.legend-item.off{opacity:.35;text-decoration:line-through}
 .legend-swatch{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.legend-toggle-all{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.legend-toggle-all span{cursor:pointer;color:var(--blue)}
+.legend-toggle-all span:hover{text-decoration:underline}
 
 .empty-state{text-align:center;padding:40px 20px;font-family:var(--mono);
   font-size:12px;color:var(--dim)}
@@ -77,6 +82,7 @@ canvas{display:block}
   <button class="range-btn" data-hours="24" onclick="setRange(24, this)">24h</button>
   <button class="range-btn active" data-hours="48" onclick="setRange(48, this)">48h</button>
   <button class="range-btn" data-hours="168" onclick="setRange(168, this)">7d</button>
+  <button class="range-btn" data-hours="720" onclick="setRange(720, this)">30d</button>
   <div class="spacer"></div>
   <button class="action-btn" onclick="loadAll()">↻ Refresh</button>
 </div>
@@ -115,6 +121,26 @@ function colorForAdapter(name) {
     adapterColorMap[name] = ADAPTER_COLORS[Object.keys(adapterColorMap).length % ADAPTER_COLORS.length];
   }
   return adapterColorMap[name];
+}
+
+// Per-series show/hide (O89) — a legend click toggles that series out of both
+// the drawn chart AND the autoscale max, keyed per chart so "aprs" hidden on
+// the message chart doesn't affect an unrelated series elsewhere. Persists
+// across refreshes/resizes (not across a full page reload) since it's set
+// state the operator is actively steering, not server data.
+const hiddenSeries = { msg: new Set(), anom: new Set() };
+function toggleSeries(chartKey, name, reloadFn) {
+  const set = hiddenSeries[chartKey];
+  if (set.has(name)) set.delete(name); else set.add(name);
+  reloadFn();
+}
+function legendItem(chartKey, name, color, reloadFn) {
+  const off = hiddenSeries[chartKey].has(name);
+  return `<div class="legend-item${off ? ' off' : ''}" onclick="toggleSeries('${chartKey}','${esc(name)}',${reloadFn.name})" title="Click to ${off ? 'show' : 'hide'}">
+    <span class="legend-swatch" style="background:${color}"></span>${esc(name)}</div>`;
+}
+function legendToggleAll(chartKey, allFn, noneFn) {
+  return `<div class="legend-toggle-all"><span onclick="${allFn.name}()">All</span> · <span onclick="${noneFn.name}()">None</span></div>`;
 }
 
 function tick() {
@@ -158,14 +184,19 @@ async function loadMessages() {
   });
   const adapterList = [...adapters].sort();
   adapterList.forEach(colorForAdapter);
+  _msgAdapterList = adapterList;
+  const visible = adapterList.filter(a => !hiddenSeries.msg.has(a));
 
-  drawLineChart('msg-chart', order, byBucket, adapterList, rangeHours);
+  drawLineChart('msg-chart', order, byBucket, visible, rangeHours);
 
   const legend = document.getElementById('msg-legend');
-  legend.innerHTML = adapterList.map(a =>
-    `<div class="legend-item"><span class="legend-swatch" style="background:${colorForAdapter(a)}"></span>${esc(a)}</div>`
-  ).join('') || '<span style="color:var(--dim);font-family:var(--mono);font-size:11px">No message data in this range</span>';
+  legend.innerHTML = (adapterList.length ? legendToggleAll('msg', selectAllMsg, selectNoneMsg) : '')
+    + adapterList.map(a => legendItem('msg', a, colorForAdapter(a), loadMessages)).join('')
+    || '<span style="color:var(--dim);font-family:var(--mono);font-size:11px">No message data in this range</span>';
 }
+let _msgAdapterList = [];
+function selectAllMsg()  { hiddenSeries.msg.clear(); loadMessages(); }
+function selectNoneMsg() { _msgAdapterList.forEach(a => hiddenSeries.msg.add(a)); loadMessages(); }
 
 // ── Command usage horizontal bar chart ──────────────────────────────────
 async function loadCommands() {
@@ -191,14 +222,19 @@ async function loadAnomalies() {
     severities.add(b.severity);
   });
   const sevList = [...severities].sort();
+  _anomSevList = sevList;
+  const visible = sevList.filter(s => !hiddenSeries.anom.has(s));
 
-  drawStackedBars('anom-chart', order, byBucket, sevList, rangeHours, SEVERITY_COLORS);
+  drawStackedBars('anom-chart', order, byBucket, visible, rangeHours, SEVERITY_COLORS);
 
   const legend = document.getElementById('anom-legend');
-  legend.innerHTML = sevList.map(s =>
-    `<div class="legend-item"><span class="legend-swatch" style="background:${SEVERITY_COLORS[s] || '#8b949e'}"></span>${esc(s)}</div>`
-  ).join('') || '<span style="color:var(--dim);font-family:var(--mono);font-size:11px">No anomalies in this range</span>';
+  legend.innerHTML = (sevList.length ? legendToggleAll('anom', selectAllAnom, selectNoneAnom) : '')
+    + sevList.map(s => legendItem('anom', s, SEVERITY_COLORS[s] || '#8b949e', loadAnomalies)).join('')
+    || '<span style="color:var(--dim);font-family:var(--mono);font-size:11px">No anomalies in this range</span>';
 }
+let _anomSevList = [];
+function selectAllAnom()  { hiddenSeries.anom.clear(); loadAnomalies(); }
+function selectNoneAnom() { _anomSevList.forEach(s => hiddenSeries.anom.add(s)); loadAnomalies(); }
 
 // ── Summary stat cards ───────────────────────────────────────────────────
 async function loadSummary() {
@@ -321,10 +357,11 @@ function drawStackedBars(canvasId, order, byBucket, seriesList, hours, colorMap)
   const {ctx, w, h} = setupCanvas(canvasId, widthHint);
   ctx.clearRect(0, 0, w, h);
 
-  if (order.length === 0) {
+  if (order.length === 0 || seriesList.length === 0) {
     ctx.fillStyle = '#484f58';
     ctx.font = '12px monospace';
-    ctx.fillText('No data in this range', 10, h / 2);
+    ctx.fillText(seriesList.length === 0 && order.length > 0
+      ? 'All series hidden — click a legend item to show one' : 'No data in this range', 10, h / 2);
     const c = document.getElementById(canvasId);
     c.onmousemove = c.onmouseleave = null;
     return;
@@ -377,10 +414,11 @@ function drawLineChart(canvasId, order, byBucket, seriesList, hours, colorMap) {
   const {ctx, w, h} = setupCanvas(canvasId, widthHint);
   ctx.clearRect(0, 0, w, h);
 
-  if (order.length === 0) {
+  if (order.length === 0 || seriesList.length === 0) {
     ctx.fillStyle = '#484f58';
     ctx.font = '12px monospace';
-    ctx.fillText('No data in this range', 10, h / 2);
+    ctx.fillText(seriesList.length === 0 && order.length > 0
+      ? 'All series hidden — click a legend item to show one' : 'No data in this range', 10, h / 2);
     const c = document.getElementById(canvasId);
     c.onmousemove = c.onmouseleave = null;
     return;

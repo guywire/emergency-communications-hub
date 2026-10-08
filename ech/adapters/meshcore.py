@@ -1417,6 +1417,28 @@ class MeshCoreAdapter(Adapter):
         finally:
             self._trace_futures.pop(tag, None)
 
+    async def ping_and_wait(self, node_id: str, via: "list[str] | None" = None,
+                             timeout: float = 25.0) -> dict:
+        """Directed variant of trace_and_wait() — probe a specific node_id and
+        await its TRACE_DATA reply synchronously, for callers (e.g. the mesh
+        bot's 'trace <node>' command) that want an inline result instead of
+        watching the message feed."""
+        res = await self.ping(node_id, via=via)
+        if res.get("status") != "sent":
+            return {"status": "error", "detail": res.get("detail", "trace send failed")}
+        tag = res["tag"]
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._trace_futures[tag] = fut
+        try:
+            data = await asyncio.wait_for(fut, timeout=timeout)
+            return {"status": "ok", "via": res.get("via"), **data}
+        except asyncio.TimeoutError:
+            return {"status": "timeout",
+                    "detail": f"no TRACE_DATA reply within {timeout:.0f}s — target may be "
+                              "unreachable, or no repeater echoed the probe"}
+        finally:
+            self._trace_futures.pop(tag, None)
+
     # ── Internal receive loop ─────────────────────────────────────────────
 
     async def _flush_contact_removals(self) -> None:

@@ -132,9 +132,11 @@ DADJOKE_URL    = "https://icanhazdadjoke.com/"
 # full catalogs as fallback (slow — SatNOGS JSON is several MB).
 # celestrak.org blocks some IP ranges, hence the multi-source approach.
 TLE_SOURCES = [
-    # CelesTrak: curated small groups — stations (ISS) and weather (NOAA) only
-    ("text", "https://celestrak.org/SATCAT/groups/stations.txt"),
-    ("text", "https://celestrak.org/SATCAT/groups/weather.txt"),
+    # CelesTrak: curated small groups — stations (ISS) and weather (NOAA) only.
+    # The old /SATCAT/groups/*.txt path 404s as of this check (2026-10-08) —
+    # CelesTrak's current group-TLE endpoint is gp.php; confirmed live.
+    ("text", "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle"),
+    ("text", "https://celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=tle"),
     # AMSAT: amateur satellites, plain 3-line TLE text
     ("text", "https://www.amsat.org/tle/current/nasabare.txt"),
     # SatNOGS: full catalog fallback — large JSON, only useful if above fail
@@ -155,7 +157,7 @@ _CMD_WORDS = [
     "ping", "weather\\??", "wx", "overhead", "planes", "aircraft",
     "satpass", "sat", "solar", "space", "ships", "fcc", "trivia", "dad",
     "alerts", "metar", "sun", "nodes", "aprs", "anomalies", "tide", "tides",
-    "grid", "id", "moon", "dxcc", "contest", "help", "path",
+    "grid", "id", "moon", "dxcc", "contest", "help", "path", "trace",
     "score", "leaderboard", "lb", "mud", "adventure", "skywarn", "strip", "repeat", "again",
     "smoke", "aqi", "airquality",
     "marine", "boating", "buoy", "kayak", "fish", "fishing", "solunar", "water",
@@ -795,6 +797,8 @@ class MeshBot:
                 reply = self._cmd_id()
             elif cmd == "path":
                 reply = self._cmd_path(msg)
+            elif cmd == "trace":
+                reply = await self._cmd_trace(msg, args)
             elif cmd == "moon":
                 reply = self._cmd_moon()
             elif cmd == "dxcc":
@@ -1002,6 +1006,54 @@ class MeshBot:
                 names.append(h)
         return f"Path: you → {' → '.join(names)} → me ({len(names)} hop{'s' if len(names) != 1 else ''})"
 
+    async def _cmd_trace(self, msg: NormalizedMessage, args: str) -> str:
+        """Active, user-invokable trace to a named node — unlike 'path' (which
+        just reports the relay chain the sender's OWN last message took),
+        this fires a real CMD_SEND_TRACE_PATH probe at a node the operator
+        names and waits for the reply, same mechanism the map's Trace button
+        uses (see MeshCoreAdapter.ping()/ping_and_wait())."""
+        if not self._router:
+            return "trace: router not available"
+        adapter = self._router._adapters.get(msg.source_adapter)
+        if adapter is None:
+            return "trace: adapter not available"
+        target = args.strip()
+        if not target:
+            return "trace: usage 'trace <node name>' — try 'nodes' to see who's around"
+        try:
+            nodes = await adapter.nodes()
+        except Exception:
+            nodes = []
+        tlow = target.lower()
+        match = None
+        for n in nodes:
+            if (n.display_name or "").lower() == tlow or (n.node_id or "").lower() == tlow:
+                match = n
+                break
+        if match is None:
+            for n in nodes:
+                if tlow in (n.display_name or "").lower():
+                    match = n
+                    break
+        if match is None:
+            return f"trace: no node matching '{target}' heard recently — try 'nodes'"
+        if hasattr(adapter, "ping_and_wait"):
+            res = await adapter.ping_and_wait(match.node_id, timeout=20.0)
+            if res.get("status") == "ok":
+                named = res.get("named") or []
+                hops = res.get("hops", len(named))
+                hop_word = "hop" if hops == 1 else "hops"
+                if named:
+                    return f"Trace to {match.display_name}: " + " → ".join(named) + f" ({hops} {hop_word})"
+                return f"Trace to {match.display_name}: direct ({hops} {hop_word})"
+            return f"Trace to {match.display_name}: {res.get('detail', res.get('status'))}"
+        if hasattr(adapter, "ping"):
+            res = await adapter.ping(match.node_id)
+            if res.get("status") == "sent":
+                return f"Trace sent to {match.display_name} — reply will appear in the message feed."
+            return f"trace: {res.get('detail', 'failed to send')}"
+        return "trace: not supported on this adapter"
+
     # ── moon ──────────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -1154,8 +1206,8 @@ class MeshBot:
         # trivia/mud/dad/score/lb/contest/repeat commands are dropped from this
         # terse list (not disabled — just not essential enough to spend budget
         # on here) to leave room for the rest.
-        return ("Cmds: alerts anomalies aprs dxcc fcc fish grid help id marine metar moon "
-                "nodes overhead path ping satpass ships skywarn smoke solar strip sun tide water wx")
+        return ("Cmds: alerts aprs dxcc fcc fish grid help id marine metar moon "
+                "nodes overhead path ping satpass ships skywarn smoke solar strip sun tide trace water wx")
 
     def _cmd_unknown(self) -> str:
         return "Unrecognized command. Send 'help' for a list."
