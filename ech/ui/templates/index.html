@@ -3618,18 +3618,36 @@ async function readWinlinkMessage(mid) {
   try {
     const m = await fetch(`/api/winlink/inbox/${encodeURIComponent(mid)}`).then(r => r.json());
     _wlCurrentMsg = m;
-    const body = (m.body || '(no body)').replace(/</g, '&lt;');
-    document.getElementById('msg-detail-content').innerHTML = `
-      <div style="margin-bottom:8px"><b>${escHtml(m.subject||'(no subject)')}</b></div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">From: ${escHtml(m.from||'')} &emsp; ${escHtml((m.date||'').replace('T',' ').slice(0,16))}</div>
-      <div style="white-space:pre-wrap;font-size:12px;font-family:var(--mono);margin-bottom:12px">${body}</div>
-      <div style="display:flex;gap:8px">
-        <button class="btn" onclick="replyWinlinkMessage()">↩ Reply</button>
-        <button class="btn" onclick="forwardWinlinkMessage()">➦ Forward</button>
-      </div>
-    `;
+    renderWinlinkMessageDetail(m);
     document.getElementById('msg-detail-popup').classList.add('open');
+    // Opening the pane marks it read on Pat itself — mirrors ordinary email
+    // client behavior. Fire-and-forget: a failure here shouldn't block
+    // reading the message, just leaves the unread flag stale until retried.
+    setWinlinkRead(mid, true, /*refreshPanel=*/true);
   } catch(e) { toast('Could not load message: ' + e.message, 'err'); }
+}
+
+function renderWinlinkMessageDetail(m) {
+  const body = (m.body || '(no body)').replace(/</g, '&lt;');
+  document.getElementById('msg-detail-content').innerHTML = `
+    <div style="margin-bottom:8px"><b>${escHtml(m.subject||'(no subject)')}</b></div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">From: ${escHtml(m.from||'')} &emsp; ${escHtml((m.date||'').replace('T',' ').slice(0,16))}</div>
+    <div style="white-space:pre-wrap;font-size:12px;font-family:var(--mono);margin-bottom:12px">${body}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="replyWinlinkMessage()">↩ Reply</button>
+      <button class="btn" onclick="forwardWinlinkMessage()">➦ Forward</button>
+      <button class="btn" onclick="setWinlinkRead('${escHtml(m.mid)}', false, true)">✉ Mark unread</button>
+    </div>
+  `;
+}
+
+async function setWinlinkRead(mid, read, refreshPanel) {
+  try {
+    await fetch(`/api/winlink/inbox/${encodeURIComponent(mid)}/read`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({read}),
+    });
+    if (refreshPanel) loadWinlinkPanel();  // updates the unread dot/badge in the list
+  } catch(e) { /* non-fatal — unread flag just goes stale until the next successful call */ }
 }
 
 function _wlQuote(m) {

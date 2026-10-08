@@ -261,6 +261,10 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     from ech.core.water_bodies import WaterBodyService
     wb_service = WaterBodyService(config, router=router)
 
+    # meshcore-hub gap comparison (O96) — read-only, off by default
+    from ech.core.meshcore_hub_compare import MeshCoreHubCompare
+    mc_hub_compare = MeshCoreHubCompare(config, db=db)
+
     # MeshMapper Coverage API (community RF coverage — diagnoses one-way links)
     from ech.core.meshmapper_coverage import MeshMapperCoverageService
     mm_coverage_service = MeshMapperCoverageService(config, router=router)
@@ -311,6 +315,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     await wb_service.start()
     await mm_coverage_service.start()
     await pota_service.start()
+    await mc_hub_compare.start()
 
     # CAT radio control via rigctld (Hamlib)
     from ech.core.cat_rigctld import CATController
@@ -363,6 +368,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
                      wb_service=wb_service if 'wb_service' in dir() else None,
                      mm_coverage_service=mm_coverage_service if 'mm_coverage_service' in dir() else None,
                      pota_service=pota_service if 'pota_service' in dir() else None,
+                     mc_hub_compare=mc_hub_compare if 'mc_hub_compare' in dir() else None,
                      auth=auth, ech_state=state, mc_bridge=mc_bridge,
                      gps_reader=gps_reader, secure_cookies=secure_cookies,
                      cat_ctrl=cat_ctrl if 'cat_ctrl' in dir() else None,
@@ -420,6 +426,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
             await mm_coverage_service.stop()
         if 'pota_service' in dir():
             await pota_service.stop()
+        if 'mc_hub_compare' in dir():
+            await mc_hub_compare.stop()
         if 'wx_bot' in dir():
             await wx_bot.stop()
         if 'cat_ctrl' in dir():

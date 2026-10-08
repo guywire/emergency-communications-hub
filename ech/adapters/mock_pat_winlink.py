@@ -267,6 +267,16 @@ class MockPatServer:
             # are only populated by messageHandler, the single-message endpoint).
             return [{k: v for k, v in m.items() if k != "Body"} for m in self._messages.values()]
 
+        if path.startswith("/api/mailbox/in/") and path.endswith("/read") and method == "POST":
+            mid = path.split("/")[-2]
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                data = {}
+            if mid in self._messages:
+                self._messages[mid]["Unread"] = not bool(data.get("Read", True))
+            return {}
+
         if path.startswith("/api/mailbox/in/") and method == "GET":
             mid = path.split("/")[-1]
             return self._messages.get(mid, {})

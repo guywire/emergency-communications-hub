@@ -16,6 +16,7 @@ FastAPI application. Exposes:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -74,13 +75,62 @@ _UPDATE_LOG_MAX_LINES = 500
 
 UI_DIR = Path(__file__).parent.parent / "ui"
 
+# O100: ECH reverse-proxied under a sub-path (e.g. https://host/ech/ behind
+# Caddy's `handle_path /ech/*`, which strips the prefix before forwarding)
+# instead of a dedicated host/port at "/". Every template hardcodes absolute
+# paths (fetch('/api/...'), new WebSocket('wss://host/ws'), href="/...",
+# src="/...") — rather than editing every call site in every template,
+# static href/src/action attributes are rewritten at render time
+# (rewrite_base_path_links), and a tiny runtime patch injected first (before
+# any other script) wraps fetch()/WebSocket() so same-origin absolute paths
+# get the prefix too (base_path_patch_script). Both are no-ops when
+# base_path is "". Pure functions (no app state) so they're unit-testable
+# without constructing the full FastAPI app.
+_HREF_SRC_RE = re.compile(r'\b(href|src|action)="/(?!/)')
 
-def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, pota_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None) -> FastAPI:
+
+def rewrite_base_path_links(content: str, base_path: str) -> str:
+    if not base_path:
+        return content
+    return _HREF_SRC_RE.sub(lambda m: f'{m.group(1)}="{base_path}/', content)
+
+
+def base_path_patch_script(base_path: str) -> str:
+    bp = base_path
+    return (
+        "window.ECH_BASE_PATH=" + repr(bp) + ";"
+        "(function(){"
+        "if(!" + ("true" if bp else "false") + ")return;"
+        "var bp=" + repr(bp) + ";"
+        "var _fetch=window.fetch;"
+        "window.fetch=function(input,init){"
+        "if(typeof input==='string'&&input.charAt(0)==='/'&&input.charAt(1)!=='/'){input=bp+input;}"
+        "return _fetch(input,init);};"
+        "var _WS=window.WebSocket;"
+        "window.WebSocket=function(url,protocols){"
+        "if(typeof url==='string'){"
+        "var m=url.match(/^(wss?:\\/\\/[^/]+)(\\/.*)$/);"
+        "if(m&&m[2].charAt(0)==='/'&&m[2].charAt(1)!=='/'){url=m[1]+bp+m[2];}"
+        "}"
+        "return protocols!==undefined?new _WS(url,protocols):new _WS(url);};"
+        "window.WebSocket.prototype=_WS.prototype;"
+        "})();"
+    )
+
+
+def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, pota_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None, mc_hub_compare=None) -> FastAPI:
     global _psk_contact, _psk_default_callsign
     _op_callsign = "N0CALL"   # injected into pages as window.ECH_CALLSIGN
     # Build PSKReporter User-Agent from config: PSKReporter TOS requires a real
     # contact email so they can reach the app author if needed. A fake .local
     # address causes 503s from their infrastructure.
+    # base_path (O100): lets ECH be reverse-proxied under a sub-path, e.g.
+    # https://host/ech/ instead of a dedicated hostname/port at "/" — the
+    # previous behavior only worked at "/" because the UI templates hardcode
+    # absolute paths (/api/..., /ws, href="/...") and FastAPI had no
+    # root_path configured. Normalized to "" (no prefix) or "/xxx" (leading
+    # slash, no trailing slash).
+    _base_path = ""
     if config_path:
         try:
             import yaml as _yaml
@@ -94,10 +144,14 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 log.warning("PSKReporter: 'pskreporter.contact_email' not set in config — "
                             "add a real email to avoid 503 rate-limit blocks")
                 _psk_contact = f"(SignalMatrix/{_op_callsign}, configure pskreporter.contact_email)"
+            _raw_base_path = str((_cfg.get("server", {}) or {}).get("base_path", "") or "").strip()
+            if _raw_base_path:
+                _base_path = "/" + _raw_base_path.strip("/")
         except Exception:
             pass
 
-    app = FastAPI(title="SignalMatrix", version=ECH_VERSION)
+    app = FastAPI(title="SignalMatrix", version=ECH_VERSION, root_path=_base_path)
+    app.state.base_path = _base_path     # "" or "/xxx" — see _render_template()
     app.state.cat_ctrl = cat_ctrl        # CATController instance (may be None)
     app.state.ca_cert_pem = ca_cert_pem  # CA cert PEM for /ca.crt download (may be None)
     app.state.config_path = config_path  # Path to config.yaml (for live editing)
@@ -370,12 +424,13 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     def _render_template(name: str) -> str:
         content = (UI_DIR / "templates" / name).read_text()
-        injections = [f"window.ECH_CALLSIGN={repr(_op_callsign)};"]
+        injections = [base_path_patch_script(_base_path), f"window.ECH_CALLSIGN={repr(_op_callsign)};"]
         if ech_state and ech_state.simulation_enabled:
             injections.append("window.ECH_SIM=true;")
         content = content.replace("</head>",
             f"<script>{''.join(injections)}</script></head>", 1)
         content = content.replace('id="header">', 'id="header">' + _TOPNAV_HTML, 1)
+        content = rewrite_base_path_links(content, _base_path)
         return content
 
     @app.get("/", response_class=HTMLResponse)
@@ -1605,15 +1660,19 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     @app.get("/login", response_class=HTMLResponse)
     async def login_page():
-        template = UI_DIR / "templates" / "login.html"
-        return HTMLResponse(content=template.read_text() if template.exists() else "<h1>Login</h1>",
-                            headers=_NO_CACHE)
+        # O100: must go through _render_template() (not a raw file read) so
+        # the base_path patch script/link rewrite apply here too — this is
+        # often the very first page hit behind a sub-path reverse proxy, and
+        # its own fetch('/api/auth/login') would otherwise silently miss
+        # the proxy prefix, locking operators out before they even start.
+        content = _render_template("login.html") if (UI_DIR / "templates" / "login.html").exists() else "<h1>Login</h1>"
+        return HTMLResponse(content=content, headers=_NO_CACHE)
 
     @app.get("/change-password", response_class=HTMLResponse)
     async def change_password_page():
-        template = UI_DIR / "templates" / "change_password.html"
-        return HTMLResponse(content=template.read_text() if template.exists() else "<h1>Change Password</h1>",
-                            headers=_NO_CACHE)
+        content = (_render_template("change_password.html")
+                   if (UI_DIR / "templates" / "change_password.html").exists() else "<h1>Change Password</h1>")
+        return HTMLResponse(content=content, headers=_NO_CACHE)
 
     @app.post("/api/auth/change-password")
     async def do_change_password(request: Request):
@@ -3125,6 +3184,22 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             "detail":       a._health_detail(),
         }
 
+    @app.get("/api/pbx/directory")
+    async def pbx_directory():
+        """HamVOIP/AllStarLink node + AREDN address directory (O98) — see
+        ech/core/radio_directory.py for the built-in-vs-config-extended
+        scope and why some categories have no built-in entries."""
+        from ech.core.radio_directory import get_directory
+        import yaml as _yaml
+        cfg = {}
+        if app.state.config_path:
+            try:
+                with open(app.state.config_path) as f:
+                    cfg = _yaml.safe_load(f) or {}
+            except Exception:
+                pass
+        return get_directory(cfg)
+
     @app.post("/api/pbx/call")
     async def pbx_call(request: Request):
         """Click-to-call: ring local phone then bridge to destination."""
@@ -3248,6 +3323,19 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 return msg
         raise HTTPException(status_code=404, detail="No Winlink adapter configured")
 
+    @app.post("/api/winlink/inbox/{mid}/read")
+    async def winlink_inbox_set_read(mid: str, request: Request):
+        """Mark an inbox message read/unread on Pat itself — {"read": bool}.
+        Opening the message detail pane calls this with read=true; a "Mark
+        unread" button in the same pane calls it with read=false."""
+        data = await request.json()
+        read = bool(data.get("read", True))
+        for adapter in router._adapters.values():
+            if hasattr(adapter, "set_read"):
+                ok = await adapter.set_read("in", mid, read)
+                return {"status": "ok" if ok else "error", "read": read}
+        raise HTTPException(status_code=404, detail="No Winlink adapter configured")
+
     @app.get("/api/winlink/templates")
     async def winlink_templates_list():
         """Plain-text Winlink message templates (ICS-213, Radiogram, SITREP) —
@@ -3282,6 +3370,28 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 await adapter._trigger_connect()
                 return {"status": "ok", "alias": adapter._connect_alias}
         return {"status": "error", "detail": "No Winlink adapter configured"}
+
+    # ── meshcore-hub gap comparison (O96) ───────────────────────────────────
+
+    @app.get("/api/meshcore-hub/status")
+    async def meshcore_hub_status():
+        if not mc_hub_compare or not mc_hub_compare.enabled:
+            return {"enabled": False}
+        health = await mc_hub_compare.check_connectivity()
+        return {"enabled": True, **health}
+
+    @app.get("/api/meshcore-hub/gaps")
+    async def meshcore_hub_gaps(hours: int = Query(24, le=24 * 7)):
+        """Messages a meshcore-hub instance's other observers heard that
+        don't appear in ECH's own message log — see
+        ech/core/meshcore_hub_compare.py for the comparison heuristic and
+        this feature's honesty caveats (unconfirmed hub response schema)."""
+        if not mc_hub_compare or not mc_hub_compare.enabled:
+            return {"enabled": False, "gaps": []}
+        gaps = await mc_hub_compare.find_gaps(hours=hours)
+        return {"enabled": True, "hours": hours, "count": len(gaps),
+                "gaps": [{"timestamp": g["timestamp"].isoformat(), "body": g["body"],
+                          "channel": g["channel"], "observer": g["observer"]} for g in gaps]}
 
     @app.post("/api/phone/push")
     async def phone_push(request: Request):

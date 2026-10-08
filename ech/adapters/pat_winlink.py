@@ -387,6 +387,20 @@ class PatWinlinkAdapter(Adapter):
             "body": raw.get("Body", ""),
         }
 
+    async def set_read(self, folder: str, mid: str, read: bool) -> bool:
+        """POST /api/mailbox/{folder}/{mid}/read — mark a message
+        read/unread. Confirmed against the real la5nta/pat source
+        (api/mailbox.go readHandler): body is {"Read": bool} (capital R,
+        matching Pat's un-JSON-tagged Go struct field, same convention as
+        every other field in this adapter — see _addr_str()'s docstring)."""
+        try:
+            resp = await self._client.post(f"/api/mailbox/{folder}/{mid}/read", json={"Read": read})
+            resp.raise_for_status()
+            return True
+        except Exception as exc:
+            log.debug("Pat Winlink %s: set_read %s/%s=%s error: %s", self.name, folder, mid, read, exc)
+            return False
+
     async def _emit_message(self, msg: dict) -> None:
         """Convert a Pat JSON message dict to NormalizedMessage and enqueue."""
         self._rx_count += 1

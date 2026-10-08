@@ -181,6 +181,22 @@ ech.example.org {
 }
 ```
 
+**Serving ECH under a sub-path instead of its own host/port** (e.g. `https://host/ech/`, alongside other services on the same domain) needs one extra step on each side — ECH has to know its own external prefix so its generated links/API calls/WebSocket connections include it:
+
+```caddyfile
+example.org {
+    handle_path /ech/* {      # handle_path strips the /ech prefix before forwarding
+        reverse_proxy localhost:8765
+    }
+}
+```
+
+```yaml
+# config.yaml
+server:
+  base_path: "/ech"    # must match the Caddyfile's handle_path prefix exactly
+```
+
 Restart Caddy, then trust its local CA once on the server itself:
 
 ```bash

@@ -11,6 +11,13 @@ server:
   host: "0.0.0.0"
   port: 8765
   # secure_cookies: true    # enable when ECH is behind HTTPS (nginx/caddy reverse proxy)
+  # base_path: "/ech"       # set this if reverse-proxied under a sub-path instead of a
+                             # dedicated host/port at "/" (e.g. Caddy's `handle_path /ech/*`,
+                             # which strips the prefix before forwarding here) — without it,
+                             # every hardcoded /api/... fetch, WebSocket, and link in the UI
+                             # breaks the moment the app isn't actually living at the proxy's
+                             # root. Leading slash, no trailing slash. Leave unset/empty for
+                             # the normal dedicated-host/port setup.
 
 database:
   path: "ech.db"
@@ -735,6 +742,42 @@ mesh_bot:
 #   lat: null                       # falls back to weather_service.nws_lat/lon
 #   lon: null
 #   poll_interval_sec: 1800         # 30 min = 48 requests/day
+
+# ── meshcore-hub gap comparison (O96) ─────────────────────────────────────────
+# Read-only: compares group/channel text messages a self-hosted meshcore-hub
+# instance's OTHER observers heard against ECH's own message log, to surface
+# reception gaps ("other observers heard this, we didn't"). Requires running
+# your own meshcore-hub instance (github.com/ipnet-mesh/meshcore-hub) — there
+# is no public shared instance. See ech/core/meshcore_hub_compare.py's module
+# docstring: the comparison heuristic and the hub's response field names were
+# NOT verified against a live instance — treat results as best-effort until
+# checked against your own deployment.
+# meshcore_hub:
+#   enabled: true
+#   base_url: "http://meshcore-hub.local:8000"   # your instance, no trailing slash
+#   bearer_token: ""                              # only if your instance requires auth
+
+# ── HamVOIP/AllStarLink + AREDN directory (O98) ───────────────────────────────
+# A handful of confirmed-real HamVOIP/AllStarLink test/parrot nodes ship
+# built in (see ech/core/radio_directory.py) — no "group"/hub or "music" node
+# numbers ship built in, since no specific, durable, confirmed-real public one
+# was found, and a wrong node silently rings a stranger. AREDN has NO built-in
+# entries at all: AREDN addresses are private to each physical mesh with no
+# universal directory. Add your own known-good entries here; each needs
+# name/destination/description at minimum (destination = node number for
+# hamvoip_entries, used directly by the existing click-to-call/originate()
+# path; for aredn_entries it's just a reference string shown in the UI, not
+# dialable).
+# radio_directory:
+#   hamvoip_entries:
+#     - name: "Local ARES net hub"
+#       destination: "12345"
+#       category: group
+#       description: "Our county ARES Tuesday net control hub"
+#   aredn_entries:
+#     - name: "Regional AREDN gateway"
+#       destination: "n0call-gw.local.mesh"
+#       description: "Main regional AREDN tunnel/gateway node"
 
 # ── CAT radio control (rigctld / Hamlib) ──────────────────────────────────────
 # ECH connects to a running rigctld process over TCP and polls freq/mode every

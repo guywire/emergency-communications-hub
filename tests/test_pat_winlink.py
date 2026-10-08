@@ -207,6 +207,39 @@ async def test_fetch_message_for_display_normalizes_pat_casing(pat_server):
 
 
 @pytest.mark.asyncio
+async def test_set_read_marks_message_read(pat_server):
+    """Opening the Winlink detail pane marks the message read on Pat itself —
+    confirmed against the real la5nta/pat source (api/mailbox.go
+    readHandler): POST /api/mailbox/{box}/{mid}/read with {"Read": bool}."""
+    port = pat_server.port
+    adapter = PatWinlinkAdapter({
+        "callsign": "W1TEST",
+        "pat_url": f"http://127.0.0.1:{port}",
+        "poll_interval": 9999,
+        "auto_connect": False,
+    })
+    await adapter.connect()
+
+    listing = await adapter.list_inbox()
+    assert listing[0]["unread"] is True
+
+    ok = await adapter.set_read("in", "TESTMID0000", True)
+    assert ok is True
+
+    listing = await adapter.list_inbox()
+    marked = next(m for m in listing if m["mid"] == "TESTMID0000")
+    assert marked["unread"] is False
+
+    # And the reverse — a "Mark unread" button
+    await adapter.set_read("in", "TESTMID0000", False)
+    listing = await adapter.list_inbox()
+    marked = next(m for m in listing if m["mid"] == "TESTMID0000")
+    assert marked["unread"] is True
+
+    await adapter.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_pat_adapter_polls_new_messages(pat_server):
     """New messages added to the server after connect should be emitted on poll."""
     port = pat_server.port

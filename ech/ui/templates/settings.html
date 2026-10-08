@@ -662,6 +662,11 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
           <button class="btn btn-blue" onclick="settingsPbxPage()">📢 Page all</button>
         </div>
       </div>
+      <div style="margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--text)">
+        <strong>HamVOIP / AllStarLink / AREDN directory</strong>
+        <span style="color:var(--dim);font-size:10px"> — click a node to fill the Destination field above</span>
+        <div id="pbx-directory-panel" style="margin-top:8px;font-size:10px;color:var(--muted)">Loading…</div>
+      </div>
       <div style="margin-top:14px;font-family:var(--mono);font-size:10px;color:var(--muted)">
         Config preset (add to config.yaml, then restart ECH):
       </div>
@@ -1197,6 +1202,7 @@ async function init() {
   setInterval(loadAdapterLive, 10000);
   loadMQTTStatus();
   loadPBXStatus();
+  loadPBXDirectory();
   loadLiveStats();
   setInterval(loadLiveStats, 5000);
 
@@ -2329,6 +2335,43 @@ async function loadPBXStatus() {
   } catch(e) {
     el.innerHTML = `<span style="color:var(--red)">PBX error: ${esc(e.message)}</span>`;
   }
+}
+
+async function loadPBXDirectory() {
+  const el = document.getElementById('pbx-directory-panel');
+  if (!el) return;
+  try {
+    const d = await fetch('/api/pbx/directory').then(r => r.json());
+    const hv = d.hamvoip || [], ar = d.aredn || [];
+    let html = '';
+    if (hv.length) {
+      const byCat = {};
+      hv.forEach(e => { (byCat[e.category || 'other'] ||= []).push(e); });
+      html += Object.entries(byCat).map(([cat, entries]) => `
+        <div style="margin-bottom:6px">
+          <div style="color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${esc(cat)}</div>
+          ${entries.map(e => `
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer" onclick="useDirectoryEntry('${esc(e.destination)}')" title="${esc(e.description || '')}">
+              <span style="color:var(--blue)">📞</span>
+              <span style="color:var(--text)">${esc(e.name)}</span>
+              <span style="color:var(--dim)">(${esc(e.destination)})</span>
+            </div>`).join('')}
+        </div>`).join('');
+    }
+    if (ar.length) {
+      html += `<div style="margin-top:6px"><div style="color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">AREDN</div>` +
+        ar.map(e => `<div style="padding:2px 0" title="${esc(e.description || '')}"><span style="color:var(--muted)">🔗</span> ${esc(e.name)} <span style="color:var(--dim)">(${esc(e.destination)})</span></div>`).join('') +
+        `</div>`;
+    }
+    el.innerHTML = html || '<span style="color:var(--dim)">No entries — add radio_directory.hamvoip_entries / .aredn_entries to config.yaml</span>';
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`;
+  }
+}
+
+function useDirectoryEntry(destination) {
+  const field = document.getElementById('pbx-dest');
+  if (field) field.value = destination;
 }
 
 async function settingsPbxCall() {
