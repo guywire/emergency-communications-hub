@@ -967,6 +967,67 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             log.error("reconnect_adapter %s: %s", adapter_name, exc)
             return {"status": "error", "detail": str(exc)}
 
+    @app.post("/api/adapters/{adapter_name}/m17/server")
+    async def set_m17_server(adapter_name: str, request: Request):
+        """O99: switch an M17 reflector adapter to a different server/module
+        from the UI instead of requiring a config.yaml edit + restart.
+        Persists the new reflector_host/reflector_port/module into
+        config.yaml, then does the same full stop/re-read-config/rebuild/
+        start cycle /api/adapters/{name}/reconnect already uses — correct
+        here (unlike MeshCore's live in-place channel switch) because this
+        may be an entirely different server, not just a channel index on
+        the same device."""
+        from ech.adapters.m17_reflector import M17ReflectorAdapter
+        from fastapi import HTTPException
+        adapter = router._adapters.get(adapter_name)
+        if not adapter:
+            raise HTTPException(status_code=404, detail=f"Adapter '{adapter_name}' not found")
+        if not isinstance(adapter, M17ReflectorAdapter):
+            return {"status": "error", "detail": f"'{adapter_name}' is not an M17 reflector adapter"}
+
+        data = await request.json()
+        host = str(data.get("reflector_host", "")).strip()
+        module = str(data.get("module", "")).strip().upper()
+        if not host:
+            return {"status": "error", "detail": "reflector_host is required"}
+        if not module or len(module) != 1 or not module.isalpha():
+            return {"status": "error", "detail": "module must be a single letter A-Z"}
+        try:
+            port = int(data.get("reflector_port", 17000))
+        except (TypeError, ValueError):
+            return {"status": "error", "detail": "reflector_port must be a number"}
+
+        import yaml
+        cfg_path = Path("/etc/ech/config.yaml")
+        if not cfg_path.exists():
+            cfg_path = Path("config.yaml")
+        try:
+            with open(cfg_path) as f:
+                full_cfg = yaml.safe_load(f) or {}
+            adapter_cfg = next((a for a in full_cfg.get("adapters", []) if a.get("name") == adapter_name), None)
+            if adapter_cfg is None:
+                return {"status": "error", "detail": f"Adapter '{adapter_name}' not found in config.yaml"}
+            adapter_cfg["reflector_host"] = host
+            adapter_cfg["reflector_port"] = port
+            adapter_cfg["module"] = module
+            with open(cfg_path, "w") as f:
+                yaml.dump(full_cfg, f, default_flow_style=False, allow_unicode=True)
+        except PermissionError:
+            return {"status": "error", "detail": "could not write config.yaml (permission denied)"}
+
+        try:
+            import asyncio
+            await router.stop_adapter(adapter_name)
+            await asyncio.sleep(1.0)
+            from ech.main import build_adapter
+            new_adapter = build_adapter(adapter_cfg)
+            await router.start_adapter(new_adapter)
+            return {"status": "ok", "adapter": adapter_name, "reflector_host": host,
+                    "reflector_port": port, "module": module}
+        except Exception as exc:
+            log.error("set_m17_server %s: %s", adapter_name, exc)
+            return {"status": "error", "detail": str(exc)}
+
     @app.post("/api/adapters/{adapter_name}/discover")
     async def trigger_discovery(adapter_name: str):
         """Immediately send a discovery pulse (APP_START + DEVICE_QUERY) to solicit node adverts."""

@@ -2100,6 +2100,26 @@ async function loadAdapterLive() {
             <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="setMeshtasticGps('${aEsc}')">Apply</button>
           </div>
         </div>` : '';
+      // M17 reflector server/module picker — same stop/reread-config/rebuild
+      // cycle as the generic Reconnect button, just with new values persisted
+      // to config.yaml first (switching servers, not just a channel index).
+      const isM17 = a.adapter.toLowerCase().includes('m17');
+      const curReflector = isM17 && a.detail && a.detail.reflector ? a.detail.reflector : '';
+      const curModule = isM17 && a.detail && a.detail.module ? a.detail.module : '';
+      const [curHost, curPort] = curReflector ? curReflector.split(':') : ['', ''];
+      const m17Controls = isM17 ? `
+        <div style="width:100%;margin-top:6px;padding:6px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;display:flex;flex-direction:column;gap:6px">
+          <div style="font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted)">M17 reflector${curReflector ? ` — currently linked to ${esc(curReflector)} module ${esc(curModule)}` : ''}</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Host:</span>
+            <input id="m17-host-${aEsc}" type="text" value="${esc(curHost)}" placeholder="reflector host/IP" style="width:160px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Port:</span>
+            <input id="m17-port-${aEsc}" type="number" min="1" max="65535" value="${esc(curPort || '17000')}" style="width:70px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Module:</span>
+            <input id="m17-module-${aEsc}" type="text" maxlength="1" value="${esc(curModule)}" placeholder="A-Z" style="width:36px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px;text-transform:uppercase">
+            <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="setM17Server('${aEsc}')">Switch reflector</button>
+          </div>
+        </div>` : '';
       return `<div class="adapter-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="color:${dotColor};font-size:14px">${dot}</span>
         <span class="adapter-name" style="flex:1">${esc(a.adapter)}${chStr}${hwStr}${fwStr}${battStr}</span>
@@ -2109,6 +2129,7 @@ async function loadAdapterLive() {
         <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" title="Disconnect and reconnect this adapter" onclick="reconnectAdapter('${aEsc}')">Reconnect</button>
         <button class="btn btn-red" style="padding:3px 8px;font-size:10px" title="Disable adapter — writes enabled:false to config, persists on restart" onclick="disableAdapter('${aEsc}')">Disable</button>
         ${meshtasticControls}
+        ${m17Controls}
       </div>`;
     }).join('');
   } catch(e) {
@@ -2362,6 +2383,22 @@ async function reconnectAdapter(name) {
   const d = await r.json().catch(() => ({}));
   setTimeout(loadAdapterLive, 3000);
   toast(d.status === 'ok' ? `${name}: reconnected` : `${name}: reconnect failed — ${d.detail || 'unknown error'}`);
+}
+
+async function setM17Server(adapterName) {
+  const host = document.getElementById(`m17-host-${adapterName}`).value.trim();
+  const port = document.getElementById(`m17-port-${adapterName}`).value.trim();
+  const module = document.getElementById(`m17-module-${adapterName}`).value.trim().toUpperCase();
+  if (!host || !module) { toast('Host and module are required'); return; }
+  toast(`${adapterName}: switching to ${host} module ${module}…`);
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/m17/server`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({reflector_host: host, reflector_port: port ? parseInt(port, 10) : 17000, module}),
+  });
+  const d = await r.json().catch(() => ({}));
+  setTimeout(loadAdapterLive, 3000);
+  if (d.status === 'ok') toast(`${adapterName}: linked to ${d.reflector_host}:${d.reflector_port} module ${d.module}`);
+  else toast(`${adapterName}: switch failed — ${d.detail || 'unknown error'}`);
 }
 
 async function disableAdapter(name) {
