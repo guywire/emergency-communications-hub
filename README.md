@@ -149,15 +149,69 @@ ECH's browser-side CAT radio control uses the **Web Serial API**. The Web Serial
 
 HTTPS also encrypts operator credentials on the LAN, which matters at large events where the Wi-Fi may be shared.
 
-### How ECH handles certificates
+### Recommended: reverse proxy with Caddy
 
-SignalMatrix generates its own Certificate Authority (CA) the first time it starts with TLS enabled. Every subsequent start, it re-issues a server certificate that includes every IP address the server has at that moment. This means the certificate is always valid no matter which IP your contest-site DHCP assigns — you do not need to regenerate anything when you pack up and redeploy at a new site.
+Run ECH in plain HTTP (the default — leave `tls:` disabled in `config.yaml`) and put [Caddy](https://caddyserver.com/) in front of it to handle HTTPS. This is the recommended setup: `caddy trust` installs Caddy's local CA into the OS trust store **in one command**, instead of clicking through a per-OS certificate-import wizard by hand (the previous `/ca.crt` download-and-install flow below still works, but is fiddlier and easy to get stuck on, especially on mobile).
 
-You trust the CA once. After that, every ECH deployment is automatically trusted.
+**Install Caddy** (see [caddyserver.com/docs/install](https://caddyserver.com/docs/install) for other platforms):
 
-### Enabling TLS
+```bash
+# Debian/Ubuntu/Raspberry Pi OS
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+```
 
-In `config.yaml`, uncomment and edit the `tls` block:
+**Caddyfile** (`/etc/caddy/Caddyfile`) — reverse-proxies HTTPS to ECH's plain-HTTP port:
+
+```caddyfile
+# LAN-only deployment (no public domain) — Caddy issues its own locally-trusted cert
+https://<server-ip-or-hostname> {
+    tls internal
+    reverse_proxy localhost:8765
+}
+```
+
+If the ECH box has a real, internet-reachable domain name instead (less common for a field/incident deployment, but applicable for a fixed station), drop the `tls internal` line and give Caddy a real domain — it automatically gets a publicly-trusted Let's Encrypt certificate, and **no device needs to trust anything at all**:
+
+```caddyfile
+ech.example.org {
+    reverse_proxy localhost:8765
+}
+```
+
+Restart Caddy, then trust its local CA once on the server itself:
+
+```bash
+sudo systemctl restart caddy
+sudo caddy trust
+```
+
+For every *other* device (laptops, tablets, phones) that will open the dashboard: grab Caddy's root certificate from the server —
+
+```bash
+# on the ECH server, Caddy's local CA root lives here when run as a systemd service:
+sudo cat /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+```
+
+— copy it to the other device as `caddy-root.crt`, and install it the same way as any root CA:
+
+| Platform | Steps |
+|---|---|
+| **Windows** | Double-click the file → **Install Certificate** → **Local Machine** (admin) or **Current User** → **Place all certificates in the following store** → **Trusted Root Certification Authorities** → **Finish** |
+| **macOS** | Double-click → Keychain Access opens → find the Caddy cert → double-click it → expand **Trust** → set **Always Trust** |
+| **Linux / Chrome** | `chrome://settings/certificates` → **Authorities** → **Import** → check **Trust this certificate for identifying websites** |
+| **Firefox** | **Settings** → **Privacy & Security** → **Certificates** → **View Certificates** → **Authorities** → **Import** → check **Trust this CA to identify websites** |
+| **Android (Chrome)** | Transfer the file to the device → **Settings** → **Security** → **Encryption & credentials** → **Install a certificate** → **CA certificate** → **Install anyway** |
+
+Then browse to `https://<server-ip-or-hostname>` (port 443, Caddy's default — no port number needed in the URL). The padlock appears with no warnings, and the Ham Log page shows the **Connect Radio** button.
+
+### Alternative: ECH's built-in self-signed CA
+
+If you'd rather not run a separate reverse proxy, ECH can generate and serve its own CA directly — no Caddy install required, but each device needs its own manual certificate-import steps (same per-OS dance as above, pointed at `ech-ca.crt` instead of Caddy's root).
+
+In `config.yaml`:
 
 ```yaml
 tls:
@@ -166,64 +220,9 @@ tls:
   data_dir: "."         # CA and server cert/key files are written here
 ```
 
-Restart SignalMatrix. It prints the CA cert path in the startup log:
+Restart SignalMatrix — it prints the CA cert path in the startup log and re-issues a server certificate covering every IP the server currently has, so nothing needs regenerating when you redeploy at a new site with a different DHCP-assigned IP.
 
-```
-INFO  TLS  CA cert: ./ech-ca.crt   server cert: ./ech-server.crt
-```
-
-### Trusting the CA certificate (one-time per device)
-
-You need to do this once on every device that will open the HTTPS dashboard or use Web Serial.
-
-**Getting the CA cert:** browse to `http://<server-ip>:8765/ca.crt` — the file downloads automatically.
-
-#### Windows
-
-1. Double-click `ech-ca.crt`.
-2. Click **Install Certificate**.
-3. Choose **Local Machine** (requires admin) or **Current User**.
-4. Select **Place all certificates in the following store** → **Browse** → **Trusted Root Certification Authorities**.
-5. Click **Finish**. Close and reopen the browser.
-
-#### macOS
-
-1. Double-click `ech-ca.crt` — Keychain Access opens.
-2. Find `ECH Local CA` in the **System** or **Login** keychain.
-3. Double-click the certificate → expand **Trust** → set **When using this certificate** to **Always Trust**.
-4. Close the dialog (enter your password when prompted).
-5. Reopen the browser.
-
-#### Linux / Chrome or Chromium
-
-1. Navigate to `chrome://settings/certificates`.
-2. Click the **Authorities** tab.
-3. Click **Import** and select `ech-ca.crt`.
-4. Check **Trust this certificate for identifying websites**.
-5. Click **OK**.
-
-#### Firefox (any platform)
-
-1. Open **Settings** → **Privacy & Security** → scroll to **Certificates** → **View Certificates**.
-2. Click the **Authorities** tab → **Import**.
-3. Select `ech-ca.crt`.
-4. Check **Trust this CA to identify websites** → **OK**.
-
-#### Android (Chrome)
-
-1. Transfer `ech-ca.crt` to the device (email, USB, or ADB).
-2. Open **Settings** → **Security** → **Encryption & credentials** → **Install a certificate** → **CA certificate**.
-3. Tap **Install anyway** → select the file.
-
-### Connecting via HTTPS
-
-After trusting the CA, open:
-
-```
-https://<server-ip>:8766
-```
-
-The padlock icon should appear with no warnings. The Ham Log page now shows the **Connect Radio** button.
+Download the CA cert by browsing to `http://<server-ip>:8765/ca.crt` on each device, then follow the same per-OS import steps as the Caddy table above (substitute `ech-ca.crt` for the Caddy root cert). Connect via `https://<server-ip>:8766`.
 
 ### Optional: mDNS (access by name instead of IP)
 
@@ -233,11 +232,11 @@ Install `zeroconf` and SignalMatrix advertises itself on the local network as `e
 pip install zeroconf
 ```
 
-Then browse to `https://ech.local:8766` from any device on the same subnet, regardless of IP address.
+With Caddy in front, point the Caddyfile's site address at `ech.local` instead of an IP; with the built-in CA, browse to `https://ech.local:8766`. Either way this works from any device on the same subnet regardless of IP address.
 
 ### In-app TLS guide
 
-SignalMatrix includes a built-in setup page at `/tls-setup` that shows these same instructions alongside the current server's IP addresses and a direct download link for the CA cert.
+SignalMatrix includes a built-in setup page at `/tls-setup` that shows the built-in-CA instructions above alongside the current server's IP addresses and a direct download link for `ech-ca.crt` — useful if you're going the no-Caddy route.
 
 ---
 
@@ -254,7 +253,7 @@ The radio connects to the **operator's laptop**, not the server. No drivers or s
 - Chrome or Edge browser (Firefox does not support Web Serial)
 
 **Steps:**
-1. Open the Ham Log page at `https://<server-ip>:8766/hamlog`.
+1. Open the Ham Log page over HTTPS — `https://<server-ip-or-hostname>/hamlog` behind Caddy (recommended, port 443), or `https://<server-ip>:8766/hamlog` with ECH's built-in CA.
 2. Click the **Connect Radio** button in the header.
 3. Select your **protocol**:
    - **Icom CI-V** — for Icom radios and Xiegu G90/G106/X6100
@@ -502,7 +501,8 @@ Open ports on the ECH machine:
 | Port | Protocol | Purpose |
 |------|----------|---------|
 | 8765 | TCP | HTTP dashboard |
-| 8766 | TCP | HTTPS dashboard (if TLS enabled) |
+| 8766 | TCP | HTTPS dashboard (if using ECH's built-in self-signed CA) |
+| 443  | TCP | HTTPS dashboard (if using the recommended Caddy reverse proxy) |
 
 No inbound ports are required for most adapters (they connect outward). Exception: JS8Call and Pat must be reachable on their respective ports if ECH runs on a different machine than those services.
 
