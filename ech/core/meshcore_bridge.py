@@ -212,6 +212,16 @@ class MeshCoreMQTTBridge:
     def _topic(self, suffix: str) -> str:
         return f"{self._prefix}/{self._iata}/{self._origin_id()}/{suffix}"
 
+    @staticmethod
+    def _device_id(raw_id: str) -> str:
+        """Normalize a raw MeshCore node id (e.g. Meshtastic-style '!a1b2c3d4'
+        or MAC-style 'A1:B2:C3:D4:E5:F6') into a clean, MQTT/JSON-safe hex
+        device id: strip the '!' prefix and ':' separators, uppercase, cap
+        at 12 hex characters — the same convention letsmesh/MeshMapper-
+        style consumers expect for a short device id."""
+        cleaned = raw_id.lstrip("!").replace(":", "")
+        return cleaned.upper()[:12]
+
     # ── Publish loop ──────────────────────────────────────────────────────
 
     async def _publish_loop(self) -> None:
@@ -314,7 +324,7 @@ class MeshCoreMQTTBridge:
             "hash":        msg.id[:12].upper(),
             # Extended fields — not in spec but useful for ECH consumers
             "channel":     msg.source_channel,
-            "from_id":     msg.from_id,
+            "from_id":     self._device_id(msg.from_id) if msg.from_id else msg.from_id,
             "from_display": msg.from_display,
             "body":        msg.body,
             "hop_count":   msg.hop_count,

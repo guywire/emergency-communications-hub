@@ -208,11 +208,39 @@ class AnomalyEngine:
         """
         if not self.enabled:
             return []
-        if not self._is_mesh_adapter(msg.source_adapter):
-            return []
 
         key = (msg.source_adapter, msg.from_id)
         new_findings: list[AnomalyFinding] = []
+
+        # ── RULE: relay path change ────────────────────────────────────────
+        # Runs for ALL adapters, including APRS — unlike the positional
+        # rules below (gated out for APRS just below this block because
+        # internet i-gates/digipeaters generate too much positional noise),
+        # a changed digipeater/relay chain is directly meaningful for APRS
+        # specifically (its own path notation, e.g. "WIDE1-1,WIDE2-1") and
+        # isn't subject to that same noise problem.
+        if msg.path:
+            normalized_path = re.sub(r'\*', '', msg.path).strip()
+            if normalized_path:
+                path_hist = self._node_path_history.setdefault(key, [])
+                if len(path_hist) >= 3:
+                    recent_paths = set(path_hist[-5:])
+                    if normalized_path not in recent_paths:
+                        prev = path_hist[-1]
+                        f = self._make_finding(
+                            msg, "path_change", Severity.WARN,
+                            f"Relay path changed: '{prev}' → '{normalized_path}' — "
+                            f"possible spoofing, node movement, or relay failure",
+                            {"previous_path": prev, "current_path": normalized_path,
+                             "path_history": list(path_hist[-3:])},
+                        )
+                        new_findings.append(f)
+                path_hist.append(normalized_path)
+                if len(path_hist) > 20:
+                    path_hist.pop(0)
+
+        if not self._is_mesh_adapter(msg.source_adapter):
+            return new_findings
 
         # Track first seen
         if key not in self._node_first_seen:
@@ -396,29 +424,6 @@ class AnomalyEngine:
                          "snr_jump_db": round(snr_jump, 1), "rssi": rssi},
                     )
                     new_findings.append(f)
-
-        # ── RULE: relay path change ───────────────────────────────────────
-        # A node suddenly routing via a different digipeater chain may indicate
-        # a spoofed packet, a moved node, or a new/failed relay.
-        if msg.path:
-            normalized_path = re.sub(r'\*', '', msg.path).strip()
-            if normalized_path:
-                path_hist = self._node_path_history.setdefault(key, [])
-                if len(path_hist) >= 3:
-                    recent_paths = set(path_hist[-5:])
-                    if normalized_path not in recent_paths:
-                        prev = path_hist[-1]
-                        f = self._make_finding(
-                            msg, "path_change", Severity.WARN,
-                            f"Relay path changed: '{prev}' → '{normalized_path}' — "
-                            f"possible spoofing, node movement, or relay failure",
-                            {"previous_path": prev, "current_path": normalized_path,
-                             "path_history": list(path_hist[-3:])},
-                        )
-                        new_findings.append(f)
-                path_hist.append(normalized_path)
-                if len(path_hist) > 20:
-                    path_hist.pop(0)
 
         # ── RULE: abnormal hop count increase ─────────────────────────────
         # Two stages: the cheap in-memory check trips a CANDIDATE, then the
