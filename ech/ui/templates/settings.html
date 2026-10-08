@@ -693,7 +693,9 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
           <select id="pbx-dir-category" style="font-family:var(--mono);font-size:10px" onchange="renderPBXDirectory()">
             <option value="">All categories</option>
           </select>
+          <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" title="Query a local AREDN node's sysinfo.json for other PBX/phone services advertised mesh-wide — requires radio_directory.aredn_discovery.sysinfo_url in config.yaml" onclick="discoverArednServices()">🔍 Discover AREDN services</button>
         </div>
+        <div id="pbx-aredn-discovery-msg" style="font-size:10px;color:var(--dim);margin-top:2px"></div>
         <div id="pbx-directory-panel" style="margin-top:8px;font-size:10px;color:var(--muted);max-height:360px;overflow-y:auto">Loading…</div>
       </div>
       <div style="margin-top:14px;font-family:var(--mono);font-size:10px;color:var(--muted)">
@@ -2531,12 +2533,57 @@ function renderPBXDirectory() {
           </div>`).join('')}
       </div>`).join('');
   }
-  if (!filterCat && !filterText && ar.length) {
-    html += `<div style="margin-top:6px"><div style="color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">AREDN</div>` +
-      ar.map(e => `<div style="padding:2px 0" title="${esc(e.description || '')}"><span style="color:var(--muted)">🔗</span> ${esc(e.name)} <span style="color:var(--dim)">(${esc(e.destination)})</span></div>`).join('') +
+  const arFiltered = ar.filter(e => {
+    if (filterCat && (e.category || 'other') !== filterCat) return false;
+    if (!filterText) return true;
+    return `${e.name} ${e.destination} ${e.category || ''}`.toLowerCase().includes(filterText);
+  });
+  if (arFiltered.length) {
+    // Discovered AREDN services (aredn_pbx) only get a clickable 📞 when a
+    // structured sip: destination was parseable — see
+    // aredn_service_discovery.py's module docstring for why most
+    // free-text service names can't be reliably auto-converted into one.
+    html += `<div style="margin-top:6px"><div style="color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">AREDN (${arFiltered.length})</div>` +
+      arFiltered.map(e => e.destination
+        ? `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer" onclick="useDirectoryEntry('${esc(e.destination)}')" title="${esc(e.description || '')}">
+            <span style="color:var(--blue)">📞</span><span style="color:var(--text)">${esc(e.name)}</span><span style="color:var(--dim)">(${esc(e.destination)})</span>
+          </div>`
+        : `<div style="padding:2px 0" title="${esc(e.description || '')}"><span style="color:var(--muted)">🔗</span> ${esc(e.name)}</div>`
+      ).join('') +
       `</div>`;
   }
   el.innerHTML = html || '<span style="color:var(--dim)">No matching entries</span>';
+}
+
+async function discoverArednServices() {
+  const msgEl = document.getElementById('pbx-aredn-discovery-msg');
+  msgEl.textContent = 'Querying AREDN mesh service list…';
+  try {
+    const d = await fetch('/api/pbx/aredn-discovery').then(r => r.json());
+    if (d.status === 'not_configured') {
+      msgEl.textContent = d.detail;
+      return;
+    }
+    if (d.status !== 'ok') {
+      msgEl.textContent = `Discovery failed: ${d.detail || 'unknown error'}`;
+      return;
+    }
+    if (!_pbxDirectoryCache) _pbxDirectoryCache = {hamvoip: [], aredn: []};
+    // Replace any previously-discovered entries rather than appending again
+    // on repeat clicks — keep only non-discovery AREDN entries, then add
+    // the fresh set.
+    const kept = (_pbxDirectoryCache.aredn || []).filter(e => e.category !== 'aredn_pbx');
+    _pbxDirectoryCache.aredn = kept.concat(d.entries || []);
+    const sel = document.getElementById('pbx-dir-category');
+    if (sel && d.entries && d.entries.length && !sel.querySelector('option[value="aredn_pbx"]')) {
+      sel.insertAdjacentHTML('beforeend', '<option value="aredn_pbx">aredn_pbx</option>');
+    }
+    msgEl.textContent = `Found ${d.entries.length} PBX/phone-like service(s) via ${d.node || 'local node'}` +
+      (d.entries.length ? ' — only entries with a structured sip: link are directly dialable; others are reference info only' : '');
+    renderPBXDirectory();
+  } catch(e) {
+    msgEl.textContent = `Discovery error: ${esc(e.message)}`;
+  }
 }
 
 function useDirectoryEntry(destination) {

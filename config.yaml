@@ -778,6 +778,20 @@ mesh_bot:
 #     - name: "Regional AREDN gateway"
 #       destination: "n0call-gw.local.mesh"
 #       description: "Main regional AREDN tunnel/gateway node"
+#   # O101/queue: auto-discover other PBX/phone services already advertised
+#   # mesh-wide via OLSR, by querying a local AREDN node's sysinfo.json —
+#   # see GET /api/pbx/aredn-discovery and ech/core/aredn_service_discovery.py.
+#   # Point this at YOUR OWN local AREDN node (e.g. a supernode on your LAN) —
+#   # there is no universal default, every AREDN deployment's addressing is
+#   # its own. Only entries with a structured sip: URI link become directly
+#   # dialable; everything else surfaces as reference info only (see that
+#   # module's docstring for why free-text service names can't be reliably
+#   # auto-converted into a dial string). Reaching your own node's web UI
+#   # does NOT guarantee your Asterisk box can actually route a call into
+#   # the wider 10.x.x.x mesh — that depends on real mesh routing being set
+#   # up separately.
+#   aredn_discovery:
+#     sysinfo_url: "http://192.168.x.x/cgi-bin/sysinfo.json"
 
 # ── CAT radio control (rigctld / Hamlib) ──────────────────────────────────────
 # ECH connects to a running rigctld process over TCP and polls freq/mode every

@@ -24,6 +24,25 @@ MeshChat is even still the right target, or whether integrating via/against
 Raven instead makes more sense. This file is left as-is (untested either
 way) rather than guessed-and-rewritten against Raven's undocumented surface.
 
+RECHECKED 2026-10-08: a community fork called "Crow" (github.com/mathisono/
+Crow, "derived from the Raven Mesh Messaging Platform... with contributions
+preserved in this repository's Git history") is now the more active project
+— confirmed real via GitHub search, pushed within the last day at check
+time. Read its actual source (not just the README) rather than assuming:
+Crow bridges Meshtastic/MeshCore/APRS/Winlink directly itself, so in many
+deployments it's a PARALLEL consumer of the same hardware ECH already
+adapts, not an integration target. Its only external-facing interface is a
+raw WebSocket on port 4404 (`websocket.uc`, standard RFC 6455 framing) —
+confirmed via source that `router.uc` exposes NO HTTP/REST/CGI endpoint at
+all, unlike the legacy MeshChat CGI this adapter speaks. The WebSocket's
+application-level JSON message schema (what a "new message" or "send
+message" frame actually looks like) is undocumented anywhere in the wiki or
+source comments found. Conclusion unchanged from the Raven note above:
+building an adapter against Crow now would mean reverse-engineering an
+undocumented, actively-moving wire protocol with nothing to verify against
+— not worth doing until Crow publishes a stable API (or this gets
+rechecked again against a later, more mature release).
+
 REST-ish CGI API (extracted from source, Aug 2026 —
   https://github.com/kn6plv/meshchat/blob/master/src/data/www/cgi-bin/meshchat
   — NOT live-tested: no AREDN mesh with a reachable MeshChat instance was

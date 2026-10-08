@@ -3355,6 +3355,38 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 pass
         return get_directory(cfg)
 
+    @app.get("/api/pbx/aredn-discovery")
+    async def pbx_aredn_discovery():
+        """Live-queries a configured local AREDN node's sysinfo.json for
+        mesh-wide PBX/phone-like services (see ech/core/aredn_service_
+        discovery.py) and returns them in the same shape as directory
+        entries — NOT merged into GET /api/pbx/directory since this one
+        does real network I/O and can fail/time out, unlike that endpoint's
+        pure config-driven merge. Returns status:'not_configured' if no
+        radio_directory.aredn_discovery.sysinfo_url is set — there's no
+        default since which AREDN node/IP exists is entirely deployment-
+        specific."""
+        import yaml as _yaml
+        cfg = {}
+        if app.state.config_path:
+            try:
+                with open(app.state.config_path) as f:
+                    cfg = _yaml.safe_load(f) or {}
+            except Exception:
+                pass
+        sysinfo_url = ((cfg.get("radio_directory") or {}).get("aredn_discovery") or {}).get("sysinfo_url")
+        if not sysinfo_url:
+            return {"status": "not_configured",
+                    "detail": "Set radio_directory.aredn_discovery.sysinfo_url in config.yaml "
+                              "to a local AREDN node's sysinfo.json URL to enable this."}
+        from ech.core.aredn_service_discovery import fetch_services, to_directory_entries
+        try:
+            sysinfo = await fetch_services(sysinfo_url)
+        except Exception as exc:
+            return {"status": "error", "detail": f"Could not reach {sysinfo_url}: {exc}"}
+        entries = to_directory_entries(sysinfo)
+        return {"status": "ok", "node": sysinfo.get("node"), "entries": entries}
+
     @app.post("/api/pbx/call")
     async def pbx_call(request: Request):
         """Click-to-call: ring local phone then bridge to destination."""
