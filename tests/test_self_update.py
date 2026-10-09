@@ -57,6 +57,8 @@ def _mock_client_factory(handler):
 @pytest.mark.asyncio
 async def test_check_latest_commit_parses_github_response(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
+        if "raw.githubusercontent.com" in str(request.url):
+            return httpx.Response(200, text="1.0.0-rc242\n")
         assert request.url.path == "/repos/guywire/emergency-communications-hub/commits/main"
         return httpx.Response(200, json={
             "sha": "abc123def456abc123def456abc123def456abc1",
@@ -72,7 +74,22 @@ async def test_check_latest_commit_parses_github_response(monkeypatch):
     assert result["sha"] == "abc123def456"
     assert result["message"] == "Fix something"
     assert result["author"] == "someone"
-    assert result["date"] == "2026-10-08T12:00:00Z"
+    assert result["version"] == "1.0.0-rc242"
+
+
+@pytest.mark.asyncio
+async def test_check_latest_commit_version_fetch_failure_is_non_fatal(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "raw.githubusercontent.com" in str(request.url):
+            return httpx.Response(404)
+        return httpx.Response(200, json={
+            "sha": "abc123def456",
+            "commit": {"message": "msg", "committer": {"date": ""}, "author": {"name": ""}},
+        })
+
+    monkeypatch.setattr(self_update.httpx, "AsyncClient", _mock_client_factory(handler))
+    result = await self_update.check_latest_commit("main")
+    assert result["version"] == ""
 
 
 @pytest.mark.asyncio

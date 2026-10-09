@@ -77,19 +77,38 @@ _state: dict = {"running": False, "started_at": None, "finished_at": None,
 async def check_latest_commit(branch: str = "main") -> dict:
     """GET the latest commit on `branch` from the public GitHub API — no
     auth needed for a public repo (rate-limited to 60 req/hr unauthenticated,
-    fine for an admin manually clicking "Check for updates")."""
+    fine for an admin manually clicking "Check for updates"). Also fetches
+    the branch's VERSION file so the UI can show ECH's own rc-style version
+    number (the same one the messaging page displays) instead of only a
+    raw git commit hash, which means nothing to an operator at a glance."""
     url = f"https://api.github.com/repos/{GITHUB_REPO}/commits/{branch}"
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(url, headers={"Accept": "application/vnd.github+json"})
         resp.raise_for_status()
         data = resp.json()
+        version = await _fetch_remote_version(client, branch)
     commit = data.get("commit", {}) or {}
     return {
         "sha": (data.get("sha") or "")[:12],
         "message": (commit.get("message") or "").split("\n", 1)[0],
         "date": (commit.get("committer") or {}).get("date", ""),
         "author": (commit.get("author") or {}).get("name", ""),
+        "version": version,
     }
+
+
+async def _fetch_remote_version(client: httpx.AsyncClient, branch: str) -> str:
+    """Best-effort fetch of the raw VERSION file at the tip of `branch`.
+    Returns '' (not raised) on any failure — the commit info above is
+    still useful on its own, and this is only ever shown as supplementary
+    context in the "check for updates" UI."""
+    url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{branch}/VERSION"
+    try:
+        resp = await client.get(url, timeout=10.0)
+        resp.raise_for_status()
+        return resp.text.strip()
+    except httpx.HTTPError:
+        return ""
 
 
 def _safe_extract(archive_path: Path, dest: Path) -> None:

@@ -70,6 +70,7 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
 <div id="header">
   <a class="back" href="/">← SM</a>
   <div class="logo">▣ SM / Settings</div>
+  <span id="settings-ech-version" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:4px;cursor:default" title="ECH version"></span>
   <div class="spacer"></div>
   <span id="user-display" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></span>
 </div>
@@ -1267,6 +1268,10 @@ async function init() {
   setInterval(loadAdapterLive, 10000);
   loadMQTTStatus();
   loadPBXStatus();
+  fetch('/api/version').then(r => r.json()).then(d => {
+    const el = document.getElementById('settings-ech-version');
+    if (el) el.textContent = 'v' + d.version;
+  }).catch(() => {});
   loadPBXDirectory();
   loadAuditLog();
   loadLiveStats();
@@ -1790,24 +1795,35 @@ async function checkSelfUpdate() {
   try {
     const d = await fetch(`/api/system/selfupdate/check?branch=${encodeURIComponent(branch)}`).then(r => r.json());
     if (d.status !== 'ok') { el.textContent = `Check failed: ${d.detail || 'unknown error'}`; return; }
-    el.innerHTML = `Latest on <b>${esc(branch)}</b>: <code>${esc(d.sha)}</code> — ${esc(d.message)}` +
-      (d.date ? ` <span style="color:var(--dim)">(${esc(d.date.replace('T',' ').slice(0,16))} UTC, ${esc(d.author||'')})</span>` : '');
+    // Lead with ECH's own rc-style version (same one the messaging page and
+    // this page's header show) — a raw git commit hash means nothing at a
+    // glance; the version number is what an operator actually recognizes.
+    const versionLabel = d.version ? `<b>v${esc(d.version)}</b>` : '<span style="color:var(--dim)">(version unknown)</span>';
+    el.innerHTML = `Latest on <b>${esc(branch)}</b>: ${versionLabel} — ${esc(d.message)}` +
+      (d.date ? ` <span style="color:var(--dim)">(${esc(d.date.replace('T',' ').slice(0,16))} UTC, ${esc(d.author||'')})</span>` : '') +
+      ` <span style="color:var(--dim)">[${esc(d.sha)}]</span>`;
   } catch(e) {
     el.textContent = 'Check failed — see console';
     console.error('checkSelfUpdate failed:', e);
   }
 }
 
+let _selfUpdatePreVersion = null;
+
 async function startSelfUpdate() {
   const branch = (document.getElementById('selfupdate-branch').value || 'main').trim();
   if (!confirm(`Update ECH from GitHub branch "${branch}" and restart now?\n\nThe dashboard will briefly disconnect while the service restarts.`)) return;
   try {
+    _selfUpdatePreVersion = await fetch('/api/version').then(r => r.json()).then(d => d.version).catch(() => null);
     const r = await fetch('/api/system/selfupdate', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({branch}),
     });
     const d = await r.json();
     if (d.status !== 'ok') { toast(`Update failed to start: ${d.detail || 'unknown error'}`, 'err'); return; }
     toast('Self-update started');
+    const log = document.getElementById('selfupdate-log');
+    log.style.display = 'block';
+    log.textContent = '[ech] update started…';
     _selfUpdatePollCount = 0;
     checkSelfUpdateStatus();
   } catch(e) {
@@ -1816,10 +1832,31 @@ async function startSelfUpdate() {
   }
 }
 
+// Every exit from the polling loop below — success, failure, or giving up —
+// must leave a plainly visible message. The original version just stopped
+// polling silently once it hit the retry cap, which looked indistinguishable
+// from the page hanging; there was no way to tell whether the update had
+// actually finished.
+function _selfUpdateFinish(message, color) {
+  clearTimeout(_selfUpdatePollTimer);
+  const btn = document.getElementById('selfupdate-btn');
+  btn.disabled = false;
+  btn.textContent = '⬇ Update & Restart ECH';
+  const log = document.getElementById('selfupdate-log');
+  log.style.display = 'block';
+  log.textContent += `\n${message}`;
+  log.scrollTop = log.scrollHeight;
+  toast(message, color === 'var(--red)' ? 'err' : 'ok');
+}
+
 async function checkSelfUpdateStatus() {
   _selfUpdatePollCount++;
   const scheduleRetry = () => {
-    if (_selfUpdatePollCount >= _SELFUPDATE_MAX_POLLS) return;  // give up quietly
+    if (_selfUpdatePollCount >= _SELFUPDATE_MAX_POLLS) {
+      _selfUpdateFinish('⚠ Gave up polling for progress after ~3 minutes — the update may still be '
+        + 'running. Refresh the page or check Settings again shortly to see the current status.', 'var(--yellow)');
+      return;
+    }
     clearTimeout(_selfUpdatePollTimer);
     _selfUpdatePollTimer = setTimeout(checkSelfUpdateStatus, 3000);
   };
@@ -1837,18 +1874,50 @@ async function checkSelfUpdateStatus() {
       btn.disabled = true;
       btn.textContent = '⬇ Updating…';
       scheduleRetry();
-    } else {
-      btn.disabled = false;
-      btn.textContent = '⬇ Update & Restart ECH';
-      // The service restart itself kills the request mid-flight on success —
-      // keep polling for a while after "running" goes false to catch the
-      // service coming back up with a fresh /api/version, not just this
-      // snapshot (which may have been taken right as the old process died).
-      scheduleRetry();
+      return;
     }
+    btn.disabled = true;
+    btn.textContent = '⬇ Restarting…';
+    if (d.exit_code !== 0) {
+      // Failed before the restart was even issued — definitive, no need
+      // to wait for anything else.
+      _selfUpdateFinish(`❌ Update failed: ${d.error || 'unknown error'}`, 'var(--red)');
+      return;
+    }
+    // exit_code === 0 means the restart WAS issued — but this process is
+    // about to be killed by that exact restart, so "not running" here does
+    // NOT yet mean the new code is live. Switch to waiting for the service
+    // to actually come back.
+    _waitForServiceBack();
   } catch(e) {
     // Expected mid-restart — the connection drops. Keep retrying (bounded).
     scheduleRetry();
+  }
+}
+
+let _serviceBackPollCount = 0;
+const _SERVICE_BACK_MAX_POLLS = 30;  // ~60s at 2s intervals
+
+async function _waitForServiceBack() {
+  _serviceBackPollCount++;
+  try {
+    const d = await fetch('/api/version').then(r => r.json());
+    const newVersion = d.version;
+    if (_selfUpdatePreVersion && newVersion === _selfUpdatePreVersion) {
+      _selfUpdateFinish(`✅ Update complete — restarted, still on v${newVersion} `
+        + `(branch had no new commits since the last update)`, 'var(--green)');
+    } else {
+      _selfUpdateFinish(`✅ Update complete — now running v${newVersion}`, 'var(--green)');
+    }
+    const verEl = document.getElementById('settings-ech-version');
+    if (verEl) verEl.textContent = 'v' + newVersion;
+  } catch(e) {
+    if (_serviceBackPollCount >= _SERVICE_BACK_MAX_POLLS) {
+      _selfUpdateFinish('⚠ Service did not respond within 60s of the restart being issued — '
+        + 'check it directly (SSH: systemctl status ech) rather than assuming it worked.', 'var(--red)');
+      return;
+    }
+    setTimeout(_waitForServiceBack, 2000);
   }
 }
 
