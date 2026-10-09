@@ -50,7 +50,7 @@ is pure numpy and has no audio-device dependency.
 | Package | PyPI name | Version | Purpose |
 |---------|-----------|---------|---------|
 | meshcore | `meshcore` | 2.3.7 (inspected) | Reference library; protocol format authority. ECH implements its own binary framing rather than using the library directly, but the library source was used to verify packet structures (CONTACT record offsets, SELF_INFO layout, PUSH_CHANNEL_MSG format, channel decryption). |
-| pyserial-asyncio | `pyserial-asyncio-fast` | ≥0.16 | Async serial I/O for serial transport |
+| pyserial-asyncio | `pyserial-asyncio` | ≥0.6 | Async serial I/O for serial transport (corrected 2026-10-09 — `-fast` doesn't exist on PyPI at the version previously listed; the code only ever imports plain `serial_asyncio`, confirmed live) |
 | pycryptodome | `pycryptodome` | any | Ed25519 JWT signing for LetsMesh auth (`Crypto.PublicKey.ECC`, `Crypto.Signature.eddsa`); AES channel decryption reference |
 
 **GitHub:** https://github.com/fdlamotte/meshcore_py — meshcore Python library (v2.3.7)
@@ -178,7 +178,7 @@ DMR network (TGIF, BrandMeister). See `ECH_REQUIREMENTS_AND_PROGRESS.md`'s DMR s
 
 ### Adapter — SMS
 
-No additional packages beyond pyserial (via pyserial-asyncio-fast). Uses AT command protocol directly.
+No additional packages beyond pyserial (via pyserial-asyncio). Uses AT command protocol directly.
 
 ### Adapter — Pat Winlink
 
@@ -196,14 +196,14 @@ No additional packages. Uses Pat's HTTP REST API via stdlib `aiohttp` or `urllib
 
 ```bash
 pip install fastapi "uvicorn[standard]" pyyaml aiosqlite \
-    aiomqtt pyserial-asyncio-fast pycryptodome \
+    aiomqtt pyserial-asyncio pycryptodome \
     meshtastic aprslib aiohttp \
     rns lxmf panoramisk meshcore
 ```
 
 > **Note:** `meshcore` (the library) is not strictly required at runtime since ECH implements
 > its own binary framing, but having it installed provides a useful reference and its
-> dependencies (pycryptodome, pyserial-asyncio-fast) are needed by ECH directly.
+> dependencies (pycryptodome, pyserial-asyncio) are needed by ECH directly.
 
 ---
 

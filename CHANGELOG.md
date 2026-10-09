@@ -8,6 +8,81 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc243 (2026-10-09)
+
+### Added
+- **Settings now has a real GUI adapter editor** instead of only a raw JSON
+  textarea — each adapter is an editable card (text/number/checkbox fields,
+  add/delete fields, enable/disable, delete, "+ Add adapter" with a type
+  picker). A serial-port dropdown (listing actually-attached devices) now
+  backs any `port`/`device` field instead of requiring you to find and type
+  a `/dev/ttyUSBn`/`COMn` path by hand.
+- **GPS is now configurable from the GUI** — enable toggle, serial port
+  picker, baud rate, minimum satellites, update interval, clock-sync toggle.
+  Previously this required SSHing in and hand-editing `config.yaml`.
+- The Settings page header now shows the running ECH version, matching the
+  messaging page.
+
+### Fixed
+- Self-update: the progress log used to just stop updating with no
+  indication of whether the update succeeded, failed, or was still running.
+  Every outcome now shows an explicit ✅/❌/⚠ message. "Check for updates"
+  now shows ECH's own version number (e.g. `v1.0.0-rc243`) instead of a raw
+  git commit hash.
+- Template/config file reads could throw a `UnicodeDecodeError` on
+  Windows-based dev/test environments (harmless on the live Linux
+  deployment, which already defaults to UTF-8) — all read/write sites now
+  specify UTF-8 explicitly.
+- `README.md`'s MeshCore adapter row referenced a nonexistent PyPI package
+  (`pyserial-asyncio-fast`) — the real dependency is `pyserial-asyncio`.
+
+## v1.0.0-rc237–rc241 — AREDN awareness, M17 protocol fixes, security audit (2026-10-08)
+
+### Added
+- AREDN-facing adapters now sanity-check their configured host against
+  real AREDN addressing conventions (`*.local.mesh` hostnames, the actual
+  10.x.x.x mesh range) and log a non-blocking warning if it doesn't look
+  mesh-typical — catches e.g. a typo'd public IP.
+- AREDN PBX/phone service discovery: query a local AREDN node for other
+  phone/PBX services already advertised mesh-wide, surfaced in the PBX
+  directory with click-to-call for any service with a structured `sip:`
+  link.
+- A tamper-evident audit log for logins, user management, and
+  admin/service actions (Settings → Audit Log), with a one-click chain
+  integrity check.
+
+### Fixed
+- M17 reflector adapter: the packet-mode TYPE field had a bug that wrongly
+  flagged every outgoing message as "stream mode" to any spec-compliant
+  receiver (the production reflector used for live testing never checked
+  this field, which is why it went unnoticed). Also implemented the
+  `#PARROT` self-test echo destination, previously left unimplemented
+  rather than guessed at.
+- A handful of flaky/stale test failures that had been carried as
+  "known, unrelated" for a while — both had real root causes (a never-
+  finished helper function in the MeshCore↔MQTT bridge, and an anomaly-
+  detection rule unintentionally excluded for APRS).
+
+## v1.0.0-rc230–rc236 — Caddy sub-path support, self-update, M17 picker, HOIP directory (2026-10-08)
+
+### Added
+- ECH can now run behind a reverse proxy mounted under a sub-path (e.g.
+  `https://host/ech/`), not just a dedicated host/port — see the Caddy
+  section below.
+- **Self-update from GitHub** — Settings → System can now pull the latest
+  code from a chosen branch and restart ECH, without needing the external
+  Windows deploy pipeline.
+- A local emergency-status board (hospital beds, shelters, vehicles, etc.)
+  with a page, a mesh-bot `status` command, and manual entry.
+- M17 reflector server/module can now be switched live from Settings
+  instead of requiring a config edit + restart.
+- The HamVOIP/AllStarLink/AREDN directory (Settings → PBX, and the
+  Messages page's Calls tab) now includes HOIP's full published directory
+  — ~150 real conference bridges, RF links, test numbers, and audio/
+  dispatch-monitor feeds — and the same directory now also populates the
+  Yealink phone's remote phonebook.
+- Winlink messages can be marked read/unread from the inbox.
+
 ## v1.0.0-rc229 (2026-10-08)
 
 ### Fixed

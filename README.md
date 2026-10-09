@@ -126,7 +126,15 @@ incident:
 
 ### Enabling adapters
 
-Every adapter is commented out by default. Find the block in `config.yaml` for the hardware you have, uncomment it, and fill in the port or host:
+**GUI method (recommended):** Settings → Adapter Configuration has an editable
+card per adapter — add one, pick its type, fill in fields with real inputs
+(including a dropdown of actually-attached serial devices for any
+`port`/`device` field), enable/disable, and save. Changes still need an ECH
+restart to take effect, same as editing the file by hand.
+
+**Manual method:** every adapter is commented out by default in
+`config.yaml`. Find the block for the hardware you have, uncomment it, and
+fill in the port or host:
 
 ```yaml
 adapters:
@@ -508,7 +516,7 @@ sudo systemctl enable --now ech
 
 ### GPS time sync
 
-If you have a USB or UART GPS receiver (u-blox or similar), ECH can set the system clock from GPS and broadcast the base position to all adapters. Uncomment and fill in the `gps:` block in `config.yaml`. Requires ECH to run as root (or with `CAP_SYS_TIME`) for clock sync.
+If you have a USB or UART GPS receiver (u-blox or similar), ECH can set the system clock from GPS and broadcast the base position to all adapters. Configure it from **Settings → Base Location & GPS** — it lists attached serial devices to pick from, no need to find the port name yourself. (Equivalently, you can still hand-edit the `gps:` block in `config.yaml`.) Requires ECH to run as root (or with `CAP_SYS_TIME`) for clock sync; either way takes effect after a restart.
 
 ### Firewall
 
@@ -531,7 +539,7 @@ No inbound ports are required for most adapters (they connect outward). Exceptio
 | Meshtastic USB/TCP | `meshtastic` | `pip install meshtastic` |
 | APRS Internet | `aprs_is` | `pip install aprslib` |
 | APRS KISS TNC / Direwolf | `aprs_kiss` | Direwolf or hardware TNC |
-| MeshCore serial/TCP | `meshcore` | `pip install pycryptodome pyserial-asyncio-fast` — custom protocol client, no `meshcore` PyPI package needed |
+| MeshCore serial/TCP | `meshcore` | `pip install pycryptodome pyserial-asyncio` — custom protocol client, no `meshcore` PyPI package needed |
 | LetsMesh MQTT | `mqtt` (with `pubkey_auth`) | `pip install aiomqtt pycryptodome` |
 | LetsMesh packet comparison | `letsmesh_compare` | `pip install aiomqtt pycryptodome` — merges path data from other LetsMesh observers into a local MeshCore adapter's topology graph; no messages added to the feed |
 | MQTT generic | `mqtt` | `pip install aiomqtt` |
@@ -539,9 +547,15 @@ No inbound ports are required for most adapters (they connect outward). Exceptio
 | Winlink / Pat | `pat_winlink` | Pat running with HTTP API |
 | SMS modem | `sms` | SIM800L / SIM7600 on USB serial |
 | Reticulum / LXMF | `reticulum` | `pip install rns lxmf` |
-| AREDN mesh | `aredn_ami` | `pip install aiohttp` |
+| AREDN mesh (PBX bridge) | `aredn_ami` | `pip install aiohttp` |
+| AREDN mesh (MeshChat) | `aredn_meshchat` | `pip install httpx` — talks to a MeshChat CGI backend reachable on the mesh |
+| AX.25 packet BBS | `ax25_bbs` | `axcall` (Linux AX.25 tools) + a configured AX.25 port |
 | Asterisk / PBX | `asterisk` | Asterisk with AMI enabled — talks raw AMI over a TCP socket, no extra package needed |
+| M17 digital voice reflector | `m17_reflector` | None — software-only UDP client to an M17 reflector (e.g. mrefd), no radio hardware required |
+| DAPNET paging | `dapnet` | `pip install httpx` — DAPNET account (hampager.de) |
+| DMR via BrandMeister | `dmr_brandmeister` | `pip install dmr_utils3 bitarray libscrc` — Homebrew/DMRplus protocol to a BrandMeister-compatible master |
 | ADS-B / PiAware | `adsb` | dump1090, PiAware, or readsb on the LAN |
+| Aircraft tracking (OpenSky) | `opensky` | `pip install aiohttp` — free OpenSky Network account |
 | AIS vessels (local SDR) | `ais_catcher` | AIS-catcher with HTTP server enabled |
 | AIS vessels (AISHub) | `aishub` | Free aishub.net account + API key |
 | AIS vessels (aisstream.io) | `aisstream` | Free aisstream.io API key |
