@@ -2209,14 +2209,29 @@ async function checkSelfUpdateStatus() {
     }
     btn.disabled = true;
     btn.textContent = '⬇ Restarting…';
-    if (d.exit_code !== 0) {
-      // Failed before the restart was even issued — definitive, no need
-      // to wait for anything else.
+    // d.step === 'failed' is the backend's own explicit failure marker —
+    // checking exit_code here is NOT safe: self_update._state is a plain
+    // in-memory dict that resets to exit_code: null on every fresh process
+    // start, which includes the brand-new process a SUCCESSFUL update's
+    // own restart spins up. Comparing "!== 0" treated that normal post-
+    // restart null as a failure every single time (real bug, 2026-10-09 —
+    // every successful update showed "Update failed: unknown error" on
+    // the very next status poll, from the new process's freshly-reset
+    // state, not an actual failure).
+    if (d.step === 'failed') {
       _selfUpdateFinish(`❌ Update failed: ${d.error || 'unknown error'}`, 'var(--red)');
       return;
     }
-    // exit_code === 0 means the restart WAS issued — but this process is
-    // about to be killed by that exact restart, so "not running" here does
+    if (d.exit_code === null && !_selfUpdatePreVersion) {
+      // Nothing is running, nothing failed, and we didn't initiate this
+      // check by clicking "Update" ourselves (no pre-update version
+      // snapshot) — this is just the idle/freshly-started state, not a
+      // report of anything. Nothing to show.
+      return;
+    }
+    // exit_code === 0 (or unknown post-restart) means the restart WAS
+    // issued — but this process is about to be killed by that exact
+    // restart, so "not running" here does
     // NOT yet mean the new code is live. Switch to waiting for the service
     // to actually come back.
     _waitForServiceBack();
