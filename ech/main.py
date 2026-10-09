@@ -84,6 +84,54 @@ def _default_config() -> dict:
     }
 
 
+# Mock adapters — no external dependencies, always importable. Module-level
+# (not local to build_adapter) so the Settings adapter-editor's type picker
+# (GET /api/system/adapter-types) can read the real dispatch table instead
+# of maintaining a second, driftable copy of this list.
+MOCK_ADAPTER_TYPES = {
+    "mock_meshtastic": ("ech.adapters.mock_meshtastic", "MockMeshtasticAdapter"),
+    "mock_aprs":       ("ech.adapters.mock_aprs",       "MockAPRSAdapter"),
+    "mock_meshcore":   ("ech.adapters.mock_meshcore",   "MockMeshCoreAdapter"),
+    "mock_js8call":    ("ech.adapters.mock_js8call",    "MockJS8CallAdapter"),
+    "mock_sms":        ("ech.adapters.mock_sms",        "MockSMSAdapter"),
+    "mock_pat_winlink":("ech.adapters.mock_pat_winlink","MockPatWinlinkAdapter"),
+    "mock_reticulum":  ("ech.adapters.reticulum_adapter","MockReticulumAdapter"),
+    "mock_mqtt":       ("ech.adapters.mqtt_adapter",    "MockMQTTAdapter"),
+    "mock_aredn_ami":  ("ech.adapters.aredn_ami",       "MockAREDNAMIAdapter"),
+    "mock_asterisk":   ("ech.adapters.mock_asterisk",  "MockAsteriskAdapter"),
+}
+# Real adapters — may require optional packages
+REAL_ADAPTER_TYPES = {
+    "meshcore":    ("ech.adapters.meshcore",         "MeshCoreAdapter",    "serial_asyncio"),
+    "meshtastic":  ("ech.adapters.meshtastic_adapter","MeshtasticAdapter", "meshtastic"),
+    "aprs_is":     ("ech.adapters.aprs_is",          "APRSISAdapter",      "aprslib"),
+    "adsb":        ("ech.adapters.adsb_adapter",       "ADSBAdapter",        "aiohttp"),
+    "opensky":     ("ech.adapters.opensky_adapter",    "OpenSkyAdapter",     "aiohttp"),
+    "ais_catcher": ("ech.adapters.ais_catcher_adapter", "AISCatcherAdapter", "aiohttp"),
+    "aisstream":   ("ech.adapters.aisstream_adapter",   "AISStreamAdapter",  "aiohttp"),
+    "aishub":      ("ech.adapters.aishub_adapter",      "AISHubAdapter",     "aiohttp"),
+    "cw_audio":    ("ech.adapters.cw_audio",            "CWAudioAdapter",    "sounddevice"),
+    "rtty_audio":  ("ech.adapters.rtty_audio",          "RTTYAudioAdapter",  "sounddevice"),
+    "psk31_audio": ("ech.adapters.rtty_audio",          "PSK31AudioAdapter", "sounddevice"),
+    "wsjtx":       ("ech.adapters.wsjtx_adapter",       "WSJTXAdapter",      None),
+    "aprs_kiss":   ("ech.adapters.aprs_kiss",        "APRSKISSAdapter",    "serial_asyncio, aprslib"),
+    "js8call":     ("ech.adapters.js8call",          "JS8CallAdapter",     None),
+    "sms":         ("ech.adapters.sms",              "SMSAdapter",         "serial_asyncio"),
+    "pat_winlink": ("ech.adapters.pat_winlink",      "PatWinlinkAdapter",  "httpx"),
+    "reticulum":   ("ech.adapters.reticulum_adapter","ReticulumAdapter",   "rns, lxmf"),
+    "mqtt":        ("ech.adapters.mqtt_adapter",     "MQTTAdapter",        "aiomqtt"),
+    "letsmesh_compare": ("ech.adapters.letsmesh_compare", "LetsMeshCompareAdapter", "aiomqtt"),
+    "aredn_ami":   ("ech.adapters.aredn_ami",        "AREDNAMIAdapter",    None),
+    "asterisk":    ("ech.adapters.asterisk_adapter", "AsteriskAdapter",    None),
+    "ax25_bbs":    ("ech.adapters.ax25_bbs_adapter",  "AX25BBSAdapter",    None),
+    "dapnet":      ("ech.adapters.dapnet",            "DAPNETAdapter",     "httpx"),
+    "aredn_meshchat": ("ech.adapters.aredn_meshchat", "AREDNMeshChatAdapter", "httpx"),
+    "m17_reflector": ("ech.adapters.m17_reflector", "M17ReflectorAdapter", None),
+    "dmr_brandmeister": ("ech.adapters.dmr_brandmeister", "DMRBrandmeisterAdapter",
+                         "dmr_utils3, bitarray, libscrc"),
+}
+
+
 def build_adapter(cfg: dict):
     """Instantiate an adapter by its 'type' key in config.
 
@@ -96,53 +144,9 @@ def build_adapter(cfg: dict):
     if not adapter_type:
         raise ValueError("Adapter config missing required 'type' key")
 
-    # Mock adapters — no external dependencies, always importable
-    _mocks = {
-        "mock_meshtastic": ("ech.adapters.mock_meshtastic", "MockMeshtasticAdapter"),
-        "mock_aprs":       ("ech.adapters.mock_aprs",       "MockAPRSAdapter"),
-        "mock_meshcore":   ("ech.adapters.mock_meshcore",   "MockMeshCoreAdapter"),
-        "mock_js8call":    ("ech.adapters.mock_js8call",    "MockJS8CallAdapter"),
-        "mock_sms":        ("ech.adapters.mock_sms",        "MockSMSAdapter"),
-        "mock_pat_winlink":("ech.adapters.mock_pat_winlink","MockPatWinlinkAdapter"),
-        "mock_reticulum":  ("ech.adapters.reticulum_adapter","MockReticulumAdapter"),
-        "mock_mqtt":       ("ech.adapters.mqtt_adapter",    "MockMQTTAdapter"),
-        "mock_aredn_ami":  ("ech.adapters.aredn_ami",       "MockAREDNAMIAdapter"),
-        "mock_asterisk":   ("ech.adapters.mock_asterisk",  "MockAsteriskAdapter"),
-    }
-    # Real adapters — may require optional packages
-    _real = {
-        "meshcore":    ("ech.adapters.meshcore",         "MeshCoreAdapter",    "serial_asyncio"),
-        "meshtastic":  ("ech.adapters.meshtastic_adapter","MeshtasticAdapter", "meshtastic"),
-        "aprs_is":     ("ech.adapters.aprs_is",          "APRSISAdapter",      "aprslib"),
-        "adsb":        ("ech.adapters.adsb_adapter",       "ADSBAdapter",        "aiohttp"),
-        "opensky":     ("ech.adapters.opensky_adapter",    "OpenSkyAdapter",     "aiohttp"),
-        "ais_catcher": ("ech.adapters.ais_catcher_adapter", "AISCatcherAdapter", "aiohttp"),
-        "aisstream":   ("ech.adapters.aisstream_adapter",   "AISStreamAdapter",  "aiohttp"),
-        "aishub":      ("ech.adapters.aishub_adapter",      "AISHubAdapter",     "aiohttp"),
-        "cw_audio":    ("ech.adapters.cw_audio",            "CWAudioAdapter",    "sounddevice"),
-        "rtty_audio":  ("ech.adapters.rtty_audio",          "RTTYAudioAdapter",  "sounddevice"),
-        "psk31_audio": ("ech.adapters.rtty_audio",          "PSK31AudioAdapter", "sounddevice"),
-        "wsjtx":       ("ech.adapters.wsjtx_adapter",       "WSJTXAdapter",      None),
-        "aprs_kiss":   ("ech.adapters.aprs_kiss",        "APRSKISSAdapter",    "serial_asyncio, aprslib"),
-        "js8call":     ("ech.adapters.js8call",          "JS8CallAdapter",     None),
-        "sms":         ("ech.adapters.sms",              "SMSAdapter",         "serial_asyncio"),
-        "pat_winlink": ("ech.adapters.pat_winlink",      "PatWinlinkAdapter",  "httpx"),
-        "reticulum":   ("ech.adapters.reticulum_adapter","ReticulumAdapter",   "rns, lxmf"),
-        "mqtt":        ("ech.adapters.mqtt_adapter",     "MQTTAdapter",        "aiomqtt"),
-        "letsmesh_compare": ("ech.adapters.letsmesh_compare", "LetsMeshCompareAdapter", "aiomqtt"),
-        "aredn_ami":   ("ech.adapters.aredn_ami",        "AREDNAMIAdapter",    None),
-        "asterisk":    ("ech.adapters.asterisk_adapter", "AsteriskAdapter",    None),
-        "ax25_bbs":    ("ech.adapters.ax25_bbs_adapter",  "AX25BBSAdapter",    None),
-        "dapnet":      ("ech.adapters.dapnet",            "DAPNETAdapter",     "httpx"),
-        "aredn_meshchat": ("ech.adapters.aredn_meshchat", "AREDNMeshChatAdapter", "httpx"),
-        "m17_reflector": ("ech.adapters.m17_reflector", "M17ReflectorAdapter", None),
-        "dmr_brandmeister": ("ech.adapters.dmr_brandmeister", "DMRBrandmeisterAdapter",
-                             "dmr_utils3, bitarray, libscrc"),
-    }
-
-    entry = _mocks.get(adapter_type) or _real.get(adapter_type)
+    entry = MOCK_ADAPTER_TYPES.get(adapter_type) or REAL_ADAPTER_TYPES.get(adapter_type)
     if not entry:
-        all_types = sorted(list(_mocks) + list(_real))
+        all_types = sorted(list(MOCK_ADAPTER_TYPES) + list(REAL_ADAPTER_TYPES))
         raise ValueError(f"Unknown adapter type: {adapter_type!r}. Available: {all_types}")
 
     module_path, class_name = entry[0], entry[1]

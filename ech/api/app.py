@@ -134,7 +134,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     if config_path:
         try:
             import yaml as _yaml
-            _cfg = _yaml.safe_load(open(config_path))
+            _cfg = _yaml.safe_load(open(config_path, encoding="utf-8"))
             _psk_email    = (_cfg.get("pskreporter", {}) or {}).get("contact_email", "")
             _op_callsign  = (_cfg.get("operator", {}) or {}).get("callsign", "N0CALL")
             _psk_default_callsign = _op_callsign.split("-")[0]  # strip SSID
@@ -428,7 +428,13 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 </script>"""
 
     def _render_template(name: str) -> str:
-        content = (UI_DIR / "templates" / name).read_text()
+        # Explicit UTF-8 — without it, Python falls back to the platform's
+        # default encoding (e.g. cp1252 on Windows), which breaks on the
+        # em-dashes and other non-ASCII characters throughout these
+        # templates. Harmless on Linux (already UTF-8 by default there,
+        # which is why this went unnoticed) but a real bug for any
+        # Windows-based dev/test workflow.
+        content = (UI_DIR / "templates" / name).read_text(encoding="utf-8")
         injections = [base_path_patch_script(_base_path), f"window.ECH_CALLSIGN={repr(_op_callsign)};"]
         if ech_state and ech_state.simulation_enabled:
             injections.append("window.ECH_SIM=true;")
@@ -956,7 +962,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             cfg_path = Path("/etc/ech/config.yaml")
             if not cfg_path.exists():
                 cfg_path = Path("config.yaml")
-            with open(cfg_path) as f:
+            with open(cfg_path, encoding="utf-8") as f:
                 full_cfg = yaml.safe_load(f) or {}
             adapter_cfgs = full_cfg.get("adapters", [])
             adapter_cfg = next((a for a in adapter_cfgs if a.get("name") == adapter_name), None)
@@ -1006,7 +1012,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not cfg_path.exists():
             cfg_path = Path("config.yaml")
         try:
-            with open(cfg_path) as f:
+            with open(cfg_path, encoding="utf-8") as f:
                 full_cfg = yaml.safe_load(f) or {}
             adapter_cfg = next((a for a in full_cfg.get("adapters", []) if a.get("name") == adapter_name), None)
             if adapter_cfg is None:
@@ -1014,7 +1020,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             adapter_cfg["reflector_host"] = host
             adapter_cfg["reflector_port"] = port
             adapter_cfg["module"] = module
-            with open(cfg_path, "w") as f:
+            with open(cfg_path, "w", encoding="utf-8") as f:
                 yaml.dump(full_cfg, f, default_flow_style=False, allow_unicode=True)
         except PermissionError:
             return {"status": "error", "detail": "could not write config.yaml (permission denied)"}
@@ -2064,7 +2070,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not config_path.exists():
             config_path = Path("config.yaml")
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f)
             return {"adapters": cfg.get("adapters", []), "bridge_rules": cfg.get("bridge_rules", [])}
         except Exception as exc:
@@ -2084,12 +2090,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             {"adapters": new_adapters}, default_flow_style=False, allow_unicode=True
         ).strip()
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
             cfg["adapters"] = new_adapters
             if "bridge_rules" in data:
                 cfg["bridge_rules"] = data["bridge_rules"]
-            with open(config_path, "w") as f:
+            with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
             return {"status": "ok", "note": "Restart ECH to apply adapter changes"}
         except PermissionError as exc:
@@ -2117,7 +2123,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not config_path.exists():
             config_path = Path("config.yaml")
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
             channels = cfg.get("channels", [])
             if not isinstance(channels, list):
@@ -2130,7 +2136,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             else:
                 channels.append({"idx": idx, "key_hex": key_hex})
             cfg["channels"] = channels
-            with open(config_path, "w") as f:
+            with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
             return {"status": "ok", "note": "Restart ECH to decrypt messages with this key"}
         except PermissionError as exc:
@@ -2156,10 +2162,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not config_path.exists():
             config_path = Path("config.yaml")
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
             cfg["bridge_rules"] = rules
-            with open(config_path, "w") as f:
+            with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
             return {"status": "ok", "rules": rules,
                     "note": f"{len(rules)} rule(s) applied live and saved to config"}
@@ -2843,6 +2849,98 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         exist. See Database.verify_audit_chain()."""
         return await db.verify_audit_chain()
 
+    @app.get("/api/system/adapter-types")
+    async def list_adapter_types():
+        """Known adapter 'type' values, read straight from main.py's own
+        build_adapter() dispatch tables so this can't drift out of sync
+        with what's actually instantiable — used to populate the Settings
+        adapter editor's type picker instead of a second hardcoded list."""
+        from ech.main import MOCK_ADAPTER_TYPES, REAL_ADAPTER_TYPES
+        return {"types": sorted(REAL_ADAPTER_TYPES), "mock_types": sorted(MOCK_ADAPTER_TYPES)}
+
+    @app.get("/api/system/serial-ports")
+    async def list_serial_ports():
+        """List attached serial devices (USB radios, GPS receivers, etc.)
+        so Settings' adapter/GPS editors can offer a picker instead of
+        requiring the operator to find and type a /dev/ttyUSBn or COMn
+        path by hand. Admin-only (covered by the generic '/api/system/'
+        ADMIN_PREFIXES entry)."""
+        try:
+            from serial.tools import list_ports
+        except ImportError:
+            return {"ports": [], "error": "pyserial not installed"}
+        ports = []
+        for p in list_ports.comports():
+            ports.append({
+                "device": p.device,
+                "description": p.description or "",
+                "hwid": p.hwid or "",
+                "manufacturer": p.manufacturer or "",
+                "product": p.product or "",
+                "serial_number": p.serial_number or "",
+                "vid": p.vid, "pid": p.pid,
+            })
+        return {"ports": ports}
+
+    @app.get("/api/system/gps-config")
+    async def get_gps_config():
+        """Current gps: block from config.yaml, or enabled:False if absent
+        — presence/absence of the key is what actually enables GpsReader in
+        main.py (no separate enabled flag there), so this endpoint surfaces
+        that as a boolean for the UI rather than making the Settings form
+        reverse-engineer it."""
+        import yaml
+        from pathlib import Path
+        config_path = Path("/etc/ech/config.yaml")
+        if not config_path.exists():
+            config_path = Path("config.yaml")
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+        except Exception as exc:
+            return {"error": str(exc)}
+        gps_cfg = cfg.get("gps")
+        if not gps_cfg:
+            return {"enabled": False}
+        return {"enabled": True, **gps_cfg}
+
+    @app.post("/api/system/gps-config")
+    async def save_gps_config(request: Request):
+        """Write (or remove) the gps: block in config.yaml — GUI equivalent
+        of hand-editing it, including picking a serial port from
+        GET /api/system/serial-ports instead of typing a device path blind.
+        Takes effect on next ECH restart, same as adapter config changes."""
+        import yaml
+        from pathlib import Path
+        data = await request.json()
+        config_path = Path("/etc/ech/config.yaml")
+        if not config_path.exists():
+            config_path = Path("config.yaml")
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            if not data.get("enabled", True):
+                cfg.pop("gps", None)
+            else:
+                port = str(data.get("port", "")).strip()
+                if not port:
+                    return {"status": "error", "detail": "Serial port is required"}
+                cfg["gps"] = {
+                    "port": port,
+                    "baud": int(data.get("baud", 9600)),
+                    "time_sync": bool(data.get("time_sync", False)),
+                    "update_interval": float(data.get("update_interval", 30)),
+                    "min_satellites": int(data.get("min_satellites", 4)),
+                }
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            return {"status": "ok", "note": "Restart ECH to apply"}
+        except PermissionError as exc:
+            return {"status": "error", "detail": str(exc),
+                    "fix_hint": f"sudo chown $(whoami) {config_path}"}
+        except Exception as exc:
+            return {"status": "error", "detail": str(exc)}
+
     @app.get("/api/system/db_health")
     async def db_health():
         """Result of the last periodic (daily) SQLite integrity_check, plus
@@ -2910,7 +3008,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not config_path.exists():
             config_path = Path("config.yaml")
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
             bridge_cfg = cfg.get("meshcore_bridge", {})
             bridge_cfg["enabled"] = enabled
@@ -2919,7 +3017,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 bridge_cfg.setdefault("mqtt_port", 1883)
                 bridge_cfg.setdefault("topic_prefix", "meshcore")
             cfg["meshcore_bridge"] = bridge_cfg
-            with open(config_path, "w") as f:
+            with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}
@@ -3800,10 +3898,10 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
         if not config_path.exists():
             config_path = Path("config.yaml")
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
             cfg.setdefault("cat", {}).update(updates)
-            with open(config_path, "w") as f:
+            with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
             return {"status": "ok", "updated": list(updates.keys()),
                     "note": "Restart ECH to apply CAT connection changes"}
@@ -3953,11 +4051,11 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
             return {"status": "ok", "updated": []}
         config_path = Path("/etc/ech/config.yaml")
         try:
-            cfg = yaml.safe_load(config_path.read_text()) or {} if config_path.exists() else {}
+            cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {} if config_path.exists() else {}
             if "hamlog" not in cfg:
                 cfg["hamlog"] = {}
             cfg["hamlog"].update(allowed)
-            config_path.write_text(yaml.dump(cfg, default_flow_style=False, allow_unicode=True))
+            config_path.write_text(yaml.dump(cfg, default_flow_style=False, allow_unicode=True), encoding="utf-8")
             return {"status": "ok", "updated": list(allowed.keys())}
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}

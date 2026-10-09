@@ -189,9 +189,58 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
       <div style="margin-top:14px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px">
         <div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);margin-bottom:8px">System GPS receiver (ublox serial)</div>
         <div id="gps-status-row" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px">Loading…</div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">
-          Configure in config.yaml under <code style="background:var(--bg2);padding:1px 4px;border-radius:2px">gps:</code> — the receiver feeds the system base location automatically.
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <label style="margin:0;display:inline">Enable GPS receiver</label>
+          <label class="toggle">
+            <input type="checkbox" id="gps-enabled" onchange="document.getElementById('gps-fields').style.display = this.checked ? '' : 'none'">
+            <span class="toggle-slider"></span>
+          </label>
+          <button class="btn" style="padding:3px 10px;font-size:10px;margin-left:auto" onclick="loadSerialPorts()">↻ Rescan serial ports</button>
         </div>
+        <div id="gps-fields" style="display:none">
+          <div class="row3">
+            <div>
+              <label>Serial port</label>
+              <select id="gps-port-select" onchange="document.getElementById('gps-port-custom').style.display = this.value === '__custom__' ? '' : 'none'">
+                <option value="">— select a port —</option>
+                <option value="__custom__">Custom path…</option>
+              </select>
+              <input type="text" id="gps-port-custom" placeholder="/dev/ttyUSB0 or COM3" style="display:none;margin-top:6px">
+            </div>
+            <div>
+              <label>Baud rate</label>
+              <select id="gps-baud">
+                <option value="4800">4800</option>
+                <option value="9600" selected>9600 (most ublox)</option>
+                <option value="19200">19200</option>
+                <option value="38400">38400</option>
+                <option value="57600">57600</option>
+                <option value="115200">115200</option>
+              </select>
+            </div>
+            <div>
+              <label>Min satellites for a fix</label>
+              <input type="number" id="gps-min-sats" value="4" min="1" max="20">
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Position update interval (seconds)</label>
+              <input type="number" id="gps-update-interval" value="30" min="1">
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:20px">
+              <label style="margin:0;display:inline">Sync system clock from GPS</label>
+              <label class="toggle">
+                <input type="checkbox" id="gps-time-sync">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-green" onclick="saveGpsConfig()">Save (requires ECH restart)</button>
+        </div>
+        <div id="gps-save-result" style="margin-top:6px;font-family:var(--mono);font-size:10px"></div>
       </div>
     </div>
   </div>
@@ -558,19 +607,32 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
   <div class="section">
     <div class="section-header" onclick="toggle('adapter-body')">
       <span class="section-title">ADAPTER CONFIGURATION</span>
-      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Edit config.yaml directly for full control</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Add, edit, enable/disable adapters — no config.yaml editing needed for common fields</span>
     </div>
     <div id="adapter-body" class="section-body">
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="btn btn-blue" onclick="addNewAdapter()">+ Add adapter</button>
+        <button class="btn" onclick="loadSerialPorts()">↻ Rescan serial ports</button>
+      </div>
       <div id="adapter-list"></div>
-      <div style="margin-top:16px">
-        <label>Raw adapter config (JSON — saved to config.yaml)</label>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-green" onclick="saveAdaptersStructured()">Save all adapters (requires ECH restart)</button>
+        <button class="btn btn-yellow" onclick="restartECH()">Restart ECH</button>
+      </div>
+      <div id="adapter-save-result" style="margin-top:6px;font-family:var(--mono);font-size:10px"></div>
+
+      <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted);margin-bottom:6px">
+          ADVANCED: raw JSON (for nested/list fields the form above can't represent)
+        </div>
         <textarea id="adapter-yaml" spellcheck="false"></textarea>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn btn-green" onclick="saveAdapters()">Save (requires ECH restart)</button>
-          <button class="btn btn-yellow" onclick="restartECH()">Restart ECH</button>
+          <button class="btn btn-green" onclick="saveAdapters()">Save raw JSON (requires ECH restart)</button>
+          <button class="btn" onclick="loadRawJsonIntoForm()">↑ Load raw JSON into form above</button>
         </div>
         <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px">
-          Changes take effect after restart. The editor shows JSON; it is converted to YAML when saved.
+          The two editors are independent snapshots, not live-synced — use "Load raw JSON into form" after
+          hand-editing here if you want those changes reflected in the structured editor too.
         </div>
       </div>
     </div>
@@ -1242,6 +1304,100 @@ async function loadGpsStatus() {
   }
 }
 
+// Shared by the GPS form and the per-adapter serial-port pickers — one
+// fetch, populates every <select class="serial-port-select"> on the page
+// so plugging in a device and clicking "Rescan" updates all of them.
+let _serialPortsCache = [];
+
+async function loadSerialPorts() {
+  try {
+    const d = await fetch('/api/system/serial-ports').then(r => r.json());
+    _serialPortsCache = d.ports || [];
+  } catch(e) {
+    _serialPortsCache = [];
+  }
+  document.querySelectorAll('select.serial-port-select').forEach(sel => _populatePortSelect(sel));
+}
+
+function _populatePortSelect(sel, currentValue) {
+  const keep = currentValue !== undefined ? currentValue : sel.dataset.value || '';
+  const opts = _serialPortsCache.map(p =>
+    `<option value="${esc(p.device)}">${esc(p.device)} — ${esc(p.description || p.product || 'unknown device')}</option>`
+  ).join('');
+  const hasCurrentInList = _serialPortsCache.some(p => p.device === keep);
+  sel.innerHTML = `<option value="">— select a port —</option>${opts}<option value="__custom__">Custom path…</option>`;
+  if (keep && hasCurrentInList) {
+    sel.value = keep;
+  } else if (keep) {
+    sel.value = '__custom__';
+  }
+  // The custom-path text input is always this select's next sibling (both
+  // the GPS form and the per-adapter field editor follow this layout) —
+  // keep it in sync with whether "Custom path…" is the active choice.
+  const customInput = sel.nextElementSibling;
+  if (customInput && customInput.tagName === 'INPUT') {
+    if (sel.value === '__custom__') {
+      customInput.style.display = '';
+      if (keep) customInput.value = keep;
+    } else {
+      customInput.style.display = 'none';
+    }
+  }
+}
+
+async function loadGpsConfig() {
+  const sel = document.getElementById('gps-port-select');
+  if (sel) sel.classList.add('serial-port-select');
+  await loadSerialPorts();
+  try {
+    const d = await fetch('/api/system/gps-config').then(r => r.json());
+    document.getElementById('gps-enabled').checked = !!d.enabled;
+    document.getElementById('gps-fields').style.display = d.enabled ? '' : 'none';
+    if (d.enabled) {
+      _populatePortSelect(sel, d.port || '');
+      if (sel.value === '__custom__') {
+        document.getElementById('gps-port-custom').style.display = '';
+        document.getElementById('gps-port-custom').value = d.port || '';
+      }
+      document.getElementById('gps-baud').value = String(d.baud || 9600);
+      document.getElementById('gps-min-sats').value = d.min_satellites ?? 4;
+      document.getElementById('gps-update-interval').value = d.update_interval ?? 30;
+      document.getElementById('gps-time-sync').checked = !!d.time_sync;
+    }
+  } catch(e) {}
+}
+
+async function saveGpsConfig() {
+  const resultEl = document.getElementById('gps-save-result');
+  const enabled = document.getElementById('gps-enabled').checked;
+  const sel = document.getElementById('gps-port-select');
+  const port = sel.value === '__custom__'
+    ? document.getElementById('gps-port-custom').value.trim()
+    : sel.value;
+  if (enabled && !port) { resultEl.innerHTML = '<span style="color:var(--red)">Select or enter a serial port</span>'; return; }
+  const payload = {
+    enabled, port,
+    baud: parseInt(document.getElementById('gps-baud').value) || 9600,
+    min_satellites: parseInt(document.getElementById('gps-min-sats').value) || 4,
+    update_interval: parseFloat(document.getElementById('gps-update-interval').value) || 30,
+    time_sync: document.getElementById('gps-time-sync').checked,
+  };
+  try {
+    const r = await fetch('/api/system/gps-config', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      resultEl.innerHTML = `<span style="color:var(--green)">✓ Saved — ${esc(d.note || '')}</span>`;
+    } else {
+      resultEl.innerHTML = `<span style="color:var(--red)">${esc(d.detail || 'save failed')}</span>` +
+        (d.fix_hint ? `<br><code style="color:var(--dim)">${esc(d.fix_hint)}</code>` : '');
+    }
+  } catch(e) {
+    resultEl.innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`;
+  }
+}
+
 function detectLocation() {
   if (!navigator.geolocation) { alert('Geolocation not available in this browser'); return; }
   navigator.geolocation.getCurrentPosition(pos => {
@@ -1280,6 +1436,7 @@ async function init() {
   // Load system GPS status
   loadGpsStatus();
   setInterval(loadGpsStatus, 15000);
+  loadGpsConfig();
 
   // Load state
   const state = await fetch('/api/state').then(r=>r.json());
@@ -1681,14 +1838,160 @@ async function pollWeatherNow() {
   toast('NWS poll complete');
 }
 
+// ── Structured adapter editor ───────────────────────────────────────────
+// _adaptersState is the editor's own working copy — edits mutate it
+// directly via oninput/onchange handlers below, independent of the raw
+// JSON textarea (which stays a separate, manually-synced snapshot; see
+// loadRawJsonIntoForm()). Field keys whose current value looks like a
+// serial device path (not a key named "port" that happens to hold a
+// numeric TCP port) get a port-picker dropdown instead of a bare text box.
+let _adaptersState = [];
+let _adapterTypesCache = { types: [], mock_types: [] };
+const _SENSITIVE_KEY_RE = /password|secret|token|key|passcode/i;
+const _SERIAL_PATH_RE = /^(\/dev\/|COM\d+)/i;
+
+async function loadAdapterTypes() {
+  try {
+    _adapterTypesCache = await fetch('/api/system/adapter-types').then(r => r.json());
+  } catch(e) {}
+}
+
 function renderAdapterList(adapters) {
-  document.getElementById('adapter-list').innerHTML = adapters.map(a =>
-    `<div class="adapter-row">
-      <span class="adapter-name">${esc(a.name)}</span>
-      <span class="adapter-type"> — ${esc(a.type)}</span>
-      ${a.type.startsWith('mock') ? '<span style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-left:6px">[mock]</span>' : ''}
-    </div>`
-  ).join('');
+  _adaptersState = JSON.parse(JSON.stringify(adapters));  // deep copy — editor's own working set
+  _renderAdapterCards();
+  _reapplySerialPortSelects();
+}
+
+function _renderAdapterCards() {
+  const el = document.getElementById('adapter-list');
+  el.innerHTML = _adaptersState.map((a, i) => {
+    const isMock = (a.type || '').startsWith('mock');
+    const scalarKeys = Object.keys(a).filter(k => k !== 'name' && k !== 'type' && k !== 'enabled' &&
+      (typeof a[k] === 'string' || typeof a[k] === 'number' || typeof a[k] === 'boolean'));
+    const complexKeys = Object.keys(a).filter(k => k !== 'name' && k !== 'type' && k !== 'enabled' && !scalarKeys.includes(k));
+    const fieldsHtml = scalarKeys.map(k => _renderAdapterFieldInput(i, k, a[k])).join('');
+    const complexHtml = complexKeys.length
+      ? `<div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px">
+          Complex field(s) not shown here — edit via raw JSON below: ${complexKeys.map(esc).join(', ')}
+        </div>` : '';
+    return `<div class="adapter-row" style="flex-direction:column;align-items:stretch;gap:8px;padding:10px;border:1px solid var(--border);border-radius:4px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="text" value="${esc(a.name || '')}" placeholder="name" style="width:160px;font-size:11px;padding:4px 8px"
+          oninput="_adaptersState[${i}].name = this.value">
+        <span class="adapter-type">${esc(a.type)}</span>
+        ${isMock ? '<span style="font-family:var(--mono);font-size:9px;color:var(--dim)">[mock]</span>' : ''}
+        <label style="margin:0;display:inline-flex;align-items:center;gap:4px;margin-left:auto">
+          <input type="checkbox" ${a.enabled === false ? '' : 'checked'}
+            onchange="_adaptersState[${i}].enabled = this.checked"> enabled
+        </label>
+        <button class="btn" style="padding:3px 8px;font-size:10px" onclick="_addAdapterFieldPrompt(${i})">+ field</button>
+        <button class="btn btn-red" style="padding:3px 8px;font-size:10px" onclick="deleteAdapterCard(${i})">delete</button>
+      </div>
+      <div class="row3" style="gap:8px">${fieldsHtml}</div>
+      ${complexHtml}
+    </div>`;
+  }).join('') || '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No adapters configured</div>';
+}
+
+function _renderAdapterFieldInput(i, key, value) {
+  const looksLikeSerialField = (key === 'port' || key === 'device') && typeof value === 'string'
+    && (value === '' || _SERIAL_PATH_RE.test(value));
+  if (looksLikeSerialField) {
+    return `<div>
+      <label style="margin-top:0">${esc(key)}</label>
+      <select class="serial-port-select" data-value="${esc(value)}"
+        onchange="_adaptersState[${i}]['${key}'] = this.value === '__custom__' ? '' : this.value; _onAdapterPortSelectChange(this, ${i}, '${key}')">
+      </select>
+      <input type="text" style="display:${value && !_serialPortsCache.some(p=>p.device===value) ? '' : 'none'};margin-top:4px" placeholder="custom path"
+        value="${esc(value)}" oninput="_adaptersState[${i}]['${key}'] = this.value">
+    </div>`;
+  }
+  if (typeof value === 'boolean') {
+    return `<div style="display:flex;align-items:center;gap:6px;margin-top:20px">
+      <label style="margin:0">${esc(key)}</label>
+      <input type="checkbox" ${value ? 'checked' : ''} onchange="_adaptersState[${i}]['${key}'] = this.checked">
+    </div>`;
+  }
+  if (typeof value === 'number') {
+    return `<div><label style="margin-top:0">${esc(key)}</label>
+      <input type="number" value="${value}" oninput="_adaptersState[${i}]['${key}'] = parseFloat(this.value) || 0"></div>`;
+  }
+  const inputType = _SENSITIVE_KEY_RE.test(key) ? 'password' : 'text';
+  return `<div><label style="margin-top:0">${esc(key)}</label>
+    <input type="${inputType}" value="${esc(value)}" oninput="_adaptersState[${i}]['${key}'] = this.value"></div>`;
+}
+
+function _onAdapterPortSelectChange(sel, i, key) {
+  const customInput = sel.nextElementSibling;
+  if (sel.value === '__custom__') {
+    customInput.style.display = '';
+    customInput.focus();
+  } else {
+    customInput.style.display = 'none';
+    customInput.value = sel.value;
+  }
+}
+
+function _addAdapterFieldPrompt(i) {
+  const key = prompt('Field name to add (see the adapter type\'s docstring in ech/adapters/ for valid keys):');
+  if (!key) return;
+  _adaptersState[i][key] = '';
+  _renderAdapterCards();
+  _reapplySerialPortSelects();
+}
+
+function deleteAdapterCard(i) {
+  if (!confirm(`Delete adapter "${_adaptersState[i].name}"? This only removes it from the form — click "Save all adapters" to persist.`)) return;
+  _adaptersState.splice(i, 1);
+  _renderAdapterCards();
+  _reapplySerialPortSelects();
+}
+
+async function addNewAdapter() {
+  if (!_adapterTypesCache.types.length) await loadAdapterTypes();
+  const allTypes = [..._adapterTypesCache.types, ..._adapterTypesCache.mock_types];
+  const type = prompt(`Adapter type — one of:\n${allTypes.join(', ')}`);
+  if (!type || !allTypes.includes(type)) { if (type) toast(`Unknown type "${type}"`, 'err'); return; }
+  const name = prompt('Adapter name (unique, used in the UI and logs):', type);
+  if (!name) return;
+  _adaptersState.push({ name, type });
+  _renderAdapterCards();
+  _reapplySerialPortSelects();
+}
+
+function _reapplySerialPortSelects() {
+  document.querySelectorAll('select.serial-port-select').forEach(sel => _populatePortSelect(sel, sel.dataset.value));
+}
+
+async function saveAdaptersStructured() {
+  const resultEl = document.getElementById('adapter-save-result');
+  try {
+    const r = await fetch('/api/adapter-config', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ adapters: _adaptersState, bridge_rules: bridgeRules }),
+    });
+    const d = await r.json();
+    if (d.status === 'error') {
+      resultEl.innerHTML = `<span style="color:var(--red)">${esc(d.detail || 'save failed')}</span>` +
+        (d.fix_hint ? `<br><code style="color:var(--dim)">${esc(d.fix_hint)}</code>` : '');
+    } else {
+      resultEl.innerHTML = `<span style="color:var(--green)">✓ ${esc(d.note || 'Saved')}</span>`;
+      document.getElementById('adapter-yaml').value = JSON.stringify(_adaptersState, null, 2);
+    }
+  } catch(e) {
+    resultEl.innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`;
+  }
+}
+
+function loadRawJsonIntoForm() {
+  try {
+    const adapters = JSON.parse(document.getElementById('adapter-yaml').value);
+    renderAdapterList(adapters);
+    _reapplySerialPortSelects();
+    toast('Raw JSON loaded into the form above');
+  } catch(e) {
+    alert('JSON parse error: ' + e.message);
+  }
 }
 
 async function saveAdapters() {
