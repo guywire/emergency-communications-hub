@@ -86,6 +86,39 @@ UI_DIR = Path(__file__).parent.parent / "ui"
 # get the prefix too (base_path_patch_script). Both are no-ops when
 # base_path is "". Pure functions (no app state) so they're unit-testable
 # without constructing the full FastAPI app.
+def atomic_write_yaml(path, cfg: dict) -> None:
+    """Write `cfg` to `path` as YAML atomically.
+
+    Real incident, 2026-10-09: every config.yaml write site in this file
+    used to open the live path directly in "w" mode and stream
+    `yaml.dump(cfg, f, ...)` straight into it. `open(path, "w")` truncates
+    the file the instant it's opened — if the dump then throws partway
+    through serializing (or a second concurrent request raced this one;
+    neither held a lock), the file was left truncated. That happened for
+    real: an operator's adapter-config save left config.yaml unparseable
+    ("unexpected end of file"), and ECH could not restart at all.
+
+    Fix: render the full YAML to a string FIRST (so any serialization
+    error happens before the live file is touched at all), then write to
+    a sibling temp file and `os.replace()` it into place — on POSIX and
+    Windows alike, `os.replace` is atomic, so the live file is only ever
+    swapped for a complete, valid one, never left half-written.
+    """
+    import os
+    import yaml
+    from pathlib import Path
+    path = Path(path)
+    # safe_dump, not dump: config.yaml is always read back with safe_load()
+    # elsewhere, and safe_dump raises cleanly on any value it can't
+    # represent in standard YAML instead of silently emitting a
+    # !!python/object:... tag for it (plain dump's default behavior).
+    rendered = yaml.safe_dump(cfg, default_flow_style=False, allow_unicode=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(rendered)
+    os.replace(tmp_path, path)
+
+
 _HREF_SRC_RE = re.compile(r'\b(href|src|action)="/(?!/)')
 
 
@@ -587,8 +620,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                     if a.get("name") == adapter_name:
                         a["enabled"] = enabled
                         break
-                with open(config_path, "w", encoding="utf-8") as f:
-                    yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+                atomic_write_yaml(config_path, cfg)
                 return {"status": "ok", "adapter": adapter_name, "enabled": enabled, "persisted": True}
             except Exception as exc:
                 return {"status": "ok", "adapter": adapter_name, "enabled": enabled,
@@ -650,8 +682,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                         a["channel_idx"] = idx
                         a["channel_name"] = name
                         break
-                with open(cp, "w", encoding="utf-8") as f:
-                    _yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+                atomic_write_yaml(cp, cfg)
                 return True
             except Exception as exc:
                 log.warning("Channel persist to config failed: %s", exc)
@@ -1020,8 +1051,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             adapter_cfg["reflector_host"] = host
             adapter_cfg["reflector_port"] = port
             adapter_cfg["module"] = module
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                yaml.dump(full_cfg, f, default_flow_style=False, allow_unicode=True)
+            atomic_write_yaml(cfg_path, full_cfg)
         except PermissionError:
             return {"status": "error", "detail": "could not write config.yaml (permission denied)"}
 
@@ -2095,8 +2125,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             cfg["adapters"] = new_adapters
             if "bridge_rules" in data:
                 cfg["bridge_rules"] = data["bridge_rules"]
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            atomic_write_yaml(config_path, cfg)
             return {"status": "ok", "note": "Restart ECH to apply adapter changes"}
         except PermissionError as exc:
             return {
@@ -2136,8 +2165,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             else:
                 channels.append({"idx": idx, "key_hex": key_hex})
             cfg["channels"] = channels
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            atomic_write_yaml(config_path, cfg)
             return {"status": "ok", "note": "Restart ECH to decrypt messages with this key"}
         except PermissionError as exc:
             raise HTTPException(status_code=500, detail=f"Config write denied: {exc}. Run: sudo chown $(whoami) {config_path}")
@@ -2165,8 +2193,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             with open(config_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
             cfg["bridge_rules"] = rules
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            atomic_write_yaml(config_path, cfg)
             return {"status": "ok", "rules": rules,
                     "note": f"{len(rules)} rule(s) applied live and saved to config"}
         except Exception as exc:
@@ -2349,8 +2376,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             if "ndbc_lat" in data:              bot_cfg["ndbc_lat"]              = float(data["ndbc_lat"]) if data["ndbc_lat"] not in (None, "") else None
             if "ndbc_lon" in data:              bot_cfg["ndbc_lon"]              = float(data["ndbc_lon"]) if data["ndbc_lon"] not in (None, "") else None
             if "mention_name" in data:          bot_cfg["mention_name"]          = str(data["mention_name"]).strip()
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            atomic_write_yaml(config_path, cfg)
             return {"status": "ok"}
         except PermissionError as exc:
             return {"status": "ok", "warning": f"Saved in-memory only — config write denied: {exc}. Run: sudo chown $(whoami) {config_path}"}
@@ -2480,13 +2506,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not path:
             return {"status": "error", "detail": "config_path not set on server"}
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
         except FileNotFoundError:
             cfg = {}
         cfg[section] = {**(cfg.get(section) or {}), **values}
-        with open(path, "w") as f:
-            yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+        atomic_write_yaml(path, cfg)
         return {"status": "ok", "saved": path}
 
     # ── Retention / purge settings ────────────────────────────────────────
@@ -2528,7 +2553,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         path = app.state.config_path
         if path:
             try:
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     cfg = yaml.safe_load(f) or {}
                 ret_section = {"enabled": True, "archive_days": archive_days, **{k: v for k, v in new_ret.items()}}
                 cfg["retention"] = ret_section
@@ -2536,8 +2561,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 for adp_cfg in cfg.get("adapters", []):
                     if str(adp_cfg.get("type", "")).lower() in ("meshcore", "meshcore_adapter"):
                         adp_cfg["node_ttl_hours"] = node_ttl
-                with open(path, "w") as f:
-                    yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+                atomic_write_yaml(path, cfg)
             except PermissionError:
                 return {"status": "ok", "warning": "settings applied but could not write config.yaml"}
         return {"status": "ok"}
@@ -2692,6 +2716,39 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             from fastapi import HTTPException
             raise HTTPException(status_code=400, detail=f"Service '{service}' not in allowed list")
         try:
+            if service == "ech":
+                # Self-restart hazard (same one self_update.py's module
+                # docstring documents at length): this request is being
+                # handled BY the "ech" process that "systemctl restart ech"
+                # is about to SIGTERM. Awaiting p.communicate() here used to
+                # block on that exact process exiting — so the response
+                # (including this audit entry) never got sent at all, and
+                # the browser saw its fetch() connection just die mid-flight
+                # (surfaced in the UI as a confusing "unexpected end of
+                # file"/JSON-parse error, not any real config corruption —
+                # a real incident, 2026-10-09). Fire-and-forget detached,
+                # exactly like self_update.py's own restart call, so this
+                # handler can actually finish and respond first.
+                await _audit_record(db, request, acting_name, "admin", "service_restart",
+                                     detail="service=ech (self-restart, detached)", success=True)
+                try:
+                    with open("/tmp/ech_manual_restart.log", "ab") as logf:
+                        await _aio.create_subprocess_exec(
+                            "sudo", "-n", "systemctl", "restart", "ech",
+                            stdout=logf, stderr=logf, start_new_session=True,
+                        )
+                except OSError:
+                    # Can't open the log file (e.g. this exact code path
+                    # running somewhere /tmp isn't writable) — the restart
+                    # itself must not be skipped over a diagnostic log.
+                    await _aio.create_subprocess_exec(
+                        "sudo", "-n", "systemctl", "restart", "ech",
+                        stdout=_aio.subprocess.DEVNULL, stderr=_aio.subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                return {"status": "ok", "service": service,
+                        "note": "Restart issued in the background — this connection will drop now"}
+
             p = await _aio.create_subprocess_exec(
                 "sudo", "systemctl", "restart", service,
                 stdout=_aio.subprocess.PIPE,
@@ -2932,8 +2989,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                     "update_interval": float(data.get("update_interval", 30)),
                     "min_satellites": int(data.get("min_satellites", 4)),
                 }
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            atomic_write_yaml(config_path, cfg)
             return {"status": "ok", "note": "Restart ECH to apply"}
         except PermissionError as exc:
             return {"status": "error", "detail": str(exc),
@@ -3017,8 +3073,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 bridge_cfg.setdefault("mqtt_port", 1883)
                 bridge_cfg.setdefault("topic_prefix", "meshcore")
             cfg["meshcore_bridge"] = bridge_cfg
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            atomic_write_yaml(config_path, cfg)
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}
         # Update in-memory state
@@ -3901,8 +3956,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
             with open(config_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
             cfg.setdefault("cat", {}).update(updates)
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            atomic_write_yaml(config_path, cfg)
             return {"status": "ok", "updated": list(updates.keys()),
                     "note": "Restart ECH to apply CAT connection changes"}
         except PermissionError as exc:
@@ -4055,7 +4109,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
             if "hamlog" not in cfg:
                 cfg["hamlog"] = {}
             cfg["hamlog"].update(allowed)
-            config_path.write_text(yaml.dump(cfg, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+            atomic_write_yaml(config_path, cfg)
             return {"status": "ok", "updated": list(allowed.keys())}
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}

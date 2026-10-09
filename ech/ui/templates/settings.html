@@ -1950,13 +1950,32 @@ function deleteAdapterCard(i) {
 async function addNewAdapter() {
   if (!_adapterTypesCache.types.length) await loadAdapterTypes();
   const allTypes = [..._adapterTypesCache.types, ..._adapterTypesCache.mock_types];
-  const type = prompt(`Adapter type — one of:\n${allTypes.join(', ')}`);
-  if (!type || !allTypes.includes(type)) { if (type) toast(`Unknown type "${type}"`, 'err'); return; }
+  const typed = prompt(`Adapter type — one of:\n${allTypes.join(', ')}`);
+  if (!typed) return;
+  // Forgive the natural "meshcore-serial"/"meshcore tcp"/"MeshCore" style
+  // guesses — transport (serial/tcp/usb/ble) is a config FIELD on a type,
+  // not a separate type name, which isn't obvious from the type list alone.
+  // Failing silently here (as this used to) looked exactly like "my new
+  // adapter just didn't show up" with no indication why — a real report,
+  // 2026-10-09.
+  const normalize = s => s.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  const typedNorm = normalize(typed);
+  let type = allTypes.find(t => normalize(t) === typedNorm);
+  if (!type) {
+    const stripped = typedNorm.replace(/-(serial|tcp|usb|ble|internet|kiss)$/, '');
+    type = allTypes.find(t => normalize(t) === stripped);
+  }
+  if (!type) {
+    alert(`"${typed}" isn't a known adapter type.\n\nValid types:\n${allTypes.join(', ')}\n\n`
+      + `(transport like serial/TCP is usually a config FIELD on the type, e.g. meshcore's "transport:" key — not a separate type name.)`);
+    return;
+  }
   const name = prompt('Adapter name (unique, used in the UI and logs):', type);
   if (!name) return;
   _adaptersState.push({ name, type });
   _renderAdapterCards();
   _reapplySerialPortSelects();
+  toast(`Added "${name}" (${type}) to the form below — don't forget to Save`);
 }
 
 function _reapplySerialPortSelects() {
@@ -2017,8 +2036,17 @@ async function restartECH() {
       toast(`Restart failed: ${d.stderr || d.detail || 'unknown error'}`, 'err');
     }
   } catch(e) {
-    toast('Restart request failed — see console', 'err');
-    console.error('restartECH failed:', e);
+    // The backend detaches this restart and responds immediately (see
+    // app.py's restart_service() — self-restarting "ech" used to await
+    // its own death, dropping the connection before any response body
+    // arrived, which surfaced here as a confusing "unexpected end of
+    // JSON input"-type error even though the restart itself was fine).
+    // A fetch()-level failure at this point most likely just means the
+    // page's own connection dropped as part of that restart, not a real
+    // failure — reload instead of alarming the operator.
+    toast('Connection dropped — ECH is likely restarting now. Reloading in 5s…');
+    console.warn('restartECH: fetch failed, assuming restart is in progress:', e);
+    setTimeout(() => location.reload(), 5000);
   }
 }
 
