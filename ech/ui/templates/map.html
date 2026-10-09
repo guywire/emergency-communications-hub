@@ -100,6 +100,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row" id="dx-btn" onclick="toggleDXCluster()" title="Show general DX cluster spots near your base position — precise for US calls (FCC address), approximate country-center for others">🌐 DX Cluster</button>
     <button class="ctrl-btn layer-row" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ Grid squares</button>
     <div class="layer-group-title">Environmental</div>
+    <button class="ctrl-btn layer-row" id="wxwarn-btn" onclick="toggleWeatherWarnings()" title="Active NWS weather warning polygons (tornado, severe thunderstorm, flash flood, etc.) — county/zone-based alerts with no polygon in the NWS feed aren't drawable and are skipped, not guessed at">⛈ Weather warnings</button>
     <button class="ctrl-btn layer-row" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI / smoke</button>
     <button class="ctrl-btn layer-row" id="water-btn" onclick="toggleWaterBodies()" title="Water body quality + boating/kayak conditions (EPA ATTAINS + NDBC buoys)">🌊 Water bodies</button>
   </div>
@@ -1304,6 +1305,64 @@ function addEmergencyStatusMarker(entry) {
   </div>`;
   const m = L.marker([entry.lat, entry.lon], {icon}).bindPopup(popup).addTo(map);
   _estatusMarkers.push(m);
+}
+
+// O94: active NWS weather warning polygons. "Severe storm tracks" (hurricane
+// forecast cones, storm-cell motion vectors) are NOT implemented — that's a
+// separate data source (NHC) ECH doesn't integrate; this draws real
+// polygon-based warnings from the NWS alerts feed ECH already polls
+// (/api/weather/alerts). County/zone-based alerts (geometry: null in the
+// NWS feed — most "Winter Storm Warning"-type alerts) have no shape to
+// draw and are skipped rather than approximated.
+let _wxWarnEnabled = false;
+let _wxWarnLayers = [];
+
+function toggleWeatherWarnings() {
+  _wxWarnEnabled = !_wxWarnEnabled;
+  const btn = document.getElementById('wxwarn-btn');
+  btn.classList.toggle('on', _wxWarnEnabled);
+  if (_wxWarnEnabled) {
+    loadWeatherWarnings();
+    toast('Weather warnings on');
+  } else {
+    _wxWarnLayers.forEach(l => map.removeLayer(l));
+    _wxWarnLayers = [];
+    toast('Weather warnings off');
+  }
+}
+
+function _wxSeverityColor(severity) {
+  const s = (severity || '').toLowerCase();
+  if (s === 'extreme') return '#f85149';
+  if (s === 'severe') return '#f0883e';
+  if (s === 'moderate') return '#d29922';
+  if (s === 'minor') return '#56d3c8';
+  return '#8b949e';
+}
+
+async function loadWeatherWarnings() {
+  if (!_wxWarnEnabled) return;
+  try {
+    const r = await fetch('/api/weather/alerts').catch(() => null);
+    if (!r || !r.ok) return;
+    const data = await r.json();
+    _wxWarnLayers.forEach(l => map.removeLayer(l));
+    _wxWarnLayers = [];
+    (data.alerts || []).forEach(a => {
+      if (!a.geometry) return;  // county/zone-based — no polygon available
+      const color = _wxSeverityColor(a.severity);
+      const layer = L.geoJSON(a.geometry, {
+        style: { color, weight: 2, fillColor: color, fillOpacity: 0.15 },
+      }).bindPopup(`<div class="node-popup">
+        <div class="node-name">⛈ ${esc(a.event || 'Weather Warning')}</div>
+        <div class="node-stat" style="color:${color}">Severity: ${esc(a.severity || 'Unknown')} · Urgency: ${esc(a.urgency || 'Unknown')}</div>
+        <div class="node-stat">${esc(a.area || '')}</div>
+        <div class="node-stat">${esc(a.headline || '')}</div>
+        ${a.expires ? `<div class="node-stat">Expires: ${esc(a.expires.replace('T',' ').slice(0,19))}</div>` : ''}
+      </div>`).addTo(map);
+      _wxWarnLayers.push(layer);
+    });
+  } catch(e) {}
 }
 
 function toggleGridSquares() {

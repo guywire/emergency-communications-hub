@@ -191,6 +191,16 @@ class WeatherService:
                     "headline": headline,
                     "area": area_desc,
                     "expires": expires,
+                    # O94: polygon-based warnings (tornado, severe
+                    # thunderstorm, flash flood, etc.) carry a real GeoJSON
+                    # geometry here; county/zone-based ones (most "Winter
+                    # Storm Warning"-type alerts) have geometry: null —
+                    # NWS doesn't inline the UGC zone boundary in this
+                    # endpoint, and ECH doesn't maintain its own zone-
+                    # boundary dataset, so those just aren't drawable as a
+                    # shape (map layer skips anything with no geometry
+                    # rather than guessing a shape).
+                    "geometry": feature.get("geometry"),
                 })
 
                 # Only emit if severity passes filter and not already seen
