@@ -27,10 +27,9 @@ Config keys:
                             Overrides username/password if the pubkey is available.
   pubkey_auth_mode  str     "letsmesh" (default) — username=8-char shortkey, password=full64hex
                             "full"               — username=full64hex, password=full64hex
-  jwt_owner         str     optional — links this observer to a letsmesh.net dashboard
-                            account for pubkey_auth JWTs (only sent when tls: true)
-  jwt_email         str     optional — same account-linking purpose as jwt_owner, the
-                            email used to log into letsmesh.net (only sent when tls: true)
+  jwt_owner         str     DEPRECATED (O75, 2026-10-09) — no longer sent; not part of
+                            LetsMesh's real auth scheme, see _jwt_header_and_payload()
+  jwt_email         str     DEPRECATED (O75, 2026-10-09) — same, no longer sent
   tls               bool    enable TLS (default: False)
   client_id         str     MQTT client ID (default: ech-{name})
   topics            list    topics to subscribe to (default: ['#'])
@@ -120,11 +119,13 @@ class MQTTAdapter(Adapter):
         self._pubkey_auth_mode = config.get("pubkey_auth_mode", "letsmesh")
         self._private_key      = config.get("private_key", "").strip()  # 64-byte hex Ed25519 key
         self._token_ttl        = int(config.get("token_ttl", 3600))
-        # Optional JWT claims matching the reference meshcoretomqtt client
-        # (Cisien/meshcoretomqtt bridge/mqtt_manager.py) — owner/email link
-        # this observer to a letsmesh.net dashboard account (cosmetic, not
-        # required for auth per LetsMesh's own docs) and are only sent when
-        # tls is enabled, matching the reference client's own guard.
+        # jwt_owner/jwt_email: DEPRECATED (O75, 2026-10-09) — these drove an
+        # `owner`/`email` JWT claim pair that, per a more accurate reference
+        # found after the original ones kept getting rejected, isn't part
+        # of LetsMesh's actual auth scheme at all. No longer sent (see
+        # _jwt_header_and_payload's docstring); kept here only so existing
+        # config.yaml files with these keys don't raise, and to emit a
+        # one-time warning pointing at why.
         self._jwt_owner        = config.get("jwt_owner", "").strip()
         self._jwt_email        = config.get("jwt_email", "").strip()
         self._tls              = bool(config.get("tls", False))
@@ -143,37 +144,50 @@ class MQTTAdapter(Adapter):
         return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
     def _jwt_header_and_payload(self, pubkey_hex: str) -> tuple[str, str]:
-        """Build the base64url header/payload halves of a meshcoretomqtt-
-        compatible Ed25519 JWT. Shared by both signing paths below — only the
-        signature (device vs. local) differs.
+        """Build the base64url header/payload halves of a LetsMesh-
+        compatible Ed25519 JWT. Shared by both signing paths below — only
+        the signature (device vs. local) differs.
 
-        Claim set matches the reference client (Cisien/meshcoretomqtt
-        bridge/mqtt_manager.py `_generate_auth_credentials`), confirmed
-        against its source rather than assumed:
-          publicKey/iat/exp  — always present
-          aud                — the broker hostname (LetsMesh's own example
-                               config sets audience to the exact server value)
-          client             — always present in the reference; ECH's JWT was
-                               previously missing this claim entirely
-          owner/email        — optional, only sent when tls is enabled
-                               (matching the reference's own guard), link this
-                               observer to a letsmesh.net dashboard account
+        REVISED 2026-10-08/09 (O75): the claim set below had two prior fix
+        attempts (rc211, rc216) that both failed to resolve a persistent
+        broker-side `[code:135] Not authorized` rejection. A fresh pass
+        found a more accurate, more actively-maintained reference than the
+        original `Cisien/meshcoretomqtt` this was modeled on —
+        `Colorado-Mesh/mesh-client`'s `docs/letsmesh-mqtt-auth.md` and
+        `michaelhart/meshcore-mqtt-broker` (broker-side source, same author
+        as the `meshcore-decoder` npm package that generates the token) —
+        and it describes a MINIMAL claim set, not the richer one rc216
+        built: only `publicKey`, `aud`, `iat`, and optional `exp`. The
+        `client`/`owner`/`email` claims added in rc216 (chasing the older,
+        less-authoritative reference) are NOT part of this scheme at all
+        and were a credible candidate for why a strict broker-side
+        validator kept rejecting the token. Removed here rather than kept
+        "just in case" — an extra, unexpected claim is exactly the kind of
+        thing a strict JWT validator can reject outright.
+
+        `aud` must equal the literal MQTT connect hostname (e.g.
+        `mqtt-us-v1.letsmesh.net`), not an apex/API domain — this already
+        matches `self._host` for a correctly-configured LetsMesh adapter
+        (see the example config in this module's docstring), so no change
+        needed there.
+
+        STATUS: implemented from the new reference, NOT yet live-verified
+        against the real broker — the operator doesn't currently run this
+        adapter against LetsMesh. Re-test live before trusting this fixes
+        the rejection; if it still fails, the next lead is forum.letsmesh.net
+        (thread "Updates to meshcoretomqtt" was actively discussing this
+        exact auth path as of the research pass, but requires a login to
+        read).
         """
         header = self._b64url(json.dumps({"alg": "Ed25519", "typ": "JWT"},
                                          separators=(",", ":")).encode())
         iat = int(time.time())
         payload_obj: dict = {
             "publicKey": pubkey_hex.upper(),
+            "aud": self._host,
             "iat": iat,
             "exp": iat + self._token_ttl,
-            "aud": self._host,
-            "client": f"ech-{ECH_VERSION}",
         }
-        if self._tls:
-            if self._jwt_owner:
-                payload_obj["owner"] = self._jwt_owner
-            if self._jwt_email:
-                payload_obj["email"] = self._jwt_email.lower()
         payload = self._b64url(json.dumps(payload_obj, separators=(",", ":")).encode())
         return header, payload
 
@@ -253,6 +267,14 @@ class MQTTAdapter(Adapter):
         return self._username, self._password
 
     async def connect(self) -> None:
+        if self._jwt_owner or self._jwt_email:
+            log.warning(
+                "MQTT %s: jwt_owner/jwt_email are configured but no longer sent — "
+                "see _jwt_header_and_payload()'s docstring (O75): the owner/email "
+                "claims aren't part of LetsMesh's real auth scheme and were a "
+                "likely cause of the broker rejecting this adapter's JWT. Safe to "
+                "remove these from config.yaml.", self.name,
+            )
         log.info("MQTT %s: connecting to %s:%d", self.name, self._host, self._port)
         self._connected = True
         self._run_task = asyncio.create_task(self._run(), name=f"{self.name}-run")
