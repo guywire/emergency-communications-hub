@@ -90,6 +90,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Live traffic</button>
     <div class="layer-group-title">Activity</div>
     <button class="ctrl-btn layer-row" id="strips-btn" onclick="toggleStripReports()" title="Strip reports with a known MGRS or LAT/LON field (mesh bot 'strip' command)">📋 Strip reports</button>
+    <button class="ctrl-btn layer-row" id="estatus-btn" onclick="toggleEmergencyStatus()" title="Emergency-status board entries with a lat/lon set (hospital beds, shelters, vehicles, etc. — see /status-board)">🏣 Emergency status</button>
     <button class="ctrl-btn layer-row" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">📓 Ham Log QSOs</button>
     <button class="ctrl-btn layer-row" id="psk-btn" onclick="togglePSKReporter()" title="Show ham stations transmitting near your base position (PSKReporter, 300km radius)">📻 PSK Reporter</button>
     <button class="ctrl-btn layer-row" id="pota-btn" onclick="togglePOTA()" title="Show active Parks on the Air activators near your base position">🏞 POTA</button>
@@ -1241,6 +1242,68 @@ function addStripMarker(rep) {
   </div>`;
   const m = L.marker([rep.lat, rep.lon], {icon}).bindPopup(popup).addTo(map);
   _stripMarkers.push(m);
+}
+
+// O93 remainder: emergency-status board entries with a lat/lon get plotted
+// here — same toggle+load+marker pattern as strip reports above. Status is
+// free text (see status_board.html's own suggested values), not a fixed
+// enum, so coloring only recognizes a handful of common values and falls
+// back to a neutral color for anything else rather than guessing.
+let _estatusEnabled = false;
+let _estatusMarkers = [];
+
+function toggleEmergencyStatus() {
+  _estatusEnabled = !_estatusEnabled;
+  const btn = document.getElementById('estatus-btn');
+  btn.classList.toggle('on', _estatusEnabled);
+  if (_estatusEnabled) {
+    loadEmergencyStatus();
+    toast('Emergency status layer on');
+  } else {
+    _estatusMarkers.forEach(m => m.remove());
+    _estatusMarkers = [];
+    toast('Emergency status layer off');
+  }
+}
+
+async function loadEmergencyStatus() {
+  if (!_estatusEnabled) return;
+  try {
+    const r = await fetch('/api/emergency-status').catch(() => null);
+    if (!r || !r.ok) return;
+    const data = await r.json();
+    _estatusMarkers.forEach(m => m.remove());
+    _estatusMarkers = [];
+    (data.entries || []).forEach(addEmergencyStatusMarker);
+  } catch(e) {}
+}
+
+function _estatusColor(status) {
+  const s = (status || '').toLowerCase();
+  if (s === 'open' || s === 'available') return '#3fb950';
+  if (s === 'limited') return '#d29922';
+  if (s === 'closed' || s === 'unavailable' || s === 'full') return '#f85149';
+  return '#8b949e';
+}
+
+function addEmergencyStatusMarker(entry) {
+  if (entry.lat == null || entry.lon == null) return;
+  const color = _estatusColor(entry.status);
+  const icon = L.divIcon({
+    className: 'node-dot',
+    html: `<div style="font-size:14px;line-height:1;color:${color};text-shadow:0 0 5px ${color}">🏣</div>`,
+    iconSize: [16, 16], iconAnchor: [8, 8],
+  });
+  const popup = `<div class="node-popup">
+    <div class="node-name">🏣 ${esc(entry.name || '')}</div>
+    <div class="node-stat">Category: ${esc(entry.category || '')}</div>
+    <div class="node-stat" style="color:${color}">Status: ${esc(entry.status || '(unset)')}</div>
+    ${entry.details ? `<div class="node-stat">${esc(entry.details)}</div>` : ''}
+    <div class="node-stat">${esc(entry.updated_at || '').replace('T',' ').slice(0,19)} UTC</div>
+    <div class="node-ext-links"><a href="/status-board" target="_blank" rel="noopener">Open in Status Board →</a></div>
+  </div>`;
+  const m = L.marker([entry.lat, entry.lon], {icon}).bindPopup(popup).addTo(map);
+  _estatusMarkers.push(m);
 }
 
 function toggleGridSquares() {
