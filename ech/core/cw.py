@@ -191,6 +191,12 @@ class CWDecoder:
                              # quantization plus edge-block widening biased the
                              # WPM estimate ~20 % low at high speeds
     end_of_tx_s: float = 1.2       # key-up silence that ends a transmission
+    # Noise rejection (live noisy-band report: static crashes decoded as runs
+    # of E/T at 60-240 "wpm" while real copy sat at 17-18 wpm):
+    max_wpm: float = 50.0          # faster decodes are noise, not keying; marks
+                                   # shorter than half a dit at this speed are
+                                   # treated as glitches and merged away
+    min_snr_db: float = 6.0        # weaker transmissions are dropped
 
     _buf: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32))
     _raw_recent: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32))
@@ -362,6 +368,26 @@ class CWDecoder:
         self._run_blocks = 0
         self._events = []
 
+        # Glitch filter: a mark shorter than half a dit at max_wpm can't be
+        # keying, and neither can one under 1/4 of this transmission's median
+        # mark (real dits are >= ~1/3 of it whether dits or dahs dominate).
+        # Drop it and merge the spaces either side into one gap — otherwise
+        # 10-15 ms static crashes become the "dit" cluster, set the unit, and
+        # every real dit decodes as a dah (live symptom: streams of T).
+        all_marks = sorted(b for is_mark, b in events if is_mark)
+        min_mark = (1200.0 / self.max_wpm) * 0.5 / self._block_ms_actual()
+        if all_marks:
+            min_mark = max(min_mark, 0.25 * all_marks[len(all_marks) // 2])
+        cleaned: list = []
+        for is_mark, b in events:
+            if is_mark and b < min_mark:
+                is_mark = False
+            if cleaned and cleaned[-1][0] == is_mark:
+                cleaned[-1] = (is_mark, cleaned[-1][1] + b)
+            else:
+                cleaned.append((is_mark, b))
+        events = cleaned
+
         marks = [b for is_mark, b in events if is_mark]
         if not marks:
             return None
@@ -378,9 +404,19 @@ class CWDecoder:
         # population); otherwise split at the geometric midpoint.
         mn, mx = min(marks), max(marks)
         if mx / mn >= 2.0:
-            split = math.sqrt(mn * mx)
-            dits = [m for m in marks if m < split]
-            unit = (sum(dits) / len(dits)) if dits else mn
+            # Pick the unit that best explains ALL marks as 1x (dit) or 3x
+            # (dah), each mark's log-error capped so a stray glitch costs a
+            # fixed amount instead of steering the fit. (The old "shortest
+            # cluster's mean" let a single surviving 25 ms static crash become
+            # the dit cluster, turning every real dit into a dah.)
+            def _cost(u: float) -> float:
+                return sum(min(abs(math.log(m / u)), abs(math.log(m / (3 * u))), 0.7)
+                           for m in marks)
+            cands = {float(m) for m in marks} | {m / 3.0 for m in marks}
+            u = min(cands, key=_cost)
+            split = u * math.sqrt(3.0)
+            dits = sorted(m for m in marks if m < split)
+            unit = dits[len(dits) // 2] if dits else u
         else:
             # All marks same length. Compare with intra-character spaces if
             # any: spaces ≈ marks → they're dits; spaces ≈ marks/3 → dahs.
@@ -423,6 +459,12 @@ class CWDecoder:
         snr_db = 0.0
         if self._tx_snr_den and self._noise > 0:
             snr_db = 10 * math.log10((self._tx_snr_num / self._tx_snr_den) / self._noise)
+        if wpm > self.max_wpm or snr_db < self.min_snr_db:
+            return None
+        # Isolated noise blips decode as lone dits/dahs — a transmission that
+        # is nothing but E and T is static, not a message.
+        if set(text.replace(" ", "")) <= {"E", "T"}:
+            return None
         return Transmission(
             text=text,
             wpm=round(wpm, 1),

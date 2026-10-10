@@ -23,7 +23,9 @@ Config (adapters: - type: cw_audio):
     wpm: 20                     # TX keying speed
     sample_rate: 8000
     tx_amplitude: 0.8
-    ptt: vox                    # "vox" (default, radio keys itself) or "cat" (ECH keys via rigctld)
+    max_wpm: 50                 # decodes faster than this are noise; also sets the glitch-mark filter
+    min_snr_db: 6               # drop weaker transmissions
+    ptt: vox                   # "vox" (default, radio keys itself) or "cat" (ECH keys via rigctld)
 
 The audio-device dependency (sounddevice/PortAudio) is imported lazily in
 connect(), matching the ADAPT-1 convention — the adapter can be configured on
@@ -100,7 +102,9 @@ class CWAudioAdapter(Adapter):
 
     def _make_decoder(self):
         return CWDecoder(sample_rate=self._sample_rate, freq=self._freq,
-                         auto_tune=self._auto_tune)
+                         auto_tune=self._auto_tune,
+                         max_wpm=float(self.config.get("max_wpm", 50.0)),
+                         min_snr_db=float(self.config.get("min_snr_db", 6.0)))
 
     def _encode_tx(self, text: str) -> np.ndarray:
         return encode_cw(text, wpm=self._wpm, freq=self._freq,
