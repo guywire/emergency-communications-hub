@@ -15,6 +15,7 @@ FastAPI application. Exposes:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -373,15 +374,17 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             await ws.close(code=4400)
             return
 
-        await ws.send_text(_json.dumps({"type": "ready", "adapter": adapter_name, "role": role}))
-
         async def _pump_tx():
             while True:
                 data = await sess.next_tx()
                 await ws.send_bytes(data)
 
-        tx_task = asyncio.ensure_future(_pump_tx())
+        tx_task = None
         try:
+            # Inside the try so any failure here still unregisters the session
+            # (otherwise it lingers "alive" and the next connect logs a stale replace).
+            await ws.send_text(_json.dumps({"type": "ready", "adapter": adapter_name, "role": role}))
+            tx_task = asyncio.ensure_future(_pump_tx())
             while True:
                 msg = await ws.receive()
                 if msg.get("type") == "websocket.disconnect":
@@ -393,7 +396,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         except WebSocketDisconnect:
             pass
         finally:
-            tx_task.cancel()
+            if tx_task is not None:
+                tx_task.cancel()
             hw_registry.unregister(sess)
 
     @app.get("/api/remote-hw")
@@ -2914,6 +2918,19 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         adapter editor's type picker instead of a second hardcoded list."""
         from ech.main import MOCK_ADAPTER_TYPES, REAL_ADAPTER_TYPES
         return {"types": sorted(REAL_ADAPTER_TYPES), "mock_types": sorted(MOCK_ADAPTER_TYPES)}
+
+    @app.get("/api/system/adapter-schema/{adapter_type}")
+    async def get_adapter_schema(adapter_type: str):
+        """Field schema (key/kind/required/default/help/options) for a
+        given adapter type, curated from each adapter module's own
+        'Config keys:' docstring — see ech/core/adapter_schemas.py. Lets
+        the Settings adapter editor pre-fill real defaults and offer a
+        real field picker instead of a blind '+ field' text prompt.
+        Returns {"fields": []} (not a 404) for any type not yet covered —
+        the editor's blind-prompt fallback still works for those."""
+        from ech.core.adapter_schemas import get_schema
+        schema = get_schema(adapter_type)
+        return schema or {"fields": []}
 
     @app.get("/api/system/serial-ports")
     async def list_serial_ports():

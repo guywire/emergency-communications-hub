@@ -127,7 +127,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     PTT on the radio still required).</p>
     <label>Adapter name (must match config)</label>
     <input id="audio-adapter" value="cw-remote">
+    <label>Input device (radio audio in)</label>
+    <select id="audio-in"><option value="">System default</option></select>
+    <label>Output device (TX audio to radio)</label>
+    <select id="audio-out"><option value="">System default</option></select>
     <br>
+    <button class="btn" onclick="listAudioDevices(true)">Refresh devices</button>
     <button class="btn" id="audio-btn" onclick="connectAudio()">Connect radio audio…</button>
     <div class="status idle" id="audio-status">Not connected</div>
     <div class="warn">Requires HTTPS (getUserMedia). Audio is resampled to 8 kHz mono
@@ -219,20 +224,61 @@ function connectSerial2() { return connectSerialFor('serial2'); }
 let _audio = {ctx: null, ws: null, running: false, stream: null};
 const TARGET_RATE = 8000;
 
+// Device labels are blank until mic permission is granted, so `askPermission`
+// opens (and immediately stops) a throwaway stream first.
+async function listAudioDevices(askPermission) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+    setStatus('audio-status', 'Audio devices unavailable — page must be served over HTTPS', 'err');
+    return;
+  }
+  try {
+    if (askPermission) {
+      const s = await navigator.mediaDevices.getUserMedia({audio: true});
+      s.getTracks().forEach(t => t.stop());
+    }
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    for (const [selId, kind] of [['audio-in', 'audioinput'], ['audio-out', 'audiooutput']]) {
+      const sel = document.getElementById(selId);
+      const keep = sel.value;
+      sel.innerHTML = '<option value="">System default</option>';
+      devs.filter(d => d.kind === kind && d.deviceId && d.deviceId !== 'default').forEach((d, i) => {
+        const o = document.createElement('option');
+        o.value = d.deviceId;
+        o.textContent = d.label || `${kind} ${i + 1}`;
+        sel.appendChild(o);
+      });
+      sel.value = [...sel.options].some(o => o.value === keep) ? keep : '';
+    }
+  } catch(e) {
+    setStatus('audio-status', 'Could not list audio devices: ' + e.message, 'err');
+  }
+}
+
 async function connectAudio() {
   const btn = document.getElementById('audio-btn');
   if (_audio.running) { stopAudio('Disconnected'); return; }
   const adapter = document.getElementById('audio-adapter').value.trim();
+  const inId = document.getElementById('audio-in').value;
+  const outId = document.getElementById('audio-out').value;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false},
+      audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+              ...(inId ? {deviceId: {exact: inId}} : {})},
     });
+    listAudioDevices(false);   // labels are populated now that permission exists
     const ws = new WebSocket(wsUrl());
     ws.binaryType = 'arraybuffer';
-    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    await new Promise((res, rej) => {
+      ws.onopen = res;
+      ws.onerror = () => rej(new Error('WebSocket connection refused (not logged in?)'));
+    });
     ws.send(JSON.stringify({role: 'audio', adapter}));
+    let serverError = '';
 
     const ctx = new AudioContext();
+    if (outId && ctx.setSinkId) {
+      try { await ctx.setSinkId(outId); } catch(e) { console.warn('setSinkId failed', e); }
+    }
     const src = ctx.createMediaStreamSource(stream);
     // ScriptProcessor is deprecated but universally available and fine at
     // this data rate; 4096-sample buffers ≈ 85 ms at 48 kHz.
@@ -253,7 +299,13 @@ async function connectAudio() {
 
     // Server → speakers (TX audio, float32 @ 8 kHz)
     ws.onmessage = (e) => {
-      if (!(e.data instanceof ArrayBuffer)) return;
+      if (!(e.data instanceof ArrayBuffer)) {
+        try {
+          const m = JSON.parse(e.data);
+          if (m.type === 'error') serverError = m.detail;
+        } catch(_) {}
+        return;
+      }
       const samples = new Float32Array(e.data);
       const buf = ctx.createBuffer(1, Math.ceil(samples.length * ctx.sampleRate / TARGET_RATE), ctx.sampleRate);
       const ch = buf.getChannelData(0);
@@ -264,7 +316,11 @@ async function connectAudio() {
       node.connect(ctx.destination);
       node.start();
     };
-    ws.onclose = () => { if (_audio.running) stopAudio('Server closed the bridge', true); };
+    ws.onclose = (ev) => {
+      if (!_audio.running) return;
+      const why = serverError || ev.reason || '';
+      stopAudio(`Server closed the bridge (code ${ev.code}${why ? ': ' + why : ''})`, true);
+    };
 
     _audio = {ctx, ws, running: true, stream, proc, src};
     btn.textContent = 'Disconnect';
@@ -435,6 +491,8 @@ async function catDisconnect() {
   btn.classList.remove('stop');
   setStatus('cat-status', 'Disconnected', 'idle');
 }
+
+listAudioDevices(false);
 </script>
 </body>
 </html>

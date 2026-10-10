@@ -610,7 +610,11 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
       <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Add, edit, enable/disable adapters — no config.yaml editing needed for common fields</span>
     </div>
     <div id="adapter-body" class="section-body">
-      <div style="display:flex;gap:8px;margin-bottom:10px">
+      <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+        <select id="new-adapter-type" style="width:200px;font-family:var(--mono);font-size:11px;padding:4px 8px">
+          <option value="">— adapter type —</option>
+        </select>
+        <input type="text" id="new-adapter-name" placeholder="name" style="width:160px;font-family:var(--mono);font-size:11px;padding:4px 8px">
         <button class="btn btn-blue" onclick="addNewAdapter()">+ Add adapter</button>
         <button class="btn" onclick="loadSerialPorts()">↻ Rescan serial ports</button>
       </div>
@@ -1437,6 +1441,7 @@ async function init() {
   loadGpsStatus();
   setInterval(loadGpsStatus, 15000);
   loadGpsConfig();
+  loadAdapterTypes();
 
   // Load state
   const state = await fetch('/api/state').then(r=>r.json());
@@ -1847,17 +1852,45 @@ async function pollWeatherNow() {
 // numeric TCP port) get a port-picker dropdown instead of a bare text box.
 let _adaptersState = [];
 let _adapterTypesCache = { types: [], mock_types: [] };
+let _adapterSchemaCache = {};  // type -> {fields: [...]}, lazily fetched
 const _SENSITIVE_KEY_RE = /password|secret|token|key|passcode/i;
 const _SERIAL_PATH_RE = /^(\/dev\/|COM\d+)/i;
 
 async function loadAdapterTypes() {
   try {
     _adapterTypesCache = await fetch('/api/system/adapter-types').then(r => r.json());
-  } catch(e) {}
+  } catch(e) { return; }
+  const sel = document.getElementById('new-adapter-type');
+  if (!sel) return;
+  const optGroup = (label, types) => types.length
+    ? `<optgroup label="${esc(label)}">${types.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}</optgroup>`
+    : '';
+  sel.innerHTML = '<option value="">— adapter type —</option>'
+    + optGroup('Real adapters', _adapterTypesCache.types)
+    + optGroup('Mock / simulation', _adapterTypesCache.mock_types);
 }
 
-function renderAdapterList(adapters) {
+async function _getAdapterSchema(type) {
+  if (type in _adapterSchemaCache) return _adapterSchemaCache[type];
+  try {
+    const schema = await fetch(`/api/system/adapter-schema/${encodeURIComponent(type)}`).then(r => r.json());
+    _adapterSchemaCache[type] = schema;
+    return schema;
+  } catch(e) {
+    return { fields: [] };
+  }
+}
+
+async function renderAdapterList(adapters) {
   _adaptersState = JSON.parse(JSON.stringify(adapters));  // deep copy — editor's own working set
+  _renderAdapterCards();
+  _reapplySerialPortSelects();
+  // Prefetch schemas for every type already configured, so EXISTING
+  // adapters (not just newly-added ones) get the nicer select/required-
+  // marker rendering on first load instead of only after some other
+  // trigger populates the cache.
+  const types = [...new Set(_adaptersState.map(a => a.type))];
+  await Promise.all(types.map(t => _getAdapterSchema(t)));
   _renderAdapterCards();
   _reapplySerialPortSelects();
 }
@@ -1866,10 +1899,14 @@ function _renderAdapterCards() {
   const el = document.getElementById('adapter-list');
   el.innerHTML = _adaptersState.map((a, i) => {
     const isMock = (a.type || '').startsWith('mock');
+    const schema = _adapterSchemaCache[a.type];
+    const schemaFields = schema ? schema.fields || [] : [];
+    const schemaByKey = {};
+    schemaFields.forEach(f => schemaByKey[f.key] = f);
     const scalarKeys = Object.keys(a).filter(k => k !== 'name' && k !== 'type' && k !== 'enabled' &&
       (typeof a[k] === 'string' || typeof a[k] === 'number' || typeof a[k] === 'boolean'));
     const complexKeys = Object.keys(a).filter(k => k !== 'name' && k !== 'type' && k !== 'enabled' && !scalarKeys.includes(k));
-    const fieldsHtml = scalarKeys.map(k => _renderAdapterFieldInput(i, k, a[k])).join('');
+    const fieldsHtml = scalarKeys.map(k => _renderAdapterFieldInput(i, k, a[k], schemaByKey[k])).join('');
     const complexHtml = complexKeys.length
       ? `<div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px">
           Complex field(s) not shown here — edit via raw JSON below: ${complexKeys.map(esc).join(', ')}
@@ -1884,7 +1921,7 @@ function _renderAdapterCards() {
           <input type="checkbox" ${a.enabled === false ? '' : 'checked'}
             onchange="_adaptersState[${i}].enabled = this.checked"> enabled
         </label>
-        <button class="btn" style="padding:3px 8px;font-size:10px" onclick="_addAdapterFieldPrompt(${i})">+ field</button>
+        <button class="btn" style="padding:3px 8px;font-size:10px" onclick="_addAdapterFieldPicker(${i}, this)">+ field</button>
         <button class="btn btn-red" style="padding:3px 8px;font-size:10px" onclick="deleteAdapterCard(${i})">delete</button>
       </div>
       <div class="row3" style="gap:8px">${fieldsHtml}</div>
@@ -1893,12 +1930,20 @@ function _renderAdapterCards() {
   }).join('') || '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No adapters configured</div>';
 }
 
-function _renderAdapterFieldInput(i, key, value) {
+function _renderAdapterFieldInput(i, key, value, fieldMeta) {
+  const label = fieldMeta && fieldMeta.required ? `${esc(key)} *` : esc(key);
+  const title = fieldMeta && fieldMeta.help ? ` title="${esc(fieldMeta.help)}"` : '';
+  if (fieldMeta && fieldMeta.kind === 'select' && fieldMeta.options) {
+    const opts = fieldMeta.options.map(o =>
+      `<option value="${esc(o)}" ${o === value ? 'selected' : ''}>${esc(o)}</option>`).join('');
+    return `<div${title}><label style="margin-top:0">${label}</label>
+      <select onchange="_adaptersState[${i}]['${key}'] = this.value">${opts}</select></div>`;
+  }
   const looksLikeSerialField = (key === 'port' || key === 'device') && typeof value === 'string'
-    && (value === '' || _SERIAL_PATH_RE.test(value));
+    && (value === '' || value === 'auto' || _SERIAL_PATH_RE.test(value));
   if (looksLikeSerialField) {
-    return `<div>
-      <label style="margin-top:0">${esc(key)}</label>
+    return `<div${title}>
+      <label style="margin-top:0">${label}</label>
       <select class="serial-port-select" data-value="${esc(value)}"
         onchange="_adaptersState[${i}]['${key}'] = this.value === '__custom__' ? '' : this.value; _onAdapterPortSelectChange(this, ${i}, '${key}')">
       </select>
@@ -1907,17 +1952,17 @@ function _renderAdapterFieldInput(i, key, value) {
     </div>`;
   }
   if (typeof value === 'boolean') {
-    return `<div style="display:flex;align-items:center;gap:6px;margin-top:20px">
-      <label style="margin:0">${esc(key)}</label>
+    return `<div${title} style="display:flex;align-items:center;gap:6px;margin-top:20px">
+      <label style="margin:0">${label}</label>
       <input type="checkbox" ${value ? 'checked' : ''} onchange="_adaptersState[${i}]['${key}'] = this.checked">
     </div>`;
   }
   if (typeof value === 'number') {
-    return `<div><label style="margin-top:0">${esc(key)}</label>
+    return `<div${title}><label style="margin-top:0">${label}</label>
       <input type="number" value="${value}" oninput="_adaptersState[${i}]['${key}'] = parseFloat(this.value) || 0"></div>`;
   }
   const inputType = _SENSITIVE_KEY_RE.test(key) ? 'password' : 'text';
-  return `<div><label style="margin-top:0">${esc(key)}</label>
+  return `<div${title}><label style="margin-top:0">${label}</label>
     <input type="${inputType}" value="${esc(value)}" oninput="_adaptersState[${i}]['${key}'] = this.value"></div>`;
 }
 
@@ -1932,12 +1977,48 @@ function _onAdapterPortSelectChange(sel, i, key) {
   }
 }
 
-function _addAdapterFieldPrompt(i) {
-  const key = prompt('Field name to add (see the adapter type\'s docstring in ech/adapters/ for valid keys):');
-  if (!key) return;
-  _adaptersState[i][key] = '';
-  _renderAdapterCards();
-  _reapplySerialPortSelects();
+async function _addAdapterFieldPicker(i, btn) {
+  const type = _adaptersState[i].type;
+  const schema = await _getAdapterSchema(type);
+  const existing = new Set(Object.keys(_adaptersState[i]));
+  const remaining = (schema.fields || []).filter(f => !existing.has(f.key));
+  if (!remaining.length) {
+    // No schema for this type (not curated yet) or every known field is
+    // already present — fall back to the old blind prompt rather than
+    // showing an empty/useless picker.
+    const key = prompt(schema.fields && schema.fields.length
+      ? 'All known fields for this type are already present. Add a custom field name:'
+      : `No field list available for "${type}" yet — type a field name `
+        + `(check ech/adapters/${type}.py's "Config keys:" docstring for valid ones):`);
+    if (!key) return;
+    _adaptersState[i][key] = '';
+    _renderAdapterCards();
+    _reapplySerialPortSelects();
+    return;
+  }
+  // Build a temporary <select> right next to the button instead of a
+  // blind text prompt — picking an option adds that field pre-filled
+  // with its real default and removes the picker immediately.
+  const sel = document.createElement('select');
+  sel.style.cssText = 'font-family:var(--mono);font-size:10px;margin-left:4px';
+  sel.innerHTML = '<option value="">— pick a field —</option>' + remaining.map((f, idx) =>
+    `<option value="${idx}" title="${esc(f.help || '')}">${esc(f.key)}${f.required ? ' *' : ''} — ${esc(f.help || '')}</option>`
+  ).join('') + '<option value="__custom__">Custom field name…</option>';
+  sel.onchange = () => {
+    if (sel.value === '__custom__') {
+      const key = prompt('Custom field name:');
+      if (key) { _adaptersState[i][key] = ''; _renderAdapterCards(); _reapplySerialPortSelects(); }
+      else sel.remove();
+      return;
+    }
+    if (sel.value === '') return;
+    const f = remaining[parseInt(sel.value, 10)];
+    _adaptersState[i][f.key] = f.default;
+    _renderAdapterCards();
+    _reapplySerialPortSelects();
+  };
+  btn.insertAdjacentElement('afterend', sel);
+  sel.focus();
 }
 
 function deleteAdapterCard(i) {
@@ -1948,34 +2029,32 @@ function deleteAdapterCard(i) {
 }
 
 async function addNewAdapter() {
-  if (!_adapterTypesCache.types.length) await loadAdapterTypes();
-  const allTypes = [..._adapterTypesCache.types, ..._adapterTypesCache.mock_types];
-  const typed = prompt(`Adapter type — one of:\n${allTypes.join(', ')}`);
-  if (!typed) return;
-  // Forgive the natural "meshcore-serial"/"meshcore tcp"/"MeshCore" style
-  // guesses — transport (serial/tcp/usb/ble) is a config FIELD on a type,
-  // not a separate type name, which isn't obvious from the type list alone.
-  // Failing silently here (as this used to) looked exactly like "my new
-  // adapter just didn't show up" with no indication why — a real report,
-  // 2026-10-09.
-  const normalize = s => s.trim().toLowerCase().replace(/[\s_]+/g, '-');
-  const typedNorm = normalize(typed);
-  let type = allTypes.find(t => normalize(t) === typedNorm);
-  if (!type) {
-    const stripped = typedNorm.replace(/-(serial|tcp|usb|ble|internet|kiss)$/, '');
-    type = allTypes.find(t => normalize(t) === stripped);
+  // Real <select> populated from /api/system/adapter-types (see
+  // loadAdapterTypes()) instead of a prompt() the operator had to type a
+  // type name into blind — that's what caused "meshcore-serial" (a
+  // reasonable guess, but transport is a config FIELD on the "meshcore"
+  // type, not a separate type name) to silently fail to add anything.
+  const typeSel = document.getElementById('new-adapter-type');
+  const nameInput = document.getElementById('new-adapter-name');
+  const type = typeSel.value;
+  if (!type) { alert('Pick an adapter type from the dropdown first.'); return; }
+  const name = nameInput.value.trim() || type;
+  const schema = await _getAdapterSchema(type);
+  // Pre-fill every known field with its real default instead of leaving
+  // a bare {name, type} the operator then has to populate one blind
+  // "+ field" prompt at a time with no idea what keys even exist.
+  const newAdapter = { name, type };
+  for (const f of (schema.fields || [])) {
+    newAdapter[f.key] = f.default;
   }
-  if (!type) {
-    alert(`"${typed}" isn't a known adapter type.\n\nValid types:\n${allTypes.join(', ')}\n\n`
-      + `(transport like serial/TCP is usually a config FIELD on the type, e.g. meshcore's "transport:" key — not a separate type name.)`);
-    return;
-  }
-  const name = prompt('Adapter name (unique, used in the UI and logs):', type);
-  if (!name) return;
-  _adaptersState.push({ name, type });
+  _adaptersState.push(newAdapter);
   _renderAdapterCards();
   _reapplySerialPortSelects();
-  toast(`Added "${name}" (${type}) to the form below — don't forget to Save`);
+  const fieldCount = (schema.fields || []).length;
+  toast(`Added "${name}" (${type})` + (fieldCount ? ` with ${fieldCount} default field(s) pre-filled` : '')
+    + ` — review required fields (marked *) below, then Save`);
+  typeSel.value = '';
+  nameInput.value = '';
 }
 
 function _reapplySerialPortSelects() {
