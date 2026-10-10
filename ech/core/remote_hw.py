@@ -115,14 +115,15 @@ class RemoteHWRegistry:
         s = self._sessions.get(adapter)
         return s if (s is not None and s.alive) else None
 
-    async def wait_for(self, adapter: str, timeout: float = 0.0) -> RemoteHWSession | None:
-        """Poll for a live session (adapter connect() path). timeout 0 = one check."""
-        deadline = time.monotonic() + timeout
+    async def wait_for(self, adapter: str, timeout: float | None = 0.0) -> RemoteHWSession | None:
+        """Poll for a live session (adapter connect() path).
+        timeout 0 = one check; None = wait indefinitely."""
+        deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             s = self.get(adapter)
             if s is not None:
                 return s
-            if time.monotonic() >= deadline:
+            if deadline is not None and time.monotonic() >= deadline:
                 return None
             await asyncio.sleep(0.5)
 

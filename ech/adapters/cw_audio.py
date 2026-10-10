@@ -113,19 +113,19 @@ class CWAudioAdapter(Adapter):
         # (mic/line via Web Audio); the /remote-hw page streams float32 PCM
         # @8 kHz over /ws/remote-hw. No sounddevice/PortAudio needed at all —
         # the DSP consumes the same sample stream either way.
+        # The adapter stays "connected" whether or not a browser is attached:
+        # _browser_pump waits for a session and re-attaches every time the
+        # operator reconnects. (Failing connect() when no browser was present
+        # put the adapter on the router's backoff — up to 60s deaf between
+        # 10s listening windows — so short browser sessions were never heard.)
         if str(self._input_device).lower() == "browser":
-            from ech.core.remote_hw import registry
-            self._hw_sess = await registry.wait_for(self.name, timeout=10.0)
-            if self._hw_sess is None:
-                raise ConnectionError(
-                    f"no browser audio session for {self.name!r} — open /remote-hw "
-                    "and connect the radio audio")
             self._input_name = "browser (remote)"
             self._output_name = "browser (remote)"
             self._rx_task = asyncio.ensure_future(self._run())
             self._pump_task = asyncio.ensure_future(self._browser_pump())
             self._connected = True
-            log.info("%sAudio %s: attached to remote browser audio", self.MODE, self.name)
+            log.info("%sAudio %s: waiting for remote browser audio on /remote-hw",
+                     self.MODE, self.name)
             return
 
         import sounddevice as sd   # lazy: PortAudio may not be installed
@@ -167,13 +167,28 @@ class CWAudioAdapter(Adapter):
             self._dropped_blocks += 1
 
     async def _browser_pump(self) -> None:
-        """Feed browser PCM chunks (float32 LE @ sample_rate) into the decoder queue."""
+        """Feed browser PCM chunks (float32 LE @ sample_rate) into the decoder
+        queue, attaching to each new /remote-hw session as the browser
+        (re)connects — a page reload or dropped tab doesn't need a server-side
+        reconnect cycle."""
+        from ech.core.remote_hw import registry
         try:
             while True:
-                chunk = await self._hw_sess.read()
-                if chunk:
-                    self._offer_samples(np.frombuffer(chunk, dtype=np.float32))
-        except (ConnectionError, asyncio.CancelledError):
+                sess = await registry.wait_for(self.name, timeout=None)
+                self._hw_sess = sess
+                log.info("%sAudio %s: attached to remote browser audio", self.MODE, self.name)
+                try:
+                    while True:
+                        chunk = await sess.read()
+                        if chunk:
+                            self._offer_samples(np.frombuffer(chunk, dtype=np.float32))
+                except ConnectionError:
+                    pass
+                if self._hw_sess is sess:
+                    self._hw_sess = None
+                log.info("%sAudio %s: browser audio detached — waiting for reconnect",
+                         self.MODE, self.name)
+        except asyncio.CancelledError:
             pass
         except Exception as exc:
             log.error("%sAudio %s: browser pump error: %s", self.MODE, self.name, exc)

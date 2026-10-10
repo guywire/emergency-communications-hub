@@ -135,6 +135,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <button class="btn" onclick="listAudioDevices(true)">Refresh devices</button>
     <button class="btn" id="audio-btn" onclick="connectAudio()">Connect radio audio…</button>
     <div class="status idle" id="audio-status">Not connected</div>
+    <div id="audio-level-row" hidden style="margin-top:6px">
+      Input level: <meter id="audio-level" min="0" max="1" low="0.05" high="0.9" optimum="0.3" value="0" style="width:200px"></meter>
+      <span id="audio-level-txt"></span>
+    </div>
+    <div class="warn"><b>Keep this tab open while bridging</b> — the bridge lives in this page,
+    so navigating away disconnects it. While connected, links here open in a new tab.</div>
     <div class="warn">Requires HTTPS (getUserMedia). Audio is resampled to 8 kHz mono
     float32 in the browser before streaming.</div>
   </div>
@@ -290,6 +296,9 @@ async function connectAudio() {
     proc.onaudioprocess = (e) => {
       if (!_audio.running || ws.readyState !== 1) return;
       const inp = e.inputBuffer.getChannelData(0);
+      let peak = 0;
+      for (let i = 0; i < inp.length; i++) { const v = Math.abs(inp[i]); if (v > peak) peak = v; }
+      _audio.peak = Math.max(_audio.peak || 0, peak);
       const n = Math.floor(inp.length / ratio);
       const out = new Float32Array(n);
       for (let i = 0; i < n; i++) out[i] = inp[Math.floor(i * ratio)];
@@ -322,7 +331,17 @@ async function connectAudio() {
       stopAudio(`Server closed the bridge (code ${ev.code}${why ? ': ' + why : ''})`, true);
     };
 
-    _audio = {ctx, ws, running: true, stream, proc, src};
+    _audio = {ctx, ws, running: true, stream, proc, src, peak: 0};
+    // Peak-hold meter (~4 Hz): flat zero = wrong input device / muted / cable.
+    document.getElementById('audio-level-row').hidden = false;
+    _audio.meterTimer = setInterval(() => {
+      const pk = _audio.peak || 0;
+      _audio.peak = 0;
+      document.getElementById('audio-level').value = pk;
+      document.getElementById('audio-level-txt').textContent =
+        pk < 0.005 ? 'silent — check input device/cable' :
+        pk > 0.95 ? 'clipping — turn radio audio down' : (20 * Math.log10(pk)).toFixed(0) + ' dBFS';
+    }, 250);
     btn.textContent = 'Disconnect';
     btn.classList.add('stop');
     setStatus('audio-status', `Streaming audio ↔ server as "${adapter}" (${ctx.sampleRate} Hz → 8 kHz)`, 'ok');
@@ -333,6 +352,8 @@ async function connectAudio() {
 
 function stopAudio(msg, isErr) {
   _audio.running = false;
+  clearInterval(_audio.meterTimer);
+  document.getElementById('audio-level-row').hidden = true;
   try { _audio.proc && _audio.proc.disconnect(); } catch(e) {}
   try { _audio.src && _audio.src.disconnect(); } catch(e) {}
   try { _audio.stream && _audio.stream.getTracks().forEach(t => t.stop()); } catch(e) {}
@@ -493,6 +514,25 @@ async function catDisconnect() {
 }
 
 listAudioDevices(false);
+
+// The bridges live in this page: leaving it closes them. While any is active,
+// send same-tab link clicks (nav bar included) to a new tab, and confirm on
+// reload/close.
+function bridgeActive() {
+  return _audio.running || !!_catPort || Object.values(_serials).some(s => s.running);
+}
+document.addEventListener('click', (e) => {
+  if (!bridgeActive() || e.defaultPrevented || e.button !== 0) return;
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (!a || a.target || a.hasAttribute('download')) return;
+  const url = new URL(a.href, location.href);
+  if (url.origin !== location.origin || (url.pathname === location.pathname && url.hash)) return;
+  e.preventDefault();
+  window.open(url.href, '_blank');
+}, true);
+window.addEventListener('beforeunload', (e) => {
+  if (bridgeActive()) { e.preventDefault(); e.returnValue = ''; }
+});
 </script>
 </body>
 </html>
