@@ -387,10 +387,22 @@ adapters:
 #   - type: meshcore
 #     name: meshcore-remote      # must match the name entered on /remote-hw
 #     transport: browser
-#   CW decoded from the operator's radio audio:
+#   CW + RTTY + PSK31 decoded from the operator's radio audio — all three share
+#   ONE /remote-hw audio stream via browser_session (the name entered there).
+#   The /remote-hw page also keys PTT (CAT / RTS / DTR) around each transmission.
 #   - type: cw_audio
-#     name: cw-remote            # must match the name entered on /remote-hw
+#     name: cw-remote
 #     input_device: browser
+#     browser_session: radio-audio
+#     sensitivity: 3             # 1 strict .. 5 weak-signal (all modem types)
+#   - type: rtty_audio
+#     name: rtty-remote
+#     input_device: browser
+#     browser_session: radio-audio
+#   - type: psk31_audio
+#     name: psk31-remote
+#     input_device: browser
+#     browser_session: radio-audio
 #
 # RTTY over a sound card (45.45 baud Baudot, 2125/2295 Hz, same VOX/PTT note):
 #   - type: rtty_audio

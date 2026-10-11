@@ -21,6 +21,7 @@ SignalMatrix is a Python/FastAPI application that bridges multiple emergency-com
 | **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status, SKYWARN + strip reports (`/reports`), analytics charts (`/analytics`) — all in the browser. The compose box shows a per-send MeshCore/Meshtastic channel picker and a Winlink subject field only when a relevant adapter is selected. |
 | **Ham Radio Log** | Contest logging (Field Day, POTA, SOTA, General); ADIF/Cabrillo/CSV import; ADIF/Cabrillo/POTA/SOTA export |
 | **CAT radio control** | Browser Web Serial (no software install) or server-side rigctld/Hamlib |
+| **Sound-card digital modes** | CW, RTTY and PSK31 decode/encode — from a sound card on the server or from radio audio on the operator's own computer via the browser (one audio stream feeds all three decoders). AFC finds signals anywhere in the passband; noise rejection; PTT keyed over CAT/RTS/DTR around each transmission; live tuning bar in the message window (see [Sound-card digital modes](#sound-card-digital-modes-cw--rtty--psk31)) |
 | **Anomaly detection** | Automatic alerts for unusual message patterns or node behaviour |
 | **Simulation mode** | Built-in mock adapters let you train operators without live hardware |
 | **Mesh bot** | 25 on-mesh commands — weather/alerts/METAR/tides/solar, aircraft & ship tracking, satellite passes, FCC/DXCC lookups, SKYWARN spotter report intake, SHARES Region 1 strip-report intake, trivia with scoreboards, text-adventure games (see [Mesh Bot](#mesh-bot)) |
@@ -559,9 +560,9 @@ No inbound ports are required for most adapters (they connect outward). Exceptio
 | AIS vessels (local SDR) | `ais_catcher` | AIS-catcher with HTTP server enabled |
 | AIS vessels (AISHub) | `aishub` | Free aishub.net account + API key |
 | AIS vessels (aisstream.io) | `aisstream` | Free aisstream.io API key |
-| CW / Morse over sound card | `cw_audio` | `pip install sounddevice numpy` (+ `libportaudio2` on Linux); radio TX needs VOX or CAT PTT (`ptt: cat` uses CAT control instead) |
-| RTTY over sound card | `rtty_audio` | Same as cw_audio (45.45 Bd Baudot, 2125/2295 Hz) |
-| PSK31 over sound card | `psk31_audio` | Same as cw_audio (31.25 Bd BPSK varicode) |
+| CW / Morse over sound card | `cw_audio` | `pip install sounddevice numpy` (+ `libportaudio2` on Linux) for a server sound card; `numpy` only for browser audio. See [Sound-card digital modes](#sound-card-digital-modes-cw--rtty--psk31) |
+| RTTY over sound card | `rtty_audio` | Same as cw_audio (45.45 Bd Baudot, 170 Hz shift, AFC, reverse) |
+| PSK31 over sound card | `psk31_audio` | Same as cw_audio (31.25 Bd BPSK varicode, AFC carrier lock) |
 | FT8/FT4 via WSJT-X | `wsjtx` | WSJT-X with "UDP Server" pointed at ECH (port 2237); RX-only |
 
 All adapters also have mock equivalents (`mock_meshtastic`, `mock_aprs`, etc.) for simulation and training.
@@ -570,12 +571,96 @@ All adapters also have mock equivalents (`mock_meshtastic`, `mock_aprs`, etc.) f
 computer (not the server) can back an adapter remotely: open `/remote-hw` in Chrome/Edge
 over HTTPS, connect the device (Web Serial) or radio audio (Web Audio), and configure the
 matching adapter with `transport: browser` (MeshCore) or `input_device: browser`
-(CW/RTTY/PSK31). Closing the tab disconnects the adapter.
+(CW/RTTY/PSK31). The bridge lives in that tab — keep it open (while connected, links
+open in a new tab and closing asks for confirmation); adapters re-attach automatically
+when the tab reconnects.
+
+**Bridge rules (`bridge_rules`) are coarse today:** a rule forwards *every* inbound
+message from one adapter to another — all channels, positions and telemetry included,
+with no rate limit or loop guard. Use them only between low-traffic adapters for now;
+channel-scoped, typed, direction-aware bridging is planned (O117 in
+`ECH_REQUIREMENTS_AND_PROGRESS.md`).
 
 **APRS-IS filter tip:** keep the radius in `filter: "r/<lat>/<lon>/<km>"` tight. A wide
 radius (e.g. 250 km) pulls in the whole region's digipeater beacons and ship-AIS objects —
 observed at 8,000+ messages/day — which bloats the database and drowns out mesh traffic.
 60 km is plenty for local situational awareness.
+
+---
+
+## Sound-card digital modes (CW / RTTY / PSK31)
+
+SignalMatrix decodes and sends CW, RTTY (45.45 Bd, 170 Hz) and PSK31 itself — no fldigi
+needed. Decoded transmissions land in the message feed; sending one is a normal send from
+the compose box with the CW/RTTY/PSK adapter selected.
+
+### Where the audio comes from
+
+* **Server sound card** — `input_device: "USB Audio"` (name substring, index, or `null`
+  for the default). Needs `sounddevice` + PortAudio on the server.
+* **The operator's computer, via the browser** — `input_device: browser`. Open
+  `/remote-hw` in Chrome/Edge over HTTPS, pick the radio's audio input/output, and click
+  *Connect radio audio*. Give all three modem adapters the same `browser_session` and
+  one browser stream feeds every decoder at once:
+
+```yaml
+adapters:
+  - type: cw_audio
+    name: cw-remote
+    input_device: browser
+    browser_session: radio-audio   # the session name entered on /remote-hw
+    wpm: 20                        # TX speed
+  - type: rtty_audio
+    name: rtty-remote
+    input_device: browser
+    browser_session: radio-audio
+  - type: psk31_audio
+    name: psk31-remote
+    input_device: browser
+    browser_session: radio-audio
+```
+
+The `/remote-hw` page shows an input level meter (aim for roughly −30 to −10 dBFS with
+signal present; it flags *silent* and *clipping*).
+
+### Receive behaviour
+
+* **AFC** (`auto_tune: true`, default): PSK31 finds and locks its carrier anywhere in the
+  passband; RTTY finds the strongest tone pair at the configured shift; CW retunes to each
+  transmission's pitch. Tune the radio anywhere sensible — no need to hit an exact audio
+  frequency. RTTY `reverse: true` for the inverted (USB) tone sense.
+* **Noise rejection**: static crashes and noise-only bursts are dropped (CW rejects
+  impossible speeds above `max_wpm`, lone E/T noise blips, and glitch marks; PSK31
+  rejects anything that isn't real BPSK varicode, so it ignores CW/RTTY on a shared stream).
+* **Sensitivity 1–5** (`sensitivity`, default 3): one knob for every mode — 1 is strict,
+  3 is the measured zero-false-decode default, 4–5 dig for weak signals at the cost of
+  occasional junk.
+
+### Message-window modem bar
+
+Select a CW/RTTY/PSK adapter in the compose bar and a tuning row appears: pitch/mark/
+carrier, AFC, TX wpm (CW), shift/baud/reverse (RTTY), sensitivity, the last copy's
+measured speed/frequency/SNR, **⇆ Match** (CW: set your TX speed and pitch to the station
+you just copied; RTTY/PSK31: lock the tracked frequency) and **💾 Save** (write to
+`config.yaml`). Changes apply instantly. Same settings via `GET/POST
+/api/adapters/<name>/modem`.
+
+### Transmit and PTT
+
+With browser audio, **the `/remote-hw` page keys the radio** over the CAT serial port
+(connect the CAT card on the same page) around each transmission: PTT on → TX delay →
+audio → tail → PTT off. Choose the keying method under *Transmit keying (PTT)*:
+CI-V, Kenwood/Elecraft `TX;`/`RX;`, Yaesu `TX1;`/`TX0;`, the RTS or DTR line (DigiRig and
+most USB interfaces use RTS), or VOX. Safety: 3-minute stuck-key watchdog, unkey on
+disconnect or page close, CAT polling paused while transmitting, and received audio is
+not decoded while keyed. Use **Test PTT (2 s tone)** into a dummy load to set the
+computer's output level so ALC barely moves — overdriven PSK31/RTTY is distorted and wide.
+
+With a server sound card, `ptt: cat` keys through the server's rigctld CAT controller;
+otherwise the radio's VOX keys itself.
+
+FT-817/818/857/897 use 5-byte binary CAT, which the browser CAT card does not speak — use
+RTS or VOX for PTT on those.
 
 ---
 
