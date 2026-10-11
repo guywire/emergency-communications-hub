@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc262** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
+**Version 1.0.0-rc263** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -18,7 +18,7 @@ SignalMatrix is a Python/FastAPI application that bridges multiple emergency-com
 | Feature | Notes |
 |---------|-------|
 | **Multi-network bridging** | Meshtastic, APRS (IS + KISS TNC), MeshCore, JS8Call, Winlink/PAT, SMS (SIM7x00/SIM800L), MQTT, Reticulum/LXMF, AREDN, Asterisk/PBX |
-| **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status, SKYWARN + strip reports (`/reports`), analytics charts (`/analytics`) — all in the browser. The compose box shows a per-send MeshCore/Meshtastic channel picker and a Winlink subject field only when a relevant adapter is selected. Map layers include POTA, a combined 📻 On the Air layer (WWFF, IOTA, SOTA, Bunkers, lighthouses, castles…), DX heard near you, NOAA tides, NWS warnings, AQI/smoke, water bodies, and a moon phase/rise/set panel. |
+| **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status, SKYWARN + strip reports (`/reports`), analytics charts (`/analytics`) — all in the browser. The compose box shows a per-send MeshCore/Meshtastic channel picker and a Winlink subject field only when a relevant adapter is selected. Map layers include POTA, a combined 📻 On the Air layer (WWFF, IOTA, SOTA, Bunkers, lighthouses, castles…), DX heard near you, NOAA tides and water temperature, river gauges with flood status, NEXRAD radar and GOES satellite overlays (browser-loaded, no server storage), NWS warnings, AQI/smoke, water bodies, and a moon phase/rise/set panel. |
 | **Ham Radio Log** | Contest logging (Field Day, POTA, SOTA, General); ADIF/Cabrillo/CSV import; ADIF/Cabrillo/POTA/SOTA export |
 | **CAT radio control** | Browser Web Serial (no software install) or server-side rigctld/Hamlib |
 | **Sound-card digital modes** | CW, RTTY and PSK31 decode/encode — from a sound card on the server or from radio audio on the operator's own computer via the browser (one audio stream feeds all three decoders). AFC finds signals anywhere in the passband; noise rejection; PTT keyed over CAT/RTS/DTR around each transmission; live tuning bar in the message window (see [Sound-card digital modes](#sound-card-digital-modes-cw--rtty--psk31)) |

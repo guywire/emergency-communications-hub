@@ -3471,6 +3471,33 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         await pota_service.trigger_poll()
         return {"status": "ok", **pota_service.status()}
 
+    @app.get("/api/rivers/gauges")
+    async def rivers_gauges(radius_km: float = 80.0):
+        """NOAA NWPS river/tide gauges near base with observed + forecast
+        flood category (ech/core/hydro.py). Most severe first."""
+        base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
+        base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
+        if base_lat is None or base_lon is None:
+            return {"gauges": [], "error": "Set a base position (Settings → GPS) to see nearby river gauges"}
+        try:
+            from ech.core.hydro import river_gauges
+            return await river_gauges(base_lat, base_lon, radius_km=min(max(radius_km, 10.0), 400.0))
+        except Exception as exc:
+            return {"gauges": [], "error": f"NOAA river gauges fetch failed: {exc.__class__.__name__}"}
+
+    @app.get("/api/water/temperature")
+    async def water_temperature(radius_km: float = 150.0):
+        """Latest water temperature at the nearest NOAA stations with a sensor."""
+        base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
+        base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
+        if base_lat is None or base_lon is None:
+            return {"stations": [], "error": "Set a base position (Settings → GPS) first"}
+        try:
+            from ech.core.hydro import water_temps
+            return await water_temps(base_lat, base_lon, radius_km=min(max(radius_km, 10.0), 500.0))
+        except Exception as exc:
+            return {"stations": [], "error": f"NOAA water temperature fetch failed: {exc.__class__.__name__}"}
+
     @app.get("/api/tides/nearby")
     async def tides_nearby(radius_km: float = 60.0, limit: int = 6):
         """Nearest NOAA tide-prediction stations to the base with next

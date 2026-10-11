@@ -105,7 +105,10 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row" id="wxwarn-btn" onclick="toggleWeatherWarnings()" title="Active NWS weather warning polygons (tornado, severe thunderstorm, flash flood, etc.) — county/zone-based alerts with no polygon in the NWS feed aren't drawable and are skipped, not guessed at">⛈ Weather warnings</button>
     <button class="ctrl-btn layer-row" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI / smoke</button>
     <button class="ctrl-btn layer-row" id="water-btn" onclick="toggleWaterBodies()" title="Water body quality + boating/kayak conditions (EPA ATTAINS + NDBC buoys)">🌊 Water bodies</button>
-    <button class="ctrl-btn layer-row" id="tides-btn" onclick="toggleTides()" title="Nearest NOAA tide stations: rising/falling and next high/low (predictions, local time)">🌊 Tides</button>
+    <button class="ctrl-btn layer-row" id="tides-btn" onclick="toggleTides()" title="Nearest NOAA tide stations (rising/falling, next high/low) and water temperature at the nearest sensor stations">🌊 Tides</button>
+    <button class="ctrl-btn layer-row" id="river-btn" onclick="toggleRivers()" title="NOAA river and tide gauges within 80 km: stage, flow and flood category now and forecast (green no flooding, yellow action, orange minor, red moderate, purple major)">💧 River gauges</button>
+    <button class="ctrl-btn layer-row" id="radar-btn" onclick="toggleImagery('radar')" title="NEXRAD weather radar (Iowa Environmental Mesonet tiles, loaded by your browser; refreshes every 5 min)">🌧 Radar</button>
+    <button class="ctrl-btn layer-row" id="sat-btn" onclick="toggleImagery('sat')" title="GOES-East infrared satellite, day and night (Iowa Environmental Mesonet, loaded by your browser; refreshes every 5 min)">🛰 Satellite IR</button>
   </div>
 </div>
 <div id="map"></div>
@@ -1990,8 +1993,8 @@ function toggleTides() {
   btn.style.color = _tidesEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _tidesEnabled ? 'var(--green)' : '';
   btn.classList.toggle('on', _tidesEnabled);
-  if (_tidesEnabled) loadTides();
-  else { _tideMarkers.forEach(m => m.remove()); _tideMarkers = []; }
+  if (_tidesEnabled) { loadTides(); loadWaterTemps(); }
+  else { _tideMarkers.forEach(m => m.remove()); _tideMarkers = []; loadWaterTemps(); }
 }
 
 async function loadTides() {
@@ -2024,7 +2027,118 @@ async function loadTides() {
   } catch(e) {
     toast('Tides fetch failed: ' + e.message);
   }
-  if (_tidesEnabled) setTimeout(loadTides, 15 * 60000);
+  if (_tidesEnabled) setTimeout(() => { loadTides(); loadWaterTemps(); }, 15 * 60000);
+}
+
+// ── River gauges (NOAA NWPS) — flood category ────────────────────────────
+// NWS flood-category colours; grey = no flood stages / not current.
+const FLOOD_COLOR = {5: '#a371f7', 4: '#f85149', 3: '#f0883e', 2: '#d29922', 1: '#3fb950', 0: '#8b949e'};
+let _riverEnabled = false;
+let _riverMarkers = [];
+
+function toggleRivers() {
+  _riverEnabled = !_riverEnabled;
+  const btn = document.getElementById('river-btn');
+  btn.style.color = _riverEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _riverEnabled ? 'var(--green)' : '';
+  btn.classList.toggle('on', _riverEnabled);
+  if (_riverEnabled) loadRivers();
+  else { _riverMarkers.forEach(m => m.remove()); _riverMarkers = []; }
+}
+
+async function loadRivers() {
+  if (!_riverEnabled) return;
+  try {
+    const r = await fetch('/api/rivers/gauges?radius_km=80').catch(() => null);
+    if (!r || !r.ok) { toast('River gauges: fetch failed'); return; }
+    const d = await r.json();
+    if (d.error) { toast('River gauges: ' + d.error, 'err'); return; }
+    _riverMarkers.forEach(m => m.remove());
+    _riverMarkers = [];
+    let worst = 0;
+    (d.gauges || []).forEach(g => {
+      const rank = Math.max(g.observed.rank, g.forecast.rank);
+      worst = Math.max(worst, rank);
+      const col = FLOOD_COLOR[rank] || FLOOD_COLOR[0];
+      const stage = g.stage != null ? `${g.stage.toFixed(1)} ${g.stage_unit}` : '';
+      const html = `<div style="font-family:monospace;font-size:9px;color:${col};background:rgba(0,0,0,.75);` +
+        `padding:1px 4px;border-radius:2px;border:1px solid ${col};white-space:nowrap">💧 ${esc(stage || g.lid)}</div>`;
+      const fc = (g.forecast.rank > 0 || g.forecast.key === 'no_flooding')
+        ? `<div class="node-stat">Forecast: ${esc(g.forecast.label)}${g.forecast_stage != null ? ' — ' + g.forecast_stage.toFixed(1) + ' ' + esc(g.stage_unit) : ''}</div>`
+        : '';
+      const m = L.marker([g.lat, g.lon], {icon: L.divIcon({className: '', html, iconSize: [80, 16], iconAnchor: [40, 8]})})
+        .bindPopup(`<div class="node-popup"><div class="node-name">💧 ${esc(g.name)}</div>` +
+          `<div class="node-stat" style="color:${FLOOD_COLOR[g.observed.rank] || FLOOD_COLOR[0]}">Now: ${esc(g.observed.label)}</div>` +
+          (stage ? `<div class="node-stat">Stage ${esc(stage)}${g.flow != null ? ` · flow ${g.flow} ${esc(g.flow_unit)}` : ''}</div>` : '') +
+          fc + `<div class="node-stat" style="color:var(--muted)">${esc(g.observed_at || '')} · ${g.distance_km} km · NWS ${esc(g.wfo)}</div>` +
+          `<div class="node-stat"><a href="${esc(g.url)}" target="_blank" rel="noopener">NOAA gauge ${esc(g.lid)} ↗</a></div></div>`)
+        .addTo(map);
+      _riverMarkers.push(m);
+    });
+    const label = {5: 'MAJOR flooding', 4: 'moderate flooding', 3: 'minor flooding', 2: 'action stage'}[worst];
+    toast(`River gauges: ${_riverMarkers.length} within ${d.radius_km} km` + (label ? ` — ⚠ ${label} at one or more` : ' — no flooding'),
+          worst >= 3 ? 'err' : '');
+  } catch(e) {
+    toast('River gauges fetch failed: ' + e.message);
+  }
+  if (_riverEnabled) setTimeout(loadRivers, 10 * 60000);
+}
+
+// Water temperature markers ride along with the Tides layer
+let _wtempMarkers = [];
+async function loadWaterTemps() {
+  _wtempMarkers.forEach(m => m.remove());
+  _wtempMarkers = [];
+  if (!_tidesEnabled) return;
+  try {
+    const d = await fetch('/api/water/temperature?radius_km=150').then(r => r.json());
+    (d.stations || []).forEach(s => {
+      const html = `<div style="font-family:monospace;font-size:9px;color:#79c0ff;background:rgba(0,0,0,.75);` +
+        `padding:1px 4px;border-radius:2px;border:1px solid #79c0ff;white-space:nowrap">🌡 ${s.water_temp_f.toFixed(0)}°F</div>`;
+      _wtempMarkers.push(L.marker([s.lat, s.lon], {icon: L.divIcon({className: '', html, iconSize: [60, 16], iconAnchor: [30, 8]})})
+        .bindPopup(`<div class="node-popup"><div class="node-name">🌡 ${esc(s.name)}</div>` +
+          `<div class="node-stat">Water ${s.water_temp_f.toFixed(1)}°F / ${s.water_temp_c.toFixed(1)}°C</div>` +
+          `<div class="node-stat" style="color:var(--muted)">${esc(s.observed_at || '')} local · ${s.distance_km} km</div>` +
+          `<div class="node-stat"><a href="${esc(s.url)}" target="_blank" rel="noopener">NOAA station ${esc(s.id)} ↗</a></div></div>`)
+        .addTo(map));
+    });
+  } catch(e) {}
+}
+
+// ── Radar / satellite overlays (browser-loaded tiles — no server storage) ─
+// Iowa Environmental Mesonet: NEXRAD composite reflectivity tiles and GOES-East
+// clean-IR (ch13, day and night) via WMS. Refreshed every 5 min.
+const _imagery = {radar: null, sat: null};
+function _imageryLayer(kind) {
+  const t = Date.now();
+  if (kind === 'radar') {
+    return L.tileLayer(`https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png?_=${t}`,
+      {opacity: 0.6, zIndex: 300, attribution: 'Radar: NWS NEXRAD via <a href="https://mesonet.agron.iastate.edu/">IEM</a>'});
+  }
+  return L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/goes_east.cgi',
+    {layers: 'conus_ch13', format: 'image/png', transparent: true, opacity: 0.55, zIndex: 290, _t: t,
+     attribution: 'GOES-East IR: NOAA via <a href="https://mesonet.agron.iastate.edu/">IEM</a>'});
+}
+function toggleImagery(kind) {
+  const btn = document.getElementById(kind === 'radar' ? 'radar-btn' : 'sat-btn');
+  if (_imagery[kind]) {
+    map.removeLayer(_imagery[kind].layer);
+    clearInterval(_imagery[kind].timer);
+    _imagery[kind] = null;
+  } else {
+    const layer = _imageryLayer(kind).addTo(map);
+    const timer = setInterval(() => {
+      if (!_imagery[kind]) return;
+      const fresh = _imageryLayer(kind).addTo(map);
+      map.removeLayer(_imagery[kind].layer);
+      _imagery[kind].layer = fresh;
+    }, 5 * 60000);
+    _imagery[kind] = {layer, timer};
+  }
+  const on = !!_imagery[kind];
+  btn.style.color = on ? 'var(--green)' : '';
+  btn.style.borderColor = on ? 'var(--green)' : '';
+  btn.classList.toggle('on', on);
 }
 
 loadWaterBodies();

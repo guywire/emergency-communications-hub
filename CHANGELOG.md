@@ -8,6 +8,18 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc263 (2026-10-11)
+
+### Added
+- **💧 River gauges** map layer: NOAA National Water Prediction Service gauges within
+  80 km — stage, flow and flood category now and forecast, colour-coded (green no
+  flooding → yellow action → orange minor → red moderate → purple major), most severe
+  first, with a warning toast when any gauge is at minor flooding or worse.
+- **Water temperature** at the nearest NOAA sensor stations, shown on the 🌊 Tides layer.
+- **🌧 Radar** (NEXRAD) and **🛰 Satellite IR** (GOES-East, day and night) overlays from the
+  Iowa Environmental Mesonet — loaded directly by your browser, nothing stored on the
+  server, refreshed every 5 minutes.
+
 ## v1.0.0-rc262 (2026-10-11)
 
 ### Added
