@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc265** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
+**Version 1.0.0-rc266** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -730,10 +730,23 @@ sudo bash /opt/ech/scripts/observer_broker.sh list
 * `install` prints a second `letsmesh_compare` adapter block (`observers-compare`,
   127.0.0.1:1884) to add to `config.yaml`.
 * **Nothing is reachable from the internet** after install — the observer listener is bound
-  to localhost. To accept outside observers, enable one of the commented listeners in
-  `/etc/mosquitto/conf.d/signalmatrix-observers.conf`: MQTT over TLS on 8883 (forward the
-  port) or MQTT-over-WebSocket on 9001 published through Caddy on 443. That opens a public
-  service — review it before you do.
+  to localhost. `install` also adds nothing to SignalMatrix by itself: add the printed
+  `observers-compare` adapter (its password is in the root-only
+  `/etc/mosquitto/signalmatrix_reader_password`).
+
+**Remote observers via Caddy (recommended):** remote observers connect with MQTT over
+WebSocket + TLS on port 443 through Caddy (`deploy/caddy/Caddyfile.observers`):
+
+1. A **dedicated hostname** (e.g. `mqtt.example.org`, DNS → your public IP). Observer software
+   always uses WebSocket path `/`, so it can't share a hostname with another site.
+2. Forward TCP **80 and 443** on your router to this machine (Caddy gets the certificate).
+3. Install Caddy and use the Caddyfile above with your hostname.
+4. **Firewall port 9001 to localhost first**, then enable the WebSocket block in
+   `signalmatrix-observers.conf`. Mosquitto 2.0.x ignores the bind address on WebSocket
+   listeners and would otherwise expose 9001 (plain text) to your LAN — the conf file has the
+   nftables commands.
+5. Give each observer `server = <hostname>`, `port = 443`, `transport = "websockets"`, TLS on,
+   and the username/password from `observer_broker.sh add`.
 
 ---
 

@@ -8,6 +8,18 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc266 (2026-10-11)
+
+### Added
+- Caddy configuration for remote MeshCore observers (`deploy/caddy/Caddyfile.observers`):
+  MQTT over WebSocket + TLS on 443 for a dedicated hostname. README walks through it.
+
+### Changed
+- The observer broker's WebSocket listener is off by default: Mosquitto 2.0.x ignores the
+  bind address on WebSocket listeners, so it must be firewalled to localhost before use
+  (commands in the config file). The broker's SignalMatrix reader password is kept in a
+  root-only file instead of being printed.
+
 ## v1.0.0-rc265 (2026-10-11)
 
 ### Added

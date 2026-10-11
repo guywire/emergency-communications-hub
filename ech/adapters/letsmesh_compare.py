@@ -154,8 +154,8 @@ class LetsMeshCompareAdapter(MQTTAdapter):
             known = getattr(target, "_direct_hashes", set()) | set(getattr(target, "_rf_adjacency", {}))
             unknown = recent_origins - known
         log.info(
-            "LetsMesh %s: %d packet(s) processed (%d path(s) merged into %s's topology), "
-            "%d distinct node(s) active on LetsMesh in the last %ds, %d not yet in local topology",
+            "Observer compare %s: %d packet(s) processed (%d path(s) merged into %s's topology), "
+            "%d distinct node(s) reported by observers in the last %ds, %d not yet in local topology",
             self.name, self._packets_seen, self._paths_merged,
             self._target_name or "?", len(recent_origins), self._window_sec, len(unknown),
         )

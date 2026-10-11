@@ -1,0 +1,17 @@
+# SignalMatrix observer broker — public entry point for remote MeshCore observers (O118)
+#
+# Replace mqtt.example.org with YOUR dedicated hostname (DNS A/AAAA record →
+# your public IP; forward TCP 80 and 443 on your router to this machine).
+# Caddy gets and renews the TLS certificate automatically.
+#
+# Observers then use (meshcoretomqtt / meshcore-packet-capture):
+#   server = "mqtt.example.org"   port = 443   transport = "websockets"
+#   [broker.tls] enabled = true    [broker.auth] method = "password"
+#
+# A dedicated hostname is required: observer software always connects to
+# WebSocket path "/", so the broker can't live under a sub-path of another site.
+# Only the MQTT WebSocket listener is exposed; SignalMatrix itself is not.
+
+mqtt.example.org {
+	reverse_proxy 127.0.0.1:9001
+}

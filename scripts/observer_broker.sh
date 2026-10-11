@@ -19,6 +19,7 @@ ACL_SRC="$HERE/deploy/mosquitto/signalmatrix.acl"
 CONF_DST="/etc/mosquitto/conf.d/signalmatrix-observers.conf"
 ACL_DST="/etc/mosquitto/signalmatrix.acl"
 PASSWD="/etc/mosquitto/signalmatrix_passwd"
+READER_PW_FILE="/etc/mosquitto/signalmatrix_reader_password"
 READER="signalmatrix"
 
 die() { echo "observer_broker: $*" >&2; exit 1; }
@@ -42,13 +43,17 @@ case "$cmd" in
       pw="$(newpass)"
       touch "$PASSWD"
       mosquitto_passwd -b "$PASSWD" "$READER" "$pw"
+      # Root-only copy for configuring SignalMatrix (its config.yaml holds it too)
+      install -m 600 /dev/null "$READER_PW_FILE"
+      printf '%s\n' "$pw" > "$READER_PW_FILE"
       new_reader=1
     fi
     chown mosquitto:mosquitto "$PASSWD" 2>/dev/null || true
     chmod 640 "$PASSWD"
     systemctl restart mosquitto
-    echo "Observer broker installed (localhost only: observers on 127.0.0.1:1884)."
+    echo "Observer broker installed (localhost only: observers on 127.0.0.1:1884; WebSocket listener for Caddy is OFF — see the conf file)."
     if [[ "${new_reader:-}" ]]; then
+      echo "SignalMatrix reader password saved to $READER_PW_FILE (root only)."
       cat <<EOF
 
 Add this adapter to /etc/ech/config.yaml so SignalMatrix compares against YOUR
@@ -59,12 +64,12 @@ observers (alongside LetsMesh if you have it), then restart SignalMatrix:
     host: 127.0.0.1
     port: 1884
     username: $READER
-    password: "$pw"
+    password: "<contents of $READER_PW_FILE>"
     meshcore_adapter: meshcore-usb      # your local MeshCore adapter name
     topics:
       - meshcore/+/+/packets
 
-(The password is shown once — it is stored only as a hash.)
+(Mosquitto stores only a hash; the root-only file above is the copy for SignalMatrix.)
 EOF
     fi
     ;;
@@ -80,10 +85,12 @@ EOF
     cat <<EOF
 Observer added. Send the observer's operator:
 
-  broker:    <your public host name>  (port 8883 TLS, or wss://<host>/mqtt — whichever you enabled)
+  server:    <your broker hostname, e.g. mqtt.example.org>
+  port:      443   transport: websockets   TLS: enabled (verify on)
+  auth:      password
   username:  $key
   password:  $pw
-  topic:     meshcore/$region/$key/packets   (same layout as LetsMesh)
+  topic:     meshcore/$region/$key/packets   (same layout as LetsMesh; IATA = $region)
 
 They can only publish under their own key, and cannot read anyone's reports.
 EOF
