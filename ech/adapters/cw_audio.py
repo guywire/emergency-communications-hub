@@ -341,20 +341,21 @@ class CWAudioAdapter(Adapter):
         # Browser-hosted: ship the rendered audio to the browser, which plays
         # it out the operator's sound card into the radio (VOX/CAT PTT still
         # applies, just on the remote end).
+        # PTT is keyed BY THE BROWSER (/remote-hw, over its Web Serial CAT
+        # port) around the moment the audio actually plays. Keying here was
+        # wrong for this path: write() only queues the audio, so the old
+        # key→write→unkey wrapped a few microseconds, not the transmission.
         if self._hw_sess is not None:
             audio = self._encode_tx(message.body)
-            await self._key_ptt(True)
             try:
                 await self._hw_sess.write(audio.astype(np.float32).tobytes())
                 self._last_tx = datetime.now(timezone.utc)
-                log.info("%sAudio %s: sent %.1fs of TX audio to browser",
+                log.info("%sAudio %s: sent %.1fs of TX audio to browser (browser keys PTT)",
                          self.MODE, self.name, len(audio) / self._sample_rate)
                 return True
             except ConnectionError:
                 log.warning("%sAudio %s: browser session gone — TX failed", self.MODE, self.name)
                 return False
-            finally:
-                await self._key_ptt(False)
         if self._sd is None:
             return False
         out_dev = self._resolve_device(self._output_device, want_input=False)
@@ -416,7 +417,8 @@ class CWAudioAdapter(Adapter):
             "dropped_blocks": self._dropped_blocks,
             "last_decode": self._last_decode,
             "modem": self.modem_settings(),
-            "ptt": "cat" if self._ptt_via_cat else "vox",
+            "ptt": ("browser" if str(self._input_device).lower() == "browser"
+                    else "cat" if self._ptt_via_cat else "vox"),
             "ptt_cat_connected": bool(self._cat_ctrl and getattr(self._cat_ctrl, "_connected", False))
                                  if self._ptt_via_cat else None,
         }

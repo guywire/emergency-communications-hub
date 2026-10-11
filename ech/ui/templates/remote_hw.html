@@ -131,6 +131,21 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <select id="audio-in"><option value="">System default</option></select>
     <label>Output device (TX audio to radio)</label>
     <select id="audio-out"><option value="">System default</option></select>
+    <label>Transmit keying (PTT) — uses the CAT serial port above</label>
+    <select id="ptt-method">
+      <option value="auto">CAT command — match the CAT rig type above</option>
+      <option value="civ">CAT — Icom CI-V (1C 00) — Xiegu G90, IC-7300, IC-705</option>
+      <option value="kenwood">CAT — Kenwood/Elecraft (TX; / RX;)</option>
+      <option value="yaesu">CAT — Yaesu text (TX1; / TX0;) — FT-991A, FT-891, FTDX10, FT-450</option>
+      <option value="rts">RTS line — DigiRig and most USB interfaces</option>
+      <option value="dtr">DTR line</option>
+      <option value="vox">None — radio VOX keys itself</option>
+    </select>
+    <label>TX delay (ms before audio) / tail (ms after)</label>
+    <span><input id="ptt-delay" type="number" value="150" min="0" max="2000" style="width:80px">
+    <input id="ptt-tail" type="number" value="120" min="0" max="2000" style="width:80px"></span>
+    <button class="btn" onclick="pttTest()" title="Key for 2 s with a 1 kHz tone — check power/ALC on the radio">Test PTT (2 s tone)</button>
+    <div class="status idle" id="ptt-status">PTT idle</div>
     <br>
     <button class="btn" onclick="listAudioDevices(true)">Refresh devices</button>
     <button class="btn" id="audio-btn" onclick="connectAudio()">Connect radio audio…</button>
@@ -295,6 +310,8 @@ async function connectAudio() {
 
     proc.onaudioprocess = (e) => {
       if (!_audio.running || ws.readyState !== 1) return;
+      // Don't feed our own transmission (radio monitor) back to the decoders
+      if (_tx.keyed) { e.outputBuffer.getChannelData(0).fill(0); return; }
       const inp = e.inputBuffer.getChannelData(0);
       let peak = 0;
       for (let i = 0; i < inp.length; i++) { const v = Math.abs(inp[i]); if (v > peak) peak = v; }
@@ -315,15 +332,7 @@ async function connectAudio() {
         } catch(_) {}
         return;
       }
-      const samples = new Float32Array(e.data);
-      const buf = ctx.createBuffer(1, Math.ceil(samples.length * ctx.sampleRate / TARGET_RATE), ctx.sampleRate);
-      const ch = buf.getChannelData(0);
-      const r = ctx.sampleRate / TARGET_RATE;
-      for (let i = 0; i < ch.length; i++) ch[i] = samples[Math.floor(i / r)] || 0;
-      const node = ctx.createBufferSource();
-      node.buffer = buf;
-      node.connect(ctx.destination);
-      node.start();
+      txEnqueue(new Float32Array(e.data));
     };
     ws.onclose = (ev) => {
       if (!_audio.running) return;
@@ -350,7 +359,107 @@ async function connectAudio() {
   }
 }
 
+// ── Transmit: queue TX audio and key PTT around actual playback ──────────
+// The server only ships the audio; the radio is keyed HERE, because only the
+// browser knows when the audio really plays. Sequence per burst:
+//   PTT on → TX delay (radio T/R switch settles) → audio → tail → PTT off.
+// Back-to-back sends (e.g. CW + RTTY + PSK selected together) queue end to
+// end under one key-down rather than overlapping.
+const _tx = {keyed: false, endAt: 0, unkeyTimer: null, watchdog: null, busy: Promise.resolve()};
+const TX_MAX_S = 180;   // stuck-key watchdog
+
+function _pttMethod() {
+  const m = document.getElementById('ptt-method').value;
+  if (m !== 'auto') return m;
+  return _catRigType === 'civ' ? 'civ' : _catRigType === 'kenwood' ? 'kenwood' : 'vox';
+}
+
+// Serialize every CAT-port write (PTT vs frequency polling) so commands and
+// replies don't interleave on the wire.
+function _catExclusive(fn) {
+  const run = _tx.busy.then(fn, fn);
+  _tx.busy = run.catch(() => {});
+  return run;
+}
+
+async function setPtt(on) {
+  const m = _pttMethod();
+  if (m === 'vox') return true;
+  if (!_catPort) {
+    setStatus('ptt-status', `PTT ${m.toUpperCase()} needs the CAT port connected (card above) — sending without keying`, 'err');
+    return false;
+  }
+  try {
+    await _catExclusive(async () => {
+      if (m === 'rts') await _catPort.setSignals({requestToSend: on});
+      else if (m === 'dtr') await _catPort.setSignals({dataTerminalReady: on});
+      else if (m === 'civ') await _catWriter.write(new Uint8Array([0xFE,0xFE,_catCivAddr,0xE0,0x1C,0x00,on ? 1 : 0,0xFD]));
+      else if (m === 'kenwood') await _catWriter.write(new TextEncoder().encode(on ? 'TX;' : 'RX;'));
+      else if (m === 'yaesu') await _catWriter.write(new TextEncoder().encode(on ? 'TX1;' : 'TX0;'));
+      // Swallow the rig's ack/echo so the next frequency poll doesn't read it
+      await new Promise(r => setTimeout(r, 60));
+      _catBuf = [];
+    });
+    return true;
+  } catch(e) {
+    setStatus('ptt-status', `PTT ${on ? 'key' : 'unkey'} failed: ${e.message}`, 'err');
+    return false;
+  }
+}
+
+async function _key() {
+  clearTimeout(_tx.unkeyTimer); _tx.unkeyTimer = null;
+  if (_tx.keyed) return;
+  _tx.keyed = true;
+  const ok = await setPtt(true);
+  if (ok) setStatus('ptt-status', `● TRANSMITTING (${_pttMethod().toUpperCase()})`, 'err');
+  clearTimeout(_tx.watchdog);
+  _tx.watchdog = setTimeout(() => { _unkey(`Watchdog: unkeyed after ${TX_MAX_S} s`); }, TX_MAX_S * 1000);
+}
+
+async function _unkey(msg) {
+  clearTimeout(_tx.unkeyTimer); _tx.unkeyTimer = null;
+  clearTimeout(_tx.watchdog); _tx.watchdog = null;
+  if (!_tx.keyed) return;
+  _tx.keyed = false;
+  _tx.endAt = 0;
+  await setPtt(false);
+  setStatus('ptt-status', msg || 'PTT idle', msg ? 'err' : 'idle');
+}
+
+async function txEnqueue(samples) {
+  const ctx = _audio.ctx;
+  if (!ctx || !samples.length) return;
+  if (ctx.state === 'suspended') { try { await ctx.resume(); } catch(e) {} }
+  const delay = Math.max(0, +document.getElementById('ptt-delay').value || 0) / 1000;
+  const tail = Math.max(0, +document.getElementById('ptt-tail').value || 0) / 1000;
+  const wasKeyed = _tx.keyed;
+  await _key();
+  // 8 kHz buffer; the AudioContext resamples it properly to the device rate
+  // (the old nearest-neighbour upsample put aliases into the TX audio).
+  const buf = ctx.createBuffer(1, samples.length, TARGET_RATE);
+  buf.getChannelData(0).set(samples);
+  const node = ctx.createBufferSource();
+  node.buffer = buf;
+  node.connect(ctx.destination);
+  const now = ctx.currentTime;
+  const start = Math.max(now + (wasKeyed ? 0.02 : delay), _tx.endAt);
+  node.start(start);
+  _tx.endAt = start + buf.duration;
+  const unkeyIn = (_tx.endAt + tail - now) * 1000;
+  clearTimeout(_tx.unkeyTimer);
+  _tx.unkeyTimer = setTimeout(() => _unkey(), unkeyIn);
+}
+
+async function pttTest() {
+  if (!_audio.running) { setStatus('ptt-status', 'Connect radio audio first', 'err'); return; }
+  const n = TARGET_RATE * 2, s = new Float32Array(n);
+  for (let i = 0; i < n; i++) s[i] = 0.5 * Math.sin(2 * Math.PI * 1000 * i / TARGET_RATE);
+  txEnqueue(s);
+}
+
 function stopAudio(msg, isErr) {
+  _unkey();
   _audio.running = false;
   clearInterval(_audio.meterTimer);
   document.getElementById('audio-level-row').hidden = true;
@@ -461,9 +570,9 @@ async function pushCatUpdate(freq_hz, mode, rig_info) {
 }
 
 async function catPoll() {
-  if (!_catPort) return;
+  if (!_catPort || _tx.keyed) return;   // no polling chatter while transmitting
   try {
-    if (_catRigType === 'civ') await civRead(); else await kenwoodRead();
+    await _catExclusive(() => _catRigType === 'civ' ? civRead() : kenwoodRead());
   } catch(e) {
     setStatus('cat-status', 'Poll error: ' + e.message, 'err');
   }
@@ -499,6 +608,7 @@ async function catConnect() {
 
 async function catDisconnect() {
   clearInterval(_catPollTimer); _catPollTimer = null;
+  await _unkey();
   try { _catReader && (await _catReader.cancel(), _catReader.releaseLock()); } catch(e) {}
   try { _catWriter && _catWriter.releaseLock(); } catch(e) {}
   try { _catPort && await _catPort.close(); } catch(e) {}
@@ -533,6 +643,9 @@ document.addEventListener('click', (e) => {
 window.addEventListener('beforeunload', (e) => {
   if (bridgeActive()) { e.preventDefault(); e.returnValue = ''; }
 });
+// Leaving while keyed: fire the unkey immediately (best effort — the page
+// can't wait for it). RTS/DTR also drop when the port closes with the page.
+window.addEventListener('pagehide', () => { if (_tx.keyed) _unkey(); });
 </script>
 </body>
 </html>
