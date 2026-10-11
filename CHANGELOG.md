@@ -8,6 +8,14 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc264 (2026-10-11)
+
+### Added
+- **Your own observer broker** for MeshCore packet comparison: Mosquitto config, an ACL
+  that lets each observer publish only under its own public key (and read nothing), and
+  `scripts/observer_broker.sh install|add|revoke|list`. Localhost-only until you choose
+  to expose it. See README "Your own observer broker".
+
 ## v1.0.0-rc263 (2026-10-11)
 
 ### Added

@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc263** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
+**Version 1.0.0-rc264** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -707,6 +707,33 @@ otherwise the radio's VOX keys itself.
 
 FT-817/818/857/897 use 5-byte binary CAT, which the browser CAT card does not speak — use
 RTS or VOX for PTT on those.
+
+---
+
+## Your own observer broker (MeshCore packet comparison)
+
+The `letsmesh_compare` adapter merges other MeshCore observers' path reports into your
+routing picture. Besides LetsMesh, you can run **your own** broker that other operators'
+observers report to (same topic layout as LetsMesh: `meshcore/<REGION>/<PUBKEY>/packets`),
+so comparison doesn't depend on anyone else's service.
+
+```bash
+sudo bash /opt/ech/scripts/observer_broker.sh install          # broker config + SignalMatrix reader login
+sudo bash /opt/ech/scripts/observer_broker.sh add <PUBKEY> RKD # login for one observer (prints their settings)
+sudo bash /opt/ech/scripts/observer_broker.sh revoke <PUBKEY>
+sudo bash /opt/ech/scripts/observer_broker.sh list
+```
+
+* Each observer logs in with its **MeshCore public key** as the username and can publish
+  only under that key; observers cannot read each other's reports; only SignalMatrix reads
+  (Mosquitto ACL in `deploy/mosquitto/signalmatrix.acl`, verified with a test broker).
+* `install` prints a second `letsmesh_compare` adapter block (`observers-compare`,
+  127.0.0.1:1884) to add to `config.yaml`.
+* **Nothing is reachable from the internet** after install — the observer listener is bound
+  to localhost. To accept outside observers, enable one of the commented listeners in
+  `/etc/mosquitto/conf.d/signalmatrix-observers.conf`: MQTT over TLS on 8883 (forward the
+  port) or MQTT-over-WebSocket on 9001 published through Caddy on 443. That opens a public
+  service — review it before you do.
 
 ---
 

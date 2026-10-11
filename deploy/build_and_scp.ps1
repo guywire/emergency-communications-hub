@@ -84,7 +84,7 @@ $bashInstall = To-BashPath "$SRC\deploy\install.sh"
 
 # ── Build tarball (includes VERSION) ─────────────────────────────────────────
 Write-Host "Building tarball..." -ForegroundColor Gray
-& $gitBash -c "cd '$bashSrc' && tar -czf '$bashTar' ech/ config.yaml deploy/install.sh deploy/ech.service deploy/ech-sim.service VERSION"
+& $gitBash -c "cd '$bashSrc' && tar -czf '$bashTar' ech/ config.yaml deploy/install.sh deploy/ech.service deploy/ech-sim.service deploy/mosquitto scripts/observer_broker.sh VERSION"
 
 if (-not (Test-Path $TAR)) {
     Write-Error "Failed to create tarball. Is Git Bash installed?"

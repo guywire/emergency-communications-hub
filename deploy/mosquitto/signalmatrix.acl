@@ -1,0 +1,11 @@
+# SignalMatrix observer broker ACL (O118)
+# Anything not allowed here is denied.
+
+# SignalMatrix itself: read every observer's reports, publish nothing.
+user signalmatrix
+topic read meshcore/#
+
+# Every observer logs in with its MeshCore public key (64 hex, upper case) as
+# the username, and may publish only under that key — never under another
+# observer's key, and it cannot read anyone's reports.
+pattern write meshcore/+/%u/#
