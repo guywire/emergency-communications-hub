@@ -162,6 +162,13 @@ class MeshCoreMQTTBridge:
         self._adapter_name   = cfg.get("adapter_name")
         self._status_interval = int(cfg.get("status_interval", 300))
         self._qos            = int(cfg.get("qos", 0))
+        # Publish raw OTA packets exactly like meshcore-packet-capture observers
+        # (raw hex + real path-independent hash) — on by default. Decoded
+        # messages (DECRYPTED text, sender, channel name) are OFF by default:
+        # turning that on sends private channel contents to whatever broker
+        # this points at (LetsMesh/MeshMapper are public services).
+        self._publish_raw    = bool(cfg.get("publish_raw", True))
+        self._publish_decoded = bool(cfg.get("publish_decoded", False))
 
         # Runtime state — populated from PACKET_SELF_INFO once adapter connects
         self._origin_name    = cfg.get("device_name", "ECH-Observer")
@@ -180,6 +187,9 @@ class MeshCoreMQTTBridge:
             return
         self._router = router
         router._meshcore_bridge = self
+        if self._publish_raw:
+            from ech.core.packet_compare import registry as _pkt_cmp
+            _pkt_cmp.add_raw_listener(self._on_raw_packet)
         self._task = asyncio.create_task(self._publish_loop(), name="meshcore-bridge")
         log.info("MeshCoreBridge: started → %s:%d iata=%s prefix=%s websocket=%s",
                  self._host, self._port, self._iata, self._prefix, self._websocket)
@@ -192,9 +202,20 @@ class MeshCoreMQTTBridge:
             except asyncio.CancelledError:
                 pass
 
-    async def enqueue(self, msg: "NormalizedMessage") -> None:
-        """Called by the router for every inbound MeshCore message."""
+    def _on_raw_packet(self, raw: bytes, snr, rssi, pkt_hash: str) -> None:
+        """packet_compare listener: every raw OTA packet the local node heard."""
         if not self.enabled:
+            return
+        self._sync_device_info()
+        try:
+            self._queue.put_nowait((raw, snr, rssi, pkt_hash))
+        except asyncio.QueueFull:
+            log.debug("MeshCoreBridge: queue full, dropping raw packet")
+
+    async def enqueue(self, msg: "NormalizedMessage") -> None:
+        """Called by the router for every inbound MeshCore message. Decoded
+        (decrypted) publishing is opt-in — see publish_decoded."""
+        if not self.enabled or not self._publish_decoded:
             return
         # Sync device name from adapter if we don't have it yet
         self._sync_device_info()
@@ -266,10 +287,16 @@ class MeshCoreMQTTBridge:
                     status_task = asyncio.create_task(_periodic_status())
                     try:
                         while True:
-                            msg = await asyncio.wait_for(
-                                self._queue.get(), timeout=60.0
-                            )
-                            await self._publish_packet(client, msg)
+                            try:
+                                item = await asyncio.wait_for(self._queue.get(), timeout=60.0)
+                            except asyncio.TimeoutError:
+                                # Idle — keep the connection (this used to escape the
+                                # `async with` and reconnect every quiet minute).
+                                continue
+                            if isinstance(item, tuple):
+                                await self._publish_raw_packet(client, *item)
+                            else:
+                                await self._publish_packet(client, item)
                     finally:
                         status_task.cancel()
                         try:
@@ -293,6 +320,38 @@ class MeshCoreMQTTBridge:
                 backoff = min(backoff * 2, 60)
 
     # ── Packet format (meshcore-packet-capture / letsmesh) ────────────────
+
+    async def _publish_raw_packet(self, client, raw: bytes, snr, rssi, pkt_hash: str) -> None:
+        """One heard OTA packet in exactly the JSON meshcore-packet-capture
+        observers publish (format_packet_data): raw hex + the real packet hash,
+        so other tools — and other observers' comparisons — match it."""
+        from datetime import datetime, timezone
+        from ech.core.meshcore_packet import parse
+        p = parse(raw)
+        if p is None:
+            return
+        now = datetime.now(timezone.utc)
+        packet = {
+            "origin":      self._origin_name,
+            "origin_id":   self._origin_id(),
+            "timestamp":   now.isoformat(),
+            "type":        "PACKET",
+            "direction":   "rx",
+            "time":        now.strftime("%H:%M:%S"),
+            "date":        now.strftime("%d/%m/%Y"),
+            "len":         str(len(raw)),
+            "packet_type": str(p["payload_type"]),
+            "route":       p["route"],
+            "payload_len": str(len(p["payload"])),
+            "raw":         raw.hex().upper(),
+            "SNR":         str(snr) if snr is not None else "",
+            "RSSI":        str(rssi) if rssi is not None else "",
+            "hash":        pkt_hash,
+        }
+        if p["route"] == "D" and p["path"]:
+            packet["path"] = ",".join(h.lower() for h in p["path"])
+        await client.publish(self._topic("packets"), payload=json.dumps(packet).encode(), qos=self._qos)
+        self._pub_count += 1
 
     async def _publish_packet(self, client, msg: "NormalizedMessage") -> None:
         """Publish one ECH NormalizedMessage as a letsmesh-format packet JSON."""
@@ -321,7 +380,10 @@ class MeshCoreMQTTBridge:
             "raw":         "",            # companion protocol doesn't expose raw LoRa frames
             "SNR":         str(snr) if snr is not None else "",
             "RSSI":        str(rssi) if rssi is not None else "",
-            "hash":        msg.id[:12].upper(),
+            # NOT a MeshCore packet hash (decoded messages carry no raw packet):
+            # tagged so consumers can't confuse it with observer hashes.
+            "hash":        "",
+            "ech_msg_id":  msg.id,
             # Extended fields — not in spec but useful for ECH consumers
             "channel":     msg.source_channel,
             "from_id":     self._device_id(msg.from_id) if msg.from_id else msg.from_id,

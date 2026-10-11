@@ -8,6 +8,23 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc265 (2026-10-11)
+
+### Added
+- **Packet-level MeshCore comparison**: every packet this station hears is matched against
+  what other observers (LetsMesh or your own observer broker) report, using the same
+  path-independent packet hash observers use — showing heard by both / only us / only
+  others, per packet type and per observer, and which packets we missed. Settings → MQTT
+  and `GET /api/meshcore/compare`.
+
+### Fixed
+- The MeshCore MQTT bridge now publishes raw packets in the exact observer format with the
+  real packet hash (it used an internal message ID that could never match other
+  observers). Publishing decoded (decrypted) messages is now opt-in
+  (`meshcore_bridge.publish_decoded`, default off) — it previously sent decrypted text,
+  sender and channel to the configured broker.
+- The bridge no longer disconnects and reconnects after every idle minute.
+
 ## v1.0.0-rc264 (2026-10-11)
 
 ### Added

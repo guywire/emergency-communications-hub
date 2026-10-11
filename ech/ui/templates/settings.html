@@ -769,6 +769,8 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
         <button class="btn btn-blue" onclick="loadMQTTStatus()">↻ Refresh</button>
       </div>
       <div id="mqtt-bridge-status" style="margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--dim)"></div>
+      <div style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--text);margin:12px 0 4px">Packet comparison — this station vs other MeshCore observers (last hour)</div>
+      <div id="pkt-compare" style="font-family:var(--mono);font-size:11px;color:var(--muted)">Loading…</div>
       <div style="margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--muted)">
         Bridge pushes your local MeshCore USB data to a MQTT broker so MeshMapper/live-map tools can track your nodes.
         The MQTT adapters above subscribe <em>from</em> external brokers — separate data flow.
@@ -1213,6 +1215,8 @@ async function loadMQTTStatus() {
         return `${dot} <b>${esc(a.adapter)}</b> — ${esc(a.state)}`;
       }).join('<br>');
     }
+
+    loadPacketCompare();
 
     // MeshCore bridge status
     const bridge = await fetch('/api/meshcore-bridge').then(r=>r.json());
@@ -3105,6 +3109,24 @@ async function disableAdapter(name) {
   setTimeout(loadAdapterLive, 500);
   if (d.persisted) toast(`${name}: disabled and written to config.yaml — won't reconnect on restart`);
   else toast(`${name}: paused now (config write failed: ${d.warning || 'unknown error'})`);
+}
+
+// ── Packet-level comparison (O118) ───────────────────────────────────────
+async function loadPacketCompare() {
+  const el = document.getElementById('pkt-compare');
+  if (!el) return;
+  try {
+    const d = await fetch('/api/meshcore/compare?window_min=60&limit=15&only=observers_only').then(r => r.json());
+    const s = d.summary;
+    if (!s.packets) { el.innerHTML = 'No packets yet. Local packets are recorded as the MeshCore node hears them; observer packets arrive once a compare adapter (LetsMesh or your own observer broker) is connected.'; return; }
+    const cov = s.local_coverage_pct == null ? '—' : s.local_coverage_pct + '%';
+    const types = Object.entries(s.by_type).map(([k, v]) => `${esc(k)} ${v.both}/${v.local_only}/${v.observers_only}`).join(' · ');
+    const obs = Object.entries(s.observers).map(([k, o]) => `${esc(o.name || k)} (${o.shared_with_us}/${o.packets} shared)`).join(', ') || 'none yet';
+    const missed = (d.recent || []).map(m => `<div>${new Date(m.first * 1000).toLocaleTimeString()} ${esc(m.type)} ${esc(m.hash)} — heard by ${m.observers.map(o => esc(o.name || o.id)).join(', ')}</div>`).join('');
+    el.innerHTML = `<div>Heard by both <b style="color:var(--text)">${s.heard_by_both}</b> · only us <b style="color:var(--text)">${s.local_only}</b> · only others <b style="color:var(--text)">${s.observers_only}</b> · we heard <b style="color:var(--text)">${cov}</b> of what others reported</div>` +
+      `<div>By type (both/us/others): ${types}</div><div>Observers: ${obs}</div>` +
+      (missed ? `<div style="margin-top:4px;color:var(--text)">Recently missed by this station:</div>${missed}` : '');
+  } catch(e) { el.textContent = 'Comparison unavailable: ' + e.message; }
 }
 
 // ── PSKReporter ──────────────────────────────────────────────────────────

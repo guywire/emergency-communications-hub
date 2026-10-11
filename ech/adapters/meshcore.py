@@ -1994,6 +1994,17 @@ class MeshCoreAdapter(Adapter):
                     self._rf_stats["rssi_samples"]  = self._rf_stats["rssi_samples"][-500:]
                 # Cache for RSSI correlation when the same packet arrives via poll (0x11/0x08)
                 self._recent_log_data.append({"snr": snr, "rssi": rssi})
+                # Packet-level comparison with other observers: hash every raw
+                # packet we hear exactly as observers do (path-independent), so
+                # the same transmission matches across stations. Also feeds the
+                # MQTT bridge, which publishes raw packets in observer format.
+                try:
+                    from ech.core.packet_compare import registry as _pkt_cmp
+                    if self._self_node_id:
+                        _pkt_cmp.set_own_id(self._self_node_id)
+                    _pkt_cmp.record_local(data[2:], snr, rssi, self.name)
+                except Exception as exc:
+                    log.debug("MeshCore %s: packet compare record error: %s", self.name, exc)
                 # Live traffic visualization: the raw OTA packet after the two
                 # metric bytes carries the routing header incl. relay-path hashes —
                 # exactly the data the map's traffic overlay needs.

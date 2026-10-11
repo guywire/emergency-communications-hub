@@ -108,7 +108,7 @@ async def test_enqueue_disabled_does_nothing():
 
 @pytest.mark.asyncio
 async def test_enqueue_enabled_adds_to_queue():
-    bridge = MeshCoreMQTTBridge(make_config(enabled=True))
+    bridge = MeshCoreMQTTBridge(make_config(enabled=True, publish_decoded=True))
     msg = make_mesh_msg()
     await bridge.enqueue(msg)
     assert bridge._queue.qsize() == 1
@@ -117,7 +117,7 @@ async def test_enqueue_enabled_adds_to_queue():
 @pytest.mark.asyncio
 async def test_enqueue_only_meshcore():
     """Non-MeshCore messages are not enqueued (router filters by adapter name)."""
-    bridge = MeshCoreMQTTBridge(make_config(enabled=True))
+    bridge = MeshCoreMQTTBridge(make_config(enabled=True, publish_decoded=True))
     aprs_msg = NormalizedMessage(
         source_adapter="aprs-mock",
         source_channel="144.390",
@@ -133,13 +133,22 @@ async def test_enqueue_only_meshcore():
 @pytest.mark.asyncio
 async def test_queue_full_drops_gracefully():
     """Queue full should drop without raising."""
-    bridge = MeshCoreMQTTBridge(make_config(enabled=True))
+    bridge = MeshCoreMQTTBridge(make_config(enabled=True, publish_decoded=True))
     # Fill the queue
     for _ in range(bridge._queue.maxsize):
         await bridge.enqueue(make_mesh_msg())
     # This should not raise
     await bridge.enqueue(make_mesh_msg())
     assert bridge._queue.qsize() == bridge._queue.maxsize
+
+
+@pytest.mark.asyncio
+async def test_decoded_messages_not_published_by_default():
+    """Decoded (decrypted) messages are opt-in — by default only raw OTA
+    packets (still encrypted, observer format) are published."""
+    bridge = MeshCoreMQTTBridge(make_config(enabled=True))
+    await bridge.enqueue(make_mesh_msg())
+    assert bridge._queue.qsize() == 0
 
 
 # ── Status ────────────────────────────────────────────────────────────────

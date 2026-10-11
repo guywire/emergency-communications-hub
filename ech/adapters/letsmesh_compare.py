@@ -84,6 +84,7 @@ class LetsMeshCompareAdapter(MQTTAdapter):
         self._log_interval_sec = int(config.get("log_interval_sec", 900))
 
         self._packets_seen = 0
+        self._packets_compared = 0
         self._paths_merged = 0
         self._parse_errors = 0
         # origin hash-prefix -> last-seen monotonic time; a rolling window of
@@ -113,6 +114,15 @@ class LetsMeshCompareAdapter(MQTTAdapter):
             return
         if data.get("type") not in (None, "PACKET"):
             return
+
+        # Packet-level comparison: match this report against what the local
+        # node heard, by the path-independent observer packet hash.
+        try:
+            from ech.core.packet_compare import registry as _pkt_cmp
+            if _pkt_cmp.record_observer(data, source=self.name):
+                self._packets_compared += 1
+        except Exception as exc:
+            log.debug("%s: packet compare error: %s", self.name, exc)
 
         origin_id = str(data.get("origin_id") or "").strip()
         if origin_id:
@@ -155,6 +165,7 @@ class LetsMeshCompareAdapter(MQTTAdapter):
         detail.update({
             "target_adapter": self._target_name,
             "packets_seen": self._packets_seen,
+            "packets_compared": self._packets_compared,
             "paths_merged": self._paths_merged,
             "parse_errors": self._parse_errors,
             "distinct_origins_seen": len(self._seen_origins),

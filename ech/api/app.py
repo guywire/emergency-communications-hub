@@ -3471,6 +3471,19 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         await pota_service.trigger_poll()
         return {"status": "ok", **pota_service.status()}
 
+    @app.get("/api/meshcore/compare")
+    async def meshcore_compare(window_min: int = 60, limit: int = 100, only: str = ""):
+        """Packet-level comparison: packets this station heard vs packets other
+        MeshCore observers reported (LetsMesh / own observer broker), matched by
+        the path-independent observer packet hash. only = both | local_only |
+        observers_only (observers_only = what we're missing)."""
+        from ech.core.packet_compare import registry as pkt_cmp
+        window_s = max(60, min(int(window_min), 24 * 60)) * 60
+        if only not in ("", "both", "local_only", "observers_only"):
+            only = ""
+        return {"summary": pkt_cmp.summary(window_s),
+                "recent": pkt_cmp.recent(limit=max(1, min(limit, 500)), window_s=window_s, only=only)}
+
     @app.get("/api/rivers/gauges")
     async def rivers_gauges(radius_km: float = 80.0):
         """NOAA NWPS river/tide gauges near base with observed + forecast
