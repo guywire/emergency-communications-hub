@@ -23,5 +23,6 @@ def test_contact_email_set_live_and_persisted(tmp_path):
         r = c.post("/api/system/contact-email", json={"contact_email": "op@example.org"}).json()
         assert r["persisted"] is True
         assert c.get("/api/system/contact-email").json()["contact_email"] == "op@example.org"
-    assert app_mod._psk_contact == "(SignalMatrix, op@example.org)"
-    assert yaml.safe_load(cfg.read_text())["pskreporter"]["contact_email"] == "op@example.org"
+    from ech.core import identity
+    assert identity.user_agent() == "(SignalMatrix/KN0O, op@example.org)"
+    assert yaml.safe_load(cfg.read_text())["operator"]["contact_email"] == "op@example.org"

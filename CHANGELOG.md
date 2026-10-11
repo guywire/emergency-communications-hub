@@ -8,6 +8,23 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc259 (2026-10-11)
+
+### Changed
+- **Every install uses its own identity and agreements.** All outbound requests (NWS,
+  NOAA, PSKReporter, OpenStreetMap, callsign lookups) send `(SignalMatrix/<your call>,
+  <your email>)` from your own config instead of a placeholder; the Settings contact
+  email now covers all of them (`operator.contact_email`).
+- **Winlink RMS gateways come from your own Pat** (`/api/rmslist`) instead of calling
+  Winlink with an access key that belonged to the Pat project.
+- No more built-in default callsign in the Asterisk installer, PBX phone book or Winlink
+  mail forwarder. README: new "Your own accounts, keys and agreements" section.
+
+### Fixed
+- JS8Call stations with 6-character grid squares were plotted ~75 km east / ~50 km
+  north of their real location.
+- `scripts/forward_winlink_mail.sh` had a bash syntax error and had never run.
+
 ## v1.0.0-rc258 (2026-10-11)
 
 ### Added

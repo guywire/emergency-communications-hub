@@ -449,6 +449,8 @@ def main():
                         help="Path to config.yaml (default: ./config.yaml)")
     args = parser.parse_args()
     config = load_config(args.config)
+    from ech.core import identity
+    identity.configure(config)   # outbound User-Agent: this station's own call + contact
     asyncio.run(run(config, config_path=args.config))
 
 

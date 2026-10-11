@@ -33,7 +33,12 @@ set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────
 FORWARD_TO="${WINLINK_FORWARD_TO:-your@email.com}"   # set this or export env var
-CALLSIGN="${PAT_CALLSIGN:-$(grep -r '"mycall"' ~/.config/pat/config.json 2>/dev/null | head -1 | sed 's/.*"mycall": *"\([^"]*\)".*/\1/' || echo 'KN0O')}"
+CALLSIGN="${PAT_CALLSIGN:-$(grep -r '"mycall"' ~/.config/pat/config.json 2>/dev/null | head -1 | sed 's/.*"mycall": *"\([^"]*\)".*/\1/' || true)}"
+if [[ -z "$CALLSIGN" ]]; then
+  # No fallback callsign: never read another station's mailbox or send as it
+  echo "forward_winlink_mail: no callsign — set PAT_CALLSIGN or Pat's mycall in ~/.config/pat/config.json" >&2
+  exit 1
+fi
 MAILBOX_IN="${HOME}/.local/share/pat/mailbox/${CALLSIGN}/in"
 STATE_FILE="${HOME}/.local/share/pat/forwarded_mids"
 LOG="/var/log/ech/winlink_forward.log"
@@ -61,7 +66,9 @@ fi
 forwarded=0
 failed=0
 
-for msgfile in "$MAILBOX_IN"/*.b2f "$MAILBOX_IN"/*.txt 2>/dev/null; do
+# (A redirect here — "… *.txt 2>/dev/null; do" — was a bash syntax error that
+# stopped this script from ever running; unmatched globs are skipped below.)
+for msgfile in "$MAILBOX_IN"/*.b2f "$MAILBOX_IN"/*.txt; do
   [[ -f "$msgfile" ]] || continue
 
   # Extract message ID from filename

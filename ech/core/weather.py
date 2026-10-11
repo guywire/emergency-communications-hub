@@ -26,11 +26,12 @@ from typing import Any
 import httpx
 
 from ech.core.models import NormalizedMessage, Priority
+from ech.core import identity
 
 log = logging.getLogger(__name__)
 
 NWS_API_BASE = "https://api.weather.gov"
-NWS_USER_AGENT = "(SignalMatrix, sm@emergency.local)"
+# NWS asks for "(app, contact)" in the User-Agent -- this install's own (identity.py)
 
 # NWS severity → ECH priority mapping
 SEVERITY_MAP = {
@@ -103,7 +104,7 @@ class WeatherService:
             log.info("WeatherService: disabled in config")
             return
         self._client = httpx.AsyncClient(
-            headers={"User-Agent": NWS_USER_AGENT},
+            headers={"User-Agent": identity.user_agent()},
             timeout=15.0,
             follow_redirects=True,
         )
@@ -353,7 +354,7 @@ class WeatherService:
         client = self._client
         if client is None:
             # Service not started — create a one-shot client
-            client = httpx.AsyncClient(headers={"User-Agent": NWS_USER_AGENT}, timeout=10.0, follow_redirects=True)
+            client = httpx.AsyncClient(headers={"User-Agent": identity.user_agent()}, timeout=10.0, follow_redirects=True)
             own_client = True
         else:
             own_client = False

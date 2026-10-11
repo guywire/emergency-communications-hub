@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from ech.core.models import Priority
 from ech import __version__ as ECH_VERSION
+from ech.core import identity
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +40,6 @@ log = logging.getLogger(__name__)
 _psk_cache: dict = {}          # key → (timestamp, payload)
 _PSK_CACHE_TTL = 300           # seconds
 _psk_last_upstream: float = 0.0     # monotonic timestamp of last real upstream request
-_psk_contact: str = "(SignalMatrix, contact@example.com)"  # set from config on startup
 _psk_default_callsign: str = ""    # operator callsign — used when API caller omits callsign
 _psk_stats: dict = {"last_success": None, "last_failure": None, "last_error": None, "total_fetches": 0}
 
@@ -166,7 +166,7 @@ def base_path_patch_script(base_path: str) -> str:
 
 
 def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, pota_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None, mc_hub_compare=None) -> FastAPI:
-    global _psk_contact, _psk_default_callsign
+    global _psk_default_callsign
     _op_callsign = "N0CALL"   # injected into pages as window.ECH_CALLSIGN
     # Build PSKReporter User-Agent from config: PSKReporter TOS requires a real
     # contact email so they can reach the app author if needed. A fake .local
@@ -182,15 +182,15 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         try:
             import yaml as _yaml
             _cfg = _yaml.safe_load(open(config_path, encoding="utf-8"))
-            _psk_email    = (_cfg.get("pskreporter", {}) or {}).get("contact_email", "")
             _op_callsign  = (_cfg.get("operator", {}) or {}).get("callsign", "N0CALL")
             _psk_default_callsign = _op_callsign.split("-")[0]  # strip SSID
-            if _psk_email:
-                _psk_contact = f"(SignalMatrix, {_psk_email})"
-            else:
-                log.warning("PSKReporter: 'pskreporter.contact_email' not set in config — "
-                            "add a real email to avoid 503 rate-limit blocks")
-                _psk_contact = f"(SignalMatrix/{_op_callsign}, configure pskreporter.contact_email)"
+            # Outbound identity for every third-party service (identity.py):
+            # this install's own callsign + contact email, never a shared one.
+            identity.configure(_cfg)
+            if not identity.email():
+                log.warning("Contact email not set (Settings → PSKReporter, or operator.contact_email "
+                            "in config.yaml) — NWS/PSKReporter/NOAA ask for one so they can reach "
+                            "you instead of blocking you")
             _raw_base_path = str((_cfg.get("server", {}) or {}).get("base_path", "") or "").strip()
             if _raw_base_path:
                 _base_path = "/" + _raw_base_path.strip("/")
@@ -1202,7 +1202,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # Deliberately boring names (no role/callsign-to-position mapping
     # broadcast to anyone who can fetch this URL). Yealink T4x series polls
     # this once configured under Directory > Remote Phone Book.
-    _PBX_ROSTER = [(str(100 + i), f"KN0O Extension {i}") for i in range(1, 11)]
+    _PBX_ROSTER = [(str(100 + i), f"{_op_callsign} Extension {i}") for i in range(1, 11)]   # this install's callsign
     _PBX_FEATURE_CODES = [
         ("*98", "Voicemail"),
         ("900", "Conference Room"),
@@ -3252,7 +3252,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 r = await client.get(
                     "https://retrieve.pskreporter.info/query",
                     params=params,
-                    headers={"User-Agent": _psk_contact},
+                    headers={"User-Agent": identity.user_agent()},
                 )
                 r.raise_for_status()
                 root = _ET.fromstring(r.text)
@@ -3332,7 +3332,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             cfg = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         except Exception:
             cfg = {}
-        return {"contact_email": ((cfg.get("pskreporter") or {}).get("contact_email") or "")}
+        return {"contact_email": ((cfg.get("operator") or {}).get("contact_email")
+                                  or (cfg.get("pskreporter") or {}).get("contact_email") or "")}
 
     @app.post("/api/system/contact-email")
     async def set_contact_email(request: Request):
@@ -3342,20 +3343,20 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         import yaml
         from pathlib import Path
         from fastapi import HTTPException
-        global _psk_contact
         email = str((await request.json()).get("contact_email", "")).strip()
         if email and not _re.fullmatch(r"[^@\s<>()]+@[^@\s<>()]+\.[A-Za-z]{2,}", email):
             raise HTTPException(status_code=400, detail="Enter a valid email address")
-        _psk_contact = (f"(SignalMatrix, {email})" if email else
-                        f"(SignalMatrix/{_op_callsign}, configure pskreporter.contact_email)")
+        identity.set_email(email)
         p = Path(app.state.config_path or "/etc/ech/config.yaml")
         if not p.exists():
             p = Path("config.yaml")
         try:
             cfg = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-            psk = cfg.get("pskreporter") or {}
-            psk["contact_email"] = email
-            cfg["pskreporter"] = psk
+            op = cfg.get("operator") or {}
+            op["contact_email"] = email
+            cfg["operator"] = op
+            if isinstance(cfg.get("pskreporter"), dict) and "contact_email" in cfg["pskreporter"]:
+                cfg["pskreporter"]["contact_email"] = email   # keep the legacy key in step
             atomic_write_yaml(p, cfg)
             return {"status": "ok", "contact_email": email, "persisted": True}
         except Exception as exc:
@@ -4558,7 +4559,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
             url += f"&band={band.lower().replace('m','m')}"
         try:
             async with _hx.AsyncClient(timeout=10) as client:
-                r = await client.get(url, headers={"User-Agent": "SM/1.0"})
+                r = await client.get(url, headers={"User-Agent": identity.user_agent()})
             remote = r.json() if r.status_code == 200 else []
         except Exception as e:
             remote = []
@@ -4612,7 +4613,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
         async def try_callook(call):
             async with _hx.AsyncClient(timeout=8) as client:
                 r = await client.get(f"https://callook.info/api/{call}/json",
-                                     headers={"User-Agent": "SM/1.0"})
+                                     headers={"User-Agent": identity.user_agent()})
             if r.status_code != 200:
                 return None
             d = r.json()
@@ -4651,7 +4652,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
         async def try_hamdb(call):
             async with _hx.AsyncClient(timeout=8) as client:
                 r = await client.get(f"https://api.hamdb.org/v1/{call}/json/ech-logger",
-                                     headers={"User-Agent": "SM/1.0"})
+                                     headers={"User-Agent": identity.user_agent()})
             if r.status_code != 200:
                 return None
             d = r.json().get("hamdb", {}).get("callsign", {})
@@ -4694,7 +4695,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
         try:
             async with _hx.AsyncClient(timeout=12) as client:
                 r = await client.get("https://www.hamqsl.com/solarxml.php",
-                                     headers={"User-Agent": "SM/1.0"})
+                                     headers={"User-Agent": identity.user_agent()})
             text = r.text
 
             def tag(*names, default=""):

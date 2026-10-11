@@ -470,69 +470,62 @@ class PatWinlinkAdapter(Adapter):
         except asyncio.CancelledError:
             pass
 
-    # Every api.winlink.org CMS Web Service call requires an access key —
-    # this one was issued by the Winlink Development Team in December 2017
-    # specifically for Pat's own use, and is committed in the clear in
-    # la5nta/pat's public source (internal/cmsapi/api.go). Confirmed the same
-    # key Pat itself sends, not a guess or a key ECH obtained independently.
-    _WINLINK_CMS_ACCESS_KEY = "1880278F11684B358F36845615BD039A"
-
     async def _discover_rms(self) -> None:
-        """Fetch active Winlink RMS gateways from the same public API Pat
-        itself uses (la5nta/pat internal/cmsapi: RootURL + PathGatewayStatus
-        = https://api.winlink.org/gateway/status.json — the previous
-        `/rms/list` URL this adapter used doesn't exist on that host).
+        """RMS gateway list from the operator's OWN local Pat (GET
+        {pat_url}/api/rmslist) — Pat fetches it from Winlink with its own
+        key. SignalMatrix used to call api.winlink.org directly with Pat's
+        CMS access key embedded in this file; that key was issued to the Pat
+        project, so every GitHub install would have been using an agreement
+        that isn't theirs. Going through Pat means each install uses its own
+        Pat/Winlink relationship and needs no key of its own.
 
-        Only the `key` param is sent (see _WINLINK_CMS_ACCESS_KEY) — every
-        other query param is left at the API's own defaults (mode=AnyAll,
-        serviceCodes=PUBLIC, its own history window), since the exact names
-        Pat sends for those aren't in the public godoc and guessing them
-        risked silently narrowing the result instead of erroring visibly.
+        Pat returns one entry per gateway CHANNEL (callsign, gridsquare,
+        modes, freq{hz}, distance from Pat's configured locator); entries are
+        grouped per callsign and placed at the centre of their grid square.
         """
-        url = "https://api.winlink.org/gateway/status.json"
+        from ech.core.grid import grid_to_latlon
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(url, params={"key": self._WINLINK_CMS_ACCESS_KEY})
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(f"{self._pat_url}/api/rmslist")
             resp.raise_for_status()
-            data = resp.json()
-            gateways = data.get("Gateways", []) if isinstance(data, dict) else []
+            entries = resp.json()
+            if not isinstance(entries, list):
+                entries = []
 
-            stations: list[dict] = []
-            for gw in gateways:
-                cs  = gw.get("Callsign", "")
-                lat = gw.get("Latitude")
-                lon = gw.get("Longitude")
-                if not cs or lat is None or lon is None:
+            by_call: dict[str, dict] = {}
+            for ch in entries:
+                cs = str(ch.get("callsign", "")).strip()
+                lat, lon = grid_to_latlon(ch.get("gridsquare", ""))
+                if not cs or lat is None:
                     continue
                 if self._bbox is not None:
                     (min_lat, min_lon), (max_lat, max_lon) = self._bbox
                     if not (min_lat <= lat <= max_lat and min_lon <= lon <= max_lon):
                         continue
-                # Per-channel fields (Gridsquare/Frequency/ServiceCode/modes)
-                # live under GatewayChannels[], not flat on the gateway and not
-                # "Channels[]" — confirmed against a real live response body
-                # (2026-08-16): gw.get("Channels") was always empty, so every
-                # gateway silently got freq/grid/mode = "" before this fix.
-                # A station can list several; take the first as representative.
-                channels = gw.get("GatewayChannels") or []
-                ch0 = channels[0] if channels else {}
-                freq_hz = ch0.get("Frequency")
-                stations.append({
-                    "callsign": cs,
-                    "lat": float(lat),
-                    "lon": float(lon),
-                    "gridsquare": ch0.get("Gridsquare", ""),
-                    # Frequency is Hz in the real response (e.g. 145090000 for
-                    # 145.090 MHz) — confirmed against a live gateway record.
-                    "freq_mhz": (freq_hz / 1e6) if freq_hz else None,
-                    "service_code": ch0.get("ServiceCode", ""),
-                    "modes": ch0.get("SupportedModes", ""),
-                })
+                freq_hz = (ch.get("freq") or {}).get("hz")
+                st = by_call.get(cs)
+                if st is None:
+                    st = by_call[cs] = {
+                        "callsign": cs, "lat": lat, "lon": lon,
+                        "gridsquare": ch.get("gridsquare", ""),
+                        "freq_mhz": (freq_hz / 1e6) if freq_hz else None,
+                        "service_code": "PUBLIC",
+                        "modes": ch.get("modes", ""),
+                        "channels": [],
+                        "distance_km": ch.get("distance"),
+                    }
+                st["channels"].append({"freq_mhz": (freq_hz / 1e6) if freq_hz else None,
+                                       "modes": ch.get("modes", "")})
+                modes = {m.strip() for m in st["modes"].split(",") if m.strip()}
+                modes.add(str(ch.get("modes", "")).strip())
+                st["modes"] = ", ".join(sorted(m for m in modes if m))
 
-            self._rms_stations = stations
-            log.info("Pat Winlink %s: discovered %d RMS gateways", self.name, len(stations))
+            self._rms_stations = list(by_call.values())
+            log.info("Pat Winlink %s: %d RMS gateways from local Pat (%d channels)",
+                     self.name, len(self._rms_stations), len(entries))
         except Exception as exc:
-            log.debug("Pat Winlink %s: RMS discovery error: %s", self.name, exc)
+            log.warning("Pat Winlink %s: RMS list from Pat (%s/api/rmslist) failed: %s",
+                        self.name, self._pat_url, exc)
 
     async def list_inbox(self) -> list[dict]:
         """Current Winlink inbox listing for the dashboard's mail panel — everything

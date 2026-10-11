@@ -112,6 +112,7 @@ from typing import Any
 
 import httpx
 
+from ech.core import identity
 from ech.core.models import NormalizedMessage, Priority
 from ech.core.strip_templates import (
     STRIP_TEMPLATES, TEMPLATE_ALIASES, build_response_strip, guided_fields,
@@ -143,7 +144,7 @@ TLE_SOURCES = [
     ("json", "https://db.satnogs.org/api/tle/?page_size=5000"),
 ]
 _TLE_SOURCE_TIMEOUT = 12.0   # per-source HTTP timeout (seconds)
-USER_AGENT = "(SignalMatrix, sm@emergency.local)"
+# Outbound User-Agent: this install's own callsign + contact (ech/core/identity.py)
 
 _WIND_DIRS = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
               "S","SSW","SW","WSW","W","WNW","NW","NNW"]
@@ -538,7 +539,7 @@ class MeshBot:
             return
         self._start_time = time.time()
         self._client = httpx.AsyncClient(
-            headers={"User-Agent": USER_AGENT, "Accept-Language": "en"},
+            headers={"User-Agent": identity.user_agent(), "Accept-Language": "en"},
             timeout=20.0,
             follow_redirects=True,
         )
@@ -2767,7 +2768,7 @@ class MeshBot:
         try:
             r = await client.get(
                 DADJOKE_URL,
-                headers={"Accept": "application/json", "User-Agent": USER_AGENT},
+                headers={"Accept": "application/json", "User-Agent": identity.user_agent()},
                 timeout=8.0,
             )
             r.raise_for_status()

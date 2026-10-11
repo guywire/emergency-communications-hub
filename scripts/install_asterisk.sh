@@ -33,8 +33,10 @@ if command -v asterisk &>/dev/null; then
 fi
 
 # ── Callsign ──────────────────────────────────────────────────────────────
-read -p "Your callsign (for Asterisk config): " CALLSIGN
-CALLSIGN=${CALLSIGN:-KN0O}
+CALLSIGN="${CALLSIGN:-}"
+while [ -z "$CALLSIGN" ]; do
+  read -p "Your callsign (for Asterisk config): " CALLSIGN   # no default: never configure someone else's call
+done
 CALLSIGN_UPPER=$(echo "$CALLSIGN" | tr '[:lower:]' '[:upper:]')
 log "Configuring for callsign: $CALLSIGN_UPPER"
 

@@ -29,12 +29,13 @@ import time
 import httpx
 
 from ech.core.models import NormalizedMessage, Priority
+from ech.core import identity
 
 log = logging.getLogger(__name__)
 
 NWS_BASE = "https://api.weather.gov"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-USER_AGENT = "(SignalMatrix, sm@emergency.local)"
+# Nominatim/NWS usage policies want an identifying UA with contact (identity.py)
 
 # Matches: "weather? 04101", "weather 90210", "wx 10001-1234"
 TRIGGER_RE = re.compile(
@@ -62,7 +63,7 @@ class WeatherBot:
             log.info("WeatherBot: disabled in config")
             return
         self._client = httpx.AsyncClient(
-            headers={"User-Agent": USER_AGENT, "Accept-Language": "en"},
+            headers={"User-Agent": identity.user_agent(), "Accept-Language": "en"},
             timeout=20.0,
             follow_redirects=True,
         )

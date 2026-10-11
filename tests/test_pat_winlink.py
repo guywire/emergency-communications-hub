@@ -103,16 +103,19 @@ def test_pat_registered_in_main():
 
 # ── RMS discovery bounding box (O95) ──────────────────────────────────────
 
-_FAKE_GATEWAYS = {
-    "Gateways": [
-        {"Callsign": "W1IN", "Latitude": 44.5, "Longitude": -69.5,
-         "GatewayChannels": [{"Gridsquare": "FN54", "Frequency": 145090000,
-                               "ServiceCode": "PUBLIC", "SupportedModes": "packet"}]},
-        {"Callsign": "W9OUT", "Latitude": 40.0, "Longitude": -90.0,
-         "GatewayChannels": [{"Gridsquare": "EN50", "Frequency": 145010000,
-                               "ServiceCode": "PUBLIC", "SupportedModes": "packet"}]},
-    ]
-}
+# Shape of Pat's own GET /api/rmslist (captured from a live Pat v1.0.0):
+# one entry per gateway CHANNEL. RMS discovery now goes through the
+# operator's local Pat instead of calling api.winlink.org with an embedded
+# (Pat-issued) access key.
+_FAKE_GATEWAYS = [
+    {"callsign": "W1IN", "gridsquare": "FN54KC", "modes": "Packet 1200", "distance": 4.6,
+     "freq": {"hz": 145090000, "khz": 145090}},
+    {"callsign": "W1IN", "gridsquare": "FN54KC", "modes": "VARA FM", "distance": 4.6,
+     "freq": {"hz": 145050000, "khz": 145050}},
+    {"callsign": "W9OUT", "gridsquare": "EN50", "modes": "Packet 1200", "distance": 1500.0,
+     "freq": {"hz": 145010000, "khz": 145010}},
+]
+_REQUESTS: list = []
 
 
 class _FakeResp:
@@ -127,6 +130,7 @@ class _FakeClient:
     async def __aenter__(self): return self
     async def __aexit__(self, *a): return False
     async def get(self, url, params=None):
+        _REQUESTS.append((url, params))
         return _FakeResp(_FAKE_GATEWAYS)
 
 
@@ -137,6 +141,20 @@ async def test_rms_discovery_no_bbox_keeps_all(monkeypatch):
     a = PatWinlinkAdapter({"callsign": "W1TEST"})
     await a._discover_rms()
     assert {s["callsign"] for s in a._rms_stations} == {"W1IN", "W9OUT"}
+
+
+@pytest.mark.asyncio
+async def test_rms_discovery_uses_local_pat_groups_channels_no_key(monkeypatch):
+    import ech.adapters.pat_winlink as mod
+    monkeypatch.setattr(mod.httpx, "AsyncClient", _FakeClient)
+    _REQUESTS.clear()
+    a = PatWinlinkAdapter({"callsign": "W1TEST", "pat_url": "http://127.0.0.1:8080"})
+    await a._discover_rms()
+    url, params = _REQUESTS[-1]
+    assert url == "http://127.0.0.1:8080/api/rmslist" and not params   # no Winlink key sent
+    w1 = next(s for s in a._rms_stations if s["callsign"] == "W1IN")
+    assert len(w1["channels"]) == 2 and "VARA FM" in w1["modes"]
+    assert (w1["lat"], w1["lon"]) == (44.1042, -69.125)                # FN54KC centre
 
 
 @pytest.mark.asyncio

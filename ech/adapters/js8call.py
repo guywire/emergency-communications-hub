@@ -478,19 +478,13 @@ class JS8CallAdapter(Adapter):
 
     @staticmethod
     def _grid_to_latlon(grid: str) -> tuple:
-        """Convert Maidenhead grid square to (lat, lon) center of that square."""
-        grid = grid.upper().strip()
-        if len(grid) < 4:
-            return None, None
-        try:
-            lon = (ord(grid[0]) - ord('A')) * 20 - 180 + (int(grid[2])) * 2 + 1.0
-            lat = (ord(grid[1]) - ord('A')) * 10 - 90  + (int(grid[3])) * 1 + 0.5
-            if len(grid) >= 6:
-                lon += (ord(grid[4]) - ord('A')) * (2/24) - (1/24)
-                lat += (ord(grid[5]) - ord('A')) * (1/24) - (1/48)
-            return round(lat, 4), round(lon, 4)
-        except Exception:
-            return None, None
+        """Centre of a Maidenhead square. Delegates to ech.core.grid — the old
+        inline version added the 6-char subsquare offset to the square's
+        CENTRE rather than its corner, placing 6-char grids ~75 km east and
+        ~50 km north of where they are (FN54KC came out 44.56,-68.21 instead
+        of 44.10,-69.13)."""
+        from ech.core.grid import grid_to_latlon
+        return grid_to_latlon(grid)
 
     def _assess_priority(self, text: str) -> Priority:
         lower = text.lower()

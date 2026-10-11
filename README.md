@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc258** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
+**Version 1.0.0-rc259** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -124,6 +124,29 @@ incident:
 ```
 
 **Do not commit `/etc/ech/config.yaml` to git** — it contains API keys and passwords. The `config.yaml` in the repository uses `N0CALL` placeholders only.
+
+### Your own accounts, keys and agreements
+
+SignalMatrix ships with **no shared API keys or accounts**. Every install talks to
+third-party services as *its own* station, using what you put in your own
+`/etc/ech/config.yaml`:
+
+* **Callsign + contact email** — set `operator.callsign` and your contact email
+  (Settings → PSKReporter, or `operator.contact_email`). They go in the User-Agent of
+  every outbound request (NWS, NOAA tides, PSKReporter, OpenStreetMap geocoding, callsign
+  lookups) as `(SignalMatrix/<CALL>, <email>)` — those services ask for a real contact
+  so they can reach you instead of blocking you. Nothing defaults to another station's
+  identity.
+* **Services that need your own account or key** (all blank in the shipped config):
+  AirNow and NASA FIRMS (AQI/smoke), AISHub, aisstream.io, OpenSky, MeshMapper, DAPNET,
+  QRZ / Club Log / POTA / SOTA log upload, LetsMesh (signed by your own MeshCore node).
+* **Winlink RMS gateway list** comes from your own Pat (`{pat_url}/api/rmslist`); Pat
+  fetches it from Winlink under its own key. SignalMatrix holds no Winlink key.
+* **SOTA** — SOTA's API terms (https://api-db2.sota.org.uk/docs) require app developers
+  to join the SOTA Reflector "API-consumers" group and get SOTA's prior approval for
+  AI-assisted software. The SOTA map layer is off unless you set
+  `sota: {api_enabled: true}` after clearing it with SOTA yourself.
+* Read each provider's terms before enabling it; you are the API user.
 
 ### Enabling adapters
 

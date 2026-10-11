@@ -783,7 +783,7 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     </div>
     <div id="psk-body" class="section-body">
       <div class="row" style="align-items:flex-end">
-        <div style="flex:2"><label>Contact email (sent to PSKReporter with each query so they can reach you instead of blocking you)</label>
+        <div style="flex:2"><label>Your contact email for data services — sent with your callsign to NWS, NOAA, PSKReporter and other services so they can reach you instead of blocking you</label>
           <input type="email" id="contact-email" placeholder="you@example.com" autocomplete="email"></div>
         <div><button class="btn btn-blue" onclick="saveContactEmail()">Save</button></div>
       </div>
@@ -3113,7 +3113,7 @@ async function loadContactEmail() {
     const d = await fetch('/api/system/contact-email').then(r => r.json());
     document.getElementById('contact-email').value = d.contact_email || '';
     document.getElementById('contact-email-msg').textContent = d.contact_email
-      ? '' : 'Not set — PSKReporter may rate-limit or block anonymous queries.';
+      ? '' : 'Not set — NWS, NOAA and PSKReporter may rate-limit or block anonymous requests.';
   } catch(e) {}
 }
 

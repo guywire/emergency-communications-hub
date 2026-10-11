@@ -22,12 +22,12 @@ import time
 from datetime import datetime, timedelta
 
 import httpx
+from ech.core import identity
 
 log = logging.getLogger(__name__)
 
 _STATIONS_URL = "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json"
 _DATA_URL = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
-_HEADERS = {"User-Agent": "SignalMatrix (amateur radio emergency comms hub)"}
 _STATIONS_TTL = 24 * 3600
 _PRED_TTL = 3600
 
@@ -93,7 +93,7 @@ def _summarise(preds: list[dict], now: datetime) -> dict:
 
 async def nearby_tides(lat: float, lon: float, radius_km: float = 60.0, limit: int = 6) -> dict:
     async with _lock:
-        async with httpx.AsyncClient(timeout=20.0, headers=_HEADERS) as client:
+        async with httpx.AsyncClient(timeout=20.0, headers={"User-Agent": identity.user_agent()}) as client:
             await _load_stations(client)
             ranked = sorted(((_haversine_km(lat, lon, s[2], s[3]), s) for s in _stations),
                             key=lambda x: x[0])
