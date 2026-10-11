@@ -292,6 +292,22 @@ class PSK31Decoder:
         # Measured separators: real PSK31 phase steps cluster at 0°/180°
         # (mean |cos Δφ| ≈ 1.0 vs RTTY ≈ 0.84) and its bit-words are valid
         # varicode (≈1.0 vs CW/RTTY ≤ 0.67).
+        # Live band noise also produced short 1–3 char junk ("e", "o", "fe")
+        # from static crashes that passed the phase/varicode checks on so few
+        # symbols. A real PSK31 transmission keeps its energy within ±~30 Hz
+        # of the carrier for many symbols; a crash is broadband and brief.
+        # Measured: real ≥115 active symbols, junk 3–7. Density is compared to
+        # the band MEDIAN (not total) so other stations on a busy band don't
+        # make a real signal look weak.
+        if int(np.sum(active)) < 16:          # < 0.5 s of signal
+            return ""
+        spec = np.abs(np.fft.rfft(audio * np.hanning(len(audio)))) ** 2
+        fr = np.fft.rfftfreq(len(audio), 1.0 / self.sample_rate)
+        near = spec[(fr > self.freq - 30) & (fr < self.freq + 30)]
+        band = spec[(fr > 300) & (fr < 2700)]
+        if len(near) and len(band) and float(np.mean(near)) < 4.0 * float(np.median(band)):
+            return ""
+
         both = active[1:] & active[:-1]
         if both.any():
             if float(np.mean(np.abs(np.cos(np.angle(corr[both]))))) < 0.9:

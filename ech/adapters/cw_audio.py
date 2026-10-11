@@ -319,7 +319,7 @@ class CWAudioAdapter(Adapter):
                 self._stream.close()
             except Exception:
                 pass
-        log.info("CWAudio %s: disconnected", self.name)
+        log.info("%sAudio %s: disconnected", self.MODE, self.name)
 
     # ── TX ────────────────────────────────────────────────────────────────
 

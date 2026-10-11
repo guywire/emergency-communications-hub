@@ -463,9 +463,13 @@ class CWDecoder:
             snr_db = 10 * math.log10((self._tx_snr_num / self._tx_snr_den) / self._noise)
         if wpm > self.max_wpm or snr_db < self.min_snr_db:
             return None
-        # Isolated noise blips decode as lone dits/dahs — a transmission that
-        # is nothing but E and T is static, not a message.
-        if set(text.replace(" ", "")) <= {"E", "T"}:
+        # Isolated noise blips decode as short groups of 1–2-element
+        # characters — static, not a message (live junk: "E E EE E I" at
+        # 48 wpm; the old E/T-only rule missed it). Word length ≤ 2 keeps
+        # real words made of those letters ("NAME", "TEAM", "MEAN").
+        words = text.split()
+        if (set("".join(words)) <= {"E", "T", "I", "A", "N", "M"}
+                and all(len(w) <= 2 for w in words)):
             return None
         return Transmission(
             text=text,

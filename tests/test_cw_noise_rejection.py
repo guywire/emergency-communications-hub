@@ -62,3 +62,14 @@ def test_lone_dit_or_dah_is_dropped():
         audio = np.concatenate([np.zeros(SR // 2, np.float32), cw.astype(np.float32),
                                 np.zeros(SR * 2, np.float32)])
         assert _decode(audio) == []
+
+
+def test_short_dit_dah_groups_dropped_but_real_words_kept():
+    def run(text):
+        cw = encode_cw(text, wpm=20, freq=600, sample_rate=SR, amplitude=0.5)
+        audio = np.concatenate([np.zeros(SR // 2, np.float32), cw.astype(np.float32),
+                                np.zeros(SR * 2, np.float32)])
+        return " ".join(t.text for t in _decode(audio))
+    assert run("E E EE E I") == ""          # live junk signature
+    assert run("NAME") == "NAME"            # real word from the same letters
+    assert "TEAM" in run("TEAM")

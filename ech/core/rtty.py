@@ -101,17 +101,25 @@ def encode_rtty(text: str, baud: float = 45.45, mark: float = 2125.0,
 
 # ── Decoder ──────────────────────────────────────────────────────────────────
 
+_PROBE_CACHE: dict = {}
+
+
 def _tone_power(block: np.ndarray, sample_rate: int, freq: float) -> float:
+    """Power at EXACTLY `freq` (single-frequency DFT). The previous integer-bin
+    Goertzel snapped to the block's bin grid — 182 Hz at 44 samples — so mark
+    and space were measured up to ~90 Hz off and leaked into each other
+    depending on where the signal sat (tone dominance 0.99 at 1277 Hz, 0.72
+    at 2128 Hz), costing copy at many AFC-found frequencies."""
     n = len(block)
-    k = int(0.5 + n * freq / sample_rate)
-    w = 2 * math.pi * k / n
-    coeff = 2 * math.cos(w)
-    s0 = s1 = s2 = 0.0
-    for x in block:
-        s0 = x + coeff * s1 - s2
-        s2 = s1
-        s1 = s0
-    return (s1 * s1 + s2 * s2 - coeff * s1 * s2) / (n * n)
+    key = (n, sample_rate, round(freq, 1))
+    probe = _PROBE_CACHE.get(key)
+    if probe is None:
+        if len(_PROBE_CACHE) > 4096:
+            _PROBE_CACHE.clear()
+        probe = np.exp(-2j * math.pi * freq * np.arange(n) / sample_rate)
+        _PROBE_CACHE[key] = probe
+    z = np.dot(np.asarray(block, dtype=np.float64), probe)
+    return float((z.real * z.real + z.imag * z.imag) / (n * n))
 
 
 @dataclass
@@ -192,8 +200,18 @@ class RTTYDecoder:
                 self._wu_vals = []
             return None
 
-        present = p > self._noise * 8 * self.squelch
-        if self.afc and not self._in_tx and not present:
+        thr = self._noise * 8 * self.squelch
+        present = p > thr
+        # Retune between transmissions, and ALSO mid-transmission when the
+        # gate is only barely open: that means it opened on leakage from a
+        # signal while parked on the previous one's frequency, and the
+        # leakage can sag mid-message and split it (seen with CW → RTTY on a
+        # shared stream). A solidly-received signal (≥3× threshold) never
+        # hops, so another station on a busy band can't steal the lock — and
+        # never while the gate is CLOSED mid-tx (that's this signal ending;
+        # hopping then merged the next station into it and lost this one).
+        if self.afc and ((not self._in_tx and not present)
+                         or (self._in_tx and present and p < 3 * thr)):
             self._afc_retune()
         if not present:
             if p < self._noise:
@@ -256,10 +274,13 @@ class RTTYDecoder:
             return ""
         is_mark = np.zeros(n_blocks, dtype=bool)
         power = np.zeros(n_blocks)
+        pm_arr = np.zeros(n_blocks)
+        ps_arr = np.zeros(n_blocks)
         for i in range(n_blocks):
             b = audio[i * n:(i + 1) * n]
             pm = _tone_power(b, self.sample_rate, self.mark)
             ps = _tone_power(b, self.sample_rate, self.mark + self.shift)
+            pm_arr[i], ps_arr[i] = pm, ps
             is_mark[i] = (pm >= ps) != self.reverse
             power[i] = pm + ps
         # A real character has continuous tone power across its whole 7-bit
@@ -267,6 +288,18 @@ class RTTYDecoder:
         # timeout fired) can fool the mark/space COMPARATOR but not the
         # power test — without this, noise tails decoded phantom characters.
         med_power = float(np.median(power)) or 1e-12
+
+        # Is this really FSK? In a real RTTY bit one tone dominates (|pm-ps|/
+        # (pm+ps) ≈ 1); broadband static crashes put equal energy on both
+        # tones (≈ 0.5). Live band noise produced a steady trickle of 1–3
+        # character junk decodes ("K", "V", "CMX") that this rejects.
+        # Measured: real 0.93–0.99 (white noise to 0.25, band noise + crashes),
+        # junk 0.45–0.57.
+        strong = power > 0.5 * med_power
+        if strong.any():
+            dom = float(np.mean(np.abs(pm_arr[strong] - ps_arr[strong]) / (power[strong] + 1e-30)))
+            if dom < 0.75:
+                return ""
 
         blocks_per_bit = self.sample_rate / self.baud / n   # ≈ 4.0
         chars: list[str] = []
