@@ -893,6 +893,7 @@ verbatim, wire them to `dmr_utils3` for the FEC primitives, then build
 | v1.0.0-rc255 | **Deployed** (2026-10-10) — committed locally, not pushed | Deployed | O117 endpoint bridges (engine + API + Settings editor); O120 settings-save permission fix (+ live /etc/ech chown); MeshCore browser transport waits for the browser; Yaesu binary CAT (FT-817/857) read + PTT in /remote-hw. |
 | v1.0.0-rc256 | **Deployed** (2026-10-11) — committed locally, not pushed | Deployed | O121: SOTA spots layer off by default (deprecated API + SOTA API terms); map button opens SOTAwatch. |
 | v1.0.0-rc257 | **Deployed** (2026-10-11) — committed locally, not pushed | Deployed | O122 spot layers fixed (DX longitude sign, no FCC home-address geocoding, labels/legend, escaping); O123 tides layer + moon panel; test suite no longer hangs at exit (unclosed DB in test_bridge_api). |
+| v1.0.0-rc258 | **Deployed** (2026-10-11) — committed locally, not pushed | Deployed | Settings contact-email field (`/api/system/contact-email`, admin-only, live + persisted) — operator's own address set on the live box at their request; bridge-rule endpoints added to the admin-only prefixes. |
 
 ---
 

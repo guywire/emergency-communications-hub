@@ -230,7 +230,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     ADMIN_PREFIXES = (
         "/api/adapters/",        # all adapter mutations (enable, channel, rename…)
         "/api/users",            # user CRUD
-        "/api/config",           # bridge rules
+        "/api/config",           # config sections (channels, …)
+        "/api/bridge-rules",     # bridge rules + status (was uncovered: lives outside /api/config)
         "/api/adapter-config",   # full config.yaml read/write (contains credentials)
         "/api/meshcore-bridge",  # MQTT bridge toggle
         "/api/system/",          # service restarts, reboot
@@ -3316,6 +3317,50 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                         "cached": True, "cache_age_sec": round(age),
                         "warning": friendly}
             return {"spots": [], "error": friendly, "cached": False}
+
+    @app.get("/api/system/contact-email")
+    async def get_contact_email():
+        """The operator's contact email for external data services (sent in
+        the PSKReporter request header so they can reach this station
+        instead of blocking it). Admin-only (/api/system/)."""
+        import yaml
+        from pathlib import Path
+        p = Path(app.state.config_path or "/etc/ech/config.yaml")
+        if not p.exists():
+            p = Path("config.yaml")
+        try:
+            cfg = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        except Exception:
+            cfg = {}
+        return {"contact_email": ((cfg.get("pskreporter") or {}).get("contact_email") or "")}
+
+    @app.post("/api/system/contact-email")
+    async def set_contact_email(request: Request):
+        """Set the contact email live and save it to config.yaml
+        (pskreporter.contact_email). Empty string clears it."""
+        import re as _re
+        import yaml
+        from pathlib import Path
+        from fastapi import HTTPException
+        global _psk_contact
+        email = str((await request.json()).get("contact_email", "")).strip()
+        if email and not _re.fullmatch(r"[^@\s<>()]+@[^@\s<>()]+\.[A-Za-z]{2,}", email):
+            raise HTTPException(status_code=400, detail="Enter a valid email address")
+        _psk_contact = (f"(SignalMatrix, {email})" if email else
+                        f"(SignalMatrix/{_op_callsign}, configure pskreporter.contact_email)")
+        p = Path(app.state.config_path or "/etc/ech/config.yaml")
+        if not p.exists():
+            p = Path("config.yaml")
+        try:
+            cfg = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            psk = cfg.get("pskreporter") or {}
+            psk["contact_email"] = email
+            cfg["pskreporter"] = psk
+            atomic_write_yaml(p, cfg)
+            return {"status": "ok", "contact_email": email, "persisted": True}
+        except Exception as exc:
+            return {"status": "ok", "contact_email": email, "persisted": False,
+                    "warning": f"applied live but not saved: {exc}"}
 
     @app.get("/api/pskreporter/status")
     async def pskreporter_status():

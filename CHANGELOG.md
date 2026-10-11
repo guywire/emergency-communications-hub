@@ -8,6 +8,16 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc258 (2026-10-11)
+
+### Added
+- **Contact email field** (Settings → PSKReporter): each operator enters their own
+  address; it's sent to PSKReporter with each query so they can reach you instead of
+  blocking you, applies immediately and is saved to `pskreporter.contact_email`.
+
+### Changed
+- Bridge-rule endpoints are admin-only, like other configuration changes.
+
 ## v1.0.0-rc257 (2026-10-11)
 
 ### Added

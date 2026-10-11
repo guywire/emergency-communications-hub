@@ -782,6 +782,12 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
       <span class="section-title">PSKREPORTER STATUS</span>
     </div>
     <div id="psk-body" class="section-body">
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:2"><label>Contact email (sent to PSKReporter with each query so they can reach you instead of blocking you)</label>
+          <input type="email" id="contact-email" placeholder="you@example.com" autocomplete="email"></div>
+        <div><button class="btn btn-blue" onclick="saveContactEmail()">Save</button></div>
+      </div>
+      <div id="contact-email-msg" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin:4px 0 10px"></div>
       <div id="psk-status-panel" style="font-family:var(--mono);font-size:11px;color:var(--muted)">Loading…</div>
       <div style="margin-top:10px;display:flex;gap:8px">
         <input type="text" id="psk-callsign" placeholder="Callsign (optional)" style="width:140px">
@@ -1584,6 +1590,7 @@ async function init() {
   bridgeRules = ac.bridge_rules || [];
   renderBridgeRules();
   startBridgePanel();
+  loadContactEmail();
 
   // Load users
   const users = await fetch('/api/users').then(r=>r.json());
@@ -3101,6 +3108,28 @@ async function disableAdapter(name) {
 }
 
 // ── PSKReporter ──────────────────────────────────────────────────────────
+async function loadContactEmail() {
+  try {
+    const d = await fetch('/api/system/contact-email').then(r => r.json());
+    document.getElementById('contact-email').value = d.contact_email || '';
+    document.getElementById('contact-email-msg').textContent = d.contact_email
+      ? '' : 'Not set — PSKReporter may rate-limit or block anonymous queries.';
+  } catch(e) {}
+}
+
+async function saveContactEmail() {
+  const email = document.getElementById('contact-email').value.trim();
+  const r = await fetch('/api/system/contact-email', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({contact_email: email}),
+  });
+  const d = await r.json().catch(() => ({}));
+  const msg = document.getElementById('contact-email-msg');
+  if (!r.ok) { msg.textContent = d.detail || 'Save failed'; msg.style.color = 'var(--red)'; return; }
+  msg.style.color = 'var(--green)';
+  msg.textContent = d.persisted ? (email ? 'Saved — in use now.' : 'Cleared.') : `Applied live (${d.warning})`;
+}
+
 async function loadPSKStatus() {
   const el = document.getElementById('psk-status-panel');
   try {
