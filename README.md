@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc229** (authoritative version is always the `VERSION` file — this banner is updated manually and can lag)
+**Version 1.0.0-rc254** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 

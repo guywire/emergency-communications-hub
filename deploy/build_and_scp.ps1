@@ -51,6 +51,23 @@ $versionFile = Join-Path $SRC "VERSION"
 $VERSION = if (Test-Path $versionFile) { (Get-Content $versionFile).Trim() } else { "unknown" }
 Write-Host "=== ECH Deploy - v$VERSION ===" -ForegroundColor Cyan
 
+# ── Keep the README version banner in step with VERSION ──────────────────────
+# It was hand-maintained and sat at rc229 while rc254 was live. Rewrite it on
+# every deploy; the change rides along in the next commit. .NET I/O with
+# explicit UTF-8 (no BOM) — Windows PowerShell 5.1's Get/Set-Content default
+# to the ANSI codepage and would mangle the README's non-ASCII characters.
+$readme = Join-Path $SRC "README.md"
+if ((Test-Path $readme) -and $VERSION -ne "unknown") {
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $text = [System.IO.File]::ReadAllText($readme, $utf8)
+    $re = [regex]'\*\*Version [^*]+\*\*'
+    $new = $re.Replace($text, "**Version $VERSION**", 1)
+    if ($new -ne $text) {
+        [System.IO.File]::WriteAllText($readme, $new, $utf8)
+        Write-Host "README version banner -> $VERSION" -ForegroundColor Gray
+    }
+}
+
 # ── Git Bash path (only needed to build the tarball with tar) ────────────────
 $gitBash = "C:\Program Files\Git\bin\bash.exe"
 if (-not (Test-Path $gitBash)) { $gitBash = "bash" }

@@ -8,6 +8,49 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc249–rc254 — Sound-card digital modes over browser audio (2026-10-10)
+
+### Added
+- **RTTY and PSK31 over browser audio**, alongside CW. One `/remote-hw` audio stream
+  now feeds all three decoders at once (`browser_session`, e.g. `radio-audio`).
+- **AFC**: PSK31 finds and locks its carrier anywhere in the passband; RTTY finds the
+  strongest tone pair at the configured shift; RTTY `reverse` for inverted tones.
+- **Message-window modem bar** (appears when a CW/RTTY/PSK adapter is selected in
+  compose): pitch/mark/carrier, AFC, TX wpm, shift/baud/reverse, a 1–5 sensitivity
+  slider, last-copy readout, **⇆ Match** (copy the other station's speed/pitch) and
+  **💾 Save**. API: `GET/POST /api/adapters/<name>/modem`.
+- **PTT keyed by the browser** around each transmission over the CAT serial port —
+  CI-V, Kenwood/Elecraft, Yaesu text, RTS, DTR or VOX — with TX delay/tail, a
+  3-minute stuck-key watchdog, unkey on disconnect/page close, and a *Test PTT* tone.
+- `/remote-hw`: audio input/output device pickers, input level meter, server error
+  detail on disconnect; the page keeps its bridges alive (links open in a new tab).
+
+### Fixed
+- `/remote-hw` bridges closed instantly on every connect ("Server closed the bridge")
+  — a missing import crashed the WebSocket handler (rc249).
+- Browser CW never attached to the audio (10 s window + up to 60 s back-off) and never
+  re-attached after a reconnect (rc250).
+- Noise decoded as streams of E/T (CW), single letters (RTTY) and short junk (PSK31):
+  glitch filtering, robust CW timing, speed/SNR limits, and per-mode "is this really
+  the mode?" checks (CW short dit/dah groups, RTTY tone dominance, PSK31 BPSK
+  phase/varicode/carrier checks) (rc251, rc254).
+- RTTY tone detection snapped to a 182 Hz grid, so copy depended on where the signal
+  sat; now measured at the exact frequency (rc254).
+- TX audio over the browser played with no PTT (the server keyed only while queueing)
+  and was upsampled crudely; now keyed around playback and resampled by Web Audio.
+
+## v1.0.0-rc244–rc248 (2026-10-09)
+
+### Added
+- Emergency-status board entries plotted on the map (O93).
+- NWS weather-warning polygons as a map layer (O94).
+- Adapter editor field picker driven by each adapter's real config schema.
+
+### Fixed
+- Self-restart race and non-atomic `config.yaml` writes that could corrupt the file (O110).
+- False "update failed" shown after every successful self-update (O111).
+- LetsMesh JWT claim set rebuilt (O75 — broker access still unresolved).
+
 ## v1.0.0-rc243 (2026-10-09)
 
 ### Added
