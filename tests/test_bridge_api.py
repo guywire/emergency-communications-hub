@@ -28,19 +28,22 @@ async def test_bridge_rules_save_validate_status(tmp_path, monkeypatch):
 
     rule = {"name": "net", "a": {"adapter": "mesh", "channel": "2"},
             "b": {"adapter": "aprs", "to": "emcomm"}, "direction": "both", "dry_run": True}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = (await c.post("/api/bridge-rules", json={"rules": [rule]})).json()
-        assert r["status"] == "ok"
-        saved = r["rules"][0]
-        assert saved["a"] == {"adapter": "mesh", "channel": 2}       # normalised
-        assert saved["b"]["to"] == "EMCOMM"
-        assert yaml.safe_load((tmp_path / "config.yaml").read_text())["bridge_rules"][0]["name"] == "net"
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = (await c.post("/api/bridge-rules", json={"rules": [rule]})).json()
+            assert r["status"] == "ok"
+            saved = r["rules"][0]
+            assert saved["a"] == {"adapter": "mesh", "channel": 2}       # normalised
+            assert saved["b"]["to"] == "EMCOMM"
+            assert yaml.safe_load((tmp_path / "config.yaml").read_text())["bridge_rules"][0]["name"] == "net"
 
-        st = (await c.get("/api/bridge-rules/status")).json()
-        assert st["rules"][0]["name"] == "net" and st["rules"][0]["counters"]["forwarded"] == 0
+            st = (await c.get("/api/bridge-rules/status")).json()
+            assert st["rules"][0]["name"] == "net" and st["rules"][0]["counters"]["forwarded"] == 0
 
-        bad = (await c.post("/api/bridge-rules",
-                            json={"rules": [{**rule, "types": ["position"]}]})).json()
-        assert bad["status"] == "error" and "position" in bad["detail"]
-        # live set unchanged by the refused save
-        assert router._bridge_rules[0]["types"] == ["text"]
+            bad = (await c.post("/api/bridge-rules",
+                                json={"rules": [{**rule, "types": ["position"]}]})).json()
+            assert bad["status"] == "error" and "position" in bad["detail"]
+            # live set unchanged by the refused save
+            assert router._bridge_rules[0]["types"] == ["text"]
+    finally:
+        await db.close()   # unclosed aiosqlite worker thread kept pytest from exiting

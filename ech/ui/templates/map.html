@@ -53,6 +53,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 .node-popup .node-ext-links{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:10px;line-height:1.8}
 .node-popup .node-ext-links a{color:var(--blue);text-decoration:none}.node-popup .node-ext-links a:hover{text-decoration:underline}
 #legend{position:absolute;bottom:30px;left:10px;z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:10px;min-width:140px}
+#moon-panel{position:absolute;bottom:30px;right:10px;z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:10px;line-height:1.5;max-width:260px}
 .legend-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
 .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 #node-count{font-size:11px;color:var(--muted)}
@@ -95,14 +96,15 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row" id="psk-btn" onclick="togglePSKReporter()" title="Show ham stations transmitting near your base position (PSKReporter, 300km radius)">📻 PSK Reporter</button>
     <button class="ctrl-btn layer-row" id="pota-btn" onclick="togglePOTA()" title="Show active Parks on the Air activators near your base position">🏞 POTA</button>
     <button class="ctrl-btn layer-row" id="sota-btn" onclick="toggleSOTA()" title="Show active Summits on the Air activators near your base position">⛰ SOTA</button>
-    <button class="ctrl-btn layer-row" id="iota-btn" onclick="toggleIOTA()" title="Show active Islands on the Air activators near your base position (filtered from the DX cluster)">🏝 IOTA</button>
-    <button class="ctrl-btn layer-row" id="bota-btn" onclick="toggleBOTA()" title="Show active Bunkers on the Air activators near your base position (filtered from the DX cluster — low volume, empty is normal)">🪖 BOTA</button>
-    <button class="ctrl-btn layer-row" id="dx-btn" onclick="toggleDXCluster()" title="Show general DX cluster spots near your base position — precise for US calls (FCC address), approximate country-center for others">🌐 DX Cluster</button>
+    <button class="ctrl-btn layer-row" id="iota-btn" onclick="toggleIOTA()" title="Islands on the Air activators spotted on the DX cluster in the last hour, worldwide">🏝 IOTA</button>
+    <button class="ctrl-btn layer-row" id="bota-btn" onclick="toggleBOTA()" title="Bunkers on the Air activators spotted on the DX cluster in the last hour, worldwide (low volume)">🪖 BOTA</button>
+    <button class="ctrl-btn layer-row" id="dx-btn" onclick="toggleDXCluster()" title="DX stations being heard by spotters within 500 km of you in the last hour, plotted at the DX station — zoom out to see them">🌐 DX Cluster</button>
     <button class="ctrl-btn layer-row" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ Grid squares</button>
     <div class="layer-group-title">Environmental</div>
     <button class="ctrl-btn layer-row" id="wxwarn-btn" onclick="toggleWeatherWarnings()" title="Active NWS weather warning polygons (tornado, severe thunderstorm, flash flood, etc.) — county/zone-based alerts with no polygon in the NWS feed aren't drawable and are skipped, not guessed at">⛈ Weather warnings</button>
     <button class="ctrl-btn layer-row" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI / smoke</button>
     <button class="ctrl-btn layer-row" id="water-btn" onclick="toggleWaterBodies()" title="Water body quality + boating/kayak conditions (EPA ATTAINS + NDBC buoys)">🌊 Water bodies</button>
+    <button class="ctrl-btn layer-row" id="tides-btn" onclick="toggleTides()" title="Nearest NOAA tide stations: rising/falling and next high/low (predictions, local time)">🌊 Tides</button>
   </div>
 </div>
 <div id="map"></div>
@@ -116,6 +118,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn" id="draw-send-btn" onclick="sendDrawPath()" disabled>▶ Send Trace</button>
   </div>
 </div>
+<div id="moon-panel"></div>
 <div id="legend">
   <div style="font-weight:500;margin-bottom:6px;font-size:11px">Node Types</div>
   <div class="legend-item"><div class="legend-dot" id="legend-dot-meshtastic" style="background:#3fb950"></div>Meshtastic</div>
@@ -126,6 +129,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
   <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Alert / WL</div>
   <div class="legend-item"><span id="legend-dot-adsb" style="color:#f0b429;font-size:13px;line-height:1;margin-right:6px">✈</span>ADS-B Aircraft</div>
   <div class="legend-item"><span id="legend-dot-ais" style="color:#56d3c8;font-size:13px;line-height:1;margin-right:6px">⚓</span>AIS Vessels</div>
+  <div id="legend-spots" style="display:none;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><div style="font-weight:500;margin-bottom:4px;font-size:11px">Spot layers</div><div id="legend-spots-items"></div></div>
   <div class="legend-item" id="legend-hamlog" style="display:none"><div class="legend-dot" style="background:#ffd700;border:1px solid #997a00"></div>Ham Log QSO</div>
 </div>
 
@@ -954,44 +958,167 @@ function togglePOTA() {
   btn.style.color = _potaEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _potaEnabled ? 'var(--green)' : '';
   btn.classList.toggle('on', _potaEnabled);
+  setSpotLegend('pota', _potaEnabled);
   if (_potaEnabled) {
     loadPOTA();
     toast('POTA: fetching nearby activators…');
   } else {
     _potaMarkers.forEach(m => m.remove());
     _potaMarkers = [];
+    _potaState.markers = [];
     toast('POTA overlay off');
   }
 }
 
-async function loadPOTA() {
-  if (!_potaEnabled) return;
+// ── Activity spot layers (POTA / SOTA / IOTA / BOTA / DX cluster) ────────
+// One look for every spot layer: icon + short type tag + callsign (+ ref/
+// band), each type its own colour, listed in the map legend while on. All
+// spot text comes from public spotting networks — always escaped.
+const SPOT_STYLE = {
+  pota: {icon: '🏞', tag: 'POTA', color: '#7ee787', label: 'Parks on the Air activator (at the park)'},
+  sota: {icon: '⛰', tag: 'SOTA', color: '#f0b429', label: 'Summits on the Air activator (at the summit)'},
+  iota: {icon: '🏝', tag: 'IOTA', color: '#56d3c8', label: 'Islands on the Air (worldwide, from DX cluster)'},
+  bota: {icon: '🛡', tag: 'BOTA', color: '#d2a8ff', label: 'Bunkers on the Air (worldwide, from DX cluster)'},
+  dx:   {icon: '📡', tag: 'DX',   color: '#ff7eb6', label: 'DX heard by spotters near you (at the DX station)'},
+};
+
+function _band(khz) {
+  const f = Number(khz) / 1000;
+  if (!f) return '';
+  const bands = [[1.8,2,'160m'],[3.5,4,'80m'],[5.3,5.41,'60m'],[7,7.3,'40m'],[10.1,10.15,'30m'],
+    [14,14.35,'20m'],[18.068,18.168,'17m'],[21,21.45,'15m'],[24.89,24.99,'12m'],[28,29.7,'10m'],
+    [50,54,'6m'],[144,148,'2m'],[420,450,'70cm']];
+  const b = bands.find(([lo, hi]) => f >= lo && f <= hi);
+  return b ? b[2] : '';
+}
+
+function spotIcon(kind, call, extra) {
+  const s = SPOT_STYLE[kind];
+  const html = `<div style="font-family:monospace;font-size:9px;color:${s.color};background:rgba(0,0,0,.75);` +
+    `padding:1px 4px;border-radius:2px;border:1px solid ${s.color};white-space:nowrap">` +
+    `${s.icon} <b>${s.tag}</b> ${esc(call || '?')}${extra ? ' ' + esc(extra) : ''}</div>`;
+  return L.divIcon({className: '', html, iconSize: [120, 16], iconAnchor: [60, 8]});
+}
+
+function spotPopup(kind, title, rows) {
+  const s = SPOT_STYLE[kind];
+  return `<div class="node-popup"><div class="node-name">${s.icon} ${esc(title)}</div>` +
+    `<div class="node-stat" style="color:${s.color}">${esc(s.label)}</div>` +
+    rows.filter(r => r && r[1] !== undefined && r[1] !== null && r[1] !== '')
+        .map(([k, v]) => `<div class="node-stat">${esc(k)}: ${esc(v)}</div>`).join('') +
+    `</div>`;
+}
+
+const _spotLegendOn = new Set();
+function setSpotLegend(kind, on) {
+  if (on) _spotLegendOn.add(kind); else _spotLegendOn.delete(kind);
+  const el = document.getElementById('legend-spots');
+  if (!el) return;
+  el.style.display = _spotLegendOn.size ? '' : 'none';
+  document.getElementById('legend-spots-items').innerHTML = [..._spotLegendOn].map(k => {
+    const s = SPOT_STYLE[k];
+    return `<div class="legend-item" title="${esc(s.label)}"><span style="font-family:monospace;font-size:9px;` +
+      `color:${s.color};border:1px solid ${s.color};padding:0 3px;border-radius:2px;margin-right:6px">` +
+      `${s.icon} ${s.tag}</span>${esc(s.label)}</div>`;
+  }).join('');
+}
+
+async function _loadSpotLayer(kind, url, state, build, emptyNote) {
   try {
-    const r = await fetch('/api/pota/spots?radius_km=500').catch(() => null);
-    if (!r || !r.ok) { toast('POTA: fetch failed'); return; }
+    const r = await fetch(url).catch(() => null);
+    if (!r || !r.ok) { toast(`${SPOT_STYLE[kind].tag}: fetch failed`); return null; }
     const data = await r.json();
-    if (data.error) { toast('POTA: ' + data.error, 'err'); return; }
-    _potaMarkers.forEach(m => m.remove());
-    _potaMarkers = [];
+    if (data.error && !data.disabled) { toast(`${SPOT_STYLE[kind].tag}: ` + data.error, 'err'); return null; }
+    if (data.disabled) return data;
+    state.markers.forEach(m => m.remove());
+    state.markers = [];
     (data.spots || []).forEach(spot => {
       if (spot.lat == null || spot.lon == null) return;
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="font-family:monospace;font-size:9px;color:#7ee787;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #7ee787;white-space:nowrap">🏞 ${spot.activator||'?'}</div>`,
-        iconSize: [80, 16],
-        iconAnchor: [40, 8],
-      });
-      const m = L.marker([spot.lat, spot.lon], {icon})
-        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.activator} @ ${spot.reference}</div><div class="node-stat">${spot.parkName||''}${spot.locationDesc ? ' ('+spot.locationDesc+')' : ''}</div><div class="node-stat">${spot.frequency} kHz ${spot.mode}</div><div class="node-stat">${spot.comments||''}</div><div class="node-stat">${spot.spotTime||''}</div></div>`)
-        .addTo(map);
-      _potaMarkers.push(m);
+      const [call, extra, title, rows] = build(spot);
+      state.markers.push(L.marker([spot.lat, spot.lon], {icon: spotIcon(kind, call, extra)})
+        .bindPopup(spotPopup(kind, title, rows)).addTo(map));
     });
-    toast(`POTA: ${_potaMarkers.length} activator(s) nearby`);
+    const n = state.markers.length;
+    toast(`${SPOT_STYLE[kind].tag}: ${n} spot${n === 1 ? '' : 's'}` + (n ? '' : ` — ${emptyNote}`));
+    return data;
   } catch(e) {
-    toast('POTA fetch failed: ' + e.message);
+    toast(`${SPOT_STYLE[kind].tag} fetch failed: ` + e.message);
+    return null;
   }
+}
+
+const _potaState = {markers: []};
+async function loadPOTA() {
+  if (!_potaEnabled) return;
+  await _loadSpotLayer('pota', '/api/pota/spots?radius_km=500', _potaState, s => [
+    s.activator, s.reference, `${s.activator} @ ${s.reference}`,
+    [['Park', `${s.parkName || ''}${s.locationDesc ? ' (' + s.locationDesc + ')' : ''}`],
+     ['Frequency', s.frequency ? `${s.frequency} kHz ${_band(s.frequency)} ${s.mode || ''}` : ''],
+     ['Comment', s.comments], ['Spotted', s.spotTime]]], 'none within 500 km right now');
+  _potaMarkers = _potaState.markers;
   if (_potaEnabled) setTimeout(loadPOTA, 90000);
 }
+
+const _sotaState = {markers: []};
+async function loadSOTA() {
+  if (!_sotaEnabled) return;
+  const data = await _loadSpotLayer('sota', '/api/sota/spots?radius_km=500', _sotaState, s => [
+    s.activator, s.summitCode, `${s.activator} @ ${s.summitCode}`,
+    [['Summit', s.summitName], ['Frequency', `${s.frequency} MHz ${s.mode || ''}`],
+     ['Comment', s.comments], ['Spotted', s.spotTime]]], 'none within 500 km right now');
+  _sotaMarkers = _sotaState.markers;
+  if (data && data.disabled) {
+    // Server has SOTA spots switched off (deprecated API / SOTA API terms).
+    _sotaEnabled = false;
+    _sotaWatchUrl = data.sotawatch_url || 'https://sotawatch.sota.org.uk/';
+    setSpotLegend('sota', false);
+    const btn = document.getElementById('sota-btn');
+    btn.style.color = ''; btn.style.borderColor = ''; btn.classList.remove('on');
+    btn.textContent = '⛰ SOTAwatch ↗';
+    btn.title = 'SOTA map spots are off — click to open SOTAwatch in a new tab';
+    toast('SOTA: ' + data.error + ' Click the button again to open SOTAwatch.', 'err');
+    return;
+  }
+  if (_sotaEnabled) setTimeout(loadSOTA, 90000);
+}
+
+function _dxRows(s) {
+  return [['Frequency', s.frequency ? `${(s.frequency / 1000).toFixed(3)} MHz ${_band(s.frequency)}` : ''],
+          ['Country', s.country], ['Comment', s.info],
+          ['Spotted by', s.spotter + (s.spotterKm != null ? ` (${s.spotterKm} km from you)` : '')],
+          ['Time', s.time]];
+}
+
+const _iotaState = {markers: []};
+async function loadIOTA() {
+  if (!_iotaEnabled) return;
+  await _loadSpotLayer('iota', '/api/iota/spots', _iotaState, s => [
+    s.dxCall, s.reference || _band(s.frequency), `${s.dxCall}${s.reference ? ' — IOTA ' + s.reference : ''}`,
+    _dxRows(s)], 'no IOTA spots on the cluster in the last hour');
+  _iotaMarkers = _iotaState.markers;
+  if (_iotaEnabled) setTimeout(loadIOTA, 90000);
+}
+
+const _botaState = {markers: []};
+async function loadBOTA() {
+  if (!_botaEnabled) return;
+  await _loadSpotLayer('bota', '/api/bota/spots', _botaState, s => [
+    s.dxCall, s.reference || _band(s.frequency), `${s.dxCall}${s.reference ? ' — BOTA ' + s.reference : ''}`,
+    _dxRows(s)], 'no BOTA spots on the cluster in the last hour (low volume)');
+  _botaMarkers = _botaState.markers;
+  if (_botaEnabled) setTimeout(loadBOTA, 90000);
+}
+
+const _dxState = {markers: []};
+async function loadDXCluster() {
+  if (!_dxEnabled) return;
+  await _loadSpotLayer('dx', '/api/dxcluster/spots?radius_km=500', _dxState, s => [
+    s.dxCall, _band(s.frequency), s.dxCall, _dxRows(s)],
+    'no spots from spotters within 500 km in the last hour');
+  _dxMarkers = _dxState.markers;
+  if (_dxEnabled) setTimeout(loadDXCluster, 90000);
+}
+
 
 // ── SOTA (Summits on the Air) activator spots ───────────────────────────
 let _sotaEnabled = false;
@@ -1009,55 +1136,18 @@ function toggleSOTA() {
   btn.style.color = _sotaEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _sotaEnabled ? 'var(--green)' : '';
   btn.classList.toggle('on', _sotaEnabled);
+  setSpotLegend('sota', _sotaEnabled);
   if (_sotaEnabled) {
     loadSOTA();
     toast('SOTA: fetching nearby activators…');
   } else {
     _sotaMarkers.forEach(m => m.remove());
     _sotaMarkers = [];
+    _sotaState.markers = [];
     toast('SOTA overlay off');
   }
 }
 
-async function loadSOTA() {
-  if (!_sotaEnabled) return;
-  try {
-    const r = await fetch('/api/sota/spots?radius_km=500').catch(() => null);
-    if (!r || !r.ok) { toast('SOTA: fetch failed'); return; }
-    const data = await r.json();
-    if (data.disabled) {
-      // Server has SOTA spots switched off (deprecated API / SOTA API terms).
-      _sotaEnabled = false;
-      _sotaWatchUrl = data.sotawatch_url || 'https://sotawatch.sota.org.uk/';
-      const btn = document.getElementById('sota-btn');
-      btn.style.color = ''; btn.style.borderColor = ''; btn.classList.remove('on');
-      btn.textContent = '⛰ SOTAwatch ↗';
-      btn.title = 'SOTA map spots are off — click to open SOTAwatch in a new tab';
-      toast('SOTA: ' + data.error + ' Click the button again to open SOTAwatch.', 'err');
-      return;
-    }
-    if (data.error) { toast('SOTA: ' + data.error, 'err'); return; }
-    _sotaMarkers.forEach(m => m.remove());
-    _sotaMarkers = [];
-    (data.spots || []).forEach(spot => {
-      if (spot.lat == null || spot.lon == null) return;
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="font-family:monospace;font-size:9px;color:#f0b429;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #f0b429;white-space:nowrap">⛰ ${spot.activator||'?'}</div>`,
-        iconSize: [80, 16],
-        iconAnchor: [40, 8],
-      });
-      const m = L.marker([spot.lat, spot.lon], {icon})
-        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.activator} @ ${spot.summitCode}</div><div class="node-stat">${spot.summitName||''}</div><div class="node-stat">${spot.frequency} MHz ${spot.mode}</div><div class="node-stat">${spot.comments||''}</div><div class="node-stat">${spot.spotTime||''}</div></div>`)
-        .addTo(map);
-      _sotaMarkers.push(m);
-    });
-    toast(`SOTA: ${_sotaMarkers.length} activator(s) nearby`);
-  } catch(e) {
-    toast('SOTA fetch failed: ' + e.message);
-  }
-  if (_sotaEnabled) setTimeout(loadSOTA, 90000);
-}
 
 // ── IOTA (Islands on the Air) — filtered from the DX cluster feed ───────
 let _iotaEnabled = false;
@@ -1069,45 +1159,18 @@ function toggleIOTA() {
   btn.style.color = _iotaEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _iotaEnabled ? 'var(--green)' : '';
   btn.classList.toggle('on', _iotaEnabled);
+  setSpotLegend('iota', _iotaEnabled);
   if (_iotaEnabled) {
     loadIOTA();
     toast('IOTA: fetching nearby activators…');
   } else {
     _iotaMarkers.forEach(m => m.remove());
     _iotaMarkers = [];
+    _iotaState.markers = [];
     toast('IOTA overlay off');
   }
 }
 
-async function loadIOTA() {
-  if (!_iotaEnabled) return;
-  try {
-    const r = await fetch('/api/iota/spots?radius_km=750').catch(() => null);
-    if (!r || !r.ok) { toast('IOTA: fetch failed'); return; }
-    const data = await r.json();
-    if (data.error) { toast('IOTA: ' + data.error, 'err'); return; }
-    _iotaMarkers.forEach(m => m.remove());
-    _iotaMarkers = [];
-    (data.spots || []).forEach(spot => {
-      if (spot.lat == null || spot.lon == null) return;
-      const dashed = spot.precise ? '' : 'border-style:dashed;';
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="font-family:monospace;font-size:9px;color:#79c0ff;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #79c0ff;${dashed}white-space:nowrap">🏝 ${spot.dxCall||'?'}${spot.reference ? ' '+spot.reference : ''}</div>`,
-        iconSize: [100, 16],
-        iconAnchor: [50, 8],
-      });
-      const m = L.marker([spot.lat, spot.lon], {icon})
-        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.dxCall}${spot.reference ? ' — IOTA '+spot.reference : ''}</div><div class="node-stat">${spot.info||''}</div><div class="node-stat">Spotted by: ${spot.spotter||''}</div><div class="node-stat">${spot.frequency ? (spot.frequency/1000).toFixed(3)+' MHz' : ''}</div><div class="node-stat">${spot.time||''}</div><div class="node-stat" style="color:var(--muted)">${spot.precise ? 'Precise (FCC address)' : 'Approximate (country-center)'}</div></div>`)
-        .addTo(map);
-      _iotaMarkers.push(m);
-    });
-    toast(`IOTA: ${_iotaMarkers.length} activator(s) nearby`);
-  } catch(e) {
-    toast('IOTA fetch failed: ' + e.message);
-  }
-  if (_iotaEnabled) setTimeout(loadIOTA, 90000);
-}
 
 // ── BOTA (Bunkers on the Air) — filtered from the DX cluster feed ───────
 let _botaEnabled = false;
@@ -1119,45 +1182,18 @@ function toggleBOTA() {
   btn.style.color = _botaEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _botaEnabled ? 'var(--green)' : '';
   btn.classList.toggle('on', _botaEnabled);
+  setSpotLegend('bota', _botaEnabled);
   if (_botaEnabled) {
     loadBOTA();
     toast('BOTA: fetching nearby activators… (low volume — empty is normal)');
   } else {
     _botaMarkers.forEach(m => m.remove());
     _botaMarkers = [];
+    _botaState.markers = [];
     toast('BOTA overlay off');
   }
 }
 
-async function loadBOTA() {
-  if (!_botaEnabled) return;
-  try {
-    const r = await fetch('/api/bota/spots?radius_km=750').catch(() => null);
-    if (!r || !r.ok) { toast('BOTA: fetch failed'); return; }
-    const data = await r.json();
-    if (data.error) { toast('BOTA: ' + data.error, 'err'); return; }
-    _botaMarkers.forEach(m => m.remove());
-    _botaMarkers = [];
-    (data.spots || []).forEach(spot => {
-      if (spot.lat == null || spot.lon == null) return;
-      const dashed = spot.precise ? '' : 'border-style:dashed;';
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="font-family:monospace;font-size:9px;color:#e2a44f;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #e2a44f;${dashed}white-space:nowrap">🪖 ${spot.dxCall||'?'}${spot.reference ? ' '+spot.reference : ''}</div>`,
-        iconSize: [100, 16],
-        iconAnchor: [50, 8],
-      });
-      const m = L.marker([spot.lat, spot.lon], {icon})
-        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.dxCall}${spot.reference ? ' — BOTA '+spot.reference : ''}</div><div class="node-stat">${spot.info||''}</div><div class="node-stat">Spotted by: ${spot.spotter||''}</div><div class="node-stat">${spot.frequency ? (spot.frequency/1000).toFixed(3)+' MHz' : ''}</div><div class="node-stat">${spot.time||''}</div><div class="node-stat" style="color:var(--muted)">${spot.precise ? 'Precise (FCC address)' : 'Approximate (country-center)'}</div></div>`)
-        .addTo(map);
-      _botaMarkers.push(m);
-    });
-    toast(`BOTA: ${_botaMarkers.length} activator(s) nearby`);
-  } catch(e) {
-    toast('BOTA fetch failed: ' + e.message);
-  }
-  if (_botaEnabled) setTimeout(loadBOTA, 90000);
-}
 
 // ── General DX cluster spots ─────────────────────────────────────────────
 let _dxEnabled = false;
@@ -1169,45 +1205,18 @@ function toggleDXCluster() {
   btn.style.color = _dxEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _dxEnabled ? 'var(--green)' : '';
   btn.classList.toggle('on', _dxEnabled);
+  setSpotLegend('dx', _dxEnabled);
   if (_dxEnabled) {
     loadDXCluster();
     toast('DX cluster: fetching nearby spots…');
   } else {
     _dxMarkers.forEach(m => m.remove());
     _dxMarkers = [];
+    _dxState.markers = [];
     toast('DX cluster overlay off');
   }
 }
 
-async function loadDXCluster() {
-  if (!_dxEnabled) return;
-  try {
-    const r = await fetch('/api/dxcluster/spots?radius_km=500').catch(() => null);
-    if (!r || !r.ok) { toast('DX cluster: fetch failed'); return; }
-    const data = await r.json();
-    if (data.error) { toast('DX cluster: ' + data.error, 'err'); return; }
-    _dxMarkers.forEach(m => m.remove());
-    _dxMarkers = [];
-    (data.spots || []).forEach(spot => {
-      if (spot.lat == null || spot.lon == null) return;
-      const dashed = spot.precise ? '' : 'border-style:dashed;';
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="font-family:monospace;font-size:9px;color:#f78c6c;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #f78c6c;${dashed}white-space:nowrap">${spot.dxCall||'?'}</div>`,
-        iconSize: [70, 16],
-        iconAnchor: [35, 8],
-      });
-      const m = L.marker([spot.lat, spot.lon], {icon})
-        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.dxCall}</div><div class="node-stat">${spot.info||''}</div><div class="node-stat">Spotted by: ${spot.spotter||''}</div><div class="node-stat">${spot.frequency ? (spot.frequency/1000).toFixed(3)+' MHz' : ''}</div><div class="node-stat">${spot.country||''}</div><div class="node-stat">${spot.time||''}</div><div class="node-stat" style="color:var(--muted)">${spot.precise ? 'Precise (FCC address)' : 'Approximate (country-center)'}</div></div>`)
-        .addTo(map);
-      _dxMarkers.push(m);
-    });
-    toast(`DX cluster: ${_dxMarkers.length} spot(s) nearby`);
-  } catch(e) {
-    toast('DX cluster fetch failed: ' + e.message);
-  }
-  if (_dxEnabled) setTimeout(loadDXCluster, 90000);
-}
 
 // ── Strip reports (mesh bot "strip" command, only those with a real coordinate) ─
 let _stripReportsEnabled = false;
@@ -1894,11 +1903,155 @@ fetch('/api/map-colors').then(r => r.json()).then(d => {
   loadNodes();
   setInterval(loadNodes, 30000);
 });
+// ── Moon phase / rise / set (computed locally — no API) ──────────────────
+// Low-precision lunar & solar position formulas (the standard algorithms
+// used by common sky-calc libraries): phase and illumination good to ~1 %,
+// rise/set to a few minutes — plenty for planning night operations.
+const MOON = (() => {
+  const rad = Math.PI / 180, dayMs = 86400000, J1970 = 2440588, J2000 = 2451545, e = rad * 23.4397;
+  const toDays = d => d.valueOf() / dayMs - 0.5 + J1970 - J2000;
+  const ra = (l, b) => Math.atan2(Math.sin(l) * Math.cos(e) - Math.tan(b) * Math.sin(e), Math.cos(l));
+  const dec = (l, b) => Math.asin(Math.sin(b) * Math.cos(e) + Math.cos(b) * Math.sin(e) * Math.sin(l));
+  function sun(d) {
+    const M = rad * (357.5291 + 0.98560028 * d);
+    const C = rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+    const L = M + C + rad * 102.9372 + Math.PI;
+    return {ra: ra(L, 0), dec: dec(L, 0)};
+  }
+  function moon(d) {
+    const L = rad * (218.316 + 13.176396 * d), M = rad * (134.963 + 13.064993 * d), F = rad * (93.272 + 13.229350 * d);
+    const l = L + rad * 6.289 * Math.sin(M), b = rad * 5.128 * Math.sin(F);
+    return {ra: ra(l, b), dec: dec(l, b), dist: 385001 - 20905 * Math.cos(M)};
+  }
+  function illumination(date) {
+    const d = toDays(date), s = sun(d), m = moon(d), sdist = 149598000;
+    const phi = Math.acos(Math.sin(s.dec) * Math.sin(m.dec) + Math.cos(s.dec) * Math.cos(m.dec) * Math.cos(s.ra - m.ra));
+    const inc = Math.atan2(sdist * Math.sin(phi), m.dist - sdist * Math.cos(phi));
+    const angle = Math.atan2(Math.cos(s.dec) * Math.sin(s.ra - m.ra),
+      Math.sin(s.dec) * Math.cos(m.dec) - Math.cos(s.dec) * Math.sin(m.dec) * Math.cos(s.ra - m.ra));
+    return {fraction: (1 + Math.cos(inc)) / 2, phase: 0.5 + 0.5 * inc * (angle < 0 ? -1 : 1) / Math.PI};
+  }
+  function altitude(date, lat, lon) {
+    const d = toDays(date), m = moon(d);
+    const H = rad * (280.16 + 360.9856235 * d) - rad * -lon - m.ra;
+    const phi = rad * lat;
+    return Math.asin(Math.sin(phi) * Math.sin(m.dec) + Math.cos(phi) * Math.cos(m.dec) * Math.cos(H)) / rad;
+  }
+  // Next rise and set within 36 h: scan altitude every 5 min, interpolate.
+  function riseSet(from, lat, lon) {
+    const h0 = 0.133, step = 5 * 60000;
+    let prev = altitude(from, lat, lon) - h0, rise = null, set = null;
+    for (let t = from.valueOf() + step; t <= from.valueOf() + 36 * 3600000 && !(rise && set); t += step) {
+      const cur = altitude(new Date(t), lat, lon) - h0;
+      if (prev < 0 && cur >= 0 && !rise) rise = new Date(t - step * cur / (cur - prev));
+      if (prev >= 0 && cur < 0 && !set) set = new Date(t - step * cur / (cur - prev));
+      prev = cur;
+    }
+    return {rise, set, up: altitude(from, lat, lon) > h0};
+  }
+  // Next new/full moon: step hourly through the phase cycle (0→1).
+  function nextPhases(from) {
+    let prev = illumination(from).phase, full = null, nw = null;
+    for (let h = 1; h <= 31 * 24 && !(full && nw); h++) {
+      const t = new Date(from.valueOf() + h * 3600000), p = illumination(t).phase;
+      if (!full && prev < 0.5 && p >= 0.5) full = t;
+      if (!nw && p < prev - 0.5) nw = t;      // wrapped past 1 → 0
+      prev = p;
+    }
+    return {full, new: nw};
+  }
+  function name(p) {
+    if (p < 0.02 || p > 0.98) return ['🌑', 'New moon'];
+    if (p < 0.23) return ['🌒', 'Waxing crescent'];
+    if (p < 0.27) return ['🌓', 'First quarter'];
+    if (p < 0.48) return ['🌔', 'Waxing gibbous'];
+    if (p < 0.52) return ['🌕', 'Full moon'];
+    if (p < 0.73) return ['🌖', 'Waning gibbous'];
+    if (p < 0.77) return ['🌗', 'Last quarter'];
+    return ['🌘', 'Waning crescent'];
+  }
+  return {illumination, riseSet, nextPhases, name, altitude};
+})();
+
+function _hm(d) {
+  if (!d) return '—';
+  const t = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  return d.toDateString() === new Date().toDateString() ? t : d.toLocaleDateString([], {weekday: 'short'}) + ' ' + t;
+}
+
+function updateMoon() {
+  const el = document.getElementById('moon-panel');
+  if (!el) return;
+  const now = new Date();
+  const {fraction, phase} = MOON.illumination(now);
+  const [icon, label] = MOON.name(phase);
+  let rs = '';
+  if (_baseLL) {
+    const r = MOON.riseSet(now, _baseLL[0], _baseLL[1]);
+    rs = `<div>${r.up ? 'Up now' : 'Below horizon'} · rise ${_hm(r.rise)} · set ${_hm(r.set)}</div>`;
+  }
+  const np = MOON.nextPhases(now);
+  const day = d => d ? d.toLocaleDateString([], {month: 'short', day: 'numeric'}) : '—';
+  el.innerHTML = `<div style="font-size:12px"><span style="font-size:15px">${icon}</span> ${label} — ${Math.round(fraction * 100)}% lit</div>` +
+    rs + `<div style="color:var(--muted)">Full ${day(np.full)} · New ${day(np.new)}</div>`;
+  el.title = 'Moon phase, illumination and rise/set at your base position (computed locally)';
+}
+
+// ── Tides (NOAA CO-OPS predictions, nearest stations) ────────────────────
+let _tidesEnabled = false;
+let _tideMarkers = [];
+
+function toggleTides() {
+  _tidesEnabled = !_tidesEnabled;
+  const btn = document.getElementById('tides-btn');
+  btn.style.color = _tidesEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _tidesEnabled ? 'var(--green)' : '';
+  btn.classList.toggle('on', _tidesEnabled);
+  if (_tidesEnabled) loadTides();
+  else { _tideMarkers.forEach(m => m.remove()); _tideMarkers = []; }
+}
+
+async function loadTides() {
+  if (!_tidesEnabled) return;
+  try {
+    const r = await fetch('/api/tides/nearby?radius_km=60&limit=6').catch(() => null);
+    if (!r || !r.ok) { toast('Tides: fetch failed'); return; }
+    const d = await r.json();
+    if (d.error) { toast('Tides: ' + d.error, 'err'); return; }
+    _tideMarkers.forEach(m => m.remove());
+    _tideMarkers = [];
+    const fmt = p => p ? `${p.t.slice(11)} ${p.ft.toFixed(1)} ft` : '—';
+    (d.stations || []).forEach(s => {
+      const arrow = s.rising ? '↑' : '↓';
+      const nxt = s.rising ? s.next_high : s.next_low;
+      const html = `<div style="font-family:monospace;font-size:9px;color:#58a6ff;background:rgba(0,0,0,.75);` +
+        `padding:1px 4px;border-radius:2px;border:1px solid #58a6ff;white-space:nowrap">` +
+        `🌊 ${arrow} ${esc(nxt ? (nxt.type === 'high' ? 'H ' : 'L ') + nxt.t.slice(11) : '')}</div>`;
+      const rows = (s.upcoming || []).map(p =>
+        `<div class="node-stat">${p.type === 'high' ? '▲ High' : '▼ Low'} ${esc(p.t.slice(5))} — ${p.ft.toFixed(1)} ft</div>`).join('');
+      const m = L.marker([s.lat, s.lon], {icon: L.divIcon({className: '', html, iconSize: [90, 16], iconAnchor: [45, 8]})})
+        .bindPopup(`<div class="node-popup"><div class="node-name">🌊 ${esc(s.name)}</div>` +
+          `<div class="node-stat" style="color:#58a6ff">Tide ${s.rising ? 'rising' : 'falling'} · ${s.distance_km} km from base</div>` +
+          rows + `<div class="node-stat" style="color:var(--muted)">NOAA predictions, ft above MLLW, local time</div>` +
+          `<div class="node-stat"><a href="${esc(s.noaa_url)}" target="_blank" rel="noopener">NOAA station ${esc(s.id)} ↗</a></div></div>`)
+        .addTo(map);
+      _tideMarkers.push(m);
+    });
+    toast(`Tides: ${_tideMarkers.length} station(s) within ${d.radius_km} km`);
+  } catch(e) {
+    toast('Tides fetch failed: ' + e.message);
+  }
+  if (_tidesEnabled) setTimeout(loadTides, 15 * 60000);
+}
+
 loadWaterBodies();
 connectWS();
+updateMoon();
+setInterval(updateMoon, 10 * 60000);
 // Base position for the rx end of stored-route lines
 fetch('/api/state').then(r => r.json()).then(st => {
   if (st.base_lat != null && st.base_lon != null) _baseLL = [st.base_lat, st.base_lon];
+  updateMoon();
 }).catch(() => {});
 if (window.ECH_SIM) document.body.classList.add('sim-mode');
 </script>

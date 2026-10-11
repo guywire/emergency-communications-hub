@@ -8,6 +8,25 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc257 (2026-10-11)
+
+### Added
+- **Tides layer** (🌊): nearest NOAA tide stations to base — rising/falling and the next
+  high/low on the map, next four highs/lows in the popup. Station list and predictions
+  cached in memory only (nothing written to disk).
+- **Moon panel**: phase, % illuminated, moonrise/moonset at the base and next full/new
+  moon — computed in the browser, no API.
+- **Spot-layer legend**: every activity layer now has its own icon, colour and type tag
+  (🏞 POTA, ⛰ SOTA, 🏝 IOTA, 🛡 BOTA, 📡 DX) plus a legend entry explaining it.
+
+### Fixed
+- **DX cluster / IOTA / BOTA placement**: dxsummit reports longitudes west-positive, so
+  spots were plotted in the wrong hemisphere; and US stations were pinned at their FCC
+  home address via callook.info. Now sign-corrected, no home-address lookups, the DX
+  layer shows what spotters within 500 km of you are hearing, and IOTA/BOTA are
+  worldwide. DX chips no longer reuse the MeshCore node colour.
+- Spot text from public spotting networks is now HTML-escaped on the map.
+
 ## v1.0.0-rc256 (2026-10-11)
 
 ### Changed

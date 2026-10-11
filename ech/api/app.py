@@ -59,13 +59,8 @@ _sota_summit_cache: dict = {}  # (associationCode, summitCode) → (lat, lon, na
 # through a dedicated API of their own.
 _dxc_cache: dict = {}           # key(limit) → (timestamp, geocoded spot list)
 _DXC_CACHE_TTL = 60             # seconds
-# The cluster's own dx_latitude/dx_longitude is a DXCC-entity/country-center
-# geocode from the callsign — for a large country (esp. the US) that can be
-# thousands of km off. callook.info gives the FCC-registered address/coordinates
-# for US callsigns for free with no key, so we prefer that when available and
-# fall back to the coarse country-center only for non-US or unlookupable calls.
-# Cached indefinitely — a license's registered address rarely changes.
-_callook_cache: dict = {}       # base callsign → (lat, lon, precise: bool)
+# dxsummit's dx_/de_ latitude/longitude are used directly (longitude is
+# west-positive there and negated on read) — see _fetch_dxcluster_spots.
 
 # Package update (apt-get update && upgrade) runs in the background since it
 # can take minutes — tracked here so /api/system/update/status can be polled
@@ -3430,6 +3425,21 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         await pota_service.trigger_poll()
         return {"status": "ok", **pota_service.status()}
 
+    @app.get("/api/tides/nearby")
+    async def tides_nearby(radius_km: float = 60.0, limit: int = 6):
+        """Nearest NOAA tide-prediction stations to the base with next
+        high/low and rising/falling (ech/core/tides.py). In-memory caches only."""
+        base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
+        base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
+        if base_lat is None or base_lon is None:
+            return {"stations": [], "error": "Set a base position (Settings → GPS) to see nearby tides"}
+        try:
+            from ech.core.tides import nearby_tides
+            return await nearby_tides(base_lat, base_lon, radius_km=min(max(radius_km, 5.0), 300.0),
+                                      limit=min(max(limit, 1), 15))
+        except Exception as exc:
+            return {"stations": [], "error": f"NOAA tides fetch failed: {exc.__class__.__name__}"}
+
     @app.get("/api/sota/spots")
     async def sota_spots_endpoint(radius_km: float = 500.0):
         """Summits on the Air activator spots within radius_km of the base
@@ -3524,91 +3534,65 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # ── DX cluster / IOTA / BOTA (shared feed) ──────────────────────────────
 
     async def _fetch_dxcluster_spots(limit: int = 300) -> list[dict]:
-        """Recent DX cluster spots via dxsummit.fi's plain-HTTP JSON mirror,
-        geocoded per-spot. Shared by the DX/IOTA/BOTA endpoints so three
-        overlays running at once still only hit dxsummit.fi once per cache
-        window, and reuse the same callsign→coordinate cache."""
+        """Recent DX cluster spots from dxsummit.fi's JSON feed. Shared by the
+        DX/IOTA/BOTA endpoints so three overlays running at once still only
+        hit dxsummit.fi once per cache window.
+
+        2026-10-11 audit fixes:
+          * dxsummit reports longitudes WEST-POSITIVE (Slovenia −14, Japan
+            −133, Massachusetts +71.65) — negated here. Uncorrected, every
+            non-geocoded spot landed in the wrong hemisphere and "spotted near
+            me" filtering matched nothing.
+          * No more callook.info lookups: they placed US stations at their FCC
+            licence (home) address — wrong for portable/park/mobile operation,
+            needlessly exposes home locations, and hammered a volunteer
+            service with doomed lookups for non-US calls.
+        """
         import time as _time
         cache_key = str(limit)
         cached = _dxc_cache.get(cache_key)
         if cached and _time.monotonic() - cached[0] < _DXC_CACHE_TTL:
             return cached[1]
 
-        import asyncio as _asyncio
-        import re as _re
         import httpx as _httpx
         async with _httpx.AsyncClient(timeout=15.0) as client:
             r = await client.get(f"http://www.dxsummit.fi/api/v1/spots?limit={limit}")
             r.raise_for_status()
             raw = r.json()
 
-            def _base_call(dx_call: str) -> str:
-                # Strip portable/mobile suffixes (W1AW/7, IZ4EFV/MM, …) — callook
-                # only recognizes the base license callsign.
-                return _re.sub(r"[/-].*$", "", (dx_call or "").strip().upper())
+        def _lon(v):
+            return -float(v) if v is not None else None
 
-            need = {_base_call(s.get("dx_call", "")) for s in raw} - {""} - set(_callook_cache)
-
-            async def _lookup(call: str, sem: "_asyncio.Semaphore") -> None:
-                async with sem:
-                    try:
-                        resp = await client.get(f"https://callook.info/{call}/json")
-                        d = resp.json()
-                        loc = d.get("location") or {}
-                        if d.get("status") == "VALID" and loc.get("latitude"):
-                            _callook_cache[call] = (float(loc["latitude"]), float(loc["longitude"]), True)
-                        else:
-                            _callook_cache[call] = (None, None, False)
-                    except Exception:
-                        _callook_cache[call] = (None, None, False)
-
-            if need:
-                sem = _asyncio.Semaphore(8)
-                await _asyncio.gather(*(_lookup(c, sem) for c in need))
-
-            spots = []
-            for s in raw:
-                call = _base_call(s.get("dx_call", ""))
-                precise_lat, precise_lon, precise = _callook_cache.get(call, (None, None, False))
-                if precise_lat is not None:
-                    lat, lon = precise_lat, precise_lon
-                else:
-                    lat, lon, precise = s.get("dx_latitude"), s.get("dx_longitude"), False
-                spots.append({
-                    "dxCall": s.get("dx_call", ""),
-                    "spotter": s.get("de_call", ""),
-                    "frequency": s.get("frequency"),
-                    "info": s.get("info", ""),
-                    "time": s.get("time", ""),
-                    "country": s.get("dx_country", ""),
-                    "lat": lat, "lon": lon,
-                    "precise": precise,  # True = FCC-registered address (callook); False = DXCC/country-center estimate
-                })
-            _dxc_cache[cache_key] = (_time.monotonic(), spots)
-            return spots
+        spots = []
+        for s in raw:
+            spots.append({
+                "dxCall": s.get("dx_call", ""),
+                "spotter": s.get("de_call", ""),
+                "frequency": s.get("frequency"),
+                "info": s.get("info", ""),
+                "time": s.get("time", ""),
+                "country": s.get("dx_country", ""),
+                "lat": s.get("dx_latitude"), "lon": _lon(s.get("dx_longitude")),
+                "spotterLat": s.get("de_latitude"), "spotterLon": _lon(s.get("de_longitude")),
+            })
+        _dxc_cache[cache_key] = (_time.monotonic(), spots)
+        return spots
 
     import re as _re_top
     _REF_RE = _re_top.compile(r"\b([A-Z]{1,3}[/-]?\d{1,4}[A-Z]{0,2})\b")
 
-    async def _dxcluster_tag_spots(tag: str, radius_km: float) -> dict:
-        """Shared filter/radius logic for the IOTA and BOTA endpoints — both are
-        just the DX cluster feed filtered to spots whose comment mentions the
-        program, since neither has its own dedicated live spot API."""
-        base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
-        base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
-        if base_lat is None or base_lon is None:
-            return {"spots": [], "total": 0,
-                    "error": f"Set a base position (Settings → GPS, or base_lat/base_lon) to see nearby {tag} activity"}
+    async def _dxcluster_tag_spots(tag: str) -> dict:
+        """IOTA / BOTA: the DX cluster feed filtered to spots whose comment
+        names the program (neither has its own live spot API). Worldwide —
+        only a handful are spotted per hour, so a radius around the base was
+        almost always empty."""
         try:
-            from ech.core.anomaly import _haversine_km
             spots = await _fetch_dxcluster_spots(limit=1000)
             out = []
             for s in spots:
                 if tag not in (s["info"] or "").upper():
                     continue
                 if s["lat"] is None or s["lon"] is None:
-                    continue
-                if _haversine_km(base_lat, base_lon, s["lat"], s["lon"]) > radius_km:
                     continue
                 # Best-effort reference code (e.g. "EU-005") pulled from the
                 # comment text right after the program tag; blank if not found.
@@ -3621,35 +3605,42 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     @app.get("/api/dxcluster/spots")
     async def dxcluster_spots_endpoint(radius_km: float = 500.0):
-        """General DX cluster spots near the base position. Coordinates are
-        precise (FCC address via callook.info) for US callsigns, otherwise an
-        approximate DXCC/country-center estimate — see each spot's "precise" flag."""
+        """DX stations being SPOTTED by spotters within radius_km of the base —
+        i.e. what's being heard from this area right now. Each spot is placed
+        at the DX station's location as dxsummit reports it, with the nearby
+        spotter's call and distance."""
         base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
         base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
         if base_lat is None or base_lon is None:
             return {"spots": [], "total": 0,
-                    "error": "Set a base position (Settings → GPS, or base_lat/base_lon) to see nearby DX cluster activity"}
+                    "error": "Set a base position (Settings → GPS, or base_lat/base_lon) to see what's being heard nearby"}
         try:
             from ech.core.anomaly import _haversine_km
             spots = await _fetch_dxcluster_spots(limit=1000)
-            out = [s for s in spots if s["lat"] is not None and s["lon"] is not None
-                   and _haversine_km(base_lat, base_lon, s["lat"], s["lon"]) <= radius_km]
-            return {"spots": out, "total": len(out)}
+            out = []
+            for s in spots:
+                if s["lat"] is None or s["lon"] is None or s["spotterLat"] is None:
+                    continue
+                d = _haversine_km(base_lat, base_lon, s["spotterLat"], s["spotterLon"])
+                if d <= radius_km:
+                    out.append({**s, "spotterKm": round(d)})
+            return {"spots": out, "total": len(out), "radius_km": radius_km}
         except Exception as exc:
             return {"spots": [], "total": 0, "error": f"DX cluster fetch failed: {exc.__class__.__name__}"}
 
     @app.get("/api/iota/spots")
-    async def iota_spots_endpoint(radius_km: float = 750.0):
-        """Islands on the Air activator spots — filtered from the DX cluster
-        feed (IOTA has no dedicated live spot API of its own)."""
-        return await _dxcluster_tag_spots("IOTA", radius_km)
+    async def iota_spots_endpoint(radius_km: float = 0.0):
+        """Islands on the Air activator spots worldwide — filtered from the DX
+        cluster feed (IOTA has no dedicated live spot API of its own).
+        radius_km is accepted for backward compatibility and ignored."""
+        return await _dxcluster_tag_spots("IOTA")
 
     @app.get("/api/bota/spots")
-    async def bota_spots_endpoint(radius_km: float = 750.0):
-        """Bunkers on the Air activator spots — filtered from the DX cluster
-        feed (BOTA has no dedicated live spot API of its own). Activity is
-        low-volume; an empty result is normal, not necessarily broken."""
-        return await _dxcluster_tag_spots("BOTA", radius_km)
+    async def bota_spots_endpoint(radius_km: float = 0.0):
+        """Bunkers on the Air activator spots worldwide — filtered from the DX
+        cluster feed (no dedicated live spot API). Low volume; an empty result
+        is normal. radius_km accepted for backward compatibility, ignored."""
+        return await _dxcluster_tag_spots("BOTA")
 
     # ── PBX / Asterisk AMI ───────────────────────────────────────────────
 
