@@ -8,6 +8,22 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc262 (2026-10-11)
+
+### Added
+- **More Winlink templates**, grouped in the picker:
+  - **ICS-214A Individual Log** — activity log validated line by line (HHMM + activity).
+  - **Local Weather Report** and **SHARES Region 1** strips — SKYWARN (GYX/CAR), SITREP,
+    Hurricane Report, WXOBS — built from the same definitions as the SHARES Response
+    Creator, so the output is byte-for-byte the strip that tool produces.
+  - **On-the-Air Spot / Hunter Report** — POTA, SOTA, WWFF, IOTA, BOTA, castles,
+    lighthouses…: spot, self-spot or hunter contact formatted like a cluster spot.
+- **Field validation on every template**: callsigns, frequencies, UTC times, dates,
+  state/NWS office codes, MGRS (or lat,lon converted), Y/N/Unk/NA answers, weather values
+  in sensible ranges, length limits, program-specific references (e.g. a SOTA reference
+  must look like W1/HA-126), and no "/" inside SHARES answers. Errors show next to each
+  field; fixed lists are dropdowns.
+
 ## v1.0.0-rc261 (2026-10-11)
 
 ### Added

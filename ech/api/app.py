@@ -3979,7 +3979,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     @app.post("/api/winlink/templates/{template_id}/render")
     async def winlink_template_render(template_id: str, request: Request):
-        from ech.core.winlink_forms import render_template
+        from ech.core.winlink_forms import TemplateValidationError, render_template
         data = await request.json()
         values = data.get("values", {})
         if not isinstance(values, dict):
@@ -3988,6 +3988,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             rendered = render_template(template_id, values)
         except KeyError:
             raise HTTPException(status_code=404, detail=f"Unknown template '{template_id}'")
+        except TemplateValidationError as exc:
+            # Per-field errors so the form can mark each bad field (O127)
+            return {"status": "error", "error": str(exc), "errors": exc.errors}
         except ValueError as exc:
             return {"status": "error", "error": str(exc)}
         return {"status": "ok", **rendered}

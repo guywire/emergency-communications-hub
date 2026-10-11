@@ -3939,19 +3939,34 @@ function renderWinlinkTemplatePicker(selectedId) {
   const tmpl = _wlTemplates.find(t => t.id === selectedId) || _wlTemplates[0];
   if (!tmpl) { content.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--dim)">No templates available</div>'; return; }
 
-  const tmplOptions = _wlTemplates.map(t => `<option value="${t.id}" ${t.id===tmpl.id?'selected':''}>${escHtml(t.name)}</option>`).join('');
+  // Grouped template menu (ICS / SHARES Region 1 / On the Air / Winlink services / General)
+  const groups = [];
+  _wlTemplates.forEach(t => { const g = t.group || 'General'; if (!groups.includes(g)) groups.push(g); });
+  const tmplOptions = groups.map(g => `<optgroup label="${escHtml(g)}">` +
+    _wlTemplates.filter(t => (t.group || 'General') === g)
+      .map(t => `<option value="${t.id}" ${t.id===tmpl.id?'selected':''}>${escHtml(t.name)}</option>`).join('') +
+    `</optgroup>`).join('');
   const fields = tmpl.fields.map(f => {
     const datalistId = `wlf-dl-${f.key}`;
     const datalist = (f.options && f.options.length)
       ? `<datalist id="${datalistId}">${f.options.map(o => `<option value="${escHtml(o)}">`).join('')}</datalist>`
       : '';
-    const input = (f.key === 'message' || f.key === 'text' || f.key === 'query')
-      ? `<textarea id="wlf-${f.key}" rows="4" class="wl-field" style="width:100%" placeholder="${escHtml(f.placeholder||'')}"></textarea>`
-      : `<input type="text" id="wlf-${f.key}" class="wl-field" style="width:100%" placeholder="${escHtml(f.placeholder||'')}" ${f.options && f.options.length ? `list="${datalistId}"` : ''}>${datalist}`;
+    const ml = f.max_len ? ` maxlength="${f.max_len}"` : '';
+    let input;
+    if (f.kind === 'choice' && f.choices && f.choices.length) {
+      input = `<select id="wlf-${f.key}" class="wl-field" style="width:100%"><option value="">${f.required ? '— choose —' : '(none)'}</option>` +
+        f.choices.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('') + `</select>`;
+    } else if (f.kind === 'multiline' || f.kind === 'timelog' || f.key === 'message' || f.key === 'text' || f.key === 'query') {
+      input = `<textarea id="wlf-${f.key}" rows="${f.kind === 'timelog' ? 6 : 4}" class="wl-field" style="width:100%"${ml} placeholder="${escHtml(f.placeholder||'')}"></textarea>`;
+    } else {
+      input = `<input type="text" id="wlf-${f.key}" class="wl-field" style="width:100%"${ml} placeholder="${escHtml(f.placeholder||'')}" ${f.options && f.options.length ? `list="${datalistId}"` : ''}>${datalist}`;
+    }
+    const hint = (f.hint && f.kind !== 'choice' && f.hint !== f.placeholder) ? `<div style="font-size:9px;color:var(--dim);margin-top:2px">${escHtml(f.hint)}</div>` : '';
     return `
     <div style="margin-bottom:8px">
       <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:3px">${escHtml(f.label)}${f.required ? ' *' : ''}</label>
-      ${input}
+      ${input}${hint}
+      <div id="wlf-err-${f.key}" style="display:none;color:var(--red);font-size:10px;margin-top:2px"></div>
     </div>`;
   }).join('');
 
@@ -3978,9 +3993,19 @@ async function useWinlinkTemplate(templateId) {
     const d = await fetch(`/api/winlink/templates/${encodeURIComponent(templateId)}/render`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({values}),
     }).then(r => r.json());
+    tmpl.fields.forEach(f => {
+      const fe = document.getElementById(`wlf-err-${f.key}`);
+      const inp = document.getElementById(`wlf-${f.key}`);
+      const msg = d.errors && d.errors[f.key];
+      if (fe) { fe.textContent = msg ? msg : ''; fe.style.display = msg ? 'block' : 'none'; }
+      if (inp) inp.style.borderColor = msg ? 'var(--red)' : '';
+    });
     if (d.status !== 'ok') {
-      errEl.textContent = d.error || 'Could not render template';
+      const n = d.errors ? Object.keys(d.errors).length : 0;
+      errEl.textContent = n > 1 ? `Please fix ${n} fields marked in red.` : (d.error || 'Could not render template');
       errEl.style.display = 'block';
+      const first = d.errors && Object.keys(d.errors)[0];
+      if (first) document.getElementById(`wlf-${first}`)?.focus();
       return;
     }
     // Force the winlink adapter on and reveal the subject field even if no
