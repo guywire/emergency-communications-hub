@@ -8,6 +8,15 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc256 (2026-10-11)
+
+### Changed
+- **SOTA map spots are off by default.** SOTA deprecated the spots API the layer used (it
+  returned a single "DEPRECATED" placeholder, so the map showed nothing), and SOTA's API
+  terms require their prior approval for AI-generated software. The ⛰ button now explains
+  this and opens SOTAwatch; opt back in with `sota: {api_enabled: true}` only after
+  clearing it with SOTA.
+
 ## v1.0.0-rc255 (2026-10-10)
 
 ### Added

@@ -997,7 +997,13 @@ async function loadPOTA() {
 let _sotaEnabled = false;
 let _sotaMarkers = [];
 
+let _sotaWatchUrl = null;   // set when the server reports SOTA spots are off
+
 function toggleSOTA() {
+  if (_sotaWatchUrl) {        // spots API off — the button opens SOTAwatch instead
+    window.open(_sotaWatchUrl, '_blank', 'noopener');
+    return;
+  }
   _sotaEnabled = !_sotaEnabled;
   const btn = document.getElementById('sota-btn');
   btn.style.color = _sotaEnabled ? 'var(--green)' : '';
@@ -1019,6 +1025,17 @@ async function loadSOTA() {
     const r = await fetch('/api/sota/spots?radius_km=500').catch(() => null);
     if (!r || !r.ok) { toast('SOTA: fetch failed'); return; }
     const data = await r.json();
+    if (data.disabled) {
+      // Server has SOTA spots switched off (deprecated API / SOTA API terms).
+      _sotaEnabled = false;
+      _sotaWatchUrl = data.sotawatch_url || 'https://sotawatch.sota.org.uk/';
+      const btn = document.getElementById('sota-btn');
+      btn.style.color = ''; btn.style.borderColor = ''; btn.classList.remove('on');
+      btn.textContent = '⛰ SOTAwatch ↗';
+      btn.title = 'SOTA map spots are off — click to open SOTAwatch in a new tab';
+      toast('SOTA: ' + data.error + ' Click the button again to open SOTAwatch.', 'err');
+      return;
+    }
     if (data.error) { toast('SOTA: ' + data.error, 'err'); return; }
     _sotaMarkers.forEach(m => m.remove());
     _sotaMarkers = [];

@@ -3437,6 +3437,29 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         each summit's coordinates via a lookup, cached forever since summit
         locations don't change."""
         import time as _time
+        # OFF unless the operator opts in (`sota: {api_enabled: true}`).
+        # 2026-10-11: api2.sota.org.uk/api/spots/... is DEPRECATED — it now
+        # returns one placeholder "DEPRECATED" spot, so this layer silently
+        # showed nothing. SOTA's API terms (https://api-db2.sota.org.uk/docs)
+        # say deprecated-endpoint use can get a user blocked, require app
+        # developers to join the SOTA Reflector "API-consumers" group, and
+        # forbid AI-generated software from connecting without SOTA's prior
+        # approval. Don't point this at a newer endpoint without that.
+        try:
+            import yaml as _yaml
+            from pathlib import Path as _P
+            _cp = _P(app.state.config_path or "/etc/ech/config.yaml")
+            if not _cp.exists():
+                _cp = _P("config.yaml")
+            _sota_cfg = ((_yaml.safe_load(_cp.read_text(encoding="utf-8")) or {}).get("sota") or {})
+        except Exception:
+            _sota_cfg = {}
+        if not _sota_cfg.get("api_enabled", False):
+            return {"spots": [], "total": 0, "disabled": True,
+                    "sotawatch_url": "https://sotawatch.sota.org.uk/",
+                    "error": ("SOTA map spots are off: the SOTA spots API this used has been "
+                              "deprecated, and SOTA's API terms require their prior approval for "
+                              "this kind of software. Open SOTAwatch for live spots.")}
         cache_key = f"{radius_km}"
         cached = _sota_spot_cache.get(cache_key)
         if cached and _time.monotonic() - cached[0] < _SOTA_CACHE_TTL:
