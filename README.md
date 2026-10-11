@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc254** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
+**Version 1.0.0-rc255** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -575,11 +575,25 @@ matching adapter with `transport: browser` (MeshCore) or `input_device: browser`
 open in a new tab and closing asks for confirmation); adapters re-attach automatically
 when the tab reconnects.
 
-**Bridge rules (`bridge_rules`) are coarse today:** a rule forwards *every* inbound
-message from one adapter to another — all channels, positions and telemetry included,
-with no rate limit or loop guard. Use them only between low-traffic adapters for now;
-channel-scoped, typed, direction-aware bridging is planned (O117 in
-`ECH_REQUIREMENTS_AND_PROGRESS.md`).
+**Bridges (`bridge_rules`)** link ONE endpoint on each side — a mesh channel ↔ APRS
+messages addressed to a group such as `EMCOMM` — not whole adapters. Each bridge sets
+its direction (one-way or bidirectional), what crosses (channel text; DMs opt-in —
+positions/telemetry are not bridged), a per-direction rate limit, sender attribution
+(`Bob: …`), the far side's length limit (APRS 67 chars), and optionally "callsign
+senders only". Bridged text is never re-bridged, network echoes are dropped and
+multi-path duplicates are forwarded once. Build bridges in **Settings → Bridge rules**
+(new bridges start in *dry run*: they log what they would forward until you press
+*Go live*); live counters and a decision log are shown there.
+
+```yaml
+bridge_rules:
+  - name: mesh-aprs-emcomm
+    a: {adapter: meshtastic-usb, channel: 2}
+    b: {adapter: aprs-internet, to: EMCOMM}   # APRS: send to and listen for EMCOMM
+    direction: both                           # a_to_b | b_to_a | both
+    types: [text]                             # add dm to include direct messages
+    rate_per_min: 6
+```
 
 **APRS-IS filter tip:** keep the radius in `filter: "r/<lat>/<lon>/<km>"` tight. A wide
 radius (e.g. 250 km) pulls in the whole region's digipeater beacons and ship-AIS objects —

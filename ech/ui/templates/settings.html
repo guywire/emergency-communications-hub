@@ -683,19 +683,53 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
   <div class="section">
     <div class="section-header" onclick="toggle('bridge-body')">
       <span class="section-title">BRIDGE RULES</span>
-      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Forward messages between adapters</span>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Link one channel/addressee on each side</span>
     </div>
     <div id="bridge-body" class="section-body">
+      <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px">
+        A bridge joins ONE endpoint on each side — e.g. a mesh channel ↔ APRS messages addressed
+        to a group like EMCOMM. Only text crosses (DMs optional), rate-limited, with sender
+        attribution; bridged text is never re-bridged and echoes are dropped. Try a new bridge with
+        <b>Dry run</b> first and watch its log.</div>
       <div id="bridge-list" style="margin-bottom:12px"></div>
       <div class="row">
-        <div><label>From adapter</label><input type="text" id="bridge-from" placeholder="meshtastic-usb"></div>
-        <div><label>To adapter</label><input type="text" id="bridge-to" placeholder="aprs-internet"></div>
+        <div><label>Name</label><input type="text" id="br-name" placeholder="mesh-aprs-emcomm"></div>
+        <div><label>Direction</label>
+          <select id="br-dir">
+            <option value="both">A ⇄ B (bidirectional)</option>
+            <option value="a_to_b">A → B only</option>
+            <option value="b_to_a">B → A only</option>
+          </select></div>
+      </div>
+      <div class="row">
+        <div><label>Side A adapter</label><select id="br-a-adapter" onchange="bridgeSideChanged('a')"></select></div>
+        <div id="br-a-ch-wrap"><label>Side A channel</label><select id="br-a-ch"></select></div>
+        <div id="br-a-to-wrap"><label>Side A addressee (APRS: group/call to send to &amp; listen for)</label>
+          <input type="text" id="br-a-to" placeholder="EMCOMM"></div>
+      </div>
+      <div class="row">
+        <div><label>Side B adapter</label><select id="br-b-adapter" onchange="bridgeSideChanged('b')"></select></div>
+        <div id="br-b-ch-wrap"><label>Side B channel</label><select id="br-b-ch"></select></div>
+        <div id="br-b-to-wrap"><label>Side B addressee (APRS: group/call to send to &amp; listen for)</label>
+          <input type="text" id="br-b-to" placeholder="EMCOMM"></div>
+      </div>
+      <div class="row">
+        <div><label>Rate limit (msgs/min each way)</label><input type="number" id="br-rate" value="6" min="1" max="120"></div>
+        <div><label>Max length (blank = per network)</label><input type="number" id="br-maxlen" placeholder="APRS 67, MeshCore 140"></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;font-family:var(--mono);font-size:11px;margin-top:6px">
+        <label><input type="checkbox" id="br-dm"> Include direct messages</label>
+        <label><input type="checkbox" id="br-prefix" checked> Sender attribution ("Bob: …")</label>
+        <label><input type="checkbox" id="br-callsign"> Only senders with a callsign</label>
+        <label><input type="checkbox" id="br-dry" checked> Dry run (log only)</label>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
-        <button class="btn btn-green" onclick="addBridgeRule()">Add rule</button>
+        <button class="btn btn-green" onclick="addBridgeRule()">Add bridge</button>
         <button class="btn btn-blue" onclick="saveBridgeRules()">Save &amp; apply</button>
         <span id="bridge-save-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);display:none">Saved and applied live</span>
       </div>
+      <div style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--text);margin:12px 0 4px">Recent bridge decisions</div>
+      <div id="bridge-log" style="font-family:var(--mono);font-size:10px;color:var(--muted);max-height:180px;overflow:auto"></div>
     </div>
   </div>
 
@@ -1549,6 +1583,7 @@ async function init() {
   }
   bridgeRules = ac.bridge_rules || [];
   renderBridgeRules();
+  startBridgePanel();
 
   // Load users
   const users = await fetch('/api/users').then(r=>r.json());
@@ -2456,28 +2491,145 @@ async function changeMyPassword() {
   toast('Password changed');
 }
 
+// ── Bridges (O117): endpoint-to-endpoint, typed, direction-aware ─────────
+let _bridgeChannels = [];     // /api/channels rows (adapter + detail.channels_list)
+let _bridgeStatus = {rules: [], log: []};
+let _bridgeTimer = null;
+
+const _isAprs = n => /aprs/i.test(n);
+function _bridgeChList(adapter) {
+  const row = _bridgeChannels.find(c => c.adapter === adapter);
+  return (row && row.detail && row.detail.channels_list) || [];
+}
+
+async function loadBridgeAdapters() {
+  try {
+    const d = await fetch('/api/channels').then(r => r.json());
+    _bridgeChannels = d.channels || [];
+  } catch(e) { _bridgeChannels = []; }
+  const names = _bridgeChannels.map(c => c.adapter)
+    .filter(n => !/adsb|opensky|ais|letsmesh|wsjtx/i.test(n));
+  for (const side of ['a', 'b']) {
+    const sel = document.getElementById(`br-${side}-adapter`);
+    const keep = sel.value;
+    sel.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    if (names.includes(keep)) sel.value = keep;
+    else if (side === 'b' && names.length > 1) sel.selectedIndex = 1;
+    bridgeSideChanged(side);
+  }
+}
+
+function bridgeSideChanged(side) {
+  const ad = document.getElementById(`br-${side}-adapter`).value || '';
+  const chs = _bridgeChList(ad);
+  const aprs = _isAprs(ad);
+  document.getElementById(`br-${side}-ch-wrap`).style.display = (!aprs && chs.length) ? '' : 'none';
+  document.getElementById(`br-${side}-to-wrap`).style.display = aprs ? '' : 'none';
+  document.getElementById(`br-${side}-ch`).innerHTML =
+    `<option value="">(any channel)</option>` +
+    chs.map(c => `<option value="${c.idx}">${c.idx}: ${esc(c.name || '')}</option>`).join('');
+}
+
+function _endpointText(ep) {
+  let s = esc(ep.adapter);
+  if (ep.channel !== undefined && ep.channel !== null) {
+    const ch = _bridgeChList(ep.adapter).find(c => c.idx === ep.channel);
+    s += ` ch${ep.channel}${ch && ch.name ? ' (' + esc(ch.name) + ')' : ''}`;
+  }
+  if (ep.to) s += ` → ${esc(ep.to)}`;
+  if (ep.listen && ep.listen !== ep.to) s += ` (listen ${esc(ep.listen)})`;
+  return s;
+}
+
 function renderBridgeRules() {
-  document.getElementById('bridge-list').innerHTML = bridgeRules.length ? bridgeRules.map((r,i) =>
-    `<div class="user-row">
-      <span class="user-name" style="font-family:var(--mono);font-size:11px">${esc(r.from_adapter)} → ${esc(r.to_adapter)}</span>
-      <button class="btn btn-red" onclick="deleteBridge(${i})" style="padding:3px 8px;font-size:10px">Remove</button>
-    </div>`
-  ).join('') : '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No bridge rules</div>';
+  const arrow = {both: '⇄', a_to_b: '→', b_to_a: '←'};
+  document.getElementById('bridge-list').innerHTML = bridgeRules.length ? bridgeRules.map((r, i) => {
+    if (r.from_adapter) {   // legacy rule not yet saved in the new format
+      return `<div class="user-row"><span class="user-name" style="font-family:var(--mono);font-size:11px">
+        ${esc(r.from_adapter)} → ${esc(r.to_adapter)} <span style="color:var(--yellow)">(legacy — becomes one-way text-only on save)</span></span>
+        <button class="btn btn-red" onclick="deleteBridge(${i})" style="padding:3px 8px;font-size:10px">Remove</button></div>`;
+    }
+    const st = (_bridgeStatus.rules || []).find(s => s.name === r.name);
+    const c = st ? st.counters : null;
+    const counts = c ? `fwd ${c.forwarded}${r.dry_run ? ` · would ${c.would_forward}` : ''} · rate-drop ${c.dropped_rate} · loop ${c.dropped_loop} · dup ${c.dropped_duplicate}` : '';
+    const flags = [(r.types || []).join('+'), `${r.rate_per_min}/min`, r.dry_run ? 'DRY RUN' : '', r.require_callsign ? 'callsign only' : '', r.enabled === false ? 'DISABLED' : '']
+      .filter(Boolean).join(' · ');
+    return `<div class="user-row" style="align-items:flex-start">
+      <span class="user-name" style="font-family:var(--mono);font-size:11px;line-height:1.5">
+        <b>${esc(r.name)}</b>: ${_endpointText(r.a)} <span style="color:var(--blue)">${arrow[r.direction] || '?'}</span> ${_endpointText(r.b)}<br>
+        <span style="color:var(--muted)">${flags}</span>${counts ? `<br><span style="color:var(--dim)">${counts}</span>` : ''}</span>
+      <span style="display:flex;gap:4px">
+        <button class="btn btn-blue" onclick="toggleBridgeDry(${i})" style="padding:3px 8px;font-size:10px">${r.dry_run ? 'Go live' : 'Dry run'}</button>
+        <button class="btn btn-red" onclick="deleteBridge(${i})" style="padding:3px 8px;font-size:10px">Remove</button>
+      </span></div>`;
+  }).join('') : '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No bridges</div>';
+}
+
+function _readEndpoint(side) {
+  const adapter = document.getElementById(`br-${side}-adapter`).value;
+  const ep = {adapter};
+  if (_isAprs(adapter)) {
+    const to = document.getElementById(`br-${side}-to`).value.trim().toUpperCase();
+    if (to) ep.to = to;
+  } else {
+    const ch = document.getElementById(`br-${side}-ch`).value;
+    if (ch !== '') ep.channel = parseInt(ch);
+  }
+  return ep;
 }
 
 function addBridgeRule() {
-  const from_adapter = document.getElementById('bridge-from').value.trim();
-  const to_adapter   = document.getElementById('bridge-to').value.trim();
-  if (!from_adapter || !to_adapter) { alert('Both adapter names required'); return; }
-  bridgeRules.push({from_adapter, to_adapter});
+  const a = _readEndpoint('a'), b = _readEndpoint('b');
+  const direction = document.getElementById('br-dir').value;
+  if (!a.adapter || !b.adapter) { toast('Pick an adapter for both sides', 'err'); return; }
+  // An APRS side that RECEIVES needs an addressee, or every APRS message in
+  // range would cross; one that SENDS needs one to address the message to.
+  for (const [ep, side] of [[a, 'A'], [b, 'B']]) {
+    if (_isAprs(ep.adapter) && !ep.to) { toast(`Side ${side} is APRS — enter the addressee (e.g. EMCOMM)`, 'err'); return; }
+  }
+  const maxlen = document.getElementById('br-maxlen').value;
+  const rule = {
+    name: document.getElementById('br-name').value.trim() || `${a.adapter}-${b.adapter}`,
+    enabled: true, a, b, direction,
+    types: document.getElementById('br-dm').checked ? ['text', 'dm'] : ['text'],
+    rate_per_min: parseFloat(document.getElementById('br-rate').value) || 6,
+    prefix: document.getElementById('br-prefix').checked,
+    max_len: maxlen ? parseInt(maxlen) : null,
+    require_callsign: document.getElementById('br-callsign').checked,
+    dry_run: document.getElementById('br-dry').checked,
+  };
+  if (bridgeRules.some(r => r.name === rule.name)) { toast('A bridge with that name exists', 'err'); return; }
+  bridgeRules.push(rule);
   renderBridgeRules();
-  document.getElementById('bridge-from').value = '';
-  document.getElementById('bridge-to').value = '';
+  toast('Bridge added — press Save & apply');
+}
+
+function toggleBridgeDry(i) {
+  bridgeRules[i].dry_run = !bridgeRules[i].dry_run;
+  renderBridgeRules();
+  saveBridgeRules();
 }
 
 function deleteBridge(i) {
   bridgeRules.splice(i, 1);
   renderBridgeRules();
+}
+
+async function refreshBridgeStatus() {
+  try {
+    _bridgeStatus = await fetch('/api/bridge-rules/status').then(r => r.json());
+  } catch(e) { return; }
+  renderBridgeRules();
+  const log = (_bridgeStatus.log || []).slice().reverse();
+  document.getElementById('bridge-log').innerHTML = log.length ? log.map(e =>
+    `<div>${new Date(e.t * 1000).toLocaleTimeString()} <b>${esc(e.rule)}</b> [${esc(e.leg)}] ${esc(e.outcome)} — ${esc(e.from)}: ${esc(e.text)}</div>`
+  ).join('') : '<div style="color:var(--dim)">Nothing yet</div>';
+}
+
+function startBridgePanel() {
+  loadBridgeAdapters();
+  refreshBridgeStatus();
+  if (!_bridgeTimer) _bridgeTimer = setInterval(refreshBridgeStatus, 5000);
 }
 
 async function saveBridgeRules() {
@@ -2487,6 +2639,8 @@ async function saveBridgeRules() {
   });
   const d = await r.json();
   if (d.status === 'ok') {
+    if (d.rules) { bridgeRules = d.rules; renderBridgeRules(); }   // server-normalised form
+    refreshBridgeStatus();
     const msg = document.getElementById('bridge-save-msg');
     msg.textContent = d.warning ? `Applied live (config save failed: ${d.warning})` : 'Saved and applied live';
     msg.style.display = 'inline';

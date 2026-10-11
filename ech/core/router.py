@@ -41,6 +41,8 @@ class Router:
         self._ws_clients: set["WebSocket"] = set()
         self._dedup_cache: dict[str, float] = {}   # hash → timestamp
         self._bridge_rules: list[dict] = []        # loaded from config
+        from ech.core.bridge import BridgeEngine
+        self._bridge = BridgeEngine()
         self._tasks: list[asyncio.Task] = []
         self._adapter_tasks: dict[str, asyncio.Task] = {}  # name → supervise task
         self._metrics_task: asyncio.Task | None = None
@@ -351,25 +353,17 @@ class Router:
         self._ws_clients -= dead
 
     async def _apply_bridge_rules(self, msg: NormalizedMessage) -> None:
-        """Forward a message to another adapter if a bridge rule matches."""
-        for rule in self._bridge_rules:
-            if rule.get("from_adapter") == msg.source_adapter:
-                target_name = rule.get("to_adapter")
-                target = self._adapters.get(target_name)
-                if target and target._connected and not target._paused:
-                    fwd = NormalizedMessage(
-                        source_adapter=msg.source_adapter,
-                        source_channel=msg.source_channel,
-                        from_id=msg.from_id,
-                        from_display=msg.from_display,
-                        body=msg.body,
-                        priority=msg.priority,
-                        lat=msg.lat,
-                        lon=msg.lon,
-                        raw={**(msg.raw or {}), "_bridged_via": target_name},
-                    )
-                    await target.send(fwd)
-                    log.debug("Bridge: forwarded %s → %s", msg.source_adapter, target_name)
+        """Forward per bridge rules — channel-scoped, typed, direction-aware,
+        rate-limited and loop-protected (ech/core/bridge.py, O117). The old
+        version re-sent EVERY inbound message from the source adapter (all
+        channels, positions, telemetry) with no rate limit or loop guard."""
+        if not self._bridge_rules and not self._bridge.rules:
+            return
+        self._bridge.ensure_loaded(self._bridge_rules)
+        try:
+            await self._bridge.apply(msg, self._adapters)
+        except Exception as exc:
+            log.error("Bridge: error applying rules to %s message: %s", msg.source_adapter, exc)
 
     async def _handle_nodes_updated(self, adapter_name: str, node_count: int) -> None:
         """Broadcast a lightweight event so the UI can refresh its node panel."""

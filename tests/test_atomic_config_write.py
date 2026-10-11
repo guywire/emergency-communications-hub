@@ -76,3 +76,25 @@ def test_atomic_write_accepts_string_path(tmp_path):
     atomic_write_yaml(str(path), {"adapters": [{"name": "x", "type": "mock_aprs"}]})
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert loaded == {"adapters": [{"name": "x", "type": "mock_aprs"}]}
+
+
+def test_falls_back_to_in_place_write_when_dir_not_writable(tmp_path, monkeypatch):
+    """Live 2026-10-10: /etc/ech root-owned → temp file creation denied →
+    every settings save failed. Must still save (in place)."""
+    import builtins
+    import yaml
+    from ech.api.app import atomic_write_yaml
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("adapters: []\n")
+    real_open = builtins.open
+
+    def guarded_open(file, mode="r", *a, **kw):
+        if str(file).endswith(".tmp") and "w" in mode:
+            raise PermissionError(13, "Permission denied", str(file))
+        return real_open(file, mode, *a, **kw)
+
+    monkeypatch.setattr(builtins, "open", guarded_open)
+    atomic_write_yaml(cfg_path, {"adapters": [{"name": "x"}], "k": 1})
+    monkeypatch.setattr(builtins, "open", real_open)
+    assert yaml.safe_load(cfg_path.read_text()) == {"adapters": [{"name": "x"}], "k": 1}

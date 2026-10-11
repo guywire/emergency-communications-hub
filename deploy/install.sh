@@ -48,7 +48,11 @@ else
   echo "Existing /etc/ech/config.yaml preserved."
 fi
 
-# Always ensure config files are owned by the ech service user so the UI can save settings
+# Always ensure config files are owned by the ech service user so the UI can save settings.
+# The DIRECTORY too: config saves write a temp file beside config.yaml and atomically
+# swap it in, which needs create permission in /etc/ech (root-owned dir = every
+# settings save failed with "permission denied" from rc247 until this was added).
+sudo chown ech:ech /etc/ech 2>/dev/null || true
 sudo chown ech:ech /etc/ech/config.yaml 2>/dev/null || true
 
 # Add pskreporter section if missing (required for correct User-Agent to avoid 503s)

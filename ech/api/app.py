@@ -115,8 +115,26 @@ def atomic_write_yaml(path, cfg: dict) -> None:
     # !!python/object:... tag for it (plain dump's default behavior).
     rendered = yaml.safe_dump(cfg, default_flow_style=False, allow_unicode=True)
     tmp_path = path.with_name(path.name + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(rendered)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(rendered)
+    except PermissionError:
+        # Live incident 2026-10-10: /etc/ech is root-owned (the ech service
+        # user owns config.yaml but can't create files beside it), so the
+        # temp file failed and EVERY settings save returned "permission
+        # denied" from rc247 on. deploy/install.sh now chowns the directory;
+        # until then (or on any install laid out that way) fall back to
+        # writing in place. The YAML is already fully rendered above, so a
+        # serialisation error still can't truncate the file — only a crash
+        # during the few-ms write itself could.
+        logging.getLogger(__name__).warning(
+            "config write: cannot create %s (directory not writable by this user) — "
+            "writing %s in place; fix with: sudo chown ech:ech %s", tmp_path, path, path.parent)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(rendered)
+            f.flush()
+            os.fsync(f.fileno())
+        return
     os.replace(tmp_path, path)
 
 
@@ -2178,7 +2196,11 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 cfg = yaml.safe_load(f) or {}
             cfg["adapters"] = new_adapters
             if "bridge_rules" in data:
-                cfg["bridge_rules"] = data["bridge_rules"]
+                from ech.core.bridge import BridgeEngine, BridgeConfigError
+                try:
+                    cfg["bridge_rules"] = [r.to_dict() for r in BridgeEngine.validate(data["bridge_rules"])]
+                except BridgeConfigError as exc:
+                    return {"status": "error", "detail": f"bridge_rules: {exc}"}
             atomic_write_yaml(config_path, cfg)
             return {"status": "ok", "note": "Restart ECH to apply adapter changes"}
         except PermissionError as exc:
@@ -2226,17 +2248,27 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 
+    @app.get("/api/bridge-rules/status")
+    async def bridge_status():
+        """Live per-rule counters (forwarded / dropped by reason / dry-run
+        would-forward) and the recent decision log, for the Settings editor."""
+        router._bridge.ensure_loaded(router._bridge_rules)
+        return router._bridge.status()
+
     @app.post("/api/bridge-rules")
     async def save_bridge_rules(request: Request):
         """Save bridge rules to config.yaml and apply them live without restart."""
         import yaml
         from pathlib import Path
+        from ech.core.bridge import BridgeEngine, BridgeConfigError
         data = await request.json()
-        rules = data.get("rules", [])
-        # Validate: each rule must have from_adapter and to_adapter strings
-        for r in rules:
-            if not isinstance(r.get("from_adapter"), str) or not isinstance(r.get("to_adapter"), str):
-                return {"status": "error", "detail": "Each rule needs from_adapter and to_adapter strings"}
+        try:
+            parsed = BridgeEngine.validate(data.get("rules", []))
+        except BridgeConfigError as exc:
+            return {"status": "error", "detail": str(exc)}
+        # Store the normalised form (legacy {from_adapter,to_adapter} rules
+        # come back as explicit one-way text bridges)
+        rules = [r.to_dict() for r in parsed]
         # Apply live to running router
         router._bridge_rules = rules
         # Persist to config.yaml

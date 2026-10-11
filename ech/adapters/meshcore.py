@@ -308,13 +308,17 @@ class BrowserTransport(MeshCoreTransport):
 
     async def connect(self) -> None:
         from ech.core.remote_hw import registry
-        # Wait briefly for the operator's browser to attach; the adapter's
-        # normal reconnect loop retries if it isn't there yet.
-        self._sess = await registry.wait_for(self._adapter_name, timeout=10.0)
+        # Wait for the operator's browser for as long as it takes. The old 10 s
+        # window raised into the router's back-off (up to 60 s), so a browser
+        # connecting in the gap sat unused for up to a minute — the same bug
+        # found live on the browser CW adapter (O113). A dropped session
+        # surfaces as ConnectionError from readexactly(); the adapter's
+        # reconnect lands back here and re-attaches on the next connect.
+        self._sess = await registry.wait_for(self._adapter_name, timeout=0)
         if self._sess is None:
-            raise ConnectionError(
-                f"no browser hardware session for {self._adapter_name!r} — open /remote-hw "
-                "and connect the MeshCore node via Web Serial")
+            log.info("MeshCore browser: waiting for /remote-hw Web Serial session %r",
+                     self._adapter_name)
+            self._sess = await registry.wait_for(self._adapter_name, timeout=None)
         self._buf.clear()
         log.info("MeshCore browser: attached to remote session for %r", self._adapter_name)
 

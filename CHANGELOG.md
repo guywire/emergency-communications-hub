@@ -8,6 +8,24 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc255 (2026-10-10)
+
+### Added
+- **Endpoint bridges**: a bridge now links ONE mesh channel (or APRS addressee such as
+  `EMCOMM`) on each side, with explicit direction, text/DM selection, per-direction
+  rate limit, sender attribution, length limits, optional callsign-only, and dry run.
+  Echoes and re-bridging are blocked; duplicates forwarded once. New Settings editor
+  with dropdowns, live counters and a decision log; `GET /api/bridge-rules/status`.
+- Browser CAT card: Yaesu 5-byte binary CAT (FT-817/818/857/897) — frequency/mode
+  readout and PTT.
+
+### Fixed
+- **Settings saves failed with "permission denied"** on installs where `/etc/ech` is
+  root-owned (every save since rc247): the deploy now gives the service user the
+  directory, and saves fall back to a safe in-place write if it still can't.
+- MeshCore `transport: browser` now waits for the browser instead of failing into a
+  back-off gap (same bug as browser CW in rc250).
+
 ## v1.0.0-rc249–rc254 — Sound-card digital modes over browser audio (2026-10-10)
 
 ### Added

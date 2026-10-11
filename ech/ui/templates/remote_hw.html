@@ -81,12 +81,14 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <p>Read live frequency/mode from a radio connected to this computer's USB port
     (Icom CI-V or Kenwood/Elecraft text CAT) and share it with the whole ECH
     server — Ham Log and other pages auto-fill from it the same way they would
-    from a server-side rigctld connection. This is read-only: setting freq/mode/PTT
-    from other pages still requires rigctld on the server.</p>
+    from a server-side rigctld connection. Frequency/mode are read-only here; the
+    same port keys PTT for CW/RTTY/PSK31 sent from the radio-audio card below.
+    Setting freq/mode from other pages still requires rigctld on the server.</p>
     <label>Rig / protocol</label>
     <select id="cat-rig-type" onchange="updateCatRigRow()">
       <option value="civ">Icom CI-V — Xiegu G90, IC-7300, IC-705, IC-9700</option>
-      <option value="kenwood">Kenwood/Yaesu text CAT — TS-590/2000, K3/K4/KX3, FT-991A, FT-891, FT-857, FT-450, FT-DX10</option>
+      <option value="kenwood">Kenwood/Yaesu text CAT — TS-590/2000, K3/K4/KX3, FT-991A, FT-891, FT-450, FT-DX10</option>
+      <option value="yaesu_bin">Yaesu 5-byte binary CAT — FT-817, FT-818, FT-857, FT-897</option>
     </select>
     <div id="cat-civ-row">
       <label>CI-V address</label>
@@ -137,6 +139,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       <option value="civ">CAT — Icom CI-V (1C 00) — Xiegu G90, IC-7300, IC-705</option>
       <option value="kenwood">CAT — Kenwood/Elecraft (TX; / RX;)</option>
       <option value="yaesu">CAT — Yaesu text (TX1; / TX0;) — FT-991A, FT-891, FTDX10, FT-450</option>
+      <option value="yaesu_bin">CAT — Yaesu binary (08 / 88) — FT-817, FT-818, FT-857, FT-897</option>
       <option value="rts">RTS line — DigiRig and most USB interfaces</option>
       <option value="dtr">DTR line</option>
       <option value="vox">None — radio VOX keys itself</option>
@@ -371,7 +374,8 @@ const TX_MAX_S = 180;   // stuck-key watchdog
 function _pttMethod() {
   const m = document.getElementById('ptt-method').value;
   if (m !== 'auto') return m;
-  return _catRigType === 'civ' ? 'civ' : _catRigType === 'kenwood' ? 'kenwood' : 'vox';
+  return _catRigType === 'civ' ? 'civ' : _catRigType === 'kenwood' ? 'kenwood'
+       : _catRigType === 'yaesu_bin' ? 'yaesu_bin' : 'vox';
 }
 
 // Serialize every CAT-port write (PTT vs frequency polling) so commands and
@@ -396,6 +400,7 @@ async function setPtt(on) {
       else if (m === 'civ') await _catWriter.write(new Uint8Array([0xFE,0xFE,_catCivAddr,0xE0,0x1C,0x00,on ? 1 : 0,0xFD]));
       else if (m === 'kenwood') await _catWriter.write(new TextEncoder().encode(on ? 'TX;' : 'RX;'));
       else if (m === 'yaesu') await _catWriter.write(new TextEncoder().encode(on ? 'TX1;' : 'TX0;'));
+      else if (m === 'yaesu_bin') await _catWriter.write(new Uint8Array([0,0,0,0,on ? 0x08 : 0x88]));
       // Swallow the rig's ack/echo so the next frequency poll doesn't read it
       await new Promise(r => setTimeout(r, 60));
       _catBuf = [];
@@ -558,6 +563,36 @@ async function kenwoodRead() {
   if (freq_hz > 0) pushCatUpdate(freq_hz, mode, 'Web Serial / Kenwood');
 }
 
+// Yaesu 5-byte binary CAT (FT-817/818/857/897): command 0x03 = read
+// frequency + mode. Reply: 4 bytes packed BCD in 10 Hz units, most
+// significant first (01 42 50 00 = 14.250.00 MHz), then a mode byte.
+const CAT_YB_MODE = {0x00:'LSB',0x01:'USB',0x02:'CW',0x03:'CW',0x04:'AM',0x06:'FM',0x08:'FM',0x0A:'DI',0x0C:'DI',0x88:'FM'};
+
+function yaesuBcdToHz(b) {
+  let v = 0;
+  for (let i = 0; i < 4; i++) v = v * 100 + ((b[i] >> 4) & 0x0F) * 10 + (b[i] & 0x0F);
+  return v * 10;
+}
+
+async function _catReadN(n, timeoutMs = 500) {
+  const out = [];
+  const deadline = Date.now() + timeoutMs;
+  while (out.length < n && Date.now() < deadline) {
+    if (_catBuf.length > 0) out.push(_catBuf.shift());
+    else await new Promise(r => setTimeout(r, 5));
+  }
+  return out.length === n ? out : null;
+}
+
+async function yaesuBinRead() {
+  _catBuf = [];
+  await _catWriter.write(new Uint8Array([0,0,0,0,0x03]));
+  const r = await _catReadN(5, 500);
+  if (!r) return;
+  const freq_hz = yaesuBcdToHz(r);
+  if (freq_hz > 0) pushCatUpdate(freq_hz, CAT_YB_MODE[r[4]] || 'USB', 'Web Serial / Yaesu binary');
+}
+
 async function pushCatUpdate(freq_hz, mode, rig_info) {
   const payload = {connected: true, freq_hz, freq_mhz: freq_hz/1e6, mode, rig_info};
   try {
@@ -572,7 +607,8 @@ async function pushCatUpdate(freq_hz, mode, rig_info) {
 async function catPoll() {
   if (!_catPort || _tx.keyed) return;   // no polling chatter while transmitting
   try {
-    await _catExclusive(() => _catRigType === 'civ' ? civRead() : kenwoodRead());
+    await _catExclusive(() => _catRigType === 'civ' ? civRead()
+                       : _catRigType === 'yaesu_bin' ? yaesuBinRead() : kenwoodRead());
   } catch(e) {
     setStatus('cat-status', 'Poll error: ' + e.message, 'err');
   }

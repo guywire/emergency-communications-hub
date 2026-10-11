@@ -339,6 +339,11 @@ class APRSISAdapter(Adapter):
                 raw_path = ",".join(str(x) for x in raw_path)
 
             raw: dict = {"format": fmt}
+            if fmt == "message":
+                # Undecorated fields for bridging (body is display-formatted
+                # "MSG A→B: text"); bridges match on addressee and forward text.
+                raw["addressee"] = packet.get("addresse", "").strip().upper()
+                raw["message_text"] = packet.get("message_text", "").strip()
             if obj_name:
                 raw["gate"] = gate_id   # preserve the gating station
             # Tag AIS objects so the map/log can style them differently
