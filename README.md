@@ -18,7 +18,7 @@ SignalMatrix is a Python/FastAPI application that bridges multiple emergency-com
 | Feature | Notes |
 |---------|-------|
 | **Multi-network bridging** | Meshtastic, APRS (IS + KISS TNC), MeshCore, JS8Call, Winlink/PAT, SMS (SIM7x00/SIM800L), MQTT, Reticulum/LXMF, AREDN, Asterisk/PBX |
-| **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status, SKYWARN + strip reports (`/reports`), analytics charts (`/analytics`) — all in the browser. The compose box shows a per-send MeshCore/Meshtastic channel picker and a Winlink subject field only when a relevant adapter is selected. |
+| **Web dashboard** | Messages, map, node list, anomaly alerts, adapter status, SKYWARN + strip reports (`/reports`), analytics charts (`/analytics`) — all in the browser. The compose box shows a per-send MeshCore/Meshtastic channel picker and a Winlink subject field only when a relevant adapter is selected. Map layers include POTA, a combined 📻 On the Air layer (WWFF, IOTA, SOTA, Bunkers, lighthouses, castles…), DX heard near you, NOAA tides, NWS warnings, AQI/smoke, water bodies, and a moon phase/rise/set panel. |
 | **Ham Radio Log** | Contest logging (Field Day, POTA, SOTA, General); ADIF/Cabrillo/CSV import; ADIF/Cabrillo/POTA/SOTA export |
 | **CAT radio control** | Browser Web Serial (no software install) or server-side rigctld/Hamlib |
 | **Sound-card digital modes** | CW, RTTY and PSK31 decode/encode — from a sound card on the server or from radio audio on the operator's own computer via the browser (one audio stream feeds all three decoders). AFC finds signals anywhere in the passband; noise rejection; PTT keyed over CAT/RTS/DTR around each transmission; live tuning bar in the message window (see [Sound-card digital modes](#sound-card-digital-modes-cw--rtty--psk31)) |
@@ -27,7 +27,7 @@ SignalMatrix is a Python/FastAPI application that bridges multiple emergency-com
 | **Mesh bot** | 25 on-mesh commands — weather/alerts/METAR/tides/solar, aircraft & ship tracking, satellite passes, FCC/DXCC lookups, SKYWARN spotter report intake, SHARES Region 1 strip-report intake, trivia with scoreboards, text-adventure games (see [Mesh Bot](#mesh-bot)) |
 | **SKYWARN & strip reports** | Guided report intake over the mesh (DM the bot `skywarn` or `strip`), auto-prefilled from the sending node's known position/callsign/temperature when available; combined `/reports` review page with map plotting, edit/complete/delete, and `net`/`inws`/`winlink` output formats for relaying to NWS |
 | **Analytics** | `/analytics` — messages per hour per adapter, bot command usage, anomaly trends (24h/48h/7d/30d), with per-series show/hide toggles on the time charts |
-| **Winlink templates** | ICS-213, ARRL Radiogram, SITREP, Winlink AI Query, and Catalog Request (weather/radar/propagation/satellite bulletins) — fill-in-the-blank, addresses and subjects itself correctly |
+| **Winlink templates** | ICS-213, ICS-214A Individual Log, ARRL Radiogram, SITREP, Local Weather Report and SHARES Region 1 strips (SKYWARN, SITREP, Hurricane, WXOBS — byte-compatible with the Response Creator), On-the-Air spot/hunter report, Winlink AI Query and Catalog Request — every field validated (callsigns, times, frequencies, MGRS, enumerated answers) with errors shown per field |
 | **GPS time sync** | Optional NMEA receiver auto-sets system clock and base position |
 | **Storage guard** | Warns when disk free falls below 1 GB or 5%; automatic message retention purge (configurable per adapter family) |
 
