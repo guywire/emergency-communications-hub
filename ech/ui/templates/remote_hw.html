@@ -125,8 +125,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     server's audio-mode decoder; decoded text lands in the message feed. TX audio from
     the server plays out this computer's speakers/line-out into the radio (VOX or CAT
     PTT on the radio still required).</p>
-    <label>Adapter name (must match config)</label>
-    <input id="audio-adapter" value="cw-remote">
+    <label>Audio session name (adapters' <code>browser_session</code>, or an adapter name)</label>
+    <input id="audio-adapter" value="radio-audio">
     <label>Input device (radio audio in)</label>
     <select id="audio-in"><option value="">System default</option></select>
     <label>Output device (TX audio to radio)</label>

@@ -537,6 +537,28 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
   gap: 8px;
   align-items: center;
 }
+/* Sound-card modem tuning (CW/RTTY/PSK31) — shown when one is selected */
+#modem-bar { display: flex; flex-direction: column; gap: 4px; }
+.modem-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; background: var(--bg);
+}
+.modem-row .mode { color: var(--hf); font-weight: 600; }
+.modem-row label { display: inline-flex; align-items: center; gap: 4px; }
+.modem-row input[type=number] {
+  width: 64px; background: var(--bg2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 3px; font-family: var(--mono); font-size: 11px; padding: 1px 4px;
+}
+.modem-row input[type=range] { width: 70px; }
+.modem-row button {
+  font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 3px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg2); color: var(--muted);
+}
+.modem-row button:hover { color: var(--text); border-color: var(--blue); }
+.modem-row .last { color: var(--text); }
+.modem-row .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); display: inline-block; }
+.modem-row .dot.on { background: var(--green); }
 #compose-adapters {
   display: flex;
   gap: 6px;
@@ -1240,6 +1262,7 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
           <option value="2">Emergency</option>
         </select>
       </div>
+      <div id="modem-bar" hidden></div>
       <div id="compose-body-wrap">
         <div id="mention-suggest"></div>
         <textarea id="compose-body" placeholder="Compose message… (@name to mention)" oninput="handleComposeInput()" onkeydown="handleComposKey(event)" onblur="document.getElementById('mention-suggest').classList.remove('open')"></textarea>
@@ -2233,7 +2256,7 @@ function updateSendBtn() {
 function toggleAdapter(el) {
   el.classList.toggle('on');
   updateSubjectVisibility();
-  updateChannelVisibility();
+  updateChannelVisibility();  updateModemBar();
 }
 
 function selectAllAdapters(on) {
@@ -2241,7 +2264,7 @@ function selectAllAdapters(on) {
     if (on) el.classList.add('on'); else el.classList.remove('on');
   });
   updateSubjectVisibility();
-  updateChannelVisibility();
+  updateChannelVisibility();  updateModemBar();
 }
 
 // Subject is only meaningful to Winlink (email-style, distinct from the
@@ -2288,6 +2311,147 @@ function updateChannelVisibility() {
     chList.map(c => `<option value="${c.idx}">${c.idx}: ${escHtml(c.name)}</option>`).join('');
   if ([...sel.options].some(o => o.value === curVal)) sel.value = curVal;
   sel.style.display = '';
+}
+
+// ── Sound-card modem bar (CW / RTTY / PSK31) ─────────────────────────────
+// One row per selected modem adapter: live receive/transmit tuning via
+// POST /api/adapters/{name}/modem. "Match" copies what the decoder measured
+// on the last copy (the other station's speed/pitch) into the settings.
+const _modemState = {};   // name -> settings from the server
+let _modemTimer = null;
+
+function _modemAdapters() {
+  return getSelectedAdapters().filter(n => {
+    const d = _lastChannelsDetail.find(a => a.adapter === n);
+    return d && d.detail && d.detail.modem;
+  });
+}
+
+async function updateModemBar() {
+  const bar = document.getElementById('modem-bar');
+  const names = _modemAdapters();
+  if (!names.length) {
+    bar.hidden = true; bar.innerHTML = '';
+    clearInterval(_modemTimer); _modemTimer = null;
+    return;
+  }
+  await Promise.all(names.map(async n => {
+    try {
+      const r = await fetch(`/api/adapters/${encodeURIComponent(n)}/modem`);
+      if (r.ok) _modemState[n] = await r.json();
+    } catch(e) {}
+  }));
+  // Rebuild rows only when the set of adapters changed, so typing in a
+  // field isn't clobbered by the periodic refresh; otherwise just refresh
+  // the read-only status bits.
+  const key = names.join('|');
+  if (bar.dataset.key !== key) {
+    bar.dataset.key = key;
+    bar.innerHTML = names.filter(n => _modemState[n]).map(_modemRowHtml).join('');
+  }
+  names.forEach(_modemRefreshStatus);
+  bar.hidden = false;
+  if (!_modemTimer) _modemTimer = setInterval(updateModemBar, 4000);
+}
+
+function _modemRowHtml(n) {
+  const s = _modemState[n];
+  const id = 'modem-' + n.replace(/[^a-z0-9_-]/gi, '_');
+  const num = (k, label, step, unit, title) =>
+    `<label title="${title}">${label} <input type="number" step="${step}" value="${s[k]}"
+      onchange="modemSet('${n}', {'${k}': parseFloat(this.value)})">${unit}</label>`;
+  const chk = (k, label, title) =>
+    `<label title="${title}"><input type="checkbox" ${s[k] ? 'checked' : ''}
+      onchange="modemSet('${n}', {'${k}': this.checked})">${label}</label>`;
+  let fields = '';
+  if (s.mode === 'CW') {
+    fields = num('freq', 'Pitch', 10, 'Hz', 'Expected CW tone; AFC searches 300-1200 Hz around it') +
+             chk('afc', 'AFC', 'Auto-tune to each transmission’s actual pitch') +
+             num('tx_wpm', 'TX', 1, 'wpm', 'Keying speed for messages you send');
+  } else if (s.mode === 'RTTY') {
+    fields = num('freq', 'Mark', 5, 'Hz', 'Mark tone (lower tone); AFC hunts the pair anywhere in the passband') +
+             num('shift', 'Shift', 5, 'Hz', 'Tone spacing — 170 Hz amateur standard') +
+             num('baud', 'Baud', 0.01, '', '45.45 amateur standard') +
+             chk('reverse', 'Rev', 'Mark is the upper tone (try this if copy is garbage)') +
+             chk('afc', 'AFC', 'Find the tone pair automatically');
+  } else {
+    fields = num('freq', 'Carrier', 5, 'Hz', 'Starting carrier; AFC finds and locks the real one') +
+             chk('afc', 'AFC', 'Find and lock the carrier automatically');
+  }
+  return `<div class="modem-row" id="${id}">
+    <span class="dot" title="browser audio attached"></span>
+    <span class="mode">${s.mode}</span><span>${escHtml(n)}</span>
+    ${fields}
+    <label title="1 = strict (fewest false decodes) … 5 = digs for weak signals (more junk)">Sens
+      <input type="range" min="1" max="5" step="1" value="${s.sensitivity}"
+        onchange="modemSet('${n}', {sensitivity: parseInt(this.value)})"><span class="sens">${s.sensitivity}</span></label>
+    <span class="last"></span>
+    <button onclick="modemMatch('${n}')" title="${s.mode === 'CW' ? 'Set TX speed and pitch to the last station copied' : 'Lock to the frequency AFC is tracking'}">⇆ Match</button>
+    <button onclick="modemSet('${n}', {}, true)" title="Save these settings to config.yaml (survive restart)">💾 Save</button>
+  </div>`;
+}
+
+function _modemRefreshStatus(n) {
+  const s = _modemState[n];
+  const row = document.getElementById('modem-' + n.replace(/[^a-z0-9_-]/gi, '_'));
+  if (!s || !row) return;
+  const dot = row.querySelector('.dot');
+  dot.classList.toggle('on', !!s.browser_attached);
+  dot.title = s.browser_session
+    ? (s.browser_attached ? `browser audio "${s.browser_session}" attached` : `waiting for browser audio "${s.browser_session}" on /remote-hw`)
+    : 'local sound card';
+  const d = s.last_decode;
+  let txt = '';
+  if (d) {
+    const ago = Math.round((Date.now() - Date.parse(d.ts)) / 1000);
+    const agoTxt = ago < 90 ? ago + 's' : Math.round(ago / 60) + 'm';
+    txt = 'last: ' + [d.wpm ? d.wpm + ' wpm' : '', d.freq ? '@' + Math.round(d.freq) + ' Hz' : '',
+                      (d.snr_db ?? '') !== '' ? d.snr_db + ' dB' : ''].filter(Boolean).join(' ') + ` (${agoTxt} ago)`;
+  } else if (s.tracking_freq) {
+    txt = 'tracking ' + Math.round(s.tracking_freq) + ' Hz';
+  }
+  row.querySelector('.last').textContent = txt;
+  row.querySelector('.sens').textContent = s.sensitivity;
+}
+
+async function modemSet(n, params, persist) {
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(n)}/modem`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(persist ? {..._modemEditable(n), persist: true} : params),
+    });
+    const j = await r.json();
+    if (!r.ok) { toast('Modem: ' + (j.detail || r.status), 'err'); return; }
+    _modemState[n] = j.settings;
+    // Rebuild this row so inputs reflect clamped/server values
+    const row = document.getElementById('modem-' + n.replace(/[^a-z0-9_-]/gi, '_'));
+    if (row) row.outerHTML = _modemRowHtml(n);
+    _modemRefreshStatus(n);
+    if (persist)
+      toast(j.persisted ? `${n}: settings saved` : `${n}: ${j.warning || 'not saved'}`);
+  } catch(e) {
+    console.error('modemSet', e);
+  }
+}
+
+function _modemEditable(n) {
+  const s = _modemState[n] || {};
+  const keys = ['freq', 'afc', 'sensitivity', 'tx_wpm', 'max_wpm', 'shift', 'baud', 'reverse'];
+  return Object.fromEntries(keys.filter(k => k in s).map(k => [k, s[k]]));
+}
+
+function modemMatch(n) {
+  const s = _modemState[n];
+  if (!s) return;
+  const d = s.last_decode;
+  if (s.mode === 'CW') {
+    if (!d) { toast('Nothing copied yet to match'); return; }
+    modemSet(n, {tx_wpm: Math.round(d.wpm), freq: Math.round(d.freq)});
+  } else {
+    const f = (d && d.freq) || s.tracking_freq;
+    if (!f) return;
+    modemSet(n, {freq: Math.round(f * 10) / 10});
+  }
 }
 
 function toggleMuteAdapter(name) {
@@ -3073,6 +3237,10 @@ function adapterMeta(name) {
   if (n.includes('reticulum') || n.includes('rns')) return {icon:'RNS', label:'Reticulum', cls:'rns', toggle:'RNS'};
   if (n.includes('dapnet'))    return {icon:'DAPN', label:'DAPNET',    cls:'dapnet', toggle:'DAPN'};
   if (n.includes('m17'))       return {icon:'M17',  label:'M17',       cls:'m17',    toggle:'M17'};
+  // Sound-card modems (cw_audio / rtty_audio / psk31_audio)
+  if (n.includes('psk'))       return {icon:'PSK',  label:'PSK31',     cls:'hf',     toggle:'PSK'};
+  if (n.includes('rtty'))      return {icon:'RTTY', label:'RTTY',      cls:'hf',     toggle:'RTTY'};
+  if (/(^|[-_])cw([-_]|$)/.test(n)) return {icon:'CW', label:'CW',     cls:'hf',     toggle:'CW'};
   // Checked before the generic 'aredn' match below — meshchat is a text
   // adapter, not the AREDN AMI/PBX voice one, so it must not inherit
   // voice:true (that flag excludes it from "select all" and mislabels it).
@@ -3130,6 +3298,7 @@ async function buildDynamicUI() {
     updateHealthDots(data.channels);
     updateSubjectVisibility();
     updateChannelVisibility();
+    updateModemBar();
   } catch(e) {
     console.error('buildDynamicUI failed:', e);
   }

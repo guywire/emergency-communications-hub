@@ -13,10 +13,17 @@ Config (adapters:):
       freq: 2125            # MARK frequency; space = freq + shift
       shift: 170
       baud: 45.45
+      reverse: false        # true = mark is the upper tone
+      auto_tune: true       # AFC: find the tone pair anywhere in the passband
+      sensitivity: 3        # 1 strict .. 5 weak-signal (see CWAudioAdapter)
     - type: psk31_audio
       name: psk31
       input_device: "USB Audio"
-      freq: 1000            # carrier
+      freq: 1000            # carrier (starting point when auto_tune is on)
+      auto_tune: true       # AFC: find + lock the carrier anywhere in the passband
+      sensitivity: 3
+
+Both also accept input_device: browser + browser_session (see cw_audio.py).
 """
 
 from __future__ import annotations
@@ -40,12 +47,34 @@ class RTTYAudioAdapter(CWAudioAdapter):
     def __init__(self, config: dict):
         self._rtty_shift = float(config.get("shift", 170.0))
         self._rtty_baud = float(config.get("baud", 45.45))
+        self._rtty_reverse = bool(config.get("reverse", False))
         config.setdefault("freq", 2125.0)   # mark frequency
         super().__init__(config)
 
     def _make_decoder(self):
         return RTTYDecoder(sample_rate=self._sample_rate, mark=self._freq,
-                           shift=self._rtty_shift, baud=self._rtty_baud)
+                           shift=self._rtty_shift, baud=self._rtty_baud,
+                           afc=self._auto_tune, reverse=self._rtty_reverse,
+                           squelch=self._squelch())
+
+    def modem_settings(self) -> dict:
+        s = super().modem_settings()
+        s.pop("tx_wpm", None)
+        s.pop("max_wpm", None)
+        s.update(shift=self._rtty_shift, baud=self._rtty_baud, reverse=self._rtty_reverse,
+                 tracking_freq=round(self._decoder.mark, 1))
+        return s
+
+    def _apply_mode_tuning(self, p: dict) -> None:
+        if "shift" in p:
+            self._rtty_shift = float(min(max(float(p["shift"]), 50.0), 1000.0))
+        if "baud" in p:
+            self._rtty_baud = float(min(max(float(p["baud"]), 20.0), 300.0))
+        if "reverse" in p:
+            self._rtty_reverse = bool(p["reverse"])
+
+    TUNING_CONFIG_KEYS = {"freq": "freq", "afc": "auto_tune", "sensitivity": "sensitivity",
+                          "shift": "shift", "baud": "baud", "reverse": "reverse"}
 
     def _encode_tx(self, text: str) -> np.ndarray:
         return encode_rtty(text, baud=self._rtty_baud, mark=self._freq,
@@ -80,7 +109,20 @@ class PSK31AudioAdapter(CWAudioAdapter):
         super().__init__(config)
 
     def _make_decoder(self):
-        return PSK31Decoder(sample_rate=self._sample_rate, freq=self._freq)
+        return PSK31Decoder(sample_rate=self._sample_rate, freq=self._freq,
+                            afc=self._auto_tune, squelch=self._squelch())
+
+    def modem_settings(self) -> dict:
+        s = super().modem_settings()
+        s.pop("tx_wpm", None)
+        s.pop("max_wpm", None)
+        s["tracking_freq"] = round(self._decoder.freq, 1)
+        return s
+
+    def _apply_mode_tuning(self, p: dict) -> None:
+        pass
+
+    TUNING_CONFIG_KEYS = {"freq": "freq", "afc": "auto_tune", "sensitivity": "sensitivity"}
 
     def _encode_tx(self, text: str) -> np.ndarray:
         return encode_psk31(text, freq=self._freq, sample_rate=self._sample_rate,

@@ -24,8 +24,12 @@ Config (adapters: - type: cw_audio):
     sample_rate: 8000
     tx_amplitude: 0.8
     max_wpm: 50                 # decodes faster than this are noise; also sets the glitch-mark filter
-    min_snr_db: 6               # drop weaker transmissions
-    ptt: vox                   # "vox" (default, radio keys itself) or "cat" (ECH keys via rigctld)
+    sensitivity: 3              # 1 (strict, fewest false decodes) .. 5 (weak signals, more junk)
+    min_snr_db: null            # explicit override; default comes from sensitivity
+    browser_session: null       # input_device: browser — /remote-hw session name to listen
+                                # on (default: this adapter's name). Give CW/RTTY/PSK31 the
+                                # same value to decode ONE browser audio stream with all three.
+    ptt: vox                  # "vox" (default, radio keys itself) or "cat" (ECH keys via rigctld)
 
 The audio-device dependency (sounddevice/PortAudio) is imported lazily in
 connect(), matching the ADAPT-1 convention — the adapter can be configured on
@@ -81,6 +85,11 @@ class CWAudioAdapter(Adapter):
         self._wpm = int(config.get("wpm", 20))
         self._sample_rate = int(config.get("sample_rate", 8000))
         self._tx_amplitude = float(config.get("tx_amplitude", 0.8))
+        self._max_wpm = float(config.get("max_wpm", 50.0))
+        self._sensitivity = min(max(int(config.get("sensitivity", 3)), 1), 5)
+        self._min_snr_override = (float(config["min_snr_db"])
+                                  if config.get("min_snr_db") is not None else None)
+        self._browser_session = str(config.get("browser_session") or self.name)
         self._decoder = self._make_decoder()
         self._sample_q: asyncio.Queue = asyncio.Queue(maxsize=256)
         self._stream = None
@@ -100,11 +109,64 @@ class CWAudioAdapter(Adapter):
 
     MODE = "CW"
 
+    # One "sensitivity" knob (1 strict .. 5 weak-signal) scales every mode's
+    # detection gate, so the operator doesn't have to know each decoder's
+    # internal thresholds. 3 = the measured defaults (zero junk decodes on a
+    # pure-noise sweep); 4-5 trade some false decodes for weaker signals.
+    SENS_SQUELCH = {1: 2.0, 2: 1.4, 3: 1.0, 4: 0.75, 5: 0.5}
+    SENS_MIN_SNR = {1: 12.0, 2: 9.0, 3: 6.0, 4: 4.0, 5: 2.0}
+
+    def _squelch(self) -> float:
+        return self.SENS_SQUELCH[self._sensitivity]
+
     def _make_decoder(self):
+        min_snr = (self._min_snr_override if self._min_snr_override is not None
+                   else self.SENS_MIN_SNR[self._sensitivity])
         return CWDecoder(sample_rate=self._sample_rate, freq=self._freq,
-                         auto_tune=self._auto_tune,
-                         max_wpm=float(self.config.get("max_wpm", 50.0)),
-                         min_snr_db=float(self.config.get("min_snr_db", 6.0)))
+                         auto_tune=self._auto_tune, max_wpm=self._max_wpm,
+                         min_snr_db=min_snr, squelch=self._squelch())
+
+    # ── live tuning (messages-page modem bar / POST /api/adapters/{n}/modem) ──
+
+    def modem_settings(self) -> dict:
+        return {
+            "mode": self.MODE,
+            "freq": round(self._freq, 1),
+            "afc": self._auto_tune,
+            "sensitivity": self._sensitivity,
+            "tx_wpm": self._wpm,
+            "max_wpm": self._max_wpm,
+            "browser_session": self._browser_session if str(self._input_device).lower() == "browser" else None,
+            "browser_attached": self._hw_sess is not None,
+            "last_decode": self._last_decode,
+        }
+
+    def _apply_mode_tuning(self, p: dict) -> None:
+        if "tx_wpm" in p:
+            self._wpm = int(min(max(float(p["tx_wpm"]), 5), 60))
+        if "max_wpm" in p:
+            self._max_wpm = float(min(max(float(p["max_wpm"]), 10), 100))
+
+    def apply_tuning(self, params: dict) -> dict:
+        """Change modem settings at runtime. The decoder is rebuilt (a
+        transmission in progress is dropped); TX settings apply to the next
+        send. Returns the resulting settings."""
+        if "freq" in params:
+            self._freq = float(min(max(float(params["freq"]), 200.0), 3500.0))
+        if "afc" in params:
+            self._auto_tune = bool(params["afc"])
+        if "sensitivity" in params:
+            self._sensitivity = min(max(int(params["sensitivity"]), 1), 5)
+            self._min_snr_override = None
+        self._apply_mode_tuning(params)
+        self._decoder = self._make_decoder()
+        log.info("%sAudio %s: tuning changed → %s", self.MODE, self.name,
+                 {k: v for k, v in self.modem_settings().items() if k != "last_decode"})
+        return self.modem_settings()
+
+    # Config keys each tuning field persists to
+    TUNING_CONFIG_KEYS = {"freq": "freq", "afc": "auto_tune", "sensitivity": "sensitivity",
+                          "tx_wpm": "wpm", "max_wpm": "max_wpm"}
 
     def _encode_tx(self, text: str) -> np.ndarray:
         return encode_cw(text, wpm=self._wpm, freq=self._freq,
@@ -178,16 +240,22 @@ class CWAudioAdapter(Adapter):
         from ech.core.remote_hw import registry
         try:
             while True:
-                sess = await registry.wait_for(self.name, timeout=None)
+                sess = await registry.wait_for(self._browser_session, timeout=None)
                 self._hw_sess = sess
-                log.info("%sAudio %s: attached to remote browser audio", self.MODE, self.name)
+                # Own queue (subscribe), not sess.read(): several modem
+                # adapters may share one browser audio session.
+                q = sess.subscribe()
+                log.info("%sAudio %s: attached to remote browser audio %r",
+                         self.MODE, self.name, self._browser_session)
                 try:
                     while True:
-                        chunk = await sess.read()
+                        chunk = await q.get()
+                        if chunk == b"" and not sess.alive:
+                            break
                         if chunk:
                             self._offer_samples(np.frombuffer(chunk, dtype=np.float32))
-                except ConnectionError:
-                    pass
+                finally:
+                    sess.unsubscribe(q)
                 if self._hw_sess is sess:
                     self._hw_sess = None
                 log.info("%sAudio %s: browser audio detached — waiting for reconnect",
@@ -347,6 +415,7 @@ class CWAudioAdapter(Adapter):
             "tx_wpm": self._wpm,
             "dropped_blocks": self._dropped_blocks,
             "last_decode": self._last_decode,
+            "modem": self.modem_settings(),
             "ptt": "cat" if self._ptt_via_cat else "vox",
             "ptt_cat_connected": bool(self._cat_ctrl and getattr(self._cat_ctrl, "_connected", False))
                                  if self._ptt_via_cat else None,

@@ -635,6 +635,56 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             raise HTTPException(status_code=404, detail=f"Adapter '{adapter_name}' not found")
         return {"status": "ok", "adapter": adapter_name, "enabled": enabled, "persisted": False}
 
+    # ── Sound-card modem tuning (CW / RTTY / PSK31) ──────────────────────
+
+    def _modem_adapter(adapter_name: str):
+        from fastapi import HTTPException
+        adapter = router._adapters.get(adapter_name)
+        if adapter is None or not hasattr(adapter, "apply_tuning"):
+            raise HTTPException(status_code=404, detail=f"No audio modem adapter '{adapter_name}'")
+        return adapter
+
+    @app.get("/api/adapters/{adapter_name}/modem")
+    async def get_modem(adapter_name: str):
+        return _modem_adapter(adapter_name).modem_settings()
+
+    @app.post("/api/adapters/{adapter_name}/modem")
+    async def set_modem(adapter_name: str, request: Request):
+        """Live-tune a CW/RTTY/PSK31 adapter from the messages page: pitch/
+        carrier, AFC, sensitivity, TX wpm (CW), shift/baud/reverse (RTTY).
+        Unknown keys are ignored. `persist: true` also writes the changed
+        values into config.yaml so they survive a restart."""
+        import yaml
+        from pathlib import Path
+        from fastapi import HTTPException
+        adapter = _modem_adapter(adapter_name)
+        data = await request.json()
+        persist = bool(data.pop("persist", False))
+        try:
+            settings = adapter.apply_tuning(data)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"bad tuning value: {exc}")
+        result = {"status": "ok", "settings": settings, "persisted": False}
+        if persist:
+            config_path = Path(app.state.config_path or "/etc/ech/config.yaml")
+            if not config_path.exists():
+                config_path = Path("config.yaml")
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                for a in cfg.get("adapters", []):
+                    if a.get("name") == adapter_name:
+                        for key, cfg_key in adapter.TUNING_CONFIG_KEYS.items():
+                            if key in settings:
+                                a[cfg_key] = settings[key]
+                        a.pop("min_snr_db", None)   # sensitivity now governs it
+                        break
+                atomic_write_yaml(config_path, cfg)
+                result["persisted"] = True
+            except Exception as exc:
+                result["warning"] = f"applied live but not saved: {exc}"
+        return result
+
     # ── MeshCore channel switch ───────────────────────────────────────────
 
     @app.post("/api/adapters/{adapter_name}/channel")

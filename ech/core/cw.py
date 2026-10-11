@@ -197,6 +197,7 @@ class CWDecoder:
                                    # shorter than half a dit at this speed are
                                    # treated as glitches and merged away
     min_snr_db: float = 6.0        # weaker transmissions are dropped
+    squelch: float = 1.0           # gate contrast multiplier (<1 = more sensitive)
 
     _buf: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32))
     _raw_recent: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32))
@@ -267,7 +268,8 @@ class CWDecoder:
         # failed by a hair, and the loop deadlocked with the floor climbing on
         # every subsequent mark block (observed: gate never opened until a
         # louder-relative moment several characters in).
-        contrast_ok = (self._peak > self._noise * 25) or (p > self._noise * 80)
+        contrast_ok = ((self._peak > self._noise * 25 * self.squelch)
+                       or (p > self._noise * 80 * self.squelch))
         thr = math.sqrt(self._noise * max(self._peak, p if contrast_ok else self._peak))
         if self._key_down:
             key = contrast_ok and p > thr * 0.6

@@ -108,8 +108,20 @@ class PSK31Decoder:
     sample_rate: int = 8000
     freq: float = 1000.0
     end_of_tx_s: float = 0.6
+    afc: bool = True               # search the passband between transmissions and
+                                   # lock the exact carrier at decode time
+    afc_lo: float = 300.0
+    afc_hi: float = 2700.0
+    squelch: float = 1.0           # gate-threshold multiplier (<1 = more sensitive)
 
     _buf: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32))
+    _raw_recent: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32))
+    _afc_countdown: int = 0
+    _p_hist: list = field(default_factory=list)
+    gate_base: float = 6.0         # noise multiple the smoothed power must exceed.
+                                   # Sweep (75 weak/offset signals, 200 s pure noise):
+                                   # old per-block 40x 30/75; smoothed 6x 66/75, 0 junk;
+                                   # 4x 74/75 but 12 junk (= sensitivity 5 territory)
     _tx_samples: list = field(default_factory=list)
     _noise: float = 1e-7
     _warmup_left: int = 12
@@ -126,6 +138,8 @@ class PSK31Decoder:
     def process(self, samples: np.ndarray) -> list[DecodedText]:
         out: list[DecodedText] = []
         self._buf = np.concatenate([self._buf, samples.astype(np.float32)])
+        if self.afc:
+            self._raw_recent = np.concatenate([self._raw_recent, samples.astype(np.float32)])[-self.sample_rate:]
         while len(self._buf) >= self._block_n:
             block, self._buf = self._buf[:self._block_n], self._buf[self._block_n:]
             tx = self._process_block(block)
@@ -135,6 +149,20 @@ class PSK31Decoder:
 
     def flush(self) -> "DecodedText | None":
         return self._end_tx() if self._in_tx else None
+
+    def _afc_retune(self) -> None:
+        """Between transmissions, steer the gate onto the strongest PSK-shaped
+        signal in the passband (~4x/s). The gate's 8 ms Goertzel bin is
+        ~125 Hz wide, so the coarse estimate only has to land within ~±50 Hz;
+        _end_tx locks the exact carrier."""
+        self._afc_countdown -= 1
+        if self._afc_countdown > 0 or len(self._raw_recent) < self.sample_rate // 2:
+            return
+        self._afc_countdown = int(0.25 * self.sample_rate / self._block_n)
+        from ech.core.afc import find_psk_center
+        f = find_psk_center(self._raw_recent, self.sample_rate, self.afc_lo, self.afc_hi)
+        if f is not None and abs(f - self.freq) > 20:
+            self.freq = f
 
     def _band_power(self, block: np.ndarray) -> float:
         n = len(block)
@@ -149,7 +177,11 @@ class PSK31Decoder:
         return (s1 * s1 + s2 * s2 - coeff * s1 * s2) / (n * n)
 
     def _process_block(self, block: np.ndarray) -> "DecodedText | None":
-        p = self._band_power(block)
+        # Gate on power averaged over one symbol (4 blocks): smooths both the
+        # noise variance and PSK31's own amplitude null at every reversal.
+        self._p_hist.append(self._band_power(block))
+        del self._p_hist[:-4]
+        p = sum(self._p_hist) / len(self._p_hist)
 
         if self._warmup_left > 0:
             self._warmup_left -= 1
@@ -162,7 +194,9 @@ class PSK31Decoder:
 
         # PSK31 amplitude nulls on every reversal, so gate with a LOW open
         # threshold and a generous idle timeout rather than per-block strictness.
-        present = p > self._noise * 40
+        present = p > self._noise * self.gate_base * self.squelch
+        if self.afc and not self._in_tx and not present:
+            self._afc_retune()
         if not present and not self._in_tx:
             if p < self._noise:
                 self._noise += (p - self._noise) * 0.05
@@ -194,13 +228,27 @@ class PSK31Decoder:
         audio = np.concatenate(self._tx_samples) if self._tx_samples else np.zeros(0, dtype=np.float32)
         self._in_tx = False
         self._tx_samples = []
+        if self.afc:
+            # Differential detection needs the carrier within a few Hz; lock it
+            # from the whole transmission before demodulating.
+            # Search THIS transmission's audio first: the gate often opens
+            # while still parked on the previous signal's frequency (a strong
+            # signal leaks into the wide gate bin), and refining around that
+            # stale value locked onto the wrong line.
+            from ech.core.afc import find_psk_center, refine_psk_carrier
+            c = find_psk_center(audio, self.sample_rate, self.afc_lo, self.afc_hi)
+            f = refine_psk_carrier(audio, self.sample_rate, c if c is not None else self.freq)
+            if f is None:
+                f = c
+            if f is not None:
+                self.freq = f
         text = self._decode_offline(audio)
         if not text.strip():
             return None
         snr_db = 0.0
         if self._tx_snr_den and self._noise > 0:
             snr_db = 10 * math.log10((self._tx_snr_num / self._tx_snr_den) / self._noise)
-        return DecodedText(text=text.strip(), freq=self.freq, snr_db=round(snr_db, 1))
+        return DecodedText(text=text.strip(), freq=round(self.freq, 1), snr_db=round(snr_db, 1))
 
     def _decode_offline(self, audio: np.ndarray) -> str:
         """Coherent mix to baseband, symbol-sync by envelope, differential
@@ -239,10 +287,26 @@ class PSK31Decoder:
             bits.append("1" if c.real > 0 else "0")
         bitstr = "".join(bits)
 
+        # Is this really BPSK? With three modems sharing one audio stream the
+        # PSK31 decoder also sees CW and RTTY, which demodulate to garbage.
+        # Measured separators: real PSK31 phase steps cluster at 0°/180°
+        # (mean |cos Δφ| ≈ 1.0 vs RTTY ≈ 0.84) and its bit-words are valid
+        # varicode (≈1.0 vs CW/RTTY ≤ 0.67).
+        both = active[1:] & active[:-1]
+        if both.any():
+            if float(np.mean(np.abs(np.cos(np.angle(corr[both]))))) < 0.9:
+                return ""
+
         # Characters are "00"-delimited varicode words; idle runs vanish
         out: list[str] = []
+        n_words = 0
         for word in bitstr.split("00"):
             w = word.strip("0")   # idle padding around the word
-            if w and w in _CODE_TO_CHAR:
+            if not w:
+                continue
+            n_words += 1
+            if w in _CODE_TO_CHAR:
                 out.append(_CODE_TO_CHAR[w])
+        if n_words and len(out) / n_words < 0.75:
+            return ""
         return "".join(out)

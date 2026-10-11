@@ -42,6 +42,21 @@ class RemoteHWSession:
         self.alive = True
         self.bytes_in = 0
         self.bytes_out = 0
+        # Fan-out readers: several adapters (CW + RTTY + PSK31) can decode
+        # one browser audio stream, each with its own queue.
+        self._subs: list[asyncio.Queue] = []
+
+    def subscribe(self) -> asyncio.Queue:
+        """Private copy of the incoming stream; b"" means the session closed."""
+        q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=512)
+        if not self.alive:
+            q.put_nowait(b"")
+        self._subs.append(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        if q in self._subs:
+            self._subs.remove(q)
 
     # Adapter side
     async def read(self, timeout: float | None = None) -> bytes:
@@ -65,10 +80,11 @@ class RemoteHWSession:
     # WebSocket side
     def feed(self, data: bytes) -> None:
         self.bytes_in += len(data)
-        try:
-            self.rx_queue.put_nowait(data)
-        except asyncio.QueueFull:
-            pass   # drop rather than stall the WS receive loop
+        for q in [self.rx_queue, *self._subs]:
+            try:
+                q.put_nowait(data)
+            except asyncio.QueueFull:
+                pass   # drop rather than stall the WS receive loop
 
     async def next_tx(self) -> bytes:
         return await self._tx_queue.get()
@@ -76,10 +92,16 @@ class RemoteHWSession:
     def close(self) -> None:
         self.alive = False
         # Wake any blocked reader so it can raise ConnectionError
-        try:
-            self.rx_queue.put_nowait(b"")
-        except asyncio.QueueFull:
-            pass
+        for q in [self.rx_queue, *self._subs]:
+            try:
+                q.put_nowait(b"")
+            except asyncio.QueueFull:
+                # Full queue: make room so the close marker still lands
+                try:
+                    q.get_nowait()
+                    q.put_nowait(b"")
+                except (asyncio.QueueEmpty, asyncio.QueueFull):
+                    pass
 
 
 class RemoteHWRegistry:

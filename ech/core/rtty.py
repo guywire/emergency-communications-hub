@@ -123,8 +123,14 @@ class RTTYDecoder:
     mark: float = 2125.0
     shift: float = 170.0
     end_of_tx_s: float = 0.5
+    afc: bool = True               # find the tone pair in the passband
+    reverse: bool = False          # mark is the UPPER tone (USB / inverted)
+    squelch: float = 1.0           # gate-threshold multiplier (<1 = more sensitive)
 
     _buf: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32))
+    _raw_recent: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32))
+    _afc_countdown: int = 0
+    _p_hist: list = field(default_factory=list)
     _tx_samples: list = field(default_factory=list)
     _noise: float = 1e-7
     _warmup_left: int = 12
@@ -141,6 +147,8 @@ class RTTYDecoder:
     def process(self, samples: np.ndarray) -> list[DecodedText]:
         out: list[DecodedText] = []
         self._buf = np.concatenate([self._buf, samples.astype(np.float32)])
+        if self.afc:
+            self._raw_recent = np.concatenate([self._raw_recent, samples.astype(np.float32)])[-self.sample_rate:]
         while len(self._buf) >= self._block_n:
             block, self._buf = self._buf[:self._block_n], self._buf[self._block_n:]
             tx = self._process_block(block)
@@ -151,10 +159,29 @@ class RTTYDecoder:
     def flush(self) -> "DecodedText | None":
         return self._end_tx() if self._in_tx else None
 
+    def _afc_retune(self) -> None:
+        """Between transmissions, move onto the strongest tone pair `shift`
+        apart (~4x/s). `mark` here is always the LOWER audio tone; `reverse`
+        decides which of the two carries mark at demod time."""
+        self._afc_countdown -= 1
+        if self._afc_countdown > 0 or len(self._raw_recent) < self.sample_rate // 2:
+            return
+        self._afc_countdown = int(0.25 * self.sample_rate / self._block_n)
+        from ech.core.afc import find_fsk_pair
+        f = find_fsk_pair(self._raw_recent, self.sample_rate, self.shift)
+        if f is not None and abs(f - self.mark) > 10:
+            self.mark = f
+
     def _process_block(self, block: np.ndarray) -> "DecodedText | None":
         pm = _tone_power(block, self.sample_rate, self.mark)
         ps = _tone_power(block, self.sample_rate, self.mark + self.shift)
-        p = pm + ps
+        # Gate on power averaged over ~1 bit (4 blocks): single 5.5 ms blocks
+        # swing so much in noise that the old per-block 60x gate had to sit
+        # far above the signal level. Measured: 17/60 → 50/60 weak-signal
+        # decodes at 8x, still zero junk from 200 s of pure noise.
+        self._p_hist.append(pm + ps)
+        del self._p_hist[:-4]
+        p = sum(self._p_hist) / len(self._p_hist)
 
         if self._warmup_left > 0:
             self._warmup_left -= 1
@@ -165,7 +192,9 @@ class RTTYDecoder:
                 self._wu_vals = []
             return None
 
-        present = p > self._noise * 60
+        present = p > self._noise * 8 * self.squelch
+        if self.afc and not self._in_tx and not present:
+            self._afc_retune()
         if not present:
             if p < self._noise:
                 self._noise += (p - self._noise) * 0.05
@@ -197,13 +226,24 @@ class RTTYDecoder:
         audio = np.concatenate(self._tx_samples) if self._tx_samples else np.zeros(0, dtype=np.float32)
         self._in_tx = False
         self._tx_samples = []
+        if self.afc:
+            # Lock the pair from the whole transmission (finer than the 1 s
+            # coarse window); fall back to a full-band search if the gate
+            # opened before the coarse AFC moved.
+            from ech.core.afc import find_fsk_pair
+            f = find_fsk_pair(audio, self.sample_rate, self.shift,
+                              lo=self.mark - 60, hi=self.mark + self.shift + 60)
+            if f is None:
+                f = find_fsk_pair(audio, self.sample_rate, self.shift)
+            if f is not None:
+                self.mark = f
         text = self._decode_offline(audio)
         if not text.strip():
             return None
         snr_db = 0.0
         if self._tx_snr_den and self._noise > 0:
             snr_db = 10 * math.log10((self._tx_snr_num / self._tx_snr_den) / self._noise)
-        return DecodedText(text=text.strip(), freq=self.mark, snr_db=round(snr_db, 1),
+        return DecodedText(text=text.strip(), freq=round(self.mark, 1), snr_db=round(snr_db, 1),
                            baud=self.baud)
 
     def _decode_offline(self, audio: np.ndarray) -> str:
@@ -220,7 +260,7 @@ class RTTYDecoder:
             b = audio[i * n:(i + 1) * n]
             pm = _tone_power(b, self.sample_rate, self.mark)
             ps = _tone_power(b, self.sample_rate, self.mark + self.shift)
-            is_mark[i] = pm >= ps
+            is_mark[i] = (pm >= ps) != self.reverse
             power[i] = pm + ps
         # A real character has continuous tone power across its whole 7-bit
         # window; trailing noise blocks (buffered before the gate's idle
