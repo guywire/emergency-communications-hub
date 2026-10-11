@@ -130,11 +130,17 @@ class LetsMeshCompareAdapter(MQTTAdapter):
 
         path = data.get("path")
         if path:
-            hashes = [h.strip().lower() for h in str(path).split("->") if h.strip()]
+            # meshcore-packet-capture joins hops with "," (format_packet_data);
+            # older/other tools used "->" — accept both. (Splitting on "->"
+            # alone meant no real observer path was ever merged.)
+            import re as _re
+            hashes = [h.strip().lower() for h in _re.split(r"->|,", str(path)) if h.strip()]
             if len(hashes) >= 2:
                 target = self._target_adapter()
                 if target is not None and hasattr(target, "_learn_topology"):
-                    target._learn_topology(hashes)
+                    # observer=True: adjacencies only — the last hop was heard by
+                    # THAT observer, not by our radio
+                    target._learn_topology(hashes, observer=True)
                     self._paths_merged += 1
 
         now = time.monotonic()

@@ -1143,9 +1143,20 @@ class Database:
 
     async def save_log_entry(self, level: str, logger: str, message: str) -> None:
         from datetime import datetime, timezone
+        import sqlite3
+        try:
+            await self._save_log_entry(level, logger, message, datetime.now(timezone.utc).isoformat())
+        except (sqlite3.ProgrammingError, ValueError):
+            # Log lines emitted during shutdown can race the database close —
+            # drop them quietly instead of an unhandled-task traceback.
+            pass
+
+    async def _save_log_entry(self, level: str, logger: str, message: str, ts: str) -> None:
+        if self._db is None:
+            return
         await self._db.execute(
             "INSERT INTO log_entries(timestamp,level,logger,message) VALUES(?,?,?,?)",
-            (datetime.now(timezone.utc).isoformat(), level, logger, message[:1000])
+            (ts, level, logger, message[:1000])
         )
         self._log_insert_count += 1
         # Rotate every 200 inserts — keep only the newest 5000 rows

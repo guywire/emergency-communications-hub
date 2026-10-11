@@ -8,6 +8,21 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc267 (2026-10-11)
+
+### Fixed
+- **MeshCore traces:** the learned mesh topology never forgot anything — a node heard
+  directly once (or a different node sharing its 1-byte hash) stayed "heard direct"
+  forever, so traces were routed over links that no longer existed. Direct links now
+  expire after 24 h and relay links after 72 h unless heard again (configurable:
+  `topology_direct_ttl_hours`, `topology_edge_ttl_hours`); older saved topology without
+  timestamps is relearned.
+- Unanswered traces now post a **"no reply"** result to the feed (route tried, how recently
+  the first hop was actually heard) instead of disappearing silently.
+- Other observers' reported paths no longer mark nodes as directly heard by your radio,
+  and their comma-separated path format is now read correctly.
+- No more traceback when a log line races the database closing at shutdown.
+
 ## v1.0.0-rc266 (2026-10-11)
 
 ### Added

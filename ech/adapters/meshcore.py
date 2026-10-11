@@ -431,6 +431,16 @@ class MeshCoreAdapter(Adapter):
         #   _direct_hashes: relays whose transmissions we hear directly
         self._rf_adjacency: dict[str, set] = {}
         self._direct_hashes: set = set()
+        # When each direct link / adjacency was last observed. Both used to be
+        # kept FOREVER (persisted, never expired) and keyed by 1-byte hashes,
+        # so one packet heard days ago — or from a different node that merely
+        # shares the first byte — made a target "heard direct" indefinitely,
+        # and traces were sent along links that no longer existed.
+        self._direct_seen: dict[str, float] = {}
+        self._edge_seen: dict[tuple, float] = {}
+        self._direct_ttl = float(config.get("topology_direct_ttl_hours", 24)) * 3600
+        self._edge_ttl = float(config.get("topology_edge_ttl_hours", 72)) * 3600
+        self._trace_ctx: dict[int, dict] = {}   # tag → what we sent (for "no reply" reports)
         # Single-slot waiter for the CMD_SIGN_* request/response sequence (see
         # sign_data()) — only armed while a sign operation is actually in
         # flight, so it can't steal an unrelated OK/ERROR ack the rest of the
@@ -573,22 +583,52 @@ class MeshCoreAdapter(Adapter):
                 seen_tag = candidate
         self._broadcast_traffic_event(route, ptype, snr, rssi, path_len, hashes, origin_id, tag=seen_tag)
 
-    def _learn_topology(self, hashes: list, confirmed_from_us: bool = False) -> None:
+    def _learn_topology(self, hashes: list, confirmed_from_us: bool = False,
+                        observer: bool = False) -> None:
         """Update the observed adjacency graph from a relay-hash chain.
 
         Heard traffic (confirmed_from_us=False): the chain is in traversal
         order and WE heard the last relay's transmission — so the LAST hash is
         direct to us, and each consecutive pair is adjacent.
         Successful trace (confirmed_from_us=True): the probe went out from us
-        along the chain — the FIRST hash is direct to us."""
+        along the chain — the FIRST hash is direct to us.
+        Another observer's report (observer=True): the last hop was heard by
+        THAT observer, not by us — learn the adjacencies only, never mark
+        anything direct to us (it used to, which would have pointed traces at
+        links our radio doesn't have)."""
         hashes = [h.lower() for h in hashes if h]
         if not hashes:
             return
-        self._direct_hashes.add(hashes[0] if confirmed_from_us else hashes[-1])
+        now = time.time()
+        if not observer:
+            d = hashes[0] if confirmed_from_us else hashes[-1]
+            self._direct_hashes.add(d)
+            self._direct_seen[d] = now
         for a, b in zip(hashes, hashes[1:]):
+            if a == b:
+                continue
             self._rf_adjacency.setdefault(a, set()).add(b)
             self._rf_adjacency.setdefault(b, set()).add(a)
+            self._edge_seen[(a, b) if a < b else (b, a)] = now
         self._topology_dirty = True
+
+    def _prune_topology(self, now: float | None = None) -> None:
+        """Drop direct links and adjacencies not observed within their TTL."""
+        now = now or time.time()
+        stale_d = [h for h, t in self._direct_seen.items() if now - t > self._direct_ttl]
+        for h in stale_d:
+            self._direct_seen.pop(h, None)
+        self._direct_hashes = {h for h in self._direct_hashes if h in self._direct_seen}
+        stale_e = [e for e, t in self._edge_seen.items() if now - t > self._edge_ttl]
+        for e in stale_e:
+            self._edge_seen.pop(e, None)
+        adj: dict[str, set] = {}
+        for (a, b) in self._edge_seen:
+            adj.setdefault(a, set()).add(b)
+            adj.setdefault(b, set()).add(a)
+        if stale_d or stale_e or adj != self._rf_adjacency:
+            self._rf_adjacency = adj
+            self._topology_dirty = True
 
     async def _persist_topology(self) -> None:
         """Save the learned graph to the DB kv store. Without this the graph
@@ -599,10 +639,11 @@ class MeshCoreAdapter(Adapter):
             return
         import json as _json
         try:
+            self._prune_topology()
             await self._db.set_kv(
                 f"meshcore_topology_{self.name}",
-                _json.dumps({"direct": sorted(self._direct_hashes),
-                             "adj": {k: sorted(v) for k, v in self._rf_adjacency.items()}}))
+                _json.dumps({"v": 2, "direct_seen": self._direct_seen,
+                             "edges": [[a, b, t] for (a, b), t in self._edge_seen.items()]}))
             self._topology_dirty = False
         except Exception as exc:
             log.debug("MeshCore %s: topology persist error: %s", self.name, exc)
@@ -615,10 +656,21 @@ class MeshCoreAdapter(Adapter):
             raw = await self._db.get_kv(f"meshcore_topology_{self.name}")
             if raw:
                 data = _json.loads(raw)
-                self._direct_hashes = set(data.get("direct", []))
-                self._rf_adjacency = {k: set(v) for k, v in data.get("adj", {}).items()}
-                log.info("MeshCore %s: restored topology (%d direct, %d nodes in graph)",
-                         self.name, len(self._direct_hashes), len(self._rf_adjacency))
+                if data.get("v") == 2:
+                    self._direct_seen = {h: float(t) for h, t in data.get("direct_seen", {}).items()}
+                    self._edge_seen = {((a, b) if a < b else (b, a)): float(t)
+                                       for a, b, t in data.get("edges", [])}
+                    self._direct_hashes = set(self._direct_seen)
+                    self._prune_topology()
+                    log.info("MeshCore %s: restored topology (%d direct, %d nodes in graph)",
+                             self.name, len(self._direct_hashes), len(self._rf_adjacency))
+                else:
+                    # Old format had no timestamps — no evidence any of it is
+                    # current, so start fresh rather than trust it forever.
+                    log.info("MeshCore %s: discarded %d undated direct links / %d graph nodes "
+                             "from the old topology format — relearning from live traffic",
+                             self.name, len(data.get("direct", [])), len(data.get("adj", {})))
+                    self._topology_dirty = True
         except Exception as exc:
             log.debug("MeshCore %s: topology restore error: %s", self.name, exc)
 
@@ -627,6 +679,7 @@ class MeshCoreAdapter(Adapter):
         target_hash (relays only, target excluded). [] = target is direct.
         None = no known path."""
         target_hash = target_hash.lower()
+        self._prune_topology()
         if target_hash in self._direct_hashes:
             return []
         from collections import deque
@@ -1258,7 +1311,34 @@ class MeshCoreAdapter(Adapter):
 
     async def _expire_pending_tag(self, tag: int, after: float) -> None:
         await asyncio.sleep(after)
+        ctx = self._trace_ctx.pop(tag, None)
+        if tag not in self._pending_trace_tags:
+            return                                   # a reply arrived
         self._pending_trace_tags.discard(tag)
+        # No reply: say so in the feed instead of expiring silently, with the
+        # evidence we actually had for the route we tried.
+        ctx = ctx or {}
+        seen = ctx.get("first_hop_seen")
+        if seen:
+            mins = int((time.time() - seen) / 60)
+            evidence = f"we last heard the first hop directly {mins} min ago"
+        elif ctx.get("route_src") in ("heard direct", "observed topology"):
+            evidence = "no recent direct reception of the first hop"
+        else:
+            evidence = "no observed route — sent as a bare probe"
+        body = (f"📡 TRACE: no reply from {ctx.get('target', '?')} within {int(after)} s "
+                f"(via {ctx.get('route', '?')}, {ctx.get('route_src', '-')}; {evidence}). "
+                "A trace needs a two-way link at every hop: we may hear a node that can't "
+                "hear us, it may not be a repeater, or another node may share its 1-byte hash.")
+        log.info("MeshCore %s: TRACE tag=%08x no reply in %ds (via %s, %s)", self.name, tag,
+                 int(after), ctx.get("route", "?"), ctx.get("route_src", "-"))
+        try:
+            await self._enqueue(NormalizedMessage(
+                source_adapter=self.name, source_channel="traceroute", from_id="local",
+                from_display=self._device_name or self.name, body=body, priority=Priority.NORMAL,
+                raw={"tag": tag, "trace_result": "no_reply", **{k: v for k, v in ctx.items()}}))
+        except Exception as exc:
+            log.debug("MeshCore %s: trace no-reply report failed: %s", self.name, exc)
 
     async def ping(self, node_id: str, via: "list[str] | None" = None) -> dict:
         """Send CMD_SEND_TRACE_PATH (0x24) — broadcasts a trace packet onto the mesh.
@@ -1385,6 +1465,12 @@ class MeshCoreAdapter(Adapter):
         try:
             await self._send_cmd(payload)
             self._pending_trace_tags.add(tag)
+            tgt_hash = (hop_prefixes[len(hop_prefixes) // 2] if hop_prefixes else "")[:2].lower()
+            first_hash = (hop_prefixes[0] if hop_prefixes else "")[:2].lower()
+            self._trace_ctx[tag] = {"target": target or "flood", "route": route_names or "flood",
+                                    "route_src": route_src or "-", "hops": hops,
+                                    "first_hop_seen": self._direct_seen.get(first_hash),
+                                    "target_hash": tgt_hash}
             asyncio.ensure_future(self._expire_pending_tag(tag, 30.0))
             log.info("MeshCore %s: SEND_TRACE_PATH tag=%08x via=%s hops=%d src=%s — response arrives as TRACE_DATA (0x89)",
                      self.name, tag, route_names or "flood", hops, route_src or "-")
