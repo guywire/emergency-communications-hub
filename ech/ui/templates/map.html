@@ -53,7 +53,9 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 .node-popup .node-ext-links{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:10px;line-height:1.8}
 .node-popup .node-ext-links a{color:var(--blue);text-decoration:none}.node-popup .node-ext-links a:hover{text-decoration:underline}
 #legend{position:absolute;bottom:30px;left:10px;z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:10px;min-width:140px}
-#moon-panel{position:absolute;bottom:30px;right:10px;z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:10px;line-height:1.5;max-width:260px}
+#moon-panel{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);z-index:1000;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:6px;padding:6px 26px 6px 10px;font-size:10px;line-height:1.5;max-width:300px}
+#moon-panel.collapsed{padding:2px 8px;cursor:pointer}
+#moon-panel .moon-x{position:absolute;top:2px;right:6px;cursor:pointer;color:var(--muted);font-size:12px}
 .legend-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
 .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 #node-count{font-size:11px;color:var(--muted)}
@@ -96,8 +98,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row" id="psk-btn" onclick="togglePSKReporter()" title="Show ham stations transmitting near your base position (PSKReporter, 300km radius)">📻 PSK Reporter</button>
     <button class="ctrl-btn layer-row" id="pota-btn" onclick="togglePOTA()" title="Show active Parks on the Air activators near your base position">🏞 POTA</button>
     <button class="ctrl-btn layer-row" id="sota-btn" onclick="toggleSOTA()" title="Show active Summits on the Air activators near your base position">⛰ SOTA</button>
-    <button class="ctrl-btn layer-row" id="iota-btn" onclick="toggleIOTA()" title="Islands on the Air activators spotted on the DX cluster in the last hour, worldwide">🏝 IOTA</button>
-    <button class="ctrl-btn layer-row" id="bota-btn" onclick="toggleBOTA()" title="Bunkers on the Air activators spotted on the DX cluster in the last hour, worldwide (low volume)">🪖 BOTA</button>
+    <button class="ctrl-btn layer-row" id="ota-btn" onclick="toggleOTA()" title="On-the-Air activations spotted on the DX cluster in the last hour, worldwide — WWFF, IOTA, SOTA, Bunkers/Beaches (BOTA), lighthouses, castles, LLOTA, HSOTA, boats. Click a spot to see which program. (POTA has its own layer.)">📻 On the Air</button>
     <button class="ctrl-btn layer-row" id="dx-btn" onclick="toggleDXCluster()" title="DX stations being heard by spotters within 500 km of you in the last hour, plotted at the DX station — zoom out to see them">🌐 DX Cluster</button>
     <button class="ctrl-btn layer-row" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ Grid squares</button>
     <div class="layer-group-title">Environmental</div>
@@ -977,8 +978,7 @@ function togglePOTA() {
 const SPOT_STYLE = {
   pota: {icon: '🏞', tag: 'POTA', color: '#7ee787', label: 'Parks on the Air activator (at the park)'},
   sota: {icon: '⛰', tag: 'SOTA', color: '#f0b429', label: 'Summits on the Air activator (at the summit)'},
-  iota: {icon: '🏝', tag: 'IOTA', color: '#56d3c8', label: 'Islands on the Air (worldwide, from DX cluster)'},
-  bota: {icon: '🛡', tag: 'BOTA', color: '#d2a8ff', label: 'Bunkers on the Air (worldwide, from DX cluster)'},
+  ota:  {icon: '📻', tag: 'OTA',  color: '#56d3c8', label: 'On-the-Air activation (WWFF, IOTA, SOTA, BOTA, lighthouse, castle…) — worldwide, from the DX cluster; click for the program'},
   dx:   {icon: '📡', tag: 'DX',   color: '#ff7eb6', label: 'DX heard by spotters near you (at the DX station)'},
 };
 
@@ -1068,15 +1068,13 @@ async function loadSOTA() {
      ['Comment', s.comments], ['Spotted', s.spotTime]]], 'none within 500 km right now');
   _sotaMarkers = _sotaState.markers;
   if (data && data.disabled) {
-    // Server has SOTA spots switched off (deprecated API / SOTA API terms).
+    // Server reports SOTA spots unavailable — say so plainly, stay off.
     _sotaEnabled = false;
-    _sotaWatchUrl = data.sotawatch_url || 'https://sotawatch.sota.org.uk/';
     setSpotLegend('sota', false);
     const btn = document.getElementById('sota-btn');
     btn.style.color = ''; btn.style.borderColor = ''; btn.classList.remove('on');
-    btn.textContent = '⛰ SOTAwatch ↗';
-    btn.title = 'SOTA map spots are off — click to open SOTAwatch in a new tab';
-    toast('SOTA: ' + data.error + ' Click the button again to open SOTAwatch.', 'err');
+    btn.title = 'SOTA spots unavailable: ' + (data.error || '');
+    toast('SOTA unavailable: ' + data.error, 'err');
     return;
   }
   if (_sotaEnabled) setTimeout(loadSOTA, 90000);
@@ -1089,24 +1087,22 @@ function _dxRows(s) {
           ['Time', s.time]];
 }
 
-const _iotaState = {markers: []};
-async function loadIOTA() {
-  if (!_iotaEnabled) return;
-  await _loadSpotLayer('iota', '/api/iota/spots', _iotaState, s => [
-    s.dxCall, s.reference || _band(s.frequency), `${s.dxCall}${s.reference ? ' — IOTA ' + s.reference : ''}`,
-    _dxRows(s)], 'no IOTA spots on the cluster in the last hour');
-  _iotaMarkers = _iotaState.markers;
-  if (_iotaEnabled) setTimeout(loadIOTA, 90000);
-}
-
-const _botaState = {markers: []};
-async function loadBOTA() {
-  if (!_botaEnabled) return;
-  await _loadSpotLayer('bota', '/api/bota/spots', _botaState, s => [
-    s.dxCall, s.reference || _band(s.frequency), `${s.dxCall}${s.reference ? ' — BOTA ' + s.reference : ''}`,
-    _dxRows(s)], 'no BOTA spots on the cluster in the last hour (low volume)');
-  _botaMarkers = _botaState.markers;
-  if (_botaEnabled) setTimeout(loadBOTA, 90000);
+const _otaState = {markers: []};
+async function loadOTA() {
+  if (!_otaEnabled) return;
+  const data = await _loadSpotLayer('ota', '/api/ota/spots', _otaState, s => {
+    const progs = s.programs || [];
+    const tags = progs.map(p => p.tag).join('+');
+    const title = `${s.dxCall} — ${progs.map(p => p.tag + (p.ref ? ' ' + p.ref : '')).join(', ')}`;
+    const rows = progs.map(p => ['Program', p.name + (p.ref ? ` — ${p.ref}` : '')]).concat(_dxRows(s));
+    return [s.dxCall, tags, title, rows];
+  }, 'no on-the-air activations spotted on the cluster in the last hour');
+  _otaMarkers = _otaState.markers;
+  if (data && data.counts && Object.keys(data.counts).length) {
+    document.getElementById('ota-btn').title = 'On the Air (last hour): ' +
+      Object.entries(data.counts).map(([k, v]) => `${k} ${v}`).join(', ');
+  }
+  if (_otaEnabled) setTimeout(loadOTA, 90000);
 }
 
 const _dxState = {markers: []};
@@ -1124,13 +1120,7 @@ async function loadDXCluster() {
 let _sotaEnabled = false;
 let _sotaMarkers = [];
 
-let _sotaWatchUrl = null;   // set when the server reports SOTA spots are off
-
 function toggleSOTA() {
-  if (_sotaWatchUrl) {        // spots API off — the button opens SOTAwatch instead
-    window.open(_sotaWatchUrl, '_blank', 'noopener');
-    return;
-  }
   _sotaEnabled = !_sotaEnabled;
   const btn = document.getElementById('sota-btn');
   btn.style.color = _sotaEnabled ? 'var(--green)' : '';
@@ -1149,48 +1139,23 @@ function toggleSOTA() {
 }
 
 
-// ── IOTA (Islands on the Air) — filtered from the DX cluster feed ───────
-let _iotaEnabled = false;
-let _iotaMarkers = [];
+// ── On the Air (WWFF, IOTA, SOTA, BOTA, lighthouses, castles…) ─────────
+let _otaEnabled = false;
+let _otaMarkers = [];
 
-function toggleIOTA() {
-  _iotaEnabled = !_iotaEnabled;
-  const btn = document.getElementById('iota-btn');
-  btn.style.color = _iotaEnabled ? 'var(--green)' : '';
-  btn.style.borderColor = _iotaEnabled ? 'var(--green)' : '';
-  btn.classList.toggle('on', _iotaEnabled);
-  setSpotLegend('iota', _iotaEnabled);
-  if (_iotaEnabled) {
-    loadIOTA();
-    toast('IOTA: fetching nearby activators…');
+function toggleOTA() {
+  _otaEnabled = !_otaEnabled;
+  const btn = document.getElementById('ota-btn');
+  btn.style.color = _otaEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _otaEnabled ? 'var(--green)' : '';
+  btn.classList.toggle('on', _otaEnabled);
+  setSpotLegend('ota', _otaEnabled);
+  if (_otaEnabled) {
+    loadOTA();
   } else {
-    _iotaMarkers.forEach(m => m.remove());
-    _iotaMarkers = [];
-    _iotaState.markers = [];
-    toast('IOTA overlay off');
-  }
-}
-
-
-// ── BOTA (Bunkers on the Air) — filtered from the DX cluster feed ───────
-let _botaEnabled = false;
-let _botaMarkers = [];
-
-function toggleBOTA() {
-  _botaEnabled = !_botaEnabled;
-  const btn = document.getElementById('bota-btn');
-  btn.style.color = _botaEnabled ? 'var(--green)' : '';
-  btn.style.borderColor = _botaEnabled ? 'var(--green)' : '';
-  btn.classList.toggle('on', _botaEnabled);
-  setSpotLegend('bota', _botaEnabled);
-  if (_botaEnabled) {
-    loadBOTA();
-    toast('BOTA: fetching nearby activators… (low volume — empty is normal)');
-  } else {
-    _botaMarkers.forEach(m => m.remove());
-    _botaMarkers = [];
-    _botaState.markers = [];
-    toast('BOTA overlay off');
+    _otaMarkers.forEach(m => m.remove());
+    _otaMarkers = [];
+    _otaState.markers = [];
   }
 }
 
@@ -1979,6 +1944,14 @@ function _hm(d) {
   return d.toDateString() === new Date().toDateString() ? t : d.toLocaleDateString([], {weekday: 'short'}) + ' ' + t;
 }
 
+function _moonCollapsed() {
+  try { return localStorage.getItem('ech_moon_collapsed') === '1'; } catch(e) { return false; }
+}
+function _setMoonCollapsed(on) {
+  try { localStorage.setItem('ech_moon_collapsed', on ? '1' : '0'); } catch(e) {}
+  updateMoon();
+}
+
 function updateMoon() {
   const el = document.getElementById('moon-panel');
   if (!el) return;
@@ -1992,7 +1965,17 @@ function updateMoon() {
   }
   const np = MOON.nextPhases(now);
   const day = d => d ? d.toLocaleDateString([], {month: 'short', day: 'numeric'}) : '—';
-  el.innerHTML = `<div style="font-size:12px"><span style="font-size:15px">${icon}</span> ${label} — ${Math.round(fraction * 100)}% lit</div>` +
+  if (_moonCollapsed()) {
+    el.className = 'collapsed';
+    el.innerHTML = `<span style="font-size:14px">${icon}</span> ${Math.round(fraction * 100)}%`;
+    el.title = `${label} — click to show moon details`;
+    el.onclick = () => _setMoonCollapsed(false);
+    return;
+  }
+  el.className = '';
+  el.onclick = null;
+  el.innerHTML = `<span class="moon-x" title="Hide moon panel" onclick="event.stopPropagation(); _setMoonCollapsed(true)">✕</span>` +
+    `<div style="font-size:12px"><span style="font-size:15px">${icon}</span> ${label} — ${Math.round(fraction * 100)}% lit</div>` +
     rs + `<div style="color:var(--muted)">Full ${day(np.full)} · New ${day(np.new)}</div>`;
   el.title = 'Moon phase, illumination and rise/set at your base position (computed locally)';
 }

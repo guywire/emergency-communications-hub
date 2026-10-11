@@ -26,5 +26,4 @@ def test_sota_spots_off_by_default_makes_no_request(tmp_path, monkeypatch):
     with TestClient(app) as c:
         d = c.get("/api/sota/spots").json()
     assert d["disabled"] is True and d["spots"] == []
-    assert "sotawatch" in d["sotawatch_url"]
     assert calls == []

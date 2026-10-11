@@ -8,6 +8,21 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc261 (2026-10-11)
+
+### Added
+- **📻 On the Air map layer** (replaces the separate IOTA and BOTA buttons): every
+  on-the-air activation spotted on the DX cluster in the last hour, worldwide — WWFF,
+  IOTA, SOTA, Bunkers (BOTA), lighthouses (ILLW/ARLHS), castles (COTA), LLOTA, and
+  Beaches on the Air / HSOTA / boats (/MM) if spotted. Each chip shows the program tags;
+  the popup names each program and its reference. POTA keeps its own layer.
+
+### Changed
+- Moon panel moved to the bottom centre and can be collapsed to a small 🌙 chip
+  (remembered per browser).
+- SOTA button no longer sends you to the SOTAwatch website; it reports that SOTA spots
+  are unavailable until the layer is updated to SOTA's current API.
+
 ## v1.0.0-rc259 (2026-10-11)
 
 ### Changed

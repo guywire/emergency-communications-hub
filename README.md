@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc259** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
+**Version 1.0.0-rc261** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -447,9 +447,10 @@ hamlog:
 **SOTA API:** SOTA's API terms (https://api-db2.sota.org.uk/docs) require app developers to
 join the SOTA Reflector "API-consumers" group, forbid AI-generated software from connecting
 without SOTA's prior approval, and allow blocking users of deprecated endpoints. The map's
-SOTA spots layer is therefore **off** (its old spots endpoint is deprecated) and the button
-opens SOTAwatch instead; it only calls the API with `sota: {api_enabled: true}`, which you
-should set only after clearing it with SOTA. The same terms apply to SOTA log upload — use
+SOTA spots layer is therefore **unavailable** until it is updated to SOTA's current API (its
+old spots endpoint is deprecated — the button reports that rather than showing nothing); it
+only calls the API with `sota: {api_enabled: true}`, which you should set only after
+clearing it with SOTA. The same terms apply to SOTA log upload — use
 the **SOTA CSV** export and upload it on the SOTA site unless you have that approval.
 
 ---

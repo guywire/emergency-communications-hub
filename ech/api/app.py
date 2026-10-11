@@ -3512,10 +3512,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             _sota_cfg = {}
         if not _sota_cfg.get("api_enabled", False):
             return {"spots": [], "total": 0, "disabled": True,
-                    "sotawatch_url": "https://sotawatch.sota.org.uk/",
-                    "error": ("SOTA map spots are off: the SOTA spots API this used has been "
-                              "deprecated, and SOTA's API terms require their prior approval for "
-                              "this kind of software. Open SOTAwatch for live spots.")}
+                    "error": ("the SOTA spots API this layer used has been deprecated by SOTA; "
+                              "it needs updating to SOTA's current API (see README).")}
         cache_key = f"{radius_km}"
         cached = _sota_spot_cache.get(cache_key)
         if cached and _time.monotonic() - cached[0] < _SOTA_CACHE_TTL:
@@ -3673,6 +3671,79 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return {"spots": out, "total": len(out), "radius_km": radius_km}
         except Exception as exc:
             return {"spots": [], "total": 0, "error": f"DX cluster fetch failed: {exc.__class__.__name__}"}
+
+    # "On the Air" programs recognised in DX cluster spot comments. Measured
+    # 2026-10-11 over 7 h of dxsummit spots: WWFF 135, IOTA 36, SOTA 35,
+    # Bunkers (BOTA) 21, lighthouses 11, castles 3, LLOTA 1; Beaches on the
+    # Air, Boats on the Air and HSOTA none — kept so they appear if spotted.
+    # Plain POTA stays on its own layer (it has the real park coordinates).
+    _OTA_PROGRAMS = (
+        ("sota",  "SOTA",  "Summits on the Air",
+         _re_top.compile(r"\bSOTA\b"), _re_top.compile(r"\b([A-Z0-9]{1,4}/[A-Z]{2}-\d{3})\b")),
+        ("wwff",  "WWFF",  "World Wide Flora & Fauna",
+         _re_top.compile(r"\bWWFF\b|\b[A-Z0-9]{1,4}FF-\d{4}\b"), _re_top.compile(r"\b([A-Z0-9]{1,4}FF-\d{4})\b")),
+        ("iota",  "IOTA",  "Islands on the Air",
+         _re_top.compile(r"\bIOTA\b|\b(?:AF|AN|AS|EU|NA|OC|SA)-\d{3}\b"), _re_top.compile(r"\b((?:AF|AN|AS|EU|NA|OC|SA)-\d{3})\b")),
+        ("bunker", "BOTA", "Bunkers on the Air (WWBOTA)",
+         _re_top.compile(r"\bBUNKER|\bWWBOTA\b|\bB/[A-Z0-9]{1,3}-\d{3,5}\b|\b[A-Z0-9]{1,3}/B-\d{3,5}\b"),
+         _re_top.compile(r"\b(B/[A-Z0-9]{1,3}-\d{3,5}|[A-Z0-9]{1,3}/B-\d{3,5})\b")),
+        ("beach", "BEACH", "Beaches on the Air",
+         _re_top.compile(r"\bBEACH(?:ES)?\b"), None),
+        ("bota",  "BOTA",  "BOTA (Bunkers or Beaches — reference not recognised)",
+         _re_top.compile(r"\bBOTA\b"), None),
+        ("light", "LIGHT", "Lighthouses (ILLW / ARLHS)",
+         _re_top.compile(r"\bILLW\b|LIGHTHOUSE|LIGHTSHIP|\bARLHS\b|\bLH\b"), _re_top.compile(r"\b([A-Z]{3}-\d{3,4})\b")),
+        ("cota",  "COTA",  "Castles on the Air",
+         _re_top.compile(r"\bCOTA\b|\bWCA\b|CASTLE"), _re_top.compile(r"\b((?:COTA/)?[A-Z]{1,3}-\d{2,5})\b")),
+        ("llota", "LLOTA", "Lakes & Lagoons on the Air",
+         _re_top.compile(r"\bLLOTA\b"), None),
+        ("hsota", "HSOTA", "Historical Sites on the Air",
+         _re_top.compile(r"\bHSOTA\b"), None),
+        ("boat",  "BOAT",  "Boats on the Air / maritime mobile",
+         _re_top.compile(r"\bBOATS?\b|\bBOTA-?BOAT"), None),
+    )
+
+    def _classify_ota(spot: dict) -> list[dict]:
+        text = (spot.get("info") or "").upper()
+        call = (spot.get("dxCall") or "").upper()
+        progs = []
+        for key, tag, name, rx, ref_rx in _OTA_PROGRAMS:
+            if key == "bota" and any(p["key"] in ("bunker", "beach") for p in progs):
+                continue                      # already identified which BOTA
+            if rx.search(text):
+                m = ref_rx.search(text) if ref_rx else None
+                progs.append({"key": key, "tag": tag, "name": name, "ref": m.group(1) if m else ""})
+        if call.endswith("/MM") and not any(p["key"] == "boat" for p in progs):
+            progs.append({"key": "boat", "tag": "/MM", "name": "Maritime mobile (on a boat)", "ref": ""})
+        return progs
+
+    @app.get("/api/ota/spots")
+    async def ota_spots_endpoint():
+        """"On the Air" activations spotted on the DX cluster in the last ~hour,
+        worldwide, each tagged with the program(s) its comment names (SOTA,
+        WWFF, IOTA, Bunkers, Beaches, lighthouses, castles, LLOTA, HSOTA,
+        boats). Placed at the DX station's location as dxsummit reports it."""
+        try:
+            spots = await _fetch_dxcluster_spots(limit=1000)
+            out, seen = [], set()
+            for s in spots:
+                if s["lat"] is None or s["lon"] is None:
+                    continue
+                progs = _classify_ota(s)
+                if not progs:
+                    continue
+                key = (s["dxCall"], round(float(s["frequency"] or 0)))
+                if key in seen:                  # same activation re-spotted
+                    continue
+                seen.add(key)
+                out.append({**s, "programs": progs})
+            counts: dict = {}
+            for s in out:
+                for p in s["programs"]:
+                    counts[p["tag"]] = counts.get(p["tag"], 0) + 1
+            return {"spots": out, "total": len(out), "counts": counts}
+        except Exception as exc:
+            return {"spots": [], "total": 0, "error": f"On the Air fetch failed: {exc.__class__.__name__}"}
 
     @app.get("/api/iota/spots")
     async def iota_spots_endpoint(radius_km: float = 0.0):
