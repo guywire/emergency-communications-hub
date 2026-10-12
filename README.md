@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc268** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
+**Version 1.0.0-rc269** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -606,6 +606,16 @@ matching adapter with `transport: browser` (MeshCore) or `input_device: browser`
 (CW/RTTY/PSK31). The bridge lives in that tab — keep it open (while connected, links
 open in a new tab and closing asks for confirmation); adapters re-attach automatically
 when the tab reconnects.
+
+**Several radios of one protocol** (e.g. a MeshCore node on the server plus one plugged
+into an operator's browser elsewhere) act as one station: the compose bar shows one
+`MSHC×2` button that sends through all of them (a channel picked in the picker is sent by
+*name*, so each radio uses its own matching channel; a DM reply goes out only on the radio
+that received it); a channel message heard on more than one radio is a single feed entry
+marked "📡 heard on 2 radios"; and one of your radios hearing another's transmission is not
+shown as a new message. Hearing is not relaying — to carry traffic **between** the two
+radios' meshes, add a bridge (below); a bridge between sibling radios waits a few seconds and
+skips any radio that already heard the message itself, so overlapping sites don't double up.
 
 **Bridges (`bridge_rules`)** link ONE endpoint on each side — a mesh channel ↔ APRS
 messages addressed to a group such as `EMCOMM` — not whole adapters. Each bridge sets

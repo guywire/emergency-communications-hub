@@ -591,7 +591,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         raw: dict = {}
         if subject:
             raw["subject"] = subject
-        if channel_idx is not None:
+        channel_name = (data.get("channel_name") or "").strip()
+        if channel_name:
+            # By NAME: one send to several radios whose channel numbering
+            # differs lands on the same channel on each (O131).
+            raw["channel_name"] = channel_name
+        elif channel_idx is not None:
             raw["channel_idx"] = int(channel_idx)
         tracked = await router.send_tracked(
             body=body,

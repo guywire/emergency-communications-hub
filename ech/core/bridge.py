@@ -141,7 +141,8 @@ class BridgeRule:
     enabled: bool = True
     counters: dict = field(default_factory=lambda: {
         "forwarded": 0, "dropped_rate": 0, "dropped_loop": 0,
-        "dropped_duplicate": 0, "dropped_no_callsign": 0, "would_forward": 0})
+        "dropped_duplicate": 0, "dropped_no_callsign": 0, "would_forward": 0,
+        "dropped_already_heard": 0})
 
     @classmethod
     def parse(cls, d: dict, idx: int = 0) -> "BridgeRule":
@@ -333,7 +334,9 @@ class BridgeEngine:
 
     # ── main entry ───────────────────────────────────────────────────────
 
-    async def apply(self, msg: NormalizedMessage, adapters: dict) -> None:
+    async def apply(self, msg: NormalizedMessage, adapters: dict, skip_targets: set | None = None) -> None:
+        """skip_targets: adapters that already heard this message themselves
+        (multi-radio merge, O131) — relaying to them would duplicate it there."""
         if (msg.raw or {}).get("_bridged_by"):
             return                                       # never re-bridge our own output
         now = time.monotonic()
@@ -359,6 +362,10 @@ class BridgeEngine:
                 key = hashlib.sha1(f"{rule.name}|{leg}|{msg.from_id}|{_norm(text)}".encode()).hexdigest()
                 if self._dup(key, now):
                     rule.counters["dropped_duplicate"] += 1
+                    continue
+                if skip_targets and dst.adapter in skip_targets:
+                    rule.counters["dropped_already_heard"] = rule.counters.get("dropped_already_heard", 0) + 1
+                    self._record(rule, leg, f"skipped: {dst.adapter} already heard it", msg, text)
                     continue
                 target = adapters.get(dst.adapter)
                 if target is None:

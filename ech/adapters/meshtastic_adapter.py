@@ -267,6 +267,14 @@ class MeshtasticAdapter(Adapter):
             # happens to be tuned to right now (e.g. via the Settings channel
             # switcher) — that mismatch used to silently misdirect replies.
             hinted_idx = (message.raw or {}).get("channel_idx")
+            # A channel NAME (one send to several radios whose channel numbering
+            # differs) resolves against this radio's own channel list.
+            hinted_name = str((message.raw or {}).get("channel_name") or "").strip().lower()
+            if hinted_name and hinted_idx is None:
+                for c in self._channel_list:
+                    if (c.get("name") or "primary").lower() == hinted_name:
+                        hinted_idx = c["index"]
+                        break
             ch_idx = int(hinted_idx) if hinted_idx is not None else self._channel_idx
             pkt = await self._loop.run_in_executor(
                 None,

@@ -8,6 +8,19 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc269 (2026-10-11)
+
+### Added
+- **Multiple radios as one station** (e.g. a server MeshCore + one in an operator's browser):
+  - one compose button per protocol (`MSHC×2`) sends through all of them; a channel picked
+    in the picker is sent by name so each radio uses its own matching channel; DM replies
+    go out on the radio that received them;
+  - a channel message heard on several radios is one feed entry, marked
+    "📡 heard on N radios";
+  - one of your radios hearing another's transmission is no longer shown as incoming.
+- Bridges between two radios of the same protocol skip a radio that already heard the
+  message itself (no double transmissions where sites overlap).
+
 ## v1.0.0-rc268 (2026-10-11)
 
 ### Fixed

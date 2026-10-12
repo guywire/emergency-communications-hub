@@ -43,6 +43,9 @@ class Router:
         self._bridge_rules: list[dict] = []        # loaded from config
         from ech.core.bridge import BridgeEngine
         self._bridge = BridgeEngine()
+        # Multi-radio (O131): the same channel message heard by two radios of
+        # the same protocol becomes ONE feed entry; key → {id, adapters, t}
+        self._radio_seen: dict[tuple, dict] = {}
         self._tasks: list[asyncio.Task] = []
         self._adapter_tasks: dict[str, asyncio.Task] = {}  # name → supervise task
         self._metrics_task: asyncio.Task | None = None
@@ -181,10 +184,93 @@ class Router:
 
     # ── Inbound pipeline ──────────────────────────────────────────────────
 
+    # ── Multi-radio (O131) ────────────────────────────────────────────────
+
+    _RADIO_FAMILIES = ("MeshCoreAdapter", "MeshtasticAdapter")
+    RADIO_MERGE_WINDOW_S = 60.0
+
+    def _radio_family(self, adapter_name: str) -> str | None:
+        a = self._adapters.get(adapter_name)
+        fam = type(a).__name__ if a is not None else ""
+        return fam if fam in self._RADIO_FAMILIES else None
+
+    def _sibling_radios(self, adapter_name: str) -> list:
+        fam = self._radio_family(adapter_name)
+        if fam is None:
+            return []
+        return [a for n, a in self._adapters.items() if n != adapter_name and type(a).__name__ == fam]
+
+    def _radio_key(self, msg: NormalizedMessage) -> tuple | None:
+        """Identity of a channel message across radios: protocol + channel
+        NAME (indices differ per radio: "ch2:testing" vs "ch0:testing") +
+        sender + text. None for DMs and non-text (a DM to radio A and one to
+        radio B are different messages)."""
+        if msg.msg_type != "text" or msg.to_id or (msg.source_channel or "").upper() == "DM":
+            return None
+        fam = self._radio_family(msg.source_adapter)
+        if fam is None:
+            return None
+        ch = (msg.source_channel or "").lower()
+        ch = ch.split(":", 1)[1] if ":" in ch else ch
+        sender = (msg.from_display or msg.from_id or "").strip().lower()
+        return (fam, ch, sender, (msg.body or "").strip())
+
+    def _is_own_radio(self, msg: NormalizedMessage) -> bool:
+        """Sent by one of OUR other radios (heard back by a sibling)."""
+        sender = {(msg.from_display or "").strip().lower(), (msg.from_id or "").strip().lower()} - {""}
+        for a in self._sibling_radios(msg.source_adapter):
+            own = {str(getattr(a, attr, "") or "").strip().lower()
+                   for attr in ("_device_name", "_self_node_id", "_my_node_id")} - {""}
+            if sender & own:
+                return True
+        return False
+
+    def heard_on(self, msg: NormalizedMessage) -> list[str]:
+        """Radios that have heard this channel message (merge bookkeeping)."""
+        key = self._radio_key(msg)
+        e = self._radio_seen.get(key) if key else None
+        return list(e["adapters"]) if e else [msg.source_adapter]
+
+    async def _multi_radio_check(self, msg: NormalizedMessage) -> str | None:
+        """'echo' = our own other radio's transmission; 'merged' = already in the
+        feed from a sibling radio (feed entry updated); None = process normally."""
+        if not self._sibling_radios(msg.source_adapter):
+            return None
+        if self._is_own_radio(msg):
+            return "echo"
+        key = self._radio_key(msg)
+        if key is None:
+            return None
+        now = time.monotonic()
+        for k in [k for k, e in self._radio_seen.items() if now - e["t"] > self.RADIO_MERGE_WINDOW_S]:
+            del self._radio_seen[k]
+        e = self._radio_seen.get(key)
+        if e is None:
+            self._radio_seen[key] = {"id": msg.id, "adapters": [msg.source_adapter], "t": now}
+            return None
+        if msg.source_adapter not in e["adapters"]:
+            e["adapters"].append(msg.source_adapter)
+            await self.broadcast_ws_event("heard_on", {
+                "msg_id": e["id"], "adapters": list(e["adapters"]),
+                "adapter": msg.source_adapter,
+                "snr": (msg.raw or {}).get("snr"), "rssi": (msg.raw or {}).get("rssi"),
+            })
+        return "merged"
+
     async def _handle_inbound(self, msg: NormalizedMessage) -> None:
         if self._is_duplicate(msg):
             log.debug("Router: dropped duplicate from %s", msg.from_id)
             M.record_message_dropped(msg.source_adapter, "dedup")
+            return
+
+        verdict = await self._multi_radio_check(msg)
+        if verdict == "echo":
+            log.debug("Router: %s heard our own radio's message — not a new message", msg.source_adapter)
+            M.record_message_dropped(msg.source_adapter, "own_radio_echo")
+            return
+        if verdict == "merged":
+            log.debug("Router: %s message already in the feed from a sibling radio — merged", msg.source_adapter)
+            M.record_message_dropped(msg.source_adapter, "multi_radio_merge")
             return
 
         # Only persist text messages — position/telemetry flow to WS only (map/anomaly)
@@ -360,8 +446,28 @@ class Router:
         if not self._bridge_rules and not self._bridge.rules:
             return
         self._bridge.ensure_loaded(self._bridge_rules)
+        # Bridging between two radios of the same protocol (O131): if they
+        # overlap in RF, the far radio may hear the message itself a moment
+        # later — relaying it too would transmit a duplicate there. Wait a
+        # few seconds (in the background) and skip targets that heard it.
+        sib = {a.name for a in self._sibling_radios(msg.source_adapter)}
+        to_sibling = any(r.enabled and any(dst.adapter in sib for _, dst, _ in r.legs())
+                         for r in self._bridge.rules)
+        if to_sibling and self._radio_key(msg) is not None:
+            asyncio.ensure_future(self._bridge_after_hold(msg))
+            return
         try:
             await self._bridge.apply(msg, self._adapters)
+        except Exception as exc:
+            log.error("Bridge: error applying rules to %s message: %s", msg.source_adapter, exc)
+
+    BRIDGE_SIBLING_HOLD_S = 8.0
+
+    async def _bridge_after_hold(self, msg: NormalizedMessage) -> None:
+        await asyncio.sleep(self.BRIDGE_SIBLING_HOLD_S)
+        try:
+            await self._bridge.apply(msg, self._adapters,
+                                     skip_targets=set(self.heard_on(msg)) - {msg.source_adapter})
         except Exception as exc:
             log.error("Bridge: error applying rules to %s message: %s", msg.source_adapter, exc)
 

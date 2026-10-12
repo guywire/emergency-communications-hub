@@ -1364,6 +1364,7 @@ function connectWS() {
     if (pkt.type === 'message')           handleInbound(pkt.data);
     if (pkt.type === 'messages_cleared')  clearMessageDisplay();
     if (pkt.type === 'msg_status')        handleMsgStatus(pkt.data);
+    if (pkt.type === 'heard_on')          handleHeardOn(pkt.data);
     if (pkt.type === 'anomaly')           handleAnomaly(pkt.data);
     if (pkt.type === 'adapter_error')     handleAdapterError(pkt.data);
     if (pkt.type === 'nodes_updated')     pollHealth();
@@ -1648,6 +1649,7 @@ function buildMsgEl(msg) {
       ${aisStr}
     </div>
   `;
+  if (_heardOn[msg.id]) _markHeardOn(div, _heardOn[msg.id]);
   return div;
 }
 
@@ -2467,9 +2469,31 @@ function toggleMuteAdapter(name) {
   renderAll();
 }
 
+// A channel message heard by several of our radios is ONE feed entry (merged
+// server-side); mark it with which radios heard it.
+const _heardOn = {};
+function handleHeardOn(d) {
+  _heardOn[d.msg_id] = d.adapters;
+  const el = document.querySelector(`[data-id="${CSS.escape(d.msg_id)}"]`);
+  if (el) _markHeardOn(el, d.adapters);
+}
+function _markHeardOn(el, adapters) {
+  let b = el.querySelector('.heard-on');
+  if (!b) {
+    b = document.createElement('span');
+    b.className = 'heard-on';
+    b.style.cssText = 'margin-left:6px;font-size:10px;color:var(--muted);font-family:var(--mono)';
+    (el.querySelector('.msg-header') || el).appendChild(b);
+  }
+  b.textContent = `📡 heard on ${adapters.length} radios`;
+  b.title = adapters.join(', ');
+}
+
+let _replyVia = null;   // radio a DM reply should go out on (set by reply-to)
+
 function getSelectedAdapters() {
   return [...document.querySelectorAll('.adapter-toggle.on')]
-    .map(el => el.dataset.adapter);
+    .flatMap(el => (el.dataset.adapters || el.dataset.adapter).split(','));
 }
 
 function handleComposKey(e) {
@@ -2495,8 +2519,14 @@ function handleComposKey(e) {
 async function sendMessage() {
   const body = document.getElementById('compose-body').value.trim();
   if (!body) return;
-  const adapters = getSelectedAdapters();
+  let adapters = getSelectedAdapters();
   if (!adapters.length) { toast('No adapters selected', 'err'); return; }
+  const toIdEarly = document.getElementById('compose-to').value.trim();
+  if (toIdEarly && _replyVia && adapters.includes(_replyVia)) {
+    // A DM goes to a contact known on ONE radio — don't fan it out to its siblings
+    const fam = adapterMeta(_replyVia).cls;
+    adapters = adapters.filter(a => a === _replyVia || adapterMeta(a).cls !== fam);
+  }
 
   const priority = parseInt(document.getElementById('priority-select').value);
   const toId = document.getElementById('compose-to').value.trim() || null;
@@ -2505,6 +2535,14 @@ async function sendMessage() {
   const channelField = document.getElementById('compose-channel');
   const channelIdx = channelField && channelField.style.display !== 'none' && channelField.value !== ''
     ? parseInt(channelField.value) : undefined;
+  // Several radios of one protocol number their channels differently — send
+  // the channel by NAME so each radio picks its own matching channel.
+  let channelName;
+  const meshSel = adapters.filter(a => ['meshc', 'mesh'].includes(adapterMeta(a).cls));
+  if (channelIdx !== undefined && meshSel.length > 1) {
+    const opt = channelField.options[channelField.selectedIndex];
+    channelName = opt ? opt.textContent.replace(/^\d+:\s*/, '').trim() : undefined;
+  }
 
   const btn = document.getElementById('send-btn');
   btn.disabled = true;
@@ -2512,9 +2550,11 @@ async function sendMessage() {
   const r = await fetch('/api/messages', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ body, adapters, to_id: toId, priority, subject: subject || undefined, channel_idx: channelIdx }),
+    body: JSON.stringify({ body, adapters, to_id: toId, priority, subject: subject || undefined,
+                           channel_idx: channelName ? undefined : channelIdx, channel_name: channelName }),
   });
   const data = await r.json();
+  _replyVia = null;
   btn.disabled = false;
 
   if (data.error) { toast(data.error, 'err'); return; }
@@ -2687,8 +2727,9 @@ function replyTo(nodeId, adapterName) {
   const noAddress = isMeshCore && ((known && known.meta && known.meta.no_pubkey) || (!known && !looksLikeAddress));
 
   document.querySelectorAll('.adapter-toggle').forEach(btn => {
-    btn.classList.toggle('on', btn.dataset.adapter === adapterName);
+    btn.classList.toggle('on', (btn.dataset.adapters || btn.dataset.adapter).split(',').includes(adapterName));
   });
+  _replyVia = adapterName;   // a DM reply goes out on the radio that received it
 
   if (noAddress) {
     document.getElementById('compose-to').value = '';
@@ -3287,11 +3328,27 @@ async function buildDynamicUI() {
     compose.querySelectorAll('.adapter-toggle').forEach(el => {
       prevState[el.dataset.adapter] = el.classList.contains('on');
     });
-    compose.innerHTML = knownAdapters.filter(name => !adapterMeta(name).rxOnly).map(name => {
+    // Several radios of the same protocol (e.g. a local MeshCore + one plugged
+    // into an operator's browser) get ONE toggle that sends through all of
+    // them — the router merges what they hear back into single messages.
+    const sendable = knownAdapters.filter(name => !adapterMeta(name).rxOnly);
+    const groups = [];
+    const seenCls = {};
+    sendable.forEach(name => {
+      const cls = adapterMeta(name).cls;
+      if ((cls === 'meshc' || cls === 'mesh') && seenCls[cls]) { seenCls[cls].push(name); return; }
+      const g = [name];
+      if (cls === 'meshc' || cls === 'mesh') seenCls[cls] = g;
+      groups.push(g);
+    });
+    compose.innerHTML = groups.map(g => {
+      const name = g[0];
       const m = adapterMeta(name);
       // Preserve user's toggle state; new adapters start off
       const startOn = name in prevState ? prevState[name] : false;
-      return `<div class="adapter-toggle ${startOn ? 'on' : ''} ${m.cls}" data-adapter="${name}" onclick="toggleAdapter(this)">${m.toggle}</div>`;
+      const multi = g.length > 1;
+      const title = multi ? `Sends through all ${g.length} radios: ${g.join(', ')}` : name;
+      return `<div class="adapter-toggle ${startOn ? 'on' : ''} ${m.cls}" data-adapter="${name}" data-adapters="${g.join(',')}" title="${escHtml(title)}" onclick="toggleAdapter(this)">${m.toggle}${multi ? '×' + g.length : ''}</div>`;
     }).join('');
 
     // Update health dots
@@ -4094,9 +4151,10 @@ buildDynamicUI().then(connectWS);
     // If an adapter is specified, activate only that adapter in the compose bar
     if (adpt) {
       document.querySelectorAll('.adapter-toggle').forEach(btn => {
-        const on = btn.dataset.adapter === adpt;
+        const on = (btn.dataset.adapters || btn.dataset.adapter).split(',').includes(adpt);
         btn.classList.toggle('on', on);
       });
+      _replyVia = adpt;
     }
     document.getElementById('compose-body')?.focus();
     // Clean URL without reload
