@@ -421,20 +421,17 @@ class MeshtasticAdapter(Adapter):
             for node_id, node_data in node_db.items():
                 self._update_node_from_dict(node_id, node_data)
 
-            # Enumerate channels from device
+            # Enumerate channels from device. The radio can still be streaming
+            # its channel table when the connection event fires, so re-read a
+            # few seconds later too (and on every health poll, see
+            # _health_detail) instead of trusting this single snapshot.
             try:
-                raw_channels = getattr(interface.localNode, "channels", []) or []
-                self._channel_list = []
-                for ch in raw_channels:
-                    idx  = getattr(ch, "index", None)
-                    role = getattr(ch, "role", None)
-                    name = getattr(getattr(ch, "settings", None), "name", "") or ""
-                    if role is not None and str(role) not in ("0", "DISABLED"):
-                        self._channel_list.append({"index": idx, "name": name})
-
-                log.info("Meshtastic %s: device channels: %s",
-                         self.name,
-                         ", ".join(f"{c['index']}:{c['name'] or 'primary'}" for c in self._channel_list))
+                self._refresh_channel_list(log_it=True, iface=interface)
+                if self._loop:
+                    for delay in (4, 15):
+                        self._loop.call_soon_threadsafe(
+                            self._loop.call_later, delay,
+                            lambda i=interface: self._refresh_channel_list(log_it=True, iface=i))
 
                 # Resolve channel_name → channel_idx
                 if self._channel_name:
@@ -1122,7 +1119,32 @@ class MeshtasticAdapter(Adapter):
     async def nodes(self) -> list[MeshNode]:
         return list(self._nodes.values())
 
+    def _refresh_channel_list(self, log_it: bool = False, iface=None) -> bool:
+        """Re-read the device's channel table from the meshtastic library's
+        mirror of it (in memory, no radio traffic). Returns True if the list
+        changed. Keeps the existing list when the library has none yet."""
+        try:
+            raw = getattr(getattr(iface or self._iface, "localNode", None), "channels", None) or []
+        except Exception:
+            return False
+        found = []
+        for ch in raw:
+            role = getattr(ch, "role", None)
+            if role is None or str(role) in ("0", "DISABLED"):
+                continue
+            found.append({"index": getattr(ch, "index", None),
+                          "name": getattr(getattr(ch, "settings", None), "name", "") or ""})
+        if not found or found == self._channel_list:
+            return False
+        self._channel_list = found
+        if log_it:
+            log.info("Meshtastic %s: device channels: %s", self.name,
+                     ", ".join(f"{c['index']}:{c['name'] or 'primary'}" for c in found))
+        return True
+
     def _health_detail(self) -> dict:
+        if self._connected and self._iface:
+            self._refresh_channel_list(log_it=True)
         ch_str = ", ".join(
             f"{c['index']}:{c['name']}" if c.get("name") else str(c["index"])
             for c in self._channel_list

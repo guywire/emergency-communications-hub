@@ -8,6 +8,14 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc274 (2026-10-12)
+
+### Fixed
+- Meshtastic: the device's channel list was read **once** at connect, so channels the
+  radio hadn't finished sending (or that you added afterwards, e.g. from the phone app)
+  never appeared and only channel 0 showed. It is now re-read 4 s and 15 s after connect
+  and on every status poll, so the Settings channel pickers track the device.
+
 ## v1.0.0-rc273 (2026-10-12)
 
 ### Added
