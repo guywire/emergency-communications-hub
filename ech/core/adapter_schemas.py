@@ -119,6 +119,10 @@ ADAPTER_SCHEMAS: dict[str, dict] = {
              "help": "Your callsign + SSID for TX"},
             {"key": "tx_path", "kind": "string", "required": False, "default": "WIDE1-1,WIDE2-1",
              "help": "AX.25 digipeater path"},
+            {"key": "tocall", "kind": "string", "required": False, "default": "APRS",
+             "help": "AX.25 destination (software tocall). Leave APRS unless you have a registered one"},
+            {"key": "beacon_interval_sec", "kind": "number", "required": False, "default": 0,
+             "help": "RF position beacon every N seconds (0 = off, minimum 600). Also settable on the APRS page"},
         ],
     },
 
@@ -272,6 +276,22 @@ ADAPTER_SCHEMAS: dict[str, dict] = {
              "help": "SMS framing for outbound text — most radios use etsi_be; some "
                      "(e.g. AnyTone with \"Motorola\" selected) need motorola",
              "options": ["etsi_be", "motorola"]},
+        ],
+    },
+    "js8call": {
+        "fields": [
+            {"key": "host", "kind": "string", "required": True, "default": "127.0.0.1",
+             "help": "Machine running the JS8Call desktop app (it must be reachable from ECH)"},
+            {"key": "port", "kind": "number", "required": True, "default": 2442,
+             "help": "JS8Call TCP API port (JS8Call: File > Settings > Reporting > TCP Server Port)"},
+            {"key": "callsign", "kind": "string", "required": True, "default": "",
+             "help": "Your callsign, used to recognise directed messages"},
+            {"key": "hb_interval", "kind": "number", "required": False, "default": 30,
+             "help": "Seconds between keepalive pings"},
+            {"key": "rx_activity", "kind": "boolean", "required": False, "default": False,
+             "help": "Surface raw band-activity packets (very noisy; debugging only)"},
+            {"key": "filter_own", "kind": "boolean", "required": False, "default": True,
+             "help": "Hide messages from your own callsign"},
         ],
     },
 }

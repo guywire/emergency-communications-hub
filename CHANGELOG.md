@@ -8,6 +8,16 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc273 (2026-10-12)
+
+### Added
+- README screenshots of the map weather layers and the new APRS page.
+
+### Fixed
+- Settings → add adapter: **JS8Call** now offers its fields (host, port, callsign,
+  keepalive, activity, filter-own) instead of an empty form; APRS KISS gained `tocall`
+  and `beacon_interval_sec` in its field list.
+
 ## v1.0.0-rc272 (2026-10-12)
 
 ### Added

@@ -45,6 +45,22 @@ Anomaly Detection
 
 ---
 
+## Screenshots
+
+**Map** — live nodes plus NWS / GOES / APRS weather warning outlines (layer chips pick the source):
+
+![Map with weather warnings](screenshots/map_weather.png)
+
+**APRS page** — messages with acks, bulletins, objects, beacon, packets and weather:
+
+| Objects | Weather |
+|---|---|
+| ![APRS objects](screenshots/aprs_objects.png) | ![APRS weather](screenshots/aprs_weather.png) |
+| **Bulletins** | **Packets** |
+| ![APRS bulletins](screenshots/aprs_bulletins.png) | ![APRS packets](screenshots/aprs_packets.png) |
+
+Map layer menu: [screenshots/map_layers.png](screenshots/map_layers.png) · Send a map item as an APRS object (pre-filled form): [screenshots/aprs_object_prefill.png](screenshots/aprs_object_prefill.png)
+
 ## Quick Start
 
 ### 1. Install Python dependencies
