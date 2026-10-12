@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBkMTExNyIvPjxjaXJjbGUgY3g9IjkiIGN5PSI5IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iOSIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48Y2lyY2xlIGN4PSIyMyIgY3k9IjkiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjIzIiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjIzIiByPSIxLjUiIGZpbGw9IiMzODhiZmQiIG9wYWNpdHk9IjAuNyIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMjMiIHI9IjEuNSIgZmlsbD0iIzM4OGJmZCIgb3BhY2l0eT0iMC43Ii8+PGNpcmNsZSBjeD0iMjMiIGN5PSIyMyIgcj0iMS41IiBmaWxsPSIjMzg4YmZkIiBvcGFjaXR5PSIwLjciLz48cGF0aCBkPSJNNCwxNiBRNywxMCAxMCwxNiBRMTMsMjIgMTYsMTYgUTE5LDEwIDIyLDE2IFEyNSwyMiAyOCwxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjIuNSIgZmlsbD0iIzNmYjk1MCIvPjwvc3ZnPg==">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SM — APRS</title>
+
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--dim:#484f58;--green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;--purple:#bc8cff;--orange:#f0883e;--mono:'IBM Plex Mono','Cascadia Code','Consolas','Liberation Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px}
+body{display:flex;flex-direction:column}
+#header{display:flex;align-items:center;gap:12px;padding:0 16px;height:44px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
+.logo{font-size:13px;color:var(--green);letter-spacing:.08em}
+.back{font-size:11px;color:var(--blue);text-decoration:none}.back:hover{text-decoration:underline}
+.spacer{flex:1}
+#hdr-status{font-size:10px;color:var(--muted)}
+#tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;overflow-x:auto}
+.tab{padding:8px 16px;font-size:11px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;user-select:none;white-space:nowrap}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.tab-badge{font-size:9px;background:var(--bg3);color:var(--muted);border-radius:8px;padding:1px 5px;margin-left:4px}
+main{flex:1;overflow:auto;padding:14px 16px}
+.pane{display:none}.pane.active{display:block}
+h3{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:.06em;text-transform:uppercase;margin:16px 0 8px}
+h3:first-child{margin-top:0}
+.note{color:var(--muted);font-size:11px;line-height:1.5;margin-bottom:10px;max-width:900px}
+.note b{color:var(--text);font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{text-align:left;color:var(--muted);font-weight:500;padding:5px 8px;border-bottom:1px solid var(--border);white-space:nowrap;position:sticky;top:0;background:var(--bg)}
+td{padding:5px 8px;border-bottom:1px solid rgba(48,54,61,.6);vertical-align:top}
+tr:hover td{background:rgba(56,139,253,.05)}
+.mono-raw{color:var(--muted);word-break:break-all}
+.dim{color:var(--dim)}.muted{color:var(--muted)}
+.ok{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}
+.pill{display:inline-block;font-size:9px;padding:1px 6px;border-radius:8px;border:1px solid var(--border);color:var(--muted)}
+.pill.rf{color:var(--orange);border-color:var(--orange)}.pill.is{color:var(--blue);border-color:var(--blue)}
+.pill.ok{color:var(--green);border-color:var(--green)}.pill.bad{color:var(--red);border-color:var(--red)}.pill.warn{color:var(--yellow);border-color:var(--yellow)}
+button,.btn{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:3px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer}
+button:hover{border-color:var(--blue);color:var(--blue)}
+button.primary{border-color:var(--green);color:var(--green)}
+button.danger:hover{border-color:var(--red);color:var(--red)}
+button:disabled{opacity:.4;cursor:default}
+input,select,textarea{font-family:var(--mono);font-size:11px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:4px 6px}
+input:focus,select:focus{outline:none;border-color:var(--blue)}
+.form{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:12px;max-width:1000px}
+.form label{display:flex;flex-direction:column;gap:3px;color:var(--muted);font-size:10px}
+.form .wide{grid-column:1/-1}
+.form .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.sym{display:inline-block;width:24px;height:24px;position:relative;vertical-align:middle}
+.sym>i{position:absolute;inset:0;background-repeat:no-repeat;background-size:384px 144px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;max-width:1100px}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:12px}
+.card .form{border:none;padding:0;margin:8px 0 0;background:none}
+.empty{color:var(--dim);padding:18px 8px}
+#toast{position:fixed;bottom:16px;right:16px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:11px;display:none;z-index:10;max-width:420px}
+.spark{vertical-align:middle}
+@media (max-width:640px){main{padding:10px}.form{grid-template-columns:1fr 1fr}td,th{padding:4px 5px}}
+</style>
+</head>
+<body>
+<div id="header">
+  <a class="back" href="/">← SM</a>
+  <div class="logo">▣ SM / APRS</div>
+  <div class="spacer"></div>
+  <span id="hdr-status"></span>
+</div>
+
+<div id="tabs">
+  <div class="tab active" data-tab="messages">Messages</div>
+  <div class="tab" data-tab="bulletins">Bulletins<span class="tab-badge" id="b-bulletins">0</span></div>
+  <div class="tab" data-tab="objects">Objects<span class="tab-badge" id="b-objects">0</span></div>
+  <div class="tab" data-tab="beacon">Beacon</div>
+  <div class="tab" data-tab="packets">Packets<span class="tab-badge" id="b-packets">0</span></div>
+  <div class="tab" data-tab="weather">Weather<span class="tab-badge" id="b-weather">0</span></div>
+</div>
+
+<main>
+<!-- Messages -->
+<section class="pane active" id="pane-messages">
+  <div class="form" style="grid-template-columns:150px 140px 1fr auto">
+    <label>Send via<select id="m-adapter"></select></label>
+    <label>To (callsign)<input id="m-to" maxlength="9" placeholder="N0CALL-7" autocomplete="off"></label>
+    <label>Text <span id="m-count" class="dim">0/67</span><input id="m-text" maxlength="67" autocomplete="off"></label>
+    <label>&nbsp;<button class="primary" onclick="sendMessage()">Send</button></label>
+  </div>
+  <div class="note">Messages addressed to you are acknowledged automatically. Messages you send are re-sent after 30 s, 60 s and 120 s until the other station acks.</div>
+  <h3>Sent</h3>
+  <table><thead><tr><th>Time</th><th>Via</th><th>To</th><th>Text</th><th>Status</th></tr></thead><tbody id="m-out"></tbody></table>
+  <h3>Received</h3>
+  <table><thead><tr><th>Time</th><th>Via</th><th>From</th><th>Message</th></tr></thead><tbody id="m-in"></tbody></table>
+</section>
+
+<!-- Bulletins -->
+<section class="pane" id="pane-bulletins">
+  <h3>Bulletins (BLN)</h3>
+  <table><thead><tr><th>Received</th><th>From</th><th>ID</th><th>Text</th><th>Via</th></tr></thead><tbody id="bl-list"></tbody></table>
+  <h3>NWS bulletins</h3>
+  <div class="note">Warnings, watches and advisories relayed onto APRS (NWS-WARN/WATCH/ADVIS), nationwide. The ones near you are drawn on the map's ⛈ Weather warnings layer (APRS = violet).</div>
+  <table><thead><tr><th>Received</th><th>Type</th><th>Event</th><th>Office</th><th>Zones</th><th>Expires</th></tr></thead><tbody id="nws-list"></tbody></table>
+</section>
+
+<!-- Objects -->
+<section class="pane" id="pane-objects">
+  <h3>Send an object</h3>
+  <div class="note">Objects mark something on everyone's APRS map (a shelter, an event, a MeshCore node) under your callsign. Each object is re-sent every interval until you kill it. <b>RF</b> transmits over your radio, so you are the control operator. Use <b>📡 APRS object</b> on a map item to fill this in.</div>
+  <div class="form" id="obj-form">
+    <label>Name (max 9)<input id="o-name" maxlength="9" autocomplete="off"></label>
+    <label>Latitude<input id="o-lat" inputmode="decimal"></label>
+    <label>Longitude<input id="o-lon" inputmode="decimal"></label>
+    <label>Symbol <span class="row"><input id="o-symbol" maxlength="2" value="/." style="width:44px"><span class="sym" id="o-sym-prev"></span>
+      <select id="o-sym-pick" onchange="if(this.value){o('o-symbol').value=this.value;symPreview()}">
+        <option value="">common…</option>
+        <option value="/.">/. X marker</option><option value="/;">/; campground / shelter</option>
+        <option value="/h">/h hospital</option><option value="/+">/+ Red Cross</option>
+        <option value="/o">/o EOC</option><option value="/r">/r repeater / radio</option>
+        <option value="/-">/- house</option><option value="/>">/> car</option>
+        <option value="/[">/[ person</option><option value="/'">/' small aircraft</option>
+        <option value="/s">/s boat</option><option value="\'">\' crash site</option>
+        <option value="\!">\! emergency</option><option value="/a">/a ambulance</option>
+        <option value="/f">/f fire truck</option><option value="\:">\: fire</option>
+        <option value="/#">/# digipeater</option><option value="M#">M# mesh node (overlay M)</option>
+      </select></span></label>
+    <label>Re-send every (min)<input id="o-interval" type="number" min="10" value="20"></label>
+    <label class="wide">Comment (max 43)<input id="o-comment" maxlength="43" autocomplete="off"></label>
+    <div class="wide row" id="o-adapters"></div>
+    <div class="wide row" id="o-follow-row" style="display:none"><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="o-follow"> Follow this node's live position on each re-send</label><span class="dim" id="o-src"></span></div>
+    <div class="wide row"><button class="primary" onclick="sendObject()">Send object</button><span class="dim" id="o-preview"></span></div>
+  </div>
+  <h3>My objects</h3>
+  <table><thead><tr><th></th><th>Name</th><th>Position</th><th>Comment</th><th>Every</th><th>Via</th><th>Last sent</th><th></th></tr></thead><tbody id="own-list"></tbody></table>
+  <h3>Heard objects &amp; items</h3>
+  <table><thead><tr><th></th><th>Name</th><th>Set by</th><th>State</th><th>Position</th><th>Comment</th><th>Heard</th></tr></thead><tbody id="obj-list"></tbody></table>
+</section>
+
+<!-- Beacon -->
+<section class="pane" id="pane-beacon">
+  <div class="note">Your station's position beacon on each APRS adapter. Minimum interval: 10 min on RF, 5 min on APRS-IS; 0 turns the automatic beacon off. Saving changes needs an admin account. The settings apply immediately and override config.yaml.</div>
+  <div class="cards" id="beacon-cards"></div>
+</section>
+
+<!-- Packets -->
+<section class="pane" id="pane-packets">
+  <div class="toolbar">
+    <input id="p-q" placeholder="filter: callsign or text" style="width:200px">
+    <select id="p-fmt"><option value="">all types</option><option>uncompressed</option><option>compressed</option><option>mic-e</option><option>object</option><option>message</option><option>bulletin</option><option>status</option><option>wx</option><option>telemetry-message</option></select>
+    <select id="p-adapter"><option value="">all adapters</option></select>
+    <label class="muted"><input type="checkbox" id="p-live" checked> live</label>
+    <span class="dim">last 2000 packets, kept in memory (cleared on restart)</span>
+  </div>
+  <table><thead><tr><th>Time</th><th>Via</th><th>From</th><th>Type</th><th>Summary</th><th>Raw</th></tr></thead><tbody id="p-list"></tbody></table>
+</section>
+
+<!-- Weather -->
+<section class="pane" id="pane-weather">
+  <div class="note">APRS weather stations heard in the last 6 hours. The trend shows temperature since ECH started hearing the station (up to 24 h).</div>
+  <table><thead><tr><th>Station</th><th>Temp</th><th>Trend</th><th>Humidity</th><th>Wind</th><th>Gust</th><th>Pressure</th><th>Rain 1h / 24h</th><th>Heard</th></tr></thead><tbody id="wx-list"></tbody></table>
+</section>
+</main>
+<div id="toast"></div>
+
+<script>
+const o = id => document.getElementById(id);
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function ago(ts) {
+  if (!ts) return '—';
+  const s = Date.now() / 1000 - ts;
+  if (s < 60) return Math.round(s) + 's';
+  if (s < 3600) return Math.round(s / 60) + 'm';
+  if (s < 86400) return Math.round(s / 3600) + 'h';
+  return Math.round(s / 86400) + 'd';
+}
+function hhmm(ts) { return ts ? new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}) : ''; }
+function toast(msg, bad) {
+  const t = o('toast'); t.textContent = msg; t.style.borderColor = bad ? 'var(--red)' : 'var(--border)';
+  t.style.display = 'block'; clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = 'none', 4000);
+}
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  let body = null; try { body = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((body && body.detail) || r.statusText);
+  return body;
+}
+const post = (path, data, method) => api(path, {method: method || 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data || {})});
+
+// aprs.fi symbol set (same sprites as the map)
+function symHtml(sym) {
+  if (!sym || sym.length !== 2) return '';
+  const base = (window.ECH_BASE_PATH || '') + '/static/aprs-symbols/aprs-symbols-48-';
+  const cell = (sheet, ch) => {
+    const i = ch.charCodeAt(0) - 33; if (i < 0 || i > 93) return '';
+    return `<i style="background-image:url('${base}${sheet}.png');background-position:-${(i % 16) * 24}px -${Math.floor(i / 16) * 24}px"></i>`;
+  };
+  let h = cell(sym[0] === '/' ? 0 : 1, sym[1]);
+  if (sym[0] !== '/' && sym[0] !== '\\') h += cell(2, sym[0]);
+  return `<span class="sym" title="${esc(sym)}">${h}</span>`;
+}
+function symPreview() { o('o-sym-prev').innerHTML = symHtml(o('o-symbol').value); }
+o('o-symbol').addEventListener('input', symPreview);
+
+// ── tabs
+let _tab = 'messages';
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
+function showTab(name) {
+  _tab = name;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
+  try { localStorage.setItem('ech_aprs_tab', name); } catch (e) {}
+  refresh();
+}
+
+// ── summary / adapters
+let _adapters = [];
+async function loadSummary() {
+  try {
+    const s = await api('/api/aprs/summary');
+    _adapters = s.adapters || [];
+    o('b-bulletins').textContent = s.counts.bulletins; o('b-objects').textContent = s.counts.objects + s.counts.own_objects;
+    o('b-packets').textContent = s.counts.packets; o('b-weather').textContent = s.counts.weather;
+    o('hdr-status').innerHTML = _adapters.length ? _adapters.map(a =>
+      `<span class="pill ${a.kind}">${esc(a.name)} ${a.kind === 'rf' ? 'RF' : 'IS'}</span> <span class="${a.can_transmit ? 'ok' : 'warn'}">${a.can_transmit ? 'TX ok' : 'RX only'}</span>`).join(' &nbsp; ')
+      : '<span class="warn">no APRS adapter configured</span>';
+    const opts = _adapters.map(a => `<option value="${esc(a.name)}" ${a.can_transmit ? '' : 'disabled'}>${esc(a.name)} (${a.kind === 'rf' ? 'RF' : 'IS'})</option>`).join('');
+    if (o('m-adapter').dataset.n !== String(_adapters.length)) {
+      o('m-adapter').innerHTML = opts; o('m-adapter').dataset.n = _adapters.length;
+      o('p-adapter').innerHTML = '<option value="">all adapters</option>' + _adapters.map(a => `<option>${esc(a.name)}</option>`).join('');
+      o('o-adapters').innerHTML = '<span class="muted">Send via:</span>' + _adapters.map(a =>
+        `<label style="flex-direction:row;gap:5px;align-items:center;color:var(--text)"><input type="checkbox" name="o-ad" value="${esc(a.name)}" ${a.kind === 'is' && a.can_transmit ? 'checked' : ''} ${a.can_transmit ? '' : 'disabled'}>
+         ${esc(a.name)} <span class="pill ${a.kind}">${a.kind === 'rf' ? 'RF — radio' : 'APRS-IS'}</span></label>`).join('');
+    }
+  } catch (e) { o('hdr-status').textContent = 'APRS status unavailable: ' + e.message; }
+}
+
+// ── messages
+o('m-text').addEventListener('input', () => o('m-count').textContent = o('m-text').value.length + '/67');
+o('m-text').addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+async function sendMessage() {
+  const to = o('m-to').value.trim().toUpperCase(), text = o('m-text').value.trim();
+  if (!to || !text) return toast('Callsign and text are both needed', true);
+  try {
+    const r = await post('/api/aprs/messages', {adapter: o('m-adapter').value, to, text});
+    if (r.status !== 'ok') throw new Error('adapter did not send');
+    o('m-text').value = ''; o('m-count').textContent = '0/67'; toast('Sent to ' + to + ' — waiting for ack');
+    loadMessages();
+  } catch (e) { toast('Not sent: ' + e.message, true); }
+}
+async function loadMessages() {
+  const d = await api('/api/aprs/messages');
+  const st = {pending: ['warn', 'waiting for ack'], acked: ['ok', 'acked'], rejected: ['bad', 'rejected'], no_ack: ['bad', 'no ack']};
+  o('m-out').innerHTML = (d.outgoing || []).map(m => `<tr><td>${hhmm(m.sent_ts)}</td><td>${esc(m.adapter)}</td><td>${esc(m.to)}</td><td>${esc(m.text)}</td>
+    <td><span class="pill ${st[m.state][0]}">${st[m.state][1]}</span> <span class="dim">try ${m.tries}</span></td></tr>`).join('')
+    || '<tr><td colspan="5" class="empty">Nothing sent since ECH started.</td></tr>';
+  o('m-in').innerHTML = (d.messages || []).filter(m => (m.body || '').startsWith('MSG ')).map(m => `<tr><td>${esc((m.timestamp || '').replace('T', ' ').slice(5, 19))}</td>
+    <td>${esc(m.source_adapter)}</td><td>${esc(m.from_display || m.from_id)}</td><td>${esc((m.body || '').replace(/^MSG /, ''))}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="empty">No APRS messages yet.</td></tr>';
+}
+
+// ── bulletins
+async function loadBulletins() {
+  const d = await api('/api/aprs/bulletins');
+  o('bl-list').innerHTML = (d.bulletins || []).map(b => `<tr><td>${hhmm(b.ts)}</td><td>${esc(b.from)}</td><td>${esc(b.id)}</td><td>${esc(b.text)}</td><td class="dim">${esc(b.adapter)}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="empty">No BLN bulletins heard (APRS-IS only passes bulletins from stations your filter covers).</td></tr>';
+  o('nws-list').innerHTML = (d.nws || []).map(b => `<tr><td>${esc((b.received || '').slice(11, 19))}Z</td><td><span class="pill ${b.kind === 'WARN' ? 'bad' : b.kind === 'WATCH' ? 'warn' : ''}">${esc(b.kind)}</span></td>
+    <td>${esc(b.event)}</td><td>${esc(b.office)}</td><td class="muted">${esc(b.ugcs.join(' '))}</td><td>${b.expires ? esc(new Date(b.expires).toLocaleString()) : ''}</td></tr>`).join('')
+    || '<tr><td colspan="6" class="empty">No NWS bulletins yet.</td></tr>';
+}
+
+// ── objects
+function fmtPos(lat, lon) { return lat == null ? '—' : `${(+lat).toFixed(4)}, ${(+lon).toFixed(4)}`; }
+let _objSource = null;
+async function sendObject() {
+  const adapters = [...document.querySelectorAll('input[name=o-ad]:checked')].map(c => c.value);
+  const spec = {name: o('o-name').value.trim(), lat: o('o-lat').value, lon: o('o-lon').value, symbol: o('o-symbol').value,
+                comment: o('o-comment').value, interval_min: +o('o-interval').value || 20, adapters,
+                source: _objSource, follow: o('o-follow').checked};
+  const rf = _adapters.filter(a => adapters.includes(a.name) && a.kind === 'rf');
+  if (rf.length && !confirm(`Transmit object "${spec.name}" over RF (${rf.map(a => a.name).join(', ')}) every ${spec.interval_min} min until killed?`)) return;
+  try {
+    const r = await post('/api/aprs/objects', spec);
+    const res = r.object.last_result || {};
+    const failed = Object.entries(res).filter(([, ok]) => !ok).map(([n]) => n);
+    toast(failed.length ? `Saved; not sent on ${failed.join(', ')} (not connected?)` : `Object ${spec.name} sent`, !!failed.length);
+    loadObjects();
+  } catch (e) { toast('Not sent: ' + e.message, true); }
+}
+async function killObject(name) {
+  if (!confirm(`Kill object "${name}"? A kill packet goes out now and again in 2 min, then it stops being sent.`)) return;
+  try { await api('/api/aprs/objects/' + encodeURIComponent(name), {method: 'DELETE'}); toast('Killed ' + name); loadObjects(); }
+  catch (e) { toast('Kill failed: ' + e.message, true); }
+}
+function editObject(name) {
+  const ob = (_own || []).find(x => x.name === name); if (!ob) return;
+  o('o-name').value = ob.name; o('o-lat').value = ob.lat; o('o-lon').value = ob.lon; o('o-symbol').value = ob.symbol;
+  o('o-comment').value = ob.comment; o('o-interval').value = ob.interval_min; _objSource = ob.source;
+  o('o-follow').checked = !!ob.follow; o('o-follow-row').style.display = ob.source && ob.source.kind === 'node' ? 'flex' : 'none';
+  document.querySelectorAll('input[name=o-ad]').forEach(c => c.checked = ob.adapters.includes(c.value));
+  symPreview(); o('obj-form').scrollIntoView({behavior: 'smooth'});
+}
+let _own = [];
+async function loadObjects() {
+  const d = await api('/api/aprs/objects');
+  _own = d.own || [];
+  o('own-list').innerHTML = _own.map(ob => {
+    const res = ob.last_result || {};
+    const via = ob.adapters.map(n => `<span class="pill ${res[n] === false ? 'bad' : (_adapters.find(a => a.name === n) || {}).kind || ''}">${esc(n)}</span>`).join(' ');
+    return `<tr><td>${symHtml(ob.symbol)}</td><td>${esc(ob.name)}${ob.follow ? ' <span class="pill" title="follows node position">follow</span>' : ''}</td>
+      <td>${fmtPos(ob.lat, ob.lon)}</td><td>${esc(ob.comment)}</td><td>${ob.interval_min}m</td><td>${via}</td><td>${ago(ob.last_sent)} ago</td>
+      <td style="white-space:nowrap"><button onclick="editObject('${esc(ob.name).replace(/'/g, "\\'")}')">Edit</button> <button class="danger" onclick="killObject('${esc(ob.name).replace(/'/g, "\\'")}')">Kill</button></td></tr>`;
+  }).join('') || '<tr><td colspan="8" class="empty">You have no active objects.</td></tr>';
+  o('obj-list').innerHTML = (d.objects || []).map(ob => `<tr><td>${symHtml(ob.symbol)}</td><td>${esc(ob.name)} <span class="dim">${ob.kind === 'item' ? 'item' : ''}</span></td>
+    <td>${esc(ob.owner)}</td><td>${ob.alive ? '<span class="ok">alive</span>' : '<span class="dim">killed</span>'}</td>
+    <td>${fmtPos(ob.lat, ob.lon)}</td><td>${esc(ob.comment)}</td><td>${ago(ob.ts)} ago</td></tr>`).join('')
+    || '<tr><td colspan="7" class="empty">No objects heard in the last 6 hours.</td></tr>';
+}
+
+// ── beacon
+async function loadBeacons() {
+  const d = await api('/api/aprs/beacon');
+  if (document.activeElement && document.activeElement.closest('#beacon-cards')) return;  // don't clobber edits
+  o('beacon-cards').innerHTML = (d.beacons || []).map(b => `<div class="card" data-ad="${esc(b.name)}">
+    <div class="row" style="display:flex;gap:8px;align-items:center">${symHtml(b.symbol)}<b>${esc(b.callsign)}</b>
+      <span class="pill ${b.kind}">${b.kind === 'rf' ? 'RF' : 'APRS-IS'}</span><span class="muted">${esc(b.name)}</span></div>
+    <div class="muted" style="margin-top:6px">path ${esc(b.tx_path)} · last beacon ${b.last_beacon_ts ? ago(b.last_beacon_ts) + ' ago' : 'never (this run)'}</div>
+    <div class="form" style="grid-template-columns:1fr 1fr">
+      <label>Latitude<input data-f="lat" value="${b.lat ?? ''}"></label><label>Longitude<input data-f="lon" value="${b.lon ?? ''}"></label>
+      <label>Symbol<input data-f="symbol" maxlength="2" value="${esc(b.symbol)}"></label>
+      <label>Every (min, 0 = off)<input data-f="interval" type="number" min="0" value="${Math.round((b.interval_sec || 0) / 60)}"></label>
+      <label class="wide">Comment<input data-f="comment" maxlength="43" value="${esc(b.comment)}"></label>
+      <div class="wide" style="display:flex;gap:8px"><button onclick="saveBeacon('${esc(b.name)}')">Save</button>
+        <button class="primary" onclick="beaconNow('${esc(b.name)}')" ${b.can_transmit ? '' : 'disabled'}>Beacon now</button></div>
+    </div></div>`).join('') || '<div class="empty">No APRS adapter configured.</div>';
+}
+async function saveBeacon(name) {
+  const card = document.querySelector(`.card[data-ad="${CSS.escape(name)}"]`);
+  const f = k => card.querySelector(`[data-f=${k}]`).value;
+  try {
+    await post('/api/aprs/beacon/' + encodeURIComponent(name), {lat: f('lat'), lon: f('lon'), symbol: f('symbol'),
+      comment: f('comment'), interval_sec: Math.round((+f('interval') || 0) * 60)});
+    toast('Beacon settings saved'); document.activeElement.blur(); loadBeacons();
+  } catch (e) { toast('Not saved: ' + e.message, true); }
+}
+async function beaconNow(name) {
+  try {
+    const r = await post('/api/aprs/beacon/' + encodeURIComponent(name) + '/now');
+    if (r.status !== 'ok') throw new Error(r.detail || 'not sent');
+    toast('Beacon sent: ' + r.packet); loadBeacons();
+  } catch (e) { toast('Beacon failed: ' + e.message, true); }
+}
+
+// ── packets
+['p-q', 'p-fmt', 'p-adapter'].forEach(id => o(id).addEventListener(id === 'p-q' ? 'input' : 'change', () => loadPackets()));
+async function loadPackets() {
+  const q = new URLSearchParams({q: o('p-q').value, fmt: o('p-fmt').value, adapter: o('p-adapter').value, limit: 400});
+  const d = await api('/api/aprs/packets?' + q);
+  o('p-list').innerHTML = (d.packets || []).map(p => `<tr><td>${hhmm(p.ts)}</td><td class="dim">${esc(p.adapter)}</td><td>${esc(p.from)}</td>
+    <td class="muted">${esc(p.format)}</td><td>${esc(p.summary)}</td><td class="mono-raw">${esc(p.raw)}</td></tr>`).join('')
+    || '<tr><td colspan="6" class="empty">No packets match.</td></tr>';
+}
+
+// ── weather (aprslib decodes to metric: °C, m/s, mm, hPa)
+const cToF = c => c == null ? null : c * 9 / 5 + 32, msToMph = v => v == null ? null : v * 2.23694;
+const COMPASS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+function spark(hist) {
+  const pts = hist.map(h => cToF(h.temperature)).filter(v => v != null);
+  if (pts.length < 2) return '<span class="dim">—</span>';
+  const mn = Math.min(...pts), mx = Math.max(...pts), w = 80, h = 18, span = mx - mn || 1;
+  const d = pts.map((v, i) => `${(i / (pts.length - 1) * w).toFixed(1)},${(h - 2 - (v - mn) / span * (h - 4)).toFixed(1)}`).join(' ');
+  return `<svg class="spark" width="${w}" height="${h}" title="${mn.toFixed(0)}–${mx.toFixed(0)}°F"><polyline fill="none" stroke="var(--blue)" stroke-width="1.5" points="${d}"/></svg>`;
+}
+async function loadWeather() {
+  const d = await api('/api/aprs/weather');
+  const f1 = (v, n = 0) => v == null ? '—' : (+v).toFixed(n);
+  o('wx-list').innerHTML = (d.stations || []).map(s => {
+    const w = s.wx || {};
+    const dir = w.wind_direction != null ? COMPASS[Math.round(w.wind_direction / 22.5) % 16] : '';
+    return `<tr><td>${esc(s.call)}</td><td><b>${f1(cToF(w.temperature))}°F</b> <span class="dim">${f1(w.temperature, 1)}°C</span></td><td>${spark(s.history || [])}</td>
+      <td>${w.humidity != null ? w.humidity + '%' : '—'}</td><td>${dir} ${f1(msToMph(w.wind_speed))} mph</td><td>${f1(msToMph(w.wind_gust))} mph</td>
+      <td>${w.pressure != null ? (w.pressure * 0.02953).toFixed(2) + ' inHg <span class="dim">' + f1(w.pressure, 1) + ' hPa</span>' : '—'}</td>
+      <td>${f1(w.rain_1h != null ? w.rain_1h / 25.4 : null, 2)} / ${f1(w.rain_24h != null ? w.rain_24h / 25.4 : null, 2)} in</td><td>${ago(s.ts)} ago</td></tr>`;
+  }).join('') || '<tr><td colspan="9" class="empty">No weather stations heard in the last 6 hours.</td></tr>';
+}
+
+// ── refresh loop
+const LOADERS = {messages: loadMessages, bulletins: loadBulletins, objects: loadObjects, beacon: loadBeacons, packets: loadPackets, weather: loadWeather};
+async function refresh() {
+  await loadSummary();
+  if (_tab === 'packets' && !o('p-live').checked && o('p-list').children.length) return;
+  try { await LOADERS[_tab](); } catch (e) { toast('Load failed: ' + e.message, true); }
+}
+setInterval(refresh, 15000);
+
+// Prefill from the map's "📡 APRS object" action: /aprs?tab=objects&name=…&lat=…&lon=…
+(function init() {
+  const q = new URLSearchParams(location.search);
+  let tab = q.get('tab');
+  try { tab = tab || localStorage.getItem('ech_aprs_tab'); } catch (e) {}
+  if (q.get('name') || q.get('lat')) {
+    tab = 'objects';
+    o('o-name').value = (q.get('name') || '').replace(/[^A-Za-z0-9 .\/-]/g, '').slice(0, 9);
+    o('o-lat').value = q.get('lat') || ''; o('o-lon').value = q.get('lon') || '';
+    if (q.get('symbol')) o('o-symbol').value = q.get('symbol');
+    o('o-comment').value = (q.get('comment') || '').slice(0, 43);
+    if (q.get('src_kind')) {
+      _objSource = {kind: q.get('src_kind'), adapter: q.get('src_adapter') || '', id: q.get('src_id') || ''};
+      if (_objSource.kind === 'node') { o('o-follow-row').style.display = 'flex'; o('o-src').textContent = `from ${_objSource.adapter} ${_objSource.id}`; }
+    }
+  }
+  symPreview();
+  showTab(LOADERS[tab] ? tab : 'messages');
+})();
+</script>
+</body>
+</html>

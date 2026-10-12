@@ -8,6 +8,33 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc272 (2026-10-12)
+
+### Added
+- **APRS page** (📍 in the top bar, `/aprs`) — APRS as a status system, not just messaging:
+  - **Messages:** send/receive with **acks and automatic retries** (30 s / 60 s / 120 s);
+    shows waiting / acked / no ack per message.
+  - **Bulletins:** BLN bulletins and NWS bulletins heard on APRS.
+  - **Objects:** objects and items other stations have set, plus **your own objects** —
+    sent on APRS-IS and/or RF, re-sent every 10+ min until you kill them, optionally
+    following a mesh node's live position. Manual only: nothing becomes an APRS object
+    unless you press Send.
+  - **Beacon:** position, symbol, comment and interval per APRS adapter, "Beacon now".
+  - **Packets:** raw packet log (last 2000, filter by callsign/text/type/adapter).
+  - **Weather:** APRS weather stations with temperature, humidity, wind, gust, pressure,
+    rain and a temperature trend.
+- **📡 APRS object** link on map popups (mesh nodes, aircraft, vessels, strip reports,
+  emergency-status entries) — opens the object form pre-filled.
+
+### Fixed
+- Messages addressed to you on APRS are now **acknowledged** (they never were, so the
+  sender's radio kept retrying and never saw delivery); retries of an already-delivered
+  message are acked but not shown twice.
+- APRS RF (KISS/Direwolf): frames were addressed to the first path element (`WIDE1-1`)
+  instead of `APRS` via `WIDE1-1,WIDE2-1`; messages went out without the APRS message
+  header; the receive loop stopped after 2 s of silence. All three fixed.
+- APRS weather from position reports: wind speed is mph (was read as knots).
+
 ## v1.0.0-rc271 (2026-10-12)
 
 ### Added

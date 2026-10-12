@@ -470,6 +470,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
   <a href="/" data-p="/" title="Messages">&#128172;</a>
   <a href="/map" data-p="/map" title="Map">&#128506;&#65039;</a>
   <a href="/hamlog" data-p="/hamlog" title="Ham Log">&#128251;</a>
+  <a href="/aprs" data-p="/aprs" title="APRS">&#128205;</a>
   <a href="/logs" data-p="/logs" title="Logs">&#128220;</a>
   <a href="/anomalies" data-p="/anomalies" title="Anomalies">&#9888;&#65039;</a>
   <a href="/analytics" data-p="/analytics" title="Analytics">&#128202;</a>
@@ -530,6 +531,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     @app.get("/hamlog", response_class=HTMLResponse)
     async def hamlog_page():
         return HTMLResponse(content=_render_template("hamlog.html"), headers=_NO_CACHE)
+
+    @app.get("/aprs", response_class=HTMLResponse)
+    async def aprs_page():
+        return HTMLResponse(content=_render_template("aprs.html"), headers=_NO_CACHE)
 
     # ── Version ───────────────────────────────────────────────────────────
 
@@ -2455,6 +2460,122 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 "aprs": {"used": True, "received": aprs_wx.store.received},
             },
         }
+
+    # ── APRS page (O133) ──────────────────────────────────────────────────
+    # Reads come from the in-memory APRS hub fed by every APRS adapter.
+    # Transmitting endpoints (objects, messages, beacon now) are POST/DELETE,
+    # so viewer accounts are blocked by auth_middleware; changing beacon
+    # settings is admin-only.
+
+    @app.get("/api/aprs/summary")
+    async def aprs_summary():
+        from ech.core.aprs_hub import hub
+        from ech.core import aprs_wx
+        return {
+            "adapters": hub.tx_adapters(),
+            "counts": {"packets": len(hub.packets), "objects": len(hub.objects),
+                       "own_objects": len(hub.own_objects), "weather": len(hub.weather),
+                       "bulletins": len(hub.bulletins) + len(aprs_wx.store.active())},
+        }
+
+    @app.get("/api/aprs/packets")
+    async def aprs_packets(q: str = "", fmt: str = "", adapter: str = "", limit: int = Query(300, le=2000)):
+        from ech.core.aprs_hub import hub
+        ql = q.strip().upper()
+        out = []
+        for p in reversed(hub.packets):
+            if fmt and p["format"] != fmt:
+                continue
+            if adapter and p["adapter"] != adapter:
+                continue
+            if ql and ql not in p["raw"].upper():
+                continue
+            out.append(p)
+            if len(out) >= limit:
+                break
+        return {"packets": out}
+
+    @app.get("/api/aprs/objects")
+    async def aprs_objects():
+        from ech.core.aprs_hub import hub
+        return {"objects": sorted(hub.objects.values(), key=lambda o: -o["ts"]),
+                "own": sorted(hub.own_objects.values(), key=lambda o: o["name"])}
+
+    @app.post("/api/aprs/objects")
+    async def aprs_object_upsert(request: Request):
+        from ech.core.aprs_hub import hub
+        try:
+            obj = await hub.upsert_object(await request.json())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"status": "ok", "object": obj}
+
+    @app.delete("/api/aprs/objects/{name}")
+    async def aprs_object_kill(name: str):
+        from ech.core.aprs_hub import hub
+        if not await hub.kill_object(name):
+            raise HTTPException(status_code=404, detail="Not one of our objects")
+        return {"status": "ok"}
+
+    @app.get("/api/aprs/weather")
+    async def aprs_weather():
+        from ech.core.aprs_hub import hub
+        return {"stations": hub.weather_view()}
+
+    @app.get("/api/aprs/bulletins")
+    async def aprs_bulletins():
+        from ech.core.aprs_hub import hub
+        from ech.core import aprs_wx
+        return {"bulletins": sorted(hub.bulletins.values(), key=lambda b: -b["ts"]),
+                "nws": aprs_wx.store.active()}
+
+    @app.get("/api/aprs/messages")
+    async def aprs_messages(limit: int = Query(200, le=1000)):
+        from ech.core.aprs_hub import hub
+        names = [a["name"] for a in hub.tx_adapters()] or [
+            n for n, a in router._adapters.items() if type(a).__name__.startswith("APRS")]
+        msgs: list = []
+        for n in names:
+            msgs.extend(await db.get_messages(limit=limit, adapter=n))
+        msgs = [m for m in msgs if (m.get("body") or "").startswith("MSG ")]
+        msgs.sort(key=lambda m: m.get("timestamp") or "", reverse=True)
+        return {"messages": msgs[:limit],
+                "outgoing": sorted(hub.outgoing.values(), key=lambda o: -o["sent_ts"])[:100]}
+
+    @app.post("/api/aprs/messages")
+    async def aprs_send_message(request: Request):
+        data = await request.json()
+        to = str(data.get("to") or "").strip().upper()
+        text = str(data.get("text") or "").strip()
+        adapter = str(data.get("adapter") or "")
+        if not to or not text or adapter not in router._adapters:
+            raise HTTPException(status_code=400, detail="adapter, to and text are required")
+        if len(text) > 67:
+            raise HTTPException(status_code=400, detail="APRS messages are limited to 67 characters")
+        results = await router.send(body=text, adapter_names=[adapter], to_id=to)
+        return {"status": "ok" if any(results.values()) else "error", "results": results}
+
+    @app.get("/api/aprs/beacon")
+    async def aprs_beacon_get():
+        from ech.core.aprs_hub import hub
+        return {"beacons": hub.beacon_view()}
+
+    @app.post("/api/aprs/beacon/{adapter_name}")
+    async def aprs_beacon_set(adapter_name: str, request: Request):
+        await _admin_required(request)
+        from ech.core.aprs_hub import hub
+        try:
+            b = await hub.set_beacon(adapter_name, await request.json())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"status": "ok", "beacon": b}
+
+    @app.post("/api/aprs/beacon/{adapter_name}/now")
+    async def aprs_beacon_now(adapter_name: str):
+        a = router._adapters.get(adapter_name)
+        if not a or not hasattr(a, "send_beacon"):
+            raise HTTPException(status_code=404, detail="No APRS adapter by that name")
+        return await a.send_beacon()
 
     # ── GOES local receiver ───────────────────────────────────────────────
 

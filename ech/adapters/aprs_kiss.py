@@ -35,10 +35,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
+import time
 from datetime import datetime, timezone
 
 from ech.adapters.base import Adapter
 from ech.core import aprs_wx
+from ech.core.aprs_hub import (MIN_BEACON_INTERVAL_SEC, build_ack_info, build_message_info,
+                               build_position_info, hub as aprs_hub)
 from ech.core.models import MeshNode, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
@@ -134,6 +137,8 @@ def ax25_to_aprs_string(ax25_frame: bytes) -> str | None:
 
 
 class APRSKISSAdapter(Adapter):
+    aprs_kind = "rf"   # APRS hub: radio path (vs "is")
+
     """
     APRS KISS TNC adapter — serial (hardware TNC) or TCP (Direwolf).
     """
@@ -148,6 +153,18 @@ class APRSKISSAdapter(Adapter):
         self._tcp_port = int(config.get("tcp_port", 8001))
         self._callsign = config.get("callsign", "N0CALL-9").upper()
         self._tx_path = config.get("tx_path", "WIDE1-1,WIDE2-1")
+        # AX.25 destination: the APRS "tocall". tx_path is only the digipeater path.
+        self._tocall = str(config.get("tocall", "APRS")).upper()
+        # Position beacon over RF — off unless beacon_interval_sec is set
+        # (min 600 s on RF) or set from the APRS page.
+        self._beacon_lat = config.get("beacon_lat")
+        self._beacon_lon = config.get("beacon_lon")
+        self._beacon_symbol = config.get("beacon_symbol", "/-")
+        self._beacon_comment = config.get("beacon_comment", "SignalMatrix")
+        _iv = int(config.get("beacon_interval_sec", 0))
+        self._beacon_interval = max(_iv, MIN_BEACON_INTERVAL_SEC["rf"]) if _iv > 0 else 0
+        self._last_beacon_ts = 0.0
+        self._beacon_task: asyncio.Task | None = None
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._run_task: asyncio.Task | None = None
@@ -184,10 +201,14 @@ class APRSKISSAdapter(Adapter):
 
         self._connected = True
         self._run_task = asyncio.create_task(self._run(), name=f"{self.name}-run")
+        self._beacon_task = asyncio.create_task(self._auto_beacon_loop(), name=f"{self.name}-beacon")
         log.info("APRS-KISS %s: connected, monitoring all APRS traffic", self.name)
 
     async def disconnect(self) -> None:
         self._connected = False
+        if self._beacon_task:
+            self._beacon_task.cancel()
+            self._beacon_task = None
         if self._run_task:
             self._run_task.cancel()
             try:
@@ -216,17 +237,71 @@ class APRSKISSAdapter(Adapter):
         """
         if not self._connected:
             return False
+        if not message.to_id:
+            log.warning("APRS-KISS %s: to_id required for APRS message send", self.name)
+            return False
+        # Proper APRS message (":ADDRESSEE:text{n}") — previously the bare body
+        # went out as the info field, which no APRS station decodes as a message.
+        seq = aprs_hub.next_msgno()
+        info = build_message_info(message.to_id, message.body, seq)
+        if not await self.send_info(info):
+            return False
+        self._mark_tx(message)
+        aprs_hub.track_outgoing(self.name, message.to_id, message.body, seq, info)
+        return True
+
+    def can_transmit(self) -> bool:
+        return self._connected and self._writer is not None
+
+    async def send_info(self, info: str) -> bool:
+        """Transmit one APRS packet over RF with this info field."""
+        if not self.can_transmit():
+            return False
         try:
-            ax25 = self._build_ax25_ui(message.body)
-            frame = kiss_encode(ax25)
-            self._writer.write(frame)
+            ax25 = self._build_ax25_ui(info)
+            self._writer.write(kiss_encode(ax25))
             await self._writer.drain()
-            self._mark_tx(message)
-            log.debug("APRS-KISS %s: TX %d bytes: %s", self.name, len(ax25), message.body[:60])
+            log.info("APRS-KISS %s: TX %s", self.name, info[:80])
             return True
         except Exception as exc:
             log.error("APRS-KISS %s: send error: %s", self.name, exc)
             return False
+
+    # ── Position beacon (RF) ──────────────────────────────────────────────
+
+    def set_base_location(self, lat: float, lon: float) -> None:
+        self._beacon_lat, self._beacon_lon = lat, lon
+
+    async def send_beacon(self, lat: float | None = None, lon: float | None = None,
+                          comment: str | None = None) -> dict:
+        use_lat = lat if lat is not None else self._beacon_lat
+        use_lon = lon if lon is not None else self._beacon_lon
+        if use_lat is None or use_lon is None:
+            return {"status": "error", "detail": "no coordinates configured"}
+        if comment:
+            self._beacon_comment = comment
+        info = build_position_info(float(use_lat), float(use_lon), self._beacon_symbol, self._beacon_comment)
+        if not await self.send_info(info):
+            return {"status": "error", "detail": "not connected"}
+        self._last_beacon_ts = time.time()
+        return {"status": "ok", "packet": f"{self._callsign}>{self._tocall},{self._tx_path}:{info}",
+                "lat": use_lat, "lon": use_lon}
+
+    async def _auto_beacon_loop(self) -> None:
+        try:
+            while self._connected:
+                await asyncio.sleep(15)
+                iv = self._beacon_interval
+                if iv > 0 and time.time() - self._last_beacon_ts >= iv:
+                    await self.send_beacon()
+                    if time.time() - self._last_beacon_ts > iv:
+                        self._last_beacon_ts = time.time()   # don't retry every tick on errors
+        except asyncio.CancelledError:
+            pass
+
+    def _is_directed_to_us(self, addresse: str) -> bool:
+        own_full = self._callsign.upper()
+        return addresse.strip().upper() in (own_full.split("-")[0], own_full)
 
     def _build_ax25_ui(self, info: str) -> bytes:
         """Build minimal AX.25 UI frame for APRS transmission."""
@@ -247,9 +322,11 @@ class APRSKISSAdapter(Adapter):
             b.append(ssid_byte)
             return bytes(b)
 
-        dest_parts = self._tx_path.split(",") if self._tx_path else []
-        dest_call = dest_parts[0] if dest_parts else "APRS"
-        digis = dest_parts[1:] if len(dest_parts) > 1 else []
+        # Destination = tocall (APRS); tx_path (WIDE1-1,WIDE2-1) = digipeaters.
+        # Previously the first path element was used as the destination, so
+        # frames went out addressed to WIDE1-1 with only WIDE2-1 as a digi.
+        dest_call = self._tocall
+        digis = [d.strip() for d in self._tx_path.split(",") if d.strip()] if self._tx_path else []
 
         frame = bytearray()
         frame += encode_callsign(dest_call)
@@ -268,16 +345,15 @@ class APRSKISSAdapter(Adapter):
         log.debug("APRS-KISS %s: RX loop started", self.name)
         try:
             while self._connected:
-                chunk = await asyncio.wait_for(
-                    self._reader.read(1024), timeout=2.0
-                )
+                try:
+                    chunk = await asyncio.wait_for(self._reader.read(1024), timeout=2.0)
+                except asyncio.TimeoutError:
+                    continue  # quiet channel, keep listening (this used to end the RX loop)
                 if not chunk:
                     raise ConnectionError("APRS-KISS: EOF on stream")
                 self._buf.extend(chunk)
                 await self._process_buffer()
 
-        except asyncio.TimeoutError:
-            pass  # Normal: no data for 2s, loop back
         except asyncio.CancelledError:
             log.debug("APRS-KISS %s: RX loop cancelled", self.name)
         except ConnectionError as exc:
@@ -310,6 +386,15 @@ class APRSKISSAdapter(Adapter):
     async def _process_packet(self, packet: dict, raw_str: str) -> None:
         self._packet_count += 1
         from_id = packet.get("from", raw_str.split(">")[0] if ">" in raw_str else "UNKNOWN")
+        aprs_hub.ingest(packet, raw_str, self.name)
+
+        # Ack messages addressed to us; a retry of one already delivered is
+        # acked again but not shown twice.
+        if (packet.get("format") == "message" and packet.get("msgNo") and not packet.get("response")
+                and self._is_directed_to_us(packet.get("addresse", ""))):
+            await self.send_info(build_ack_info(from_id, str(packet["msgNo"])))
+            if aprs_hub.incoming_message_seen(from_id, str(packet["msgNo"])):
+                return
 
         # NWS weather bulletins heard on RF → map weather layer
         if packet.get("format") == "message" and aprs_wx.store.ingest(

@@ -434,7 +434,10 @@ adapters:
 #     port: /dev/ttyUSB1
 #     baud: 9600
 #     callsign: N0CALL-9
-#     tx_path: WIDE1-1,WIDE2-1
+#     tx_path: WIDE1-1,WIDE2-1   # digipeater path (the AX.25 destination is `tocall`, default APRS)
+#     beacon_interval_sec: 0     # RF position beacon, min 600; also settable on the APRS page
+#     beacon_symbol: "/-"
+#     beacon_comment: "SignalMatrix"
 #
 # Direwolf KISS over TCP:
 #   - type: aprs_kiss

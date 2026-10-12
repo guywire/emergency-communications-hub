@@ -308,6 +308,14 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     # Now start router (adapters already have correct pause state)
     await router.start()
 
+    # APRS hub (O133): packet log, objects, weather, bulletins, acks/retries,
+    # our own objects + beacon settings saved from the APRS page
+    from ech.core.aprs_hub import hub as aprs_hub
+    aprs_hub.set_router(router)
+    await aprs_hub.set_db(db)
+    await aprs_hub.restore_beacon_settings()
+    aprs_hub.start()
+
     # System GPS reader (optional — only if 'gps:' section present in config)
     gps_reader = None
     gps_cfg = config.get("gps")
@@ -444,6 +452,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
             await mc_hub_compare.stop()
         if 'goes_service' in dir():
             await goes_service.stop()
+        if 'aprs_hub' in dir():
+            await aprs_hub.stop()
         if 'wx_bot' in dir():
             await wx_bot.stop()
         if 'cat_ctrl' in dir():

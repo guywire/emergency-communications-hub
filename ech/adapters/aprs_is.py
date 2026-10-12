@@ -23,18 +23,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 
 import aprslib
 
 from ech.adapters.base import Adapter
 from ech.core import aprs_wx
+from ech.core.aprs_hub import build_ack_info, build_message_info, build_position_info, hub as aprs_hub
 from ech.core.models import MeshNode, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
 
 
 class APRSISAdapter(Adapter):
+    aprs_kind = "is"   # APRS hub: internet path (vs "rf")
+
     """
     APRS-IS adapter using aprslib (synchronous library bridged to asyncio).
     aprslib uses blocking I/O internally so we run it in a thread and
@@ -69,6 +73,7 @@ class APRSISAdapter(Adapter):
         self._beacon_symbol = config.get("beacon_symbol", "/-")   # /- = house
         self._beacon_comment = config.get("beacon_comment", "SignalMatrix")
         self._beacon_interval = int(config.get("beacon_interval_sec", 0))  # 0 = disabled
+        self._last_beacon_ts = 0.0
         self._ais: aprslib.IS | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -105,6 +110,7 @@ class APRSISAdapter(Adapter):
             if self._beacon_lat is not None and self._beacon_lon is not None:
                 pos_pkt = self._make_beacon_packet(self._beacon_lat, self._beacon_lon)
                 await self._loop.run_in_executor(None, self._ais.sendall, pos_pkt)
+                self._last_beacon_ts = time.time()   # auto-beacon loop counts from here
                 log.info("APRS-IS %s: sent position beacon (%.5f, %.5f)",
                          self.name, self._beacon_lat, self._beacon_lon)
             else:
@@ -127,7 +133,7 @@ class APRSISAdapter(Adapter):
         self._cleanup_task = asyncio.create_task(
             self._cleanup_loop(), name=f"{self.name}-cleanup"
         )
-        if self._beacon_interval > 0 and self._passcode != -1:
+        if self._passcode != -1:
             self._beacon_task = asyncio.create_task(
                 self._auto_beacon_loop(), name=f"{self.name}-beacon"
             )
@@ -165,18 +171,34 @@ class APRSISAdapter(Adapter):
             return False
 
         # APRS message format: SRC>APRS,TCPIP*::DEST     :body{seq}
-        dest = message.to_id.upper().ljust(9)
-        seq = self._msg_seq
-        self._msg_seq = (self._msg_seq % 99999) + 1
-        aprs_str = f"{self._callsign}>APRS,TCPIP*::{dest}:{message.body}{{{seq}}}"
+        # Tracked by the APRS hub, which retries until the recipient acks.
+        seq = aprs_hub.next_msgno()
+        info = build_message_info(message.to_id, message.body, seq)
+        aprs_str = f"{self._callsign}>APRS,TCPIP*:{info}"
         try:
             await self._loop.run_in_executor(None, self._ais.sendall, aprs_str)
             self._mark_tx(message)
-            log.info("APRS-IS %s: sent to %s (seq %d): %s",
+            aprs_hub.track_outgoing(self.name, message.to_id, message.body, seq, info)
+            log.info("APRS-IS %s: sent to %s (seq %s): %s",
                      self.name, message.to_id, seq, message.body[:60])
             return True
         except Exception as exc:
             log.error("APRS-IS %s: send error: %s", self.name, exc)
+            return False
+
+    def can_transmit(self) -> bool:
+        return self._passcode != -1 and bool(self._ais) and self._connected
+
+    async def send_info(self, info: str) -> bool:
+        """Send one APRS packet with this info field (APRS hub: objects,
+        acks, retries). Header SRC>APRS,TCPIP* added here."""
+        if not self.can_transmit():
+            return False
+        try:
+            await self._loop.run_in_executor(None, self._ais.sendall, f"{self._callsign}>APRS,TCPIP*:{info}")
+            return True
+        except Exception as exc:
+            log.error("APRS-IS %s: send_info error: %s", self.name, exc)
             return False
 
     # ── Position beacon ───────────────────────────────────────────────────
@@ -220,6 +242,7 @@ class APRSISAdapter(Adapter):
         pkt = self._make_beacon_packet(use_lat, use_lon)
         try:
             await self._loop.run_in_executor(None, self._ais.sendall, pkt)
+            self._last_beacon_ts = time.time()
             log.info("APRS-IS %s: position beacon sent (%.5f, %.5f): %s",
                      self.name, use_lat, use_lon, pkt)
             return {"status": "ok", "packet": pkt, "lat": use_lat, "lon": use_lon}
@@ -228,12 +251,18 @@ class APRSISAdapter(Adapter):
             return {"status": "error", "detail": str(exc)}
 
     async def _auto_beacon_loop(self) -> None:
-        """Send periodic position beacons if beacon_interval_sec > 0."""
+        """Send periodic position beacons while beacon_interval_sec > 0.
+        Ticks every 15 s and re-reads the interval, so a change made on the
+        APRS page takes effect without reconnecting."""
         try:
             while self._connected:
-                await asyncio.sleep(self._beacon_interval)
-                if self._beacon_lat is not None and self._beacon_lon is not None:
+                await asyncio.sleep(15)
+                iv = self._beacon_interval
+                if (iv > 0 and self._beacon_lat is not None and self._beacon_lon is not None
+                        and time.time() - self._last_beacon_ts >= iv):
                     await self.send_beacon()
+                    if not self._last_beacon_ts or time.time() - self._last_beacon_ts > iv:
+                        self._last_beacon_ts = time.time()   # don't hammer on errors
         except asyncio.CancelledError:
             pass
 
@@ -303,6 +332,18 @@ class APRSISAdapter(Adapter):
             lat      = packet.get("latitude")
             lon      = packet.get("longitude")
             now      = datetime.now(timezone.utc)
+
+            aprs_hub.ingest(packet, packet.get("raw", ""), self.name)
+
+            # Ack messages addressed to us (APRS 1.0.1 ch. 14) — without it the
+            # sender's radio keeps retrying and never learns it was delivered.
+            # A retry of something already delivered is acked again but not
+            # shown twice.
+            if (fmt == "message" and packet.get("msgNo") and not packet.get("response")
+                    and self._is_directed_to_us(packet.get("addresse", ""))):
+                await self.send_info(build_ack_info(gate_id, str(packet["msgNo"])))
+                if aprs_hub.incoming_message_seen(gate_id, str(packet["msgNo"])):
+                    return
 
             # NWS weather bulletins → map weather layer, not the message stream
             # or station list (with g/NWS-* they arrive from the whole country,

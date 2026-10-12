@@ -325,6 +325,26 @@ function makeNodeIcon(node, color, size=12) {
   return makeIcon(color, size);
 }
 
+// O133: "📡 APRS object" — opens the APRS page's object form pre-filled
+// with this map item. Manual only: nothing is sent until the operator
+// presses Send there.
+function aprsObjectLink(o) {
+  if (o.lat == null || o.lon == null) return '';
+  const q = new URLSearchParams({
+    name: String(o.name || '').replace(/[^A-Za-z0-9 .\/-]/g, '').trim().slice(0, 9),
+    lat: (+o.lat).toFixed(5), lon: (+o.lon).toFixed(5), symbol: o.symbol || '/.',
+    comment: String(o.comment || '').slice(0, 43)});
+  if (o.src) { q.set('src_kind', o.src.kind); q.set('src_adapter', o.src.adapter || ''); q.set('src_id', o.src.id || ''); }
+  return `<a href="${window.ECH_BASE_PATH || ''}/aprs?${q}" target="_blank" rel="noopener" title="Send this to APRS as an object (opens the APRS page — nothing is sent until you press Send)">📡 APRS object</a>`;
+}
+function _aprsSymbolFor(node) {
+  const a = (node._adapter || '').toLowerCase();
+  if ((node.node_id || '').toLowerCase().startsWith('icao:')) return "/'";
+  if (nodeIsVessel(node)) return '/s';
+  if (a.includes('meshcore') || a.includes('meshtastic')) return 'M#';
+  return '/.';
+}
+
 // APRS symbols drawn with the aprs.fi symbol set (github.com/hessu/aprs-symbols,
 // bundled under /static/aprs-symbols so it works offline). Each sheet is a
 // 16x6 grid of 48px cells, shown at 24px; symbol code c sits at index
@@ -402,6 +422,11 @@ function popupContent(node, isAlert, lastMsg) {
     : `<span style="flex:1;text-align:center;font-family:var(--mono);font-size:9px;padding:4px 2px;border:1px solid var(--border);color:var(--muted);border-radius:3px" title="${notMsgTitle}">not messageable</span>`;
   const actionBtns = `<div style="display:flex;gap:5px;margin-top:8px">
     ${msgAction}
+    ${(node.lat != null && !(node._adapter || '').toLowerCase().includes('aprs'))
+      ? `<span style="flex:1;text-align:center;font-family:var(--mono);font-size:10px;padding:4px 0;border:1px solid rgba(188,140,255,.4);border-radius:3px">${aprsObjectLink({
+          name: node.short_name || node.display_name || node.node_id, lat: node.lat, lon: node.lon, symbol: _aprsSymbolFor(node),
+          comment: `${node.display_name || node.node_id} via ${node._adapter || ''}`,
+          src: {kind: 'node', adapter: node._adapter, id: node.node_id}})}</span>` : ''}
     ${isMeshCore ? `<button onclick="mapTrace('${esc(node._adapter)}','${esc(node.node_id)}',this)" style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);color:#3fb950;border-radius:3px;cursor:pointer">📡 Trace</button>` : ''}
   </div>`;
 
@@ -1266,7 +1291,9 @@ function addStripMarker(rep) {
     <div class="node-stat">${rep.sent ? '✓ Sent' + (rep.winlink_dest ? ' → ' + esc(rep.winlink_dest) : '') : '⏳ Pending'}</div>
     <div class="node-stat">${new Date(rep.timestamp).toUTCString().slice(5,22)}</div>
     ${fieldLines}
-    <div class="node-ext-links"><a href="/reports" target="_blank" rel="noopener">Open in Reports →</a></div>
+    <div class="node-ext-links"><a href="/reports" target="_blank" rel="noopener">Open in Reports →</a> &bull; ${aprsObjectLink({
+      name: rep.template || 'STRIP', lat: rep.lat, lon: rep.lon, symbol: '\\!',
+      comment: `${rep.template || 'Report'} from ${rep.from_display || rep.from_id || ''}`, src: {kind: 'strip', id: String(rep.id || '')}})}</div>
   </div>`;
   const m = L.marker([rep.lat, rep.lon], {icon}).bindPopup(popup).addTo(map);
   _stripMarkers.push(m);
@@ -1328,7 +1355,10 @@ function addEmergencyStatusMarker(entry) {
     <div class="node-stat" style="color:${color}">Status: ${esc(entry.status || '(unset)')}</div>
     ${entry.details ? `<div class="node-stat">${esc(entry.details)}</div>` : ''}
     <div class="node-stat">${esc(entry.updated_at || '').replace('T',' ').slice(0,19)} UTC</div>
-    <div class="node-ext-links"><a href="/status-board" target="_blank" rel="noopener">Open in Status Board →</a></div>
+    <div class="node-ext-links"><a href="/status-board" target="_blank" rel="noopener">Open in Status Board →</a> &bull; ${aprsObjectLink({
+      name: entry.name, lat: entry.lat, lon: entry.lon,
+      symbol: /hosp/i.test(entry.category || '') ? '/h' : /shelter/i.test(entry.category || '') ? '/;' : '/.',
+      comment: `${entry.category || ''}: ${entry.status || ''}`, src: {kind: 'status', id: String(entry.id || '')}})}</div>
   </div>`;
   const m = L.marker([entry.lat, entry.lon], {icon}).bindPopup(popup).addTo(map);
   _estatusMarkers.push(m);
