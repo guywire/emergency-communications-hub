@@ -14,6 +14,10 @@ from v1.0.0-rc198 — earlier history predates this file.
 - README screenshots of the map weather layers and the new APRS page.
 
 ### Fixed
+- Meshtastic: messages from a node the radio hadn't learned yet showed a **null sender**
+  (the library sets `fromId` to None, and the fallback only applied to a missing key). The
+  sender is now taken from the numeric node number (`!aabbccdd`) and shown until its name
+  arrives; same fix for the destination, so direct messages are no longer mistaken for broadcasts.
 - Settings → add adapter: **JS8Call** now offers its fields (host, port, callsign,
   keepalive, activity, filter-own) instead of an empty form; APRS KISS gained `tocall`
   and `beacon_interval_sec` in its field list.
