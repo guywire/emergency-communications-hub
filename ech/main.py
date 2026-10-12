@@ -257,6 +257,14 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     from ech.core.weather import WeatherService
     wx_service = WeatherService(config, router=router)
 
+    # GOES from a local RTL-SDR receiver (goestools/SatDump output) — off unless configured
+    from ech.core.goes_receiver import GoesReceiverService
+    goes_service = GoesReceiverService(config, wx_service=wx_service)
+
+    # APRS NWS bulletins need zone shapes too (fetched while the internet is up)
+    from ech.core import aprs_wx
+    wx_service.zone_providers.append(lambda: [u for b in aprs_wx.store.active() for u in b["ugcs"]])
+
     # Air quality / wildfire smoke service (AirNow AQI + NASA FIRMS hotspots)
     from ech.core.air_quality import AirQualityService
     aq_service = AirQualityService(config, router=router)
@@ -320,6 +328,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     await mm_coverage_service.start()
     await pota_service.start()
     await mc_hub_compare.start()
+    await goes_service.start()
 
     # CAT radio control via rigctld (Hamlib)
     from ech.core.cat_rigctld import CATController
@@ -373,6 +382,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
                      mm_coverage_service=mm_coverage_service if 'mm_coverage_service' in dir() else None,
                      pota_service=pota_service if 'pota_service' in dir() else None,
                      mc_hub_compare=mc_hub_compare if 'mc_hub_compare' in dir() else None,
+                     goes_service=goes_service if 'goes_service' in dir() else None,
                      auth=auth, ech_state=state, mc_bridge=mc_bridge,
                      gps_reader=gps_reader, secure_cookies=secure_cookies,
                      cat_ctrl=cat_ctrl if 'cat_ctrl' in dir() else None,
@@ -432,6 +442,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
             await pota_service.stop()
         if 'mc_hub_compare' in dir():
             await mc_hub_compare.stop()
+        if 'goes_service' in dir():
+            await goes_service.stop()
         if 'wx_bot' in dir():
             await wx_bot.stop()
         if 'cat_ctrl' in dir():

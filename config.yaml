@@ -368,6 +368,8 @@ adapters:
 #     filter: "r/44.1/-69.1/60"   # radius in km — keep this tight; a wide radius (e.g. 250km)
 #                                  # pulls in the whole region's ship-AIS/digipeater/beacon
 #                                  # firehose (observed: 8000+ msgs/day at 250km vs local need)
+#     nws_bulletins: true         # default — appends g/NWS-* so NWS weather bulletins reach the
+#                                  # map's weather layer (violet); they never enter the message log
 #
 # CW / Morse code over a sound card (built-in, USB, or a rig's USB audio codec):
 #   RX decodes transmissions into inbox messages (adaptive speed/pitch/threshold);
@@ -667,6 +669,39 @@ mesh_bot:
   # ndbc_lon: null
 
 # weather_bot key is still accepted as an alias for mesh_bot (backwards compat)
+
+# ── Map weather layer: regional NWS alerts ────────────────────────────────────
+# The map's ⛈ Weather warnings layer shows every active alert for the hub's
+# state, its neighbouring states and nearby marine areas — not just the alerts
+# covering the hub's own point (those still drive the mesh broadcasts above).
+# Zone-based alerts (most Special Weather Statements, winter/wind advisories)
+# are drawn from NWS zone outlines, fetched once and cached next to the DB in
+# nws_zone_cache.json so they still draw when the internet is down.
+# weather_service:
+#   map_alerts: true
+#   map_alert_areas: []          # override, e.g. ["ME", "NH", "AN"]; empty = auto from hub location
+#   map_alert_radius_km: 500     # hide alerts drawn entirely farther than this (0 = no limit)
+
+# ── GOES satellite from your own receiver (RTL-SDR) ───────────────────────────
+# Uses what goestools (goesrecv + goesproc) or SatDump writes from GOES HRIT/
+# LRIT (1694.1 MHz, needs a ~1 m dish or grid + LNA/filter) instead of the
+# internet. The receiver can run on another machine; get its output into
+# these directories however suits (NFS/sshfs mount, rsync from cron).
+# goes_receiver:
+#   enabled: false
+#   imagery_dir: "/srv/goes/goes19/fd/ch13"   # FULL-DISK channel folder (searched by newest date subfolder)
+#   imagery_glob: "*"              # e.g. "*CH13*" if several products share the folder
+#   satellite_lon: -75.2           # GOES-19 (East) -75.2, GOES-18 (West) -137.0
+#   imagery_source: auto           # auto = own image if newer than max_image_age_min, else internet
+#                                  # local = always own image; internet = never
+#   max_image_age_min: 90
+#   region_half_width_deg: 10      # area around the hub that gets reprojected
+#   region_half_height_deg: 7
+#   output_px: 1024
+#   emwin_dir: "/srv/goes/emwin"   # goesproc "emwin" handler output (NWS text products)
+#   alerts_source: auto            # auto = NWS internet while it's answering, else GOES EMWIN
+#                                  # goes | internet | both
+#   emwin_max_age_hours: 12
 
 # ── Air quality / wildfire smoke (AirNow AQI + NASA FIRMS + NOAA HMS smoke) ───
 # Powers the mesh bot's "smoke"/"aqi" command and the map's 🔥 AQI layer

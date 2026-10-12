@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -27,6 +28,7 @@ import httpx
 
 from ech.core.models import NormalizedMessage, Priority
 from ech.core import identity
+from ech.core import nws_zones
 
 log = logging.getLogger(__name__)
 
@@ -94,6 +96,30 @@ class WeatherService:
         # Scheduled broadcasts from config
         self._schedules = config.get("scheduled_broadcasts", [])
 
+        # Map weather layer: every active alert for the region around the hub
+        # (its state, neighbouring states and nearby marine areas), not just
+        # the ones covering the hub's own point. Zone-based alerts (most
+        # Special Weather Statements, winter/wind advisories) are drawn from
+        # cached NWS zone boundaries.
+        self._map_alerts_enabled = bool(wx_cfg.get("map_alerts", True))
+        self._map_areas_cfg = [str(a).upper() for a in (wx_cfg.get("map_alert_areas") or [])]
+        # Marine areas are big (AN = Maine to Virginia waters): drop alerts
+        # whose shape lies entirely farther than this from the hub.
+        self._map_radius_km = float(wx_cfg.get("map_alert_radius_km", 500))
+        self._map_alerts: list[dict] = []
+        self._map_areas: list[str] = []
+        self._map_last_ok: float = 0.0
+        self._map_last_error: str = ""
+        self._hub_state: str | None = None
+        self._hub_state_for: tuple | None = None
+        # Callables returning UGC codes other sources need shapes for
+        # (APRS bulletins, GOES EMWIN) — registered in main.py
+        self.zone_providers: list = []
+        _db_path = (config.get("database") or {}).get("path", "ech.db")
+        _data_dir = os.path.dirname(os.path.abspath(_db_path)) if _db_path != ":memory:" else None
+        self.zones = nws_zones.ZoneShapeCache(
+            wx_cfg.get("zone_cache_path") or (os.path.join(_data_dir, "nws_zone_cache.json") if _data_dir else None))
+
     def set_db(self, db) -> None:
         self._db = db
 
@@ -131,12 +157,133 @@ class WeatherService:
     async def _poll_loop(self) -> None:
         # Initial poll on startup
         await self._poll_alerts()
+        await self._poll_map_alerts()
         try:
             while True:
                 await asyncio.sleep(self._poll_interval)
                 await self._poll_alerts()
+                await self._poll_map_alerts()
         except asyncio.CancelledError:
             pass
+
+    # ── Regional alerts for the map ───────────────────────────────────────
+
+    async def _resolve_map_areas(self) -> list[str]:
+        if self._map_areas_cfg:
+            return self._map_areas_cfg
+        if self._lat is not None and self._lon is not None:
+            key = (round(float(self._lat), 2), round(float(self._lon), 2))
+            if self._hub_state_for != key:
+                try:
+                    r = await self._client.get(f"{NWS_API_BASE}/points/{key[0]},{key[1]}")
+                    r.raise_for_status()
+                    st = (((r.json().get("properties") or {}).get("relativeLocation") or {})
+                          .get("properties") or {}).get("state")
+                    if st:
+                        self._hub_state, self._hub_state_for = str(st).upper(), key
+                except Exception as exc:
+                    log.debug("WeatherService: /points state lookup failed: %s", exc)
+        state = self._hub_state or (self._area or "").upper()
+        return nws_zones.region_areas(state) if state else []
+
+    def map_area_states(self) -> set[str]:
+        """Two-letter prefixes (states + marine areas) the map layer covers.
+        Works with no internet too: falls back to the configured areas or
+        nws_area's region, so APRS/GOES alerts can still be filtered."""
+        if self._map_areas:
+            return set(self._map_areas)
+        if self._map_areas_cfg:
+            return set(self._map_areas_cfg)
+        state = self._hub_state or (self._area or "").upper()
+        return set(nws_zones.region_areas(state)) if state else set()
+
+    async def _poll_map_alerts(self) -> None:
+        if not self._map_alerts_enabled or not self._client:
+            return
+        try:
+            areas = await self._resolve_map_areas()
+            if not areas:
+                return
+            self._map_areas = areas
+            resp = await self._client.get(f"{NWS_API_BASE}/alerts/active",
+                                          params={"area": ",".join(areas), "status": "actual"})
+            resp.raise_for_status()
+            alerts: list[dict] = []
+            need_zones: list[str] = []
+            for feature in resp.json().get("features", []):
+                props = feature.get("properties", {})
+                event = props.get("event", "")
+                if props.get("status", "Actual") != "Actual" or "test" in event.lower():
+                    continue
+                geom = feature.get("geometry")
+                ugcs = [z for z in (nws_zones.ugc_from_url(u) for u in props.get("affectedZones") or []) if z]
+                if not geom:
+                    need_zones.extend(ugcs)
+                alerts.append({
+                    "id": props.get("id", ""),
+                    "event": event,
+                    "severity": props.get("severity", "Unknown"),
+                    "urgency": props.get("urgency", "Unknown"),
+                    "headline": props.get("headline", ""),
+                    "area": props.get("areaDesc", ""),
+                    "sender": props.get("senderName", ""),
+                    "expires": props.get("ends") or props.get("expires") or "",
+                    "geometry": geom,
+                    "ugcs": ugcs,
+                    "source": "nws_api",
+                })
+            self._map_alerts = alerts
+            self._map_last_ok = time.time()
+            self._map_last_error = ""
+        except Exception as exc:
+            self._map_last_error = str(exc)[:200]
+            log.warning("WeatherService: regional map alert poll failed: %s", exc)
+            need_zones = []
+        # Zone shapes for APRS bulletins and GOES EMWIN products too, while
+        # the internet is up, so they can still be drawn when it isn't.
+        for provider in self.zone_providers:
+            try:
+                need_zones.extend(provider())
+            except Exception as exc:
+                log.debug("WeatherService: zone provider failed: %s", exc)
+        prefixes = self.map_area_states()
+        need_zones = [z for z in need_zones if not prefixes or z[:2] in prefixes]
+        try:
+            await self.zones.ensure(need_zones, self._client)
+        except Exception as exc:
+            log.debug("WeatherService: zone fetch failed: %s", exc)
+
+    def near_hub(self, geometry: dict | None, ugcs: list[str] | None = None) -> bool:
+        """True if the alert's shape (its polygon, or its cached zone
+        outlines) comes within map_alert_radius_km of the hub. Unknown
+        shape or hub location → True (never hidden for lack of data)."""
+        if self._lat is None or self._lon is None or self._map_radius_km <= 0:
+            return True
+        boxes = []
+        if geometry:
+            boxes.append(nws_zones.geometry_bbox(geometry))
+        else:
+            for u in ugcs or []:
+                g = self.zones.get(u)
+                if g:
+                    boxes.append(nws_zones.geometry_bbox(g))
+        boxes = [b for b in boxes if b]
+        if not boxes:
+            return True
+        import math
+        lat, lon = float(self._lat), float(self._lon)
+        for x0, y0, x1, y1 in boxes:
+            # nearest point of the box to the hub, then haversine
+            nlat, nlon = min(max(lat, y0), y1), min(max(lon, x0), x1)
+            p1, p2 = math.radians(lat), math.radians(nlat)
+            a = (math.sin((p2 - p1) / 2) ** 2
+                 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(nlon - lon) / 2) ** 2)
+            if 2 * 6371.0 * math.asin(math.sqrt(min(1.0, a))) <= self._map_radius_km:
+                return True
+        return False
+
+    def map_alerts_fresh(self, max_age_sec: int = 1200) -> bool:
+        return bool(self._map_last_ok) and time.time() - self._map_last_ok < max_age_sec
 
     async def _poll_alerts(self) -> None:
         try:

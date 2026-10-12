@@ -38,7 +38,8 @@ import struct
 from datetime import datetime, timezone
 
 from ech.adapters.base import Adapter
-from ech.core.models import NormalizedMessage, Priority
+from ech.core import aprs_wx
+from ech.core.models import MeshNode, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
 
@@ -152,6 +153,8 @@ class APRSKISSAdapter(Adapter):
         self._run_task: asyncio.Task | None = None
         self._packet_count = 0
         self._buf = bytearray()
+        self._nodes: dict[str, MeshNode] = {}
+        self._node_ttl = int(config.get("node_ttl_sec", 3600))
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -307,12 +310,31 @@ class APRSKISSAdapter(Adapter):
     async def _process_packet(self, packet: dict, raw_str: str) -> None:
         self._packet_count += 1
         from_id = packet.get("from", raw_str.split(">")[0] if ">" in raw_str else "UNKNOWN")
-        body = self._packet_to_body(packet, raw_str)
-        if not body:
+
+        # NWS weather bulletins heard on RF → map weather layer
+        if packet.get("format") == "message" and aprs_wx.store.ingest(
+                from_id, packet.get("addresse", ""), packet.get("message_text", ""), via=self.name):
             return
 
         lat = packet.get("latitude")
         lon = packet.get("longitude")
+        if lat is not None and lon is not None:
+            # Station cache for the map, with the APRS symbol (aprs.fi icons)
+            node_id = (packet.get("object_name") or "").strip() if packet.get("format") == "object" else ""
+            node_id = node_id or from_id
+            now = datetime.now(timezone.utc)
+            node = self._nodes.get(node_id)
+            if node is None:
+                node = MeshNode(node_id=node_id, display_name=node_id, first_seen=now)
+                self._nodes[node_id] = node
+            node.last_heard = now
+            node.lat, node.lon = float(lat), float(lon)
+            if packet.get("symbol") and packet.get("symbol_table"):
+                node.meta["aprs_symbol"] = str(packet["symbol_table"])[:1] + str(packet["symbol"])[:1]
+
+        body = self._packet_to_body(packet, raw_str)
+        if not body:
+            return
 
         # Extract digipeater path: "SRC>DEST,DIGI1*,DIGI2:..." → "DEST,DIGI1*,DIGI2"
         aprs_path = None
@@ -361,6 +383,12 @@ class APRSKISSAdapter(Adapter):
         # Fallback to raw
         info_part = raw_str.split(":", 1)[-1] if ":" in raw_str else raw_str
         return info_part[:120].strip() or ""
+
+    async def nodes(self):
+        """Stations heard on RF within node_ttl_sec (default 1 hr)."""
+        cutoff = datetime.now(timezone.utc).timestamp() - self._node_ttl
+        return [n for n in self._nodes.values()
+                if n.last_heard and n.last_heard.timestamp() >= cutoff]
 
     def _health_detail(self) -> dict:
         return {

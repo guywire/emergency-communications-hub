@@ -8,6 +8,28 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc271 (2026-10-12)
+
+### Added
+- **Special Weather Statements on the map:** the ⛈ Weather warnings layer now shows every
+  active NWS alert for your state, neighbouring states and nearby waters, not just alerts
+  covering the hub (within 500 km, `map_alert_radius_km`). Zone-based alerts (most SPS, winter/wind/fog advisories) are drawn as
+  their NWS zone/county outlines (dashed); SPS use NWS's moccasin colour. Zone outlines are
+  cached on the server, so they still draw when the internet is down.
+- **GOES from your own receiver (RTL-SDR):** new `goes_receiver` section. Point it at
+  goestools/SatDump output and the 🛰 Satellite IR layer uses your own full-disk image
+  (reprojected for your area) instead of the internet, and EMWIN text gives warnings and
+  SPS with no internet. `auto` (default) uses the internet while it answers and your
+  receiver otherwise; `local`/`goes`, `internet` and `both` force a source.
+- **APRS weather bulletins:** NWS bulletins on APRS (NWS-WARN/WATCH/ADVIS) are drawn on the
+  weather layer in violet with a dotted outline; GOES-received alerts are cyan. NWS / GOES /
+  APRS buttons under the layer turn each source on or off. APRS-IS adds `g/NWS-*` to the
+  filter automatically (`nws_bulletins: false` to opt out); bulletins don't enter the
+  message log.
+- **aprs.fi symbols for APRS stations** on the map (Hessu's open aprs.fi symbol set,
+  bundled so it works offline), including overlay characters. RF (KISS) stations now
+  appear on the map too.
+
 ## v1.0.0-rc269 (2026-10-11)
 
 ### Added

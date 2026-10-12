@@ -102,13 +102,18 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row" id="dx-btn" onclick="toggleDXCluster()" title="DX stations being heard by spotters within 500 km of you in the last hour, plotted at the DX station — zoom out to see them">🌐 DX Cluster</button>
     <button class="ctrl-btn layer-row" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ Grid squares</button>
     <div class="layer-group-title">Environmental</div>
-    <button class="ctrl-btn layer-row" id="wxwarn-btn" onclick="toggleWeatherWarnings()" title="Active NWS weather warning polygons (tornado, severe thunderstorm, flash flood, etc.) — county/zone-based alerts with no polygon in the NWS feed aren't drawable and are skipped, not guessed at">⛈ Weather warnings</button>
+    <button class="ctrl-btn layer-row" id="wxwarn-btn" onclick="toggleWeatherWarnings()" title="Active NWS warnings, watches, advisories and Special Weather Statements for your state, neighbouring states and nearby waters. Storm-based alerts are drawn as their polygon; zone-based ones (most SPS, winter/wind advisories) as their NWS zone or county outline (dashed).">⛈ Weather warnings</button>
+    <div id="wxsrc-row" style="display:flex;gap:4px;margin:0 0 4px 25px">
+      <button class="ctrl-btn wxsrc on" data-src="nws_api" onclick="toggleWxSource('nws_api')" title="api.weather.gov over the internet — coloured by severity; Special Weather Statements in NWS moccasin">NWS</button>
+      <button class="ctrl-btn wxsrc on" data-src="goes_emwin" onclick="toggleWxSource('goes_emwin')" title="EMWIN text received by your own GOES satellite receiver (no internet needed) — cyan">GOES</button>
+      <button class="ctrl-btn wxsrc on" data-src="aprs" onclick="toggleWxSource('aprs')" title="NWS bulletins heard over APRS (NWS-WARN/WATCH/ADVIS) — violet, dotted">APRS</button>
+    </div>
     <button class="ctrl-btn layer-row" id="aqi-btn" onclick="toggleAirQuality()" title="AQI choropleth + wildfire hotspots (AirNow + NASA FIRMS)">🔥 AQI / smoke</button>
     <button class="ctrl-btn layer-row" id="water-btn" onclick="toggleWaterBodies()" title="Water body quality + boating/kayak conditions (EPA ATTAINS + NDBC buoys)">🌊 Water bodies</button>
     <button class="ctrl-btn layer-row" id="tides-btn" onclick="toggleTides()" title="Nearest NOAA tide stations (rising/falling, next high/low) and water temperature at the nearest sensor stations">🌊 Tides</button>
     <button class="ctrl-btn layer-row" id="river-btn" onclick="toggleRivers()" title="NOAA river and tide gauges within 80 km: stage, flow and flood category now and forecast (green no flooding, yellow action, orange minor, red moderate, purple major)">💧 River gauges</button>
     <button class="ctrl-btn layer-row" id="radar-btn" onclick="toggleImagery('radar')" title="NEXRAD weather radar (Iowa Environmental Mesonet tiles, loaded by your browser; refreshes every 5 min)">🌧 Radar</button>
-    <button class="ctrl-btn layer-row" id="sat-btn" onclick="toggleImagery('sat')" title="GOES-East infrared satellite, day and night (Iowa Environmental Mesonet, loaded by your browser; refreshes every 5 min)">🛰 Satellite IR</button>
+    <button class="ctrl-btn layer-row" id="sat-btn" onclick="toggleImagery('sat')" title="GOES-East infrared satellite, day and night. From your own GOES receiver when one is configured and its latest image is recent (goes_receiver in config.yaml), otherwise Iowa Environmental Mesonet tiles loaded by your browser. Refreshes every 5 min.">🛰 Satellite IR</button>
   </div>
 </div>
 <div id="map"></div>
@@ -315,7 +320,35 @@ function makeNodeIcon(node, color, size=12) {
       iconAnchor: [sz/2, sz/2],
     });
   }
+  const aprsSym = node.meta && node.meta.aprs_symbol;
+  if (aprsSym && aprsSym.length === 2) return makeAprsIcon(aprsSym, color);
   return makeIcon(color, size);
+}
+
+// APRS symbols drawn with the aprs.fi symbol set (github.com/hessu/aprs-symbols,
+// bundled under /static/aprs-symbols so it works offline). Each sheet is a
+// 16x6 grid of 48px cells, shown at 24px; symbol code c sits at index
+// c.charCodeAt(0) - 33. Table '/' = primary, '\' = alternate; any other table
+// character (0-9, A-Z) is an overlay: the alternate-table symbol with that
+// character drawn on top, as aprs.fi does.
+function _aprsSpriteDiv(sheet, code) {
+  const i = code.charCodeAt(0) - 33;
+  if (i < 0 || i > 93) return '';
+  const base = (window.ECH_BASE_PATH || '') + '/static/aprs-symbols/aprs-symbols-48-';
+  return `<div style="position:absolute;inset:0;background:url('${base}${sheet}.png') -${(i % 16) * 24}px -${Math.floor(i / 16) * 24}px / 384px 144px no-repeat"></div>`;
+}
+function makeAprsIcon(sym, color) {
+  const table = sym[0], code = sym[1];
+  let html = _aprsSpriteDiv(table === '/' ? 0 : 1, code);
+  if (table !== '/' && table !== '\\' && /[0-9A-Z]/.test(table)) html += _aprsSpriteDiv(2, table);
+  if (!html) return makeIcon(color);
+  return L.divIcon({
+    className: 'node-dot',
+    // faint halo in the protocol color so APRS stays distinguishable from other layers
+    html: `<div style="position:relative;width:24px;height:24px;filter:drop-shadow(0 0 2px ${color})">${html}</div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
 }
 
 function makeIcon(color, size=12) {
@@ -1301,15 +1334,21 @@ function addEmergencyStatusMarker(entry) {
   _estatusMarkers.push(m);
 }
 
-// O94: active NWS weather warning polygons. "Severe storm tracks" (hurricane
-// forecast cones, storm-cell motion vectors) are NOT implemented — that's a
-// separate data source (NHC) ECH doesn't integrate; this draws real
-// polygon-based warnings from the NWS alerts feed ECH already polls
-// (/api/weather/alerts). County/zone-based alerts (geometry: null in the
-// NWS feed — most "Winter Storm Warning"-type alerts) have no shape to
-// draw and are skipped rather than approximated.
+// Weather alerts layer (O94, extended O132). /api/weather/map_alerts merges
+// three sources, each drawn in its own colour so you can tell them apart:
+//   nws_api    — api.weather.gov (internet): colour by severity, SPS moccasin
+//   goes_emwin — EMWIN text from the local GOES receiver: cyan
+//   aprs       — NWS bulletins heard on APRS: violet, dotted outline
+// Storm-based alerts carry their own polygon (solid outline). Zone-based ones
+// (most SPS, winter/wind advisories, every APRS bulletin) list UGC codes and
+// are drawn from NWS zone/county outlines (dashed). The server sends each
+// zone shape once in `zones`.
 let _wxWarnEnabled = false;
 let _wxWarnLayers = [];
+let _wxWarnTimer = null;
+let _wxSources = new Set(['nws_api', 'goes_emwin', 'aprs']);
+try { const saved = JSON.parse(localStorage.getItem('ech_wx_sources') || 'null'); if (Array.isArray(saved)) _wxSources = new Set(saved); } catch(e) {}
+document.querySelectorAll('.wxsrc').forEach(b => b.classList.toggle('on', _wxSources.has(b.dataset.src)));
 
 function toggleWeatherWarnings() {
   _wxWarnEnabled = !_wxWarnEnabled;
@@ -1317,12 +1356,22 @@ function toggleWeatherWarnings() {
   btn.classList.toggle('on', _wxWarnEnabled);
   if (_wxWarnEnabled) {
     loadWeatherWarnings();
+    _wxWarnTimer = setInterval(loadWeatherWarnings, 5 * 60000);
     toast('Weather warnings on');
   } else {
+    clearInterval(_wxWarnTimer);
+    _wxWarnTimer = null;
     _wxWarnLayers.forEach(l => map.removeLayer(l));
     _wxWarnLayers = [];
     toast('Weather warnings off');
   }
+}
+
+function toggleWxSource(src) {
+  if (_wxSources.has(src)) _wxSources.delete(src); else _wxSources.add(src);
+  document.querySelectorAll('.wxsrc').forEach(b => b.classList.toggle('on', _wxSources.has(b.dataset.src)));
+  try { localStorage.setItem('ech_wx_sources', JSON.stringify([..._wxSources])); } catch(e) {}
+  if (_wxWarnEnabled) loadWeatherWarnings();
 }
 
 function _wxSeverityColor(severity) {
@@ -1334,25 +1383,48 @@ function _wxSeverityColor(severity) {
   return '#8b949e';
 }
 
+const _WX_SOURCE_LABEL = {nws_api: 'NWS (internet)', goes_emwin: 'GOES receiver (EMWIN)', aprs: 'APRS bulletin'};
+function _wxAlertColor(a) {
+  if (a.source === 'goes_emwin') return '#39d0d8';
+  if (a.source === 'aprs') return '#b083f0';
+  if ((a.event || '') === 'Special Weather Statement') return '#ffe4b5';  // NWS's own SPS colour (moccasin)
+  return _wxSeverityColor(a.severity);
+}
+
 async function loadWeatherWarnings() {
   if (!_wxWarnEnabled) return;
   try {
-    const r = await fetch('/api/weather/alerts').catch(() => null);
+    const r = await fetch('/api/weather/map_alerts').catch(() => null);
     if (!r || !r.ok) return;
     const data = await r.json();
+    const zones = data.zones || {};
     _wxWarnLayers.forEach(l => map.removeLayer(l));
     _wxWarnLayers = [];
-    (data.alerts || []).forEach(a => {
-      if (!a.geometry) return;  // county/zone-based — no polygon available
-      const color = _wxSeverityColor(a.severity);
-      const layer = L.geoJSON(a.geometry, {
-        style: { color, weight: 2, fillColor: color, fillOpacity: 0.15 },
+    // Least severe first so warnings end up on top of advisories/statements
+    const rank = {extreme: 4, severe: 3, moderate: 2, minor: 1};
+    const alerts = (data.alerts || []).filter(a => _wxSources.has(a.source))
+      .sort((x, y) => (rank[(x.severity || '').toLowerCase()] || 0) - (rank[(y.severity || '').toLowerCase()] || 0));
+    alerts.forEach(a => {
+      let geom = a.geometry, fromZones = false;
+      if (!geom) {
+        const polys = [];
+        (a.ugcs || []).forEach(u => { const z = zones[u]; if (z) polys.push(...z.coordinates); });
+        if (!polys.length) return;   // zone shape not cached yet — never guessed
+        geom = {type: 'MultiPolygon', coordinates: polys};
+        fromZones = true;
+      }
+      const color = _wxAlertColor(a);
+      const dash = a.source === 'aprs' ? '2 5' : (fromZones ? '6 4' : null);
+      const layer = L.geoJSON(geom, {
+        style: { color, weight: fromZones ? 1.5 : 2, dashArray: dash, fillColor: color,
+                 fillOpacity: a.source === 'nws_api' ? 0.15 : 0.1 },
       }).bindPopup(`<div class="node-popup">
-        <div class="node-name">⛈ ${esc(a.event || 'Weather Warning')}</div>
-        <div class="node-stat" style="color:${color}">Severity: ${esc(a.severity || 'Unknown')} · Urgency: ${esc(a.urgency || 'Unknown')}</div>
-        <div class="node-stat">${esc(a.area || '')}</div>
-        <div class="node-stat">${esc(a.headline || '')}</div>
-        ${a.expires ? `<div class="node-stat">Expires: ${esc(a.expires.replace('T',' ').slice(0,19))}</div>` : ''}
+        <div class="node-name">⛈ ${esc(a.event || 'Weather alert')}</div>
+        <div class="node-stat" style="color:${color}">Severity: ${esc(a.severity || 'Unknown')}${a.urgency ? ` · Urgency: ${esc(a.urgency)}` : ''}</div>
+        <div class="node-stat">${esc((a.area || '').slice(0, 300))}</div>
+        ${a.headline ? `<div class="node-stat">${esc(a.headline)}</div>` : ''}
+        ${a.expires ? `<div class="node-stat">Expires: ${esc(new Date(a.expires).toLocaleString())}</div>` : ''}
+        <div class="node-stat" style="color:var(--muted)">Source: ${esc(_WX_SOURCE_LABEL[a.source] || a.source)}${a.via ? ` via ${esc(a.via)}` : ''}${fromZones ? ' · drawn from NWS zone outlines' : ''}</div>
       </div>`).addTo(map);
       _wxWarnLayers.push(layer);
     });
@@ -2105,35 +2177,59 @@ async function loadWaterTemps() {
   } catch(e) {}
 }
 
-// ── Radar / satellite overlays (browser-loaded tiles — no server storage) ─
+// ── Radar / satellite overlays ──────────────────────────────────────────
 // Iowa Environmental Mesonet: NEXRAD composite reflectivity tiles and GOES-East
-// clean-IR (ch13, day and night) via WMS. Refreshed every 5 min.
+// clean-IR (ch13, day and night) via WMS, loaded by the browser. When a local
+// GOES receiver is configured (goes_receiver in config.yaml) and its latest
+// full-disk image is recent, the satellite layer instead shows that image,
+// reprojected by the server for the area around the hub (/api/goes/image.png).
+// Refreshed every 5 min; each refresh re-checks which source to use.
 const _imagery = {radar: null, sat: null};
-function _imageryLayer(kind) {
+async function _imageryLayer(kind) {
   const t = Date.now();
   if (kind === 'radar') {
     return L.tileLayer(`https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png?_=${t}`,
       {opacity: 0.6, zIndex: 300, attribution: 'Radar: NWS NEXRAD via <a href="https://mesonet.agron.iastate.edu/">IEM</a>'});
   }
-  return L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/goes_east.cgi',
+  try {
+    const r = await fetch('/api/goes/status');
+    const st = r.ok ? await r.json() : null;
+    if (st && st.use_local_imagery && st.image) {
+      const when = st.image.time ? new Date(st.image.time).toLocaleTimeString() : '';
+      const layer = L.imageOverlay(`${window.ECH_BASE_PATH || ''}/api/goes/image.png?_=${encodeURIComponent(st.image.time || t)}`,
+        st.image.bounds, {opacity: 0.55, zIndex: 290,
+          attribution: `GOES IR: own receiver (${esc(st.image.file || '')}${when ? ', ' + when : ''})`});
+      layer._echSource = 'local';
+      return layer;
+    }
+  } catch(e) {}
+  const layer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/goes_east.cgi',
     {layers: 'conus_ch13', format: 'image/png', transparent: true, opacity: 0.55, zIndex: 290, _t: t,
      attribution: 'GOES-East IR: NOAA via <a href="https://mesonet.agron.iastate.edu/">IEM</a>'});
+  layer._echSource = 'internet';
+  return layer;
 }
-function toggleImagery(kind) {
+async function toggleImagery(kind) {
   const btn = document.getElementById(kind === 'radar' ? 'radar-btn' : 'sat-btn');
   if (_imagery[kind]) {
-    map.removeLayer(_imagery[kind].layer);
+    if (_imagery[kind].layer) map.removeLayer(_imagery[kind].layer);
     clearInterval(_imagery[kind].timer);
     _imagery[kind] = null;
   } else {
-    const layer = _imageryLayer(kind).addTo(map);
-    const timer = setInterval(() => {
+    _imagery[kind] = {layer: null, timer: null};
+    const layer = await _imageryLayer(kind);
+    if (!_imagery[kind]) return;   // toggled off while loading
+    layer.addTo(map);
+    _imagery[kind].layer = layer;
+    if (kind === 'sat') toast(layer._echSource === 'local' ? 'Satellite: own GOES receiver' : 'Satellite: internet (IEM)');
+    _imagery[kind].timer = setInterval(async () => {
       if (!_imagery[kind]) return;
-      const fresh = _imageryLayer(kind).addTo(map);
+      const fresh = await _imageryLayer(kind);
+      if (!_imagery[kind]) return;
+      fresh.addTo(map);
       map.removeLayer(_imagery[kind].layer);
       _imagery[kind].layer = fresh;
     }, 5 * 60000);
-    _imagery[kind] = {layer, timer};
   }
   const on = !!_imagery[kind];
   btn.style.color = on ? 'var(--green)' : '';

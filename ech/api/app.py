@@ -165,7 +165,7 @@ def base_path_patch_script(base_path: str) -> str:
     )
 
 
-def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, pota_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None, mc_hub_compare=None) -> FastAPI:
+def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, pota_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None, mc_hub_compare=None, goes_service=None) -> FastAPI:
     global _psk_default_callsign
     _op_callsign = "N0CALL"   # injected into pages as window.ECH_CALLSIGN
     # Build PSKReporter User-Agent from config: PSKReporter TOS requires a real
@@ -2384,6 +2384,94 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             "last_poll": wx_service._last_poll.isoformat() if wx_service._last_poll else None,
             "alerts": alerts,
         }
+
+    @app.get("/api/weather/map_alerts")
+    async def get_weather_map_alerts():
+        """Alerts for the map's weather layer, from up to three sources, each
+        tagged so the map can colour them apart:
+          nws_api    — api.weather.gov, the hub's state + neighbours (internet)
+          goes_emwin — EMWIN text from a local GOES receiver (no internet)
+          aprs       — NWS bulletins heard over APRS (APRS-IS or RF)
+        goes_receiver.alerts_source picks internet vs GOES: auto (internet
+        while its last poll is fresh, else GOES), internet, goes, or both.
+        Zone-based alerts list `ugcs`; their shapes are in `zones`, sent once
+        per zone instead of once per alert."""
+        from ech.core import aprs_wx
+        if not wx_service:
+            return {"enabled": False, "alerts": [], "zones": {}}
+        prefixes = wx_service.map_area_states()
+        internet_ok = wx_service.map_alerts_fresh()
+        mode = goes_service.alerts_source if (goes_service and goes_service.enabled) else "internet"
+        use_api = mode in ("internet", "both") or (mode == "auto" and internet_ok)
+        use_goes = bool(goes_service and goes_service.enabled) and (
+            mode in ("goes", "both") or (mode == "auto" and not internet_ok))
+        alerts: list[dict] = []
+        if use_api:
+            alerts.extend(wx_service._map_alerts)
+        if use_goes:
+            for a in goes_service.emwin_alerts():
+                if prefixes and not any(u[:2] in prefixes for u in a["ugcs"]):
+                    continue
+                alerts.append({
+                    "id": "goes:" + a["key"], "event": a["event"], "severity": a["severity"],
+                    "headline": a["headline"], "area": ", ".join(a["ugcs"][:12]),
+                    "sender": a["office"], "expires": a["expires"] or "",
+                    "geometry": a["geometry"], "ugcs": a["ugcs"], "source": "goes_emwin",
+                })
+        for b in aprs_wx.store.active():
+            if prefixes and not any(u[:2] in prefixes for u in b["ugcs"]):
+                continue
+            alerts.append({
+                "id": b["id"], "event": b["event"], "severity": b["severity"],
+                "headline": f'{b["event"]} ({b["kind"]}) from {b["from"]}',
+                "area": ", ".join(b["ugcs"][:12]), "sender": b["office"],
+                "expires": b["expires"] or "", "geometry": None, "ugcs": b["ugcs"],
+                "source": "aprs", "via": b.get("via", ""),
+            })
+        alerts = [a for a in alerts if wx_service.near_hub(a.get("geometry"), a.get("ugcs"))]
+        zones: dict[str, dict] = {}
+        missing = 0
+        for a in alerts:
+            if a.get("geometry"):
+                continue
+            for u in a.get("ugcs") or []:
+                if u in zones:
+                    continue
+                g = wx_service.zones.get(u)
+                if g:
+                    zones[u] = g
+                else:
+                    missing += 1
+        return {
+            "enabled": True,
+            "areas": sorted(prefixes),
+            "alerts": alerts,
+            "zones": zones,
+            "zones_missing": missing,
+            "sources": {
+                "nws_api": {"used": use_api, "fresh": internet_ok,
+                            "error": wx_service._map_last_error},
+                "goes_emwin": {"used": use_goes, "mode": mode},
+                "aprs": {"used": True, "received": aprs_wx.store.received},
+            },
+        }
+
+    # ── GOES local receiver ───────────────────────────────────────────────
+
+    @app.get("/api/goes/status")
+    async def get_goes_status():
+        if not goes_service:
+            return {"enabled": False, "use_local_imagery": False}
+        return goes_service.status()
+
+    @app.get("/api/goes/image.png")
+    async def get_goes_image():
+        import os
+        from fastapi.responses import FileResponse
+        if not goes_service or not goes_service.image_info or not os.path.exists(goes_service.image_path):
+            raise HTTPException(status_code=404, detail="No local GOES image yet")
+        return FileResponse(goes_service.image_path, media_type="image/png",
+                            headers={"Cache-Control": "no-cache"})
 
     @app.post("/api/weather/poll")
     async def trigger_weather_poll():

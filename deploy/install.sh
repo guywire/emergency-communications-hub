@@ -223,6 +223,15 @@ else
   echo "mgrs package OK"
 fi
 
+# Same reasoning for Pillow (GOES receiver: reads full-disk images and writes
+# the reprojected map overlay). Prebuilt manylinux wheels, baseline x86-64/SSE2.
+if ! sudo /opt/ech/.venv/bin/python3 -c "import PIL" 2>/dev/null; then
+  echo "Installing Pillow (GOES receiver imagery) ..."
+  sudo /opt/ech/.venv/bin/pip install -q "Pillow>=10"
+else
+  echo "Pillow package OK"
+fi
+
 # Same reasoning for the DMR adapter's dependencies (dmr_utils3/bitarray/
 # libscrc — BPTC FEC + CRC primitives for the SMS codec). All three ship
 # prebuilt wheels for linux x86_64/aarch64, no compiler needed here.

@@ -14,6 +14,8 @@ Config keys:
   port          int     APRS-IS port (default: 14580)
   filter        str     APRS-IS filter string (default: r/44.1/-69.1/100)
   beacon        bool    send a login beacon on connect (default: True)
+  nws_bulletins bool    also receive NWS weather bulletins (NWS-WARN etc.) for the
+                        map's weather layer by adding g/NWS-* to the filter (default: True)
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from datetime import datetime, timezone
 import aprslib
 
 from ech.adapters.base import Adapter
+from ech.core import aprs_wx
 from ech.core.models import MeshNode, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
@@ -49,6 +52,12 @@ class APRSISAdapter(Adapter):
         self._server = config.get("server", "rotate.aprs2.net")
         self._port = int(config.get("port", 14580))
         _cfg_filter = config.get("filter", "r/44.1/-69.1/100")
+        # NWS bulletins are group messages with no position, so a range
+        # filter (r/...) never passes them. g/NWS-* adds them; the NWS_xxxx
+        # twins are the same bulletins and are left out to halve the traffic.
+        self._nws_bulletins = bool(config.get("nws_bulletins", True))
+        if self._nws_bulletins and "g/NWS" not in _cfg_filter:
+            _cfg_filter = f"{_cfg_filter} g/NWS-*".strip()
         self._filter = _cfg_filter
         # Note: APRS-IS servers automatically deliver messages addressed to the
         # authenticated callsign regardless of filter — no extra filter needed.
@@ -295,6 +304,13 @@ class APRSISAdapter(Adapter):
             lon      = packet.get("longitude")
             now      = datetime.now(timezone.utc)
 
+            # NWS weather bulletins → map weather layer, not the message stream
+            # or station list (with g/NWS-* they arrive from the whole country,
+            # all day, from office/product pseudo-calls like CAEFLS).
+            if fmt == "message" and aprs_wx.store.ingest(
+                    gate_id, packet.get("addresse", ""), packet.get("message_text", ""), via=self.name):
+                return
+
             # For object packets the position belongs to the named object, not
             # the gate station.  Use object_name as the unique node/message ID
             # so each vessel gets its own map marker instead of all collapsing
@@ -325,6 +341,11 @@ class APRSISAdapter(Adapter):
                 st = self._classify_station(packet, fmt)
                 if st:
                     node.meta["node_type"] = st
+
+            # Keep the APRS symbol so the map can draw the station's own
+            # icon (aprs.fi symbol set) instead of a plain dot.
+            if packet.get("symbol") and packet.get("symbol_table"):
+                node.meta["aprs_symbol"] = str(packet["symbol_table"])[:1] + str(packet["symbol"])[:1]
 
             # Position-only beacons → node cache only, not message stream
             if fmt in self._POS_FORMATS:
