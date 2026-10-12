@@ -1053,17 +1053,22 @@ class MeshtasticAdapter(Adapter):
                 except ImportError:
                     return {"status": "error", "detail": "meshtastic protobuf unavailable"}
             try:
-                ch = channel_pb2.Channel()
+                # meshtastic's Node has no setChannel(): edit the local copy of the
+                # channel table in place, then writeChannel(idx) sends that entry
+                # to the radio (and persists it).
+                node = self._iface.localNode
+                chans = getattr(node, "channels", None)
+                if not chans or idx >= len(chans):
+                    return {"status": "error",
+                            "detail": f"device channel table not loaded yet (slot {idx}); try again in a few seconds"}
+                ch = chans[idx]
                 ch.index = idx
                 ch.settings.name = name
                 ch.settings.psk = psk_bytes
                 ch.role = (channel_pb2.Channel.Role.PRIMARY
                            if idx == 0
                            else channel_pb2.Channel.Role.SECONDARY)
-                self._iface.localNode.setChannel(ch)
-                # Commit channel to device flash
-                if hasattr(self._iface.localNode, "writeChannel"):
-                    self._iface.localNode.writeChannel(idx)
+                node.writeChannel(idx)
                 # Set modem preset on primary channel
                 if modem_preset and idx == 0:
                     preset_map = {

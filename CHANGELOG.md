@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc275 (2026-10-12)
+
+### Fixed
+- Meshtastic **Configure channel on device** (Settings) always failed with
+  `'Node' object has no attribute 'setChannel'`. It now edits the radio's channel
+  table and writes the entry with `writeChannel`.
+
 ## v1.0.0-rc274 (2026-10-12)
 
 ### Fixed
