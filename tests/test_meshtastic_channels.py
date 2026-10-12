@@ -34,3 +34,12 @@ def test_empty_library_table_keeps_existing_list():
     a._channel_list = [{"index": 0, "name": ""}]
     assert a._refresh_channel_list(iface=NS(localNode=NS(channels=None))) is False
     assert a._channel_list == [{"index": 0, "name": ""}]
+
+
+def test_tx_channel_label_includes_name_when_known():
+    a = _adapter()
+    a._channel_list = [{"index": 0, "name": ""}, {"index": 1, "name": "test"}]
+    assert a._channel_label(0) == "ch0"
+    assert a._channel_label(1) == "ch1:test"
+    a._channel_idx = 1
+    assert a.tx_channel == "ch1:test"

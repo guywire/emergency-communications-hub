@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc276 (2026-10-12)
+
+### Fixed
+- Meshtastic messages you send now show the **channel** they went out on (e.g.
+  `ch1:test`, or `DM`) in the Messages window. They were stored as "outbound", a label
+  the UI hides. This includes messages the bridge or bots send on your behalf.
+
 ## v1.0.0-rc275 (2026-10-12)
 
 ### Fixed

@@ -293,6 +293,11 @@ class MeshtasticAdapter(Adapter):
                         hinted_idx = c["index"]
                         break
             ch_idx = int(hinted_idx) if hinted_idx is not None else self._channel_idx
+            # Label the stored/broadcast message with where it really went, so
+            # the Messages window shows the channel (it used to say "outbound",
+            # which the UI hides). Same "chN:name" form MeshCore uses.
+            message.source_channel = "DM" if is_dm else self._channel_label(ch_idx)
+            message.raw = {**(message.raw or {}), "channel_idx": ch_idx}
             pkt = await self._loop.run_in_executor(
                 None,
                 lambda: self._iface.sendText(
@@ -1124,6 +1129,18 @@ class MeshtasticAdapter(Adapter):
     async def nodes(self) -> list[MeshNode]:
         return list(self._nodes.values())
 
+    def _channel_label(self, idx: int) -> str:
+        """'ch1:test' for a known named channel, 'ch0' otherwise."""
+        for c in self._channel_list:
+            if c.get("index") == idx and c.get("name"):
+                return f"ch{idx}:{c['name']}"
+        return f"ch{idx}"
+
+    @property
+    def tx_channel(self) -> str:
+        """Current TX channel label, e.g. 'ch1:test' (used for outbound labels)."""
+        return self._channel_label(self._channel_idx)
+
     def _refresh_channel_list(self, log_it: bool = False, iface=None) -> bool:
         """Re-read the device's channel table from the meshtastic library's
         mirror of it (in memory, no radio traffic). Returns True if the list
@@ -1159,6 +1176,7 @@ class MeshtasticAdapter(Adapter):
             "port": self._port or "auto",
             "node_id": self._my_node_id,
             "channel_idx": self._channel_idx,
+            "tx_channel": self.tx_channel,
             "channel_name": self._channel_name,
             "channels": ch_str,
             "channels_list": [
