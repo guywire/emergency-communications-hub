@@ -150,9 +150,12 @@ class MeshtasticAdapter(Adapter):
         super().__init__(config)
         self.name         = config.get("name", "meshtastic")
         self._transport   = config.get("transport", "serial")
-        self._port        = config.get("port", None)       # None = auto-detect
-        self._host        = config.get("host", "localhost")
-        self._ble_addr    = config.get("ble_address", None)
+        # Blank values (the Settings editor saves "" for untouched fields) mean
+        # "not set": an empty port must auto-detect, not be opened as a device
+        # literally named "" ([Errno 2] No such file or directory: '').
+        self._port        = config.get("port") or None          # None = auto-detect
+        self._host        = config.get("host") or "localhost"
+        self._ble_addr    = config.get("ble_address") or None
         self._channel_idx = int(config.get("channel_idx", 0))
         self._channel_name = config.get("channel_name", None)
         # channel_indices: list of channel indices to receive from; None/[] = all channels
@@ -176,6 +179,16 @@ class MeshtasticAdapter(Adapter):
     async def connect(self) -> None:
         self._loop = asyncio.get_running_loop()
         log.info("Meshtastic %s: connecting via %s", self.name, self._transport)
+
+        if self._transport == "browser":
+            # Wait for the operator's browser however long it takes (the
+            # stream's own 10 s wait otherwise raised into the router's
+            # back-off, leaving up to a minute where a freshly connected
+            # browser sat unused — same bug fixed for MeshCore/CW).
+            from ech.core.remote_hw import registry
+            if await registry.wait_for(self.name, timeout=0) is None:
+                log.info("Meshtastic %s: waiting for /remote-hw Web Serial session", self.name)
+                await registry.wait_for(self.name, timeout=None)
 
         # Run the blocking meshtastic connect in a thread executor
         await self._loop.run_in_executor(None, self._sync_connect)

@@ -220,7 +220,13 @@ async function connectSerialFor(key) {
     ws.onmessage = async (e) => {
       if (e.data instanceof ArrayBuffer) {
         try { await writer.write(new Uint8Array(e.data)); } catch(err) {}
+        return;
       }
+      // Server-side check: is any adapter actually set up to use this device?
+      try {
+        const m = JSON.parse(e.data);
+        if (m.type === 'warning') setStatus(`${key}-status`, '⚠ ' + m.detail, 'err');
+      } catch(_) {}
     };
     ws.onclose = () => { if (state.running) stopSerialFor(key, 'Server closed the bridge', true); };
   } catch(e) {
@@ -332,6 +338,7 @@ async function connectAudio() {
         try {
           const m = JSON.parse(e.data);
           if (m.type === 'error') serverError = m.detail;
+          if (m.type === 'warning') setStatus('audio-status', '⚠ ' + m.detail, 'err');
         } catch(_) {}
         return;
       }

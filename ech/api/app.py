@@ -388,6 +388,30 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             await ws.close(code=4400)
             return
 
+        def _browser_mismatch() -> str | None:
+            """Why no adapter will use this session, or None if one will.
+            (Live case: an adapter saved with transport: serial while its node
+            was plugged into the browser — the page looked connected but the
+            server kept trying to open a local port.)"""
+            adapters = getattr(router, "_adapters", {}) or {}
+            if role == "audio":
+                users = [a for a in adapters.values()
+                         if getattr(a, "_browser_session", None) == adapter_name
+                         and str(getattr(a, "_input_device", "")).lower() == "browser"]
+                return None if users else (
+                    f'No CW/RTTY/PSK31 adapter listens on audio session "{adapter_name}" — set '
+                    f'input_device: browser and browser_session: {adapter_name} on the adapter.')
+            a = adapters.get(adapter_name)
+            if a is None:
+                return (f'No adapter named "{adapter_name}" is configured — add one in Settings with '
+                        f'that exact name and transport "browser".')
+            transport = getattr(a, "_transport_type", None) or getattr(a, "_transport", None)
+            if transport is not None and str(transport).lower() != "browser":
+                return (f'Adapter "{adapter_name}" is set to transport "{transport}", so the server is '
+                        f'not using this browser connection — change its transport to "browser" in '
+                        f'Settings and restart SignalMatrix.')
+            return None
+
         async def _pump_tx():
             while True:
                 data = await sess.next_tx()
@@ -398,6 +422,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             # Inside the try so any failure here still unregisters the session
             # (otherwise it lingers "alive" and the next connect logs a stale replace).
             await ws.send_text(_json.dumps({"type": "ready", "adapter": adapter_name, "role": role}))
+            mismatch = _browser_mismatch()
+            if mismatch:
+                log.warning("RemoteHW: %s", mismatch)
+                await ws.send_text(_json.dumps({"type": "warning", "detail": mismatch}))
             tx_task = asyncio.ensure_future(_pump_tx())
             while True:
                 msg = await ws.receive()
@@ -2184,6 +2212,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             config_path = Path("config.yaml")
         # Pre-build yaml snippet in case write fails (permission error etc.)
         new_adapters = data.get("adapters", [])
+        # Drop blank fields the editor sends for untouched inputs — "" is never
+        # a meaningful setting, and e.g. port: '' made Meshtastic try to open a
+        # device literally named '' instead of auto-detecting.
+        if isinstance(new_adapters, list):
+            new_adapters = [{k: v for k, v in a.items() if v != ""} if isinstance(a, dict) else a
+                            for a in new_adapters]
         yaml_snippet = yaml.dump(
             {"adapters": new_adapters}, default_flow_style=False, allow_unicode=True
         ).strip()

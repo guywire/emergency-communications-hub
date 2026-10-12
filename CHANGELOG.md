@@ -8,6 +8,17 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc268 (2026-10-11)
+
+### Fixed
+- **Browser-connected devices that silently did nothing:** `/remote-hw` now warns when no
+  adapter will use the device you connected — wrong name, or the adapter isn't set to
+  transport "browser" — and says exactly what to change.
+- Meshtastic with a blank serial port now auto-detects instead of failing with
+  "No such file or directory: ''"; the adapter editor no longer saves blank fields.
+- Meshtastic nodes connected through the browser are picked up immediately (no up-to-a-
+  minute retry gap).
+
 ## v1.0.0-rc267 (2026-10-11)
 
 ### Fixed
