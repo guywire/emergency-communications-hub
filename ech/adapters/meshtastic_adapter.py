@@ -140,6 +140,23 @@ def _make_browser_serial_interface(adapter_name: str, loop: asyncio.AbstractEven
     return _BrowserSerialInterface(devPath="browser", connectNow=connect_now)
 
 
+
+def _packet_node_id(packet: dict, id_key: str, num_key: str) -> str | None:
+    """Node id ("!aabbccdd") for a packet's sender/destination.
+
+    The meshtastic library sets ``fromId``/``toId`` to None (key present) when
+    the node isn't in its node table yet, so ``dict.get(key, default)`` returns
+    None and the message showed up as coming from a null address. Fall back to
+    the numeric ``from``/``to`` field, formatted the way Meshtastic names nodes.
+    """
+    v = packet.get(id_key)
+    if isinstance(v, str) and v.strip():
+        return v.strip()
+    n = packet.get(num_key)
+    if isinstance(n, int) and not isinstance(n, bool) and 0 <= n <= 0xFFFFFFFF:
+        return "^all" if (num_key == "to" and n == 0xFFFFFFFF) else f"!{n:08x}"
+    return None
+
 class MeshtasticAdapter(Adapter):
     """
     Meshtastic adapter — supports serial, TCP, and BLE transports.
@@ -464,7 +481,7 @@ class MeshtasticAdapter(Adapter):
         try:
             decoded   = packet.get("decoded", {})
             portnum   = decoded.get("portnum", "")
-            from_id   = packet.get("fromId", packet.get("from", "unknown"))
+            from_id   = _packet_node_id(packet, "fromId", "from") or "unknown"
             channel   = packet.get("channel", self._channel_idx)
             rx_snr    = packet.get("rxSnr")
             rx_rssi   = packet.get("rxRssi")
@@ -523,8 +540,8 @@ class MeshtasticAdapter(Adapter):
         display = node.display_name if node else from_id
 
         # Detect DM vs channel broadcast
-        to_id = packet.get("toId", "")
-        is_dm = to_id and to_id != "^all" and to_id != "0xffffffff"
+        to_id = _packet_node_id(packet, "toId", "to") or ""
+        is_dm = to_id and to_id != "^all" and to_id.lower() not in ("0xffffffff", "!ffffffff")
 
         ch_name = f"ch{channel}"
         if is_dm:
