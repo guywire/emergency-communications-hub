@@ -8,6 +8,19 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc278 (2026-10-13)
+
+### Changed
+- **APRS page, Objects tab** is now two panes: your objects and the heard-objects table
+  (with search, live/killed filter and a live/killed/mine count) on the left, and a
+  persistent **New object** form on the right with remaining-character counters and a
+  **live packet preview** showing exactly what will be transmitted. "My beacon position"
+  fills the coordinates; "Clear" resets the form.
+- Messages and Beacon tabs get status badges (messages waiting for an ack / without one,
+  and how many APRS adapters can transmit).
+- Passive compare adapters are labelled with their own name in the channel list instead of
+  a generic "LetsMesh (compare)", so a leftover one isn't mistaken for a removed adapter.
+
 ## v1.0.0-rc277 (2026-10-13)
 
 ### Changed

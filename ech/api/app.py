@@ -2475,6 +2475,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             "adapters": hub.tx_adapters(),
             "counts": {"packets": len(hub.packets), "objects": len(hub.objects),
                        "own_objects": len(hub.own_objects), "weather": len(hub.weather),
+                       "objects_alive": sum(1 for o in hub.objects.values() if o.get("alive")),
+                       "objects_killed": sum(1 for o in hub.objects.values() if not o.get("alive")),
+                       "messages_pending": sum(1 for m in hub.outgoing.values() if m.get("state") == "pending"),
+                       "messages_unacked": sum(1 for m in hub.outgoing.values() if m.get("state") in ("no_ack", "rejected")),
                        "bulletins": len(hub.bulletins) + len(aprs_wx.store.active())},
         }
 

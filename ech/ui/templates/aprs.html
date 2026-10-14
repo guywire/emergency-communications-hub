@@ -57,6 +57,16 @@ input:focus,select:focus{outline:none;border-color:var(--blue)}
 .empty{color:var(--dim);padding:18px 8px}
 #toast{position:fixed;bottom:16px;right:16px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:11px;display:none;z-index:10;max-width:420px}
 .spark{vertical-align:middle}
+#pane-objects.active{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
+#obj-side{position:sticky;top:0}
+#obj-side .form{grid-template-columns:1fr;max-width:none;margin-bottom:0}
+.statline{color:var(--muted);font-size:11px;margin-left:auto}
+.statline b{color:var(--text);font-weight:500}
+.rawprev{font-size:10px;color:var(--orange);background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:6px 8px;word-break:break-all;min-height:30px}
+.rawprev .dim{color:var(--dim)}
+.tab-badge.warn{background:rgba(210,153,34,.2);color:var(--yellow)}
+.tab-badge.bad{background:rgba(248,81,73,.2);color:var(--red)}
+@media (max-width:980px){#pane-objects.active{display:block}#obj-side{position:static;margin-bottom:14px}}
 @media (max-width:640px){main{padding:10px}.form{grid-template-columns:1fr 1fr}td,th{padding:4px 5px}}
 </style>
 </head>
@@ -69,10 +79,10 @@ input:focus,select:focus{outline:none;border-color:var(--blue)}
 </div>
 
 <div id="tabs">
-  <div class="tab active" data-tab="messages">Messages</div>
+  <div class="tab active" data-tab="messages">Messages<span class="tab-badge" id="b-messages" style="display:none">0</span></div>
   <div class="tab" data-tab="bulletins">Bulletins<span class="tab-badge" id="b-bulletins">0</span></div>
   <div class="tab" data-tab="objects">Objects<span class="tab-badge" id="b-objects">0</span></div>
-  <div class="tab" data-tab="beacon">Beacon</div>
+  <div class="tab" data-tab="beacon">Beacon<span class="tab-badge" id="b-beacon" style="display:none">0</span></div>
   <div class="tab" data-tab="packets">Packets<span class="tab-badge" id="b-packets">0</span></div>
   <div class="tab" data-tab="weather">Weather<span class="tab-badge" id="b-weather">0</span></div>
 </div>
@@ -104,35 +114,47 @@ input:focus,select:focus{outline:none;border-color:var(--blue)}
 
 <!-- Objects -->
 <section class="pane" id="pane-objects">
-  <h3>Send an object</h3>
-  <div class="note">Objects mark something on everyone's APRS map (a shelter, an event, a MeshCore node) under your callsign. Each object is re-sent every interval until you kill it. <b>RF</b> transmits over your radio, so you are the control operator. Use <b>📡 APRS object</b> on a map item to fill this in.</div>
-  <div class="form" id="obj-form">
-    <label>Name (max 9)<input id="o-name" maxlength="9" autocomplete="off"></label>
-    <label>Latitude<input id="o-lat" inputmode="decimal"></label>
-    <label>Longitude<input id="o-lon" inputmode="decimal"></label>
-    <label>Symbol <span class="row"><input id="o-symbol" maxlength="2" value="/." style="width:44px"><span class="sym" id="o-sym-prev"></span>
-      <select id="o-sym-pick" onchange="if(this.value){o('o-symbol').value=this.value;symPreview()}">
-        <option value="">common…</option>
-        <option value="/.">/. X marker</option><option value="/;">/; campground / shelter</option>
-        <option value="/h">/h hospital</option><option value="/+">/+ Red Cross</option>
-        <option value="/o">/o EOC</option><option value="/r">/r repeater / radio</option>
-        <option value="/-">/- house</option><option value="/>">/> car</option>
-        <option value="/[">/[ person</option><option value="/'">/' small aircraft</option>
-        <option value="/s">/s boat</option><option value="\'">\' crash site</option>
-        <option value="\!">\! emergency</option><option value="/a">/a ambulance</option>
-        <option value="/f">/f fire truck</option><option value="\:">\: fire</option>
-        <option value="/#">/# digipeater</option><option value="M#">M# mesh node (overlay M)</option>
-      </select></span></label>
-    <label>Re-send every (min)<input id="o-interval" type="number" min="10" value="20"></label>
-    <label class="wide">Comment (max 43)<input id="o-comment" maxlength="43" autocomplete="off"></label>
-    <div class="wide row" id="o-adapters"></div>
-    <div class="wide row" id="o-follow-row" style="display:none"><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="o-follow"> Follow this node's live position on each re-send</label><span class="dim" id="o-src"></span></div>
-    <div class="wide row"><button class="primary" onclick="sendObject()">Send object</button><span class="dim" id="o-preview"></span></div>
+  <div id="obj-main">
+    <div class="note">Objects mark something on everyone's APRS map (a shelter, an event, a MeshCore node) under your callsign. Each one is re-sent every interval until you kill it. <b>RF</b> transmits over your radio, so you are the control operator. Use <b>📡 APRS object</b> on a map item to fill in the form.</div>
+    <h3>My objects <span class="dim" id="own-count"></span></h3>
+    <table><thead><tr><th></th><th>Name</th><th>Position</th><th>Comment</th><th>Every</th><th>Via</th><th>Last sent</th><th></th></tr></thead><tbody id="own-list"></tbody></table>
+    <h3>Heard objects &amp; items</h3>
+    <div class="toolbar">
+      <input id="h-q" placeholder="search name / station / comment" style="width:240px">
+      <select id="h-state"><option value="">all objects</option><option value="alive">live only</option><option value="killed">killed only</option></select>
+      <span class="statline" id="h-stat"></span>
+    </div>
+    <table><thead><tr><th></th><th>Name</th><th>Set by</th><th>State</th><th>Position</th><th>Comment</th><th>Heard</th></tr></thead><tbody id="obj-list"></tbody></table>
   </div>
-  <h3>My objects</h3>
-  <table><thead><tr><th></th><th>Name</th><th>Position</th><th>Comment</th><th>Every</th><th>Via</th><th>Last sent</th><th></th></tr></thead><tbody id="own-list"></tbody></table>
-  <h3>Heard objects &amp; items</h3>
-  <table><thead><tr><th></th><th>Name</th><th>Set by</th><th>State</th><th>Position</th><th>Comment</th><th>Heard</th></tr></thead><tbody id="obj-list"></tbody></table>
+
+  <aside id="obj-side">
+    <h3>New object</h3>
+    <div class="form" id="obj-form">
+      <label>Object name <span class="dim" id="o-name-left">9 left</span><input id="o-name" maxlength="9" autocomplete="off" placeholder="e.g. SHELTER1"></label>
+      <label>Latitude<input id="o-lat" inputmode="decimal"></label>
+      <label>Longitude<input id="o-lon" inputmode="decimal"></label>
+      <div class="row"><button type="button" onclick="useBeaconPosition()" title="Fill latitude/longitude from your station beacon position">⌖ My beacon position</button></div>
+      <label>Symbol <span class="row"><input id="o-symbol" maxlength="2" value="/." style="width:44px"><span class="sym" id="o-sym-prev"></span>
+        <select id="o-sym-pick" onchange="if(this.value){o('o-symbol').value=this.value;symPreview();rawPreview()}">
+          <option value="">common…</option>
+          <option value="/.">/. X marker</option><option value="/;">/; campground / shelter</option>
+          <option value="/h">/h hospital</option><option value="/+">/+ Red Cross</option>
+          <option value="/o">/o EOC</option><option value="/r">/r repeater / radio</option>
+          <option value="/-">/- house</option><option value="/&gt;">/&gt; car</option>
+          <option value="/[">/[ person</option><option value="/'">/' small aircraft</option>
+          <option value="/s">/s boat</option><option value="\'">\' crash site</option>
+          <option value="\!">\! emergency</option><option value="/a">/a ambulance</option>
+          <option value="/f">/f fire truck</option><option value="\:">\: fire</option>
+          <option value="/#">/# digipeater</option><option value="M#">M# mesh node (overlay M)</option>
+        </select></span></label>
+      <label>Re-send every (min)<input id="o-interval" type="number" min="10" value="20"></label>
+      <label>Comment <span class="dim" id="o-comment-left">43 left</span><input id="o-comment" maxlength="43" autocomplete="off"></label>
+      <div class="row" id="o-adapters"></div>
+      <div class="row" id="o-follow-row" style="display:none"><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="o-follow"> Follow this node's live position on each re-send</label><span class="dim" id="o-src"></span></div>
+      <label>Packet preview<div class="rawprev" id="o-preview"><span class="dim">fill in name and position</span></div></label>
+      <div class="row"><button class="primary" onclick="sendObject()">Send object</button><button type="button" onclick="clearObjectForm()">Clear</button></div>
+    </div>
+  </aside>
 </section>
 
 <!-- Beacon -->
@@ -219,6 +241,13 @@ async function loadSummary() {
     _adapters = s.adapters || [];
     o('b-bulletins').textContent = s.counts.bulletins; o('b-objects').textContent = s.counts.objects + s.counts.own_objects;
     o('b-packets').textContent = s.counts.packets; o('b-weather').textContent = s.counts.weather;
+    const pend = s.counts.messages_pending || 0, bad = s.counts.messages_unacked || 0, mb = o('b-messages');
+    mb.style.display = (pend || bad) ? '' : 'none';
+    mb.className = 'tab-badge' + (bad ? ' bad' : pend ? ' warn' : '');
+    mb.textContent = bad ? bad + ' no ack' : pend + ' waiting';
+    const bb = o('b-beacon'), txn = _adapters.filter(a => a.can_transmit).length;
+    bb.style.display = _adapters.length ? '' : 'none'; bb.textContent = txn + '/' + _adapters.length + ' TX';
+    o('b-objects').title = `${s.counts.objects_alive || 0} live, ${s.counts.objects_killed || 0} killed heard; ${s.counts.own_objects} yours`;
     o('hdr-status').innerHTML = _adapters.length ? _adapters.map(a =>
       `<span class="pill ${a.kind}">${esc(a.name)} ${a.kind === 'rf' ? 'RF' : 'IS'}</span> <span class="${a.can_transmit ? 'ok' : 'warn'}">${a.can_transmit ? 'TX ok' : 'RX only'}</span>`).join(' &nbsp; ')
       : '<span class="warn">no APRS adapter configured</span>';
@@ -296,7 +325,7 @@ function editObject(name) {
   o('o-comment').value = ob.comment; o('o-interval').value = ob.interval_min; _objSource = ob.source;
   o('o-follow').checked = !!ob.follow; o('o-follow-row').style.display = ob.source && ob.source.kind === 'node' ? 'flex' : 'none';
   document.querySelectorAll('input[name=o-ad]').forEach(c => c.checked = ob.adapters.includes(c.value));
-  symPreview(); o('obj-form').scrollIntoView({behavior: 'smooth'});
+  symPreview(); rawPreview(); o('obj-form').scrollIntoView({behavior: 'smooth'});
 }
 let _own = [];
 async function loadObjects() {
@@ -309,10 +338,57 @@ async function loadObjects() {
       <td>${fmtPos(ob.lat, ob.lon)}</td><td>${esc(ob.comment)}</td><td>${ob.interval_min}m</td><td>${via}</td><td>${ago(ob.last_sent)} ago</td>
       <td style="white-space:nowrap"><button onclick="editObject('${esc(ob.name).replace(/'/g, "\\'")}')">Edit</button> <button class="danger" onclick="killObject('${esc(ob.name).replace(/'/g, "\\'")}')">Kill</button></td></tr>`;
   }).join('') || '<tr><td colspan="8" class="empty">You have no active objects.</td></tr>';
-  o('obj-list').innerHTML = (d.objects || []).map(ob => `<tr><td>${symHtml(ob.symbol)}</td><td>${esc(ob.name)} <span class="dim">${ob.kind === 'item' ? 'item' : ''}</span></td>
-    <td>${esc(ob.owner)}</td><td>${ob.alive ? '<span class="ok">alive</span>' : '<span class="dim">killed</span>'}</td>
+  o('own-count').textContent = _own.length ? `(${_own.length})` : '';
+  _heard = d.objects || [];
+  renderHeard();
+}
+let _heard = [];
+['h-q', 'h-state'].forEach(id => o(id).addEventListener(id === 'h-q' ? 'input' : 'change', () => renderHeard()));
+function renderHeard() {
+  const q = o('h-q').value.trim().toLowerCase(), st = o('h-state').value;
+  const live = _heard.filter(x => x.alive).length, killed = _heard.length - live;
+  const rows = _heard.filter(x => (!st || (st === 'alive') === !!x.alive) &&
+    (!q || `${x.name} ${x.owner} ${x.comment}`.toLowerCase().includes(q)));
+  o('h-stat').innerHTML = `<b>${live}</b> live · <b>${killed}</b> killed · <b>${_own.length}</b> mine` + (rows.length !== _heard.length ? ` · showing <b>${rows.length}</b>` : '');
+  o('obj-list').innerHTML = rows.map(ob => `<tr><td>${symHtml(ob.symbol)}</td><td>${esc(ob.name)} <span class="dim">${ob.kind === 'item' ? 'item' : ''}</span>${ob.mine ? ' <span class="pill ok">mine</span>' : ''}</td>
+    <td>${esc(ob.owner)}</td><td>${ob.alive ? '<span class="pill ok">LIVE</span>' : '<span class="pill">killed</span>'}</td>
     <td>${fmtPos(ob.lat, ob.lon)}</td><td>${esc(ob.comment)}</td><td>${ago(ob.ts)} ago</td></tr>`).join('')
-    || '<tr><td colspan="7" class="empty">No objects heard in the last 6 hours.</td></tr>';
+    || '<tr><td colspan="7" class="empty">' + (_heard.length ? 'No objects match.' : 'No objects heard in the last 6 hours.') + '</td></tr>';
+}
+
+// Packet preview — mirrors aprs_hub.build_object_info so the operator sees
+// exactly what goes on the air (timestamp is "now", UTC).
+function aprsLat(v) { const a = Math.abs(v); let d = Math.floor(a), m = Math.round((a - d) * 6000) / 100; if (m >= 60) { d++; m = 0; }
+  return String(d).padStart(2, '0') + m.toFixed(2).padStart(5, '0') + (v >= 0 ? 'N' : 'S'); }
+function aprsLon(v) { const a = Math.abs(v); let d = Math.floor(a), m = Math.round((a - d) * 6000) / 100; if (m >= 60) { d++; m = 0; }
+  return String(d).padStart(3, '0') + m.toFixed(2).padStart(5, '0') + (v >= 0 ? 'E' : 'W'); }
+function rawPreview() {
+  const name = o('o-name').value, lat = parseFloat(o('o-lat').value), lon = parseFloat(o('o-lon').value), sym = o('o-symbol').value;
+  o('o-name-left').textContent = (9 - name.length) + ' left';
+  o('o-comment-left').textContent = (43 - o('o-comment').value.length) + ' left';
+  const box = o('o-preview');
+  if (!name.trim() || isNaN(lat) || isNaN(lon) || sym.length !== 2 || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    box.innerHTML = '<span class="dim">fill in name, position and a 2-character symbol</span>'; return;
+  }
+  const t = new Date(), z = n => String(n).padStart(2, '0');
+  const comment = o('o-comment').value.replace(/[^\x20-\x7e]/g, '').replace(/[|~]/g, '').slice(0, 43);
+  box.textContent = ';' + name.padEnd(9).slice(0, 9) + '*' + z(t.getUTCDate()) + z(t.getUTCHours()) + z(t.getUTCMinutes()) + 'z'
+    + aprsLat(lat) + sym[0] + aprsLon(lon) + sym[1] + comment;
+}
+['o-name', 'o-lat', 'o-lon', 'o-symbol', 'o-comment'].forEach(id => o(id).addEventListener('input', rawPreview));
+async function useBeaconPosition() {
+  try {
+    const d = await api('/api/aprs/beacon');
+    const b = (d.beacons || []).find(x => x.lat != null);
+    if (!b) return toast('No beacon position set (Beacon tab)', true);
+    o('o-lat').value = b.lat; o('o-lon').value = b.lon; rawPreview();
+  } catch (e) { toast('Could not read beacon position: ' + e.message, true); }
+}
+function clearObjectForm() {
+  ['o-name', 'o-lat', 'o-lon', 'o-comment'].forEach(id => o(id).value = '');
+  o('o-symbol').value = '/.'; o('o-interval').value = 20; o('o-follow').checked = false;
+  o('o-follow-row').style.display = 'none'; o('o-src').textContent = ''; _objSource = null;
+  symPreview(); rawPreview();
 }
 
 // ── beacon
@@ -407,7 +483,7 @@ setInterval(refresh, 15000);
       if (_objSource.kind === 'node') { o('o-follow-row').style.display = 'flex'; o('o-src').textContent = `from ${_objSource.adapter} ${_objSource.id}`; }
     }
   }
-  symPreview();
+  symPreview(); rawPreview();
   showTab(LOADERS[tab] ? tab : 'messages');
 })();
 </script>

@@ -3294,7 +3294,7 @@ function adapterMeta(name) {
   // routing but never adds to the message feed and can't send; must not appear as a
   // compose target (see ech/adapters/letsmesh_compare.py docstring).
   if (n.includes('letsmesh') || n.includes('compare'))   // LetsMesh + own observer-broker compare adapters
-    return {icon:'LSM', label:'LetsMesh (compare)', cls:'', toggle:'', rxOnly:true};
+    return {icon:'LSM', label:`${name} (compare)`, cls:'', toggle:'', rxOnly:true};
   return {icon:name.slice(0,4).toUpperCase(), label:name, cls:'', toggle:name.slice(0,4).toUpperCase()};
 }
 
