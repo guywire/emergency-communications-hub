@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc279 (2026-10-13)
+
+### Changed
+- **Messages sidebar:** data-input-only adapters (ADS-B, OpenSky, AIS, AISHub, AISstream)
+  and the passive compare adapters no longer appear in the channel list. They feed the
+  map and node list, not the message pane. Their alerts still show under "All".
+
 ## v1.0.0-rc278 (2026-10-13)
 
 ### Changed
