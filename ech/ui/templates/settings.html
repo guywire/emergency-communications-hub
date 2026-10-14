@@ -2321,6 +2321,16 @@ async function checkSelfUpdateStatus() {
     const d = await r.json();
     const btn = document.getElementById('selfupdate-btn');
     const log = document.getElementById('selfupdate-log');
+    // Idle: nothing running, nothing finished, nothing failed, and this page
+    // didn't start an update. This is what a normal Settings page load sees
+    // (the status call is made whenever an old update log exists). It must
+    // leave the button usable — it used to fall through to the "Restarting…"
+    // state below and disable the button for good.
+    if (!d.running && !d.step && d.exit_code === null && !_selfUpdatePreVersion) {
+      btn.disabled = false;
+      btn.textContent = '⬇ Update & Restart ECH';
+      return;
+    }
     if (d.step || d.log_tail) {
       log.style.display = 'block';
       log.textContent = (d.step ? `[step: ${d.step}]\n` : '') + (d.log_tail || '(no output yet)');

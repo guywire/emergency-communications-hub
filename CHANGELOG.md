@@ -8,6 +8,21 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc277 (2026-10-13)
+
+### Changed
+- **Installer:** mDNS (Avahi) and Prometheus are now **optional**. `scripts/install.sh`
+  no longer installs/enables Avahi by default; pass `--with-mdns` for `<hostname>.local`
+  and `--with-prometheus` for a local Prometheus server. The Prometheus option writes a
+  scrape config that works (HTTPS to 127.0.0.1:8765); the hand-made one on the live server
+  pointed at `host.docker.internal` over HTTP and never collected anything. ECH does not
+  need either; the app's own `/metrics` endpoint is unchanged.
+
+### Fixed
+- Settings -> Software update: the **"Update & Restart ECH" button was stuck on
+  "Restarting..." (disabled) on every page load** whenever an old update log existed, even
+  though nothing was updating. An idle status now leaves the button usable.
+
 ## v1.0.0-rc276 (2026-10-12)
 
 ### Fixed

@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # ECH install script — Debian 12 / Ubuntu 22.04 (LXC container or bare metal)
 # Run as root or with sudo.
-# Usage: bash install.sh [--no-systemd]
+# Usage: bash install.sh [--no-systemd] [--with-mdns] [--with-prometheus]
+#
+#   --no-systemd       don't install/enable the ech systemd unit
+#   --with-mdns        install avahi and advertise the hub as <hostname>.local
+#                      (OFF by default - ECH works fine by IP address)
+#   --with-prometheus  install a local Prometheus server scraping ECH's
+#                      /metrics (OFF by default - ECH does not need it; it only
+#                      keeps history for Grafana-style dashboards)
 
 set -euo pipefail
 
@@ -18,7 +25,16 @@ err()  { echo -e "${RED}[ERR]${NC} $*"; exit 1; }
 [[ $EUID -ne 0 ]] && err "Run as root: sudo bash install.sh"
 
 USE_SYSTEMD=true
-[[ "${1:-}" == "--no-systemd" ]] && USE_SYSTEMD=false
+WITH_MDNS=false
+WITH_PROMETHEUS=false
+for arg in "$@"; do
+  case "$arg" in
+    --no-systemd)      USE_SYSTEMD=false ;;
+    --with-mdns)       WITH_MDNS=true ;;
+    --with-prometheus) WITH_PROMETHEUS=true ;;
+    *) err "Unknown option: $arg (see usage at the top of this script)" ;;
+  esac
+done
 
 log "=== Emergency Communications Hub installer ==="
 log "Target: $ECH_DIR"
@@ -31,7 +47,6 @@ apt-get install -y --no-install-recommends \
   python3 python3-pip python3-venv python3-dev \
   git curl ca-certificates \
   libusb-1.0-0 libudev-dev \
-  avahi-daemon avahi-utils \
   usbutils \
   mosquitto mosquitto-clients \
   libportaudio2 \
@@ -147,21 +162,56 @@ else
   warn "  $ECH_DIR/.venv/bin/ech --config $ECH_CONFIG"
 fi
 
-# ── Avahi mDNS ─────────────────────────────────────────────────────────────
-if command -v avahi-daemon &>/dev/null; then
+# ── Avahi mDNS (optional: --with-mdns) ─────────────────────────────────────
+if $WITH_MDNS; then
+  apt-get install -y --no-install-recommends avahi-daemon avahi-utils \
+    || warn "avahi install failed - mDNS skipped"
+fi
+if $WITH_MDNS && command -v avahi-daemon &>/dev/null; then
   cat > /etc/avahi/services/ech.service << 'EOF'
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
   <name>Emergency Communications Hub</name>
   <service>
-    <type>_http._tcp</type>
+    <type>_https._tcp</type>
     <port>8765</port>
   </service>
 </service-group>
 EOF
+  systemctl enable --now avahi-daemon 2>/dev/null || true
   systemctl restart avahi-daemon 2>/dev/null || true
-  log "mDNS registered — accessible at http://ech.local:8765"
+  log "mDNS registered - accessible at https://$(hostname).local:8765"
+else
+  log "mDNS not installed (use --with-mdns to enable; ECH is reachable by IP)"
+fi
+
+# ── Prometheus (optional: --with-prometheus) ───────────────────────────────
+# ECH serves /metrics itself; this installs a local Prometheus that scrapes it
+# and keeps history. Nothing in ECH reads from Prometheus.
+if $WITH_PROMETHEUS; then
+  apt-get install -y --no-install-recommends prometheus \
+    || warn "prometheus install failed - skipped"
+  if [[ -d /etc/prometheus ]]; then
+    cat > /etc/prometheus/prometheus.yml << 'EOF'
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+scrape_configs:
+  - job_name: ech
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true   # ECH uses a self-signed certificate by default
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['127.0.0.1:8765']
+EOF
+    systemctl enable --now prometheus 2>/dev/null || true
+    systemctl restart prometheus 2>/dev/null || true
+    log "Prometheus installed - http://localhost:9090 (scrapes https://127.0.0.1:8765/metrics)"
+  fi
+else
+  log "Prometheus not installed (use --with-prometheus to enable)"
 fi
 
 # ── Passwordless sudo for service restarts, reboot, and package updates ────
