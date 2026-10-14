@@ -40,6 +40,7 @@ deploy/ech.service) and this is the exact same pattern the already-existing
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 import os
 import shutil
@@ -95,6 +96,53 @@ async def check_latest_commit(branch: str = "main") -> dict:
         "author": (commit.get("author") or {}).get("name", ""),
         "version": version,
     }
+
+
+_VER_RE = re.compile(r"^\s*v?(\d+)\.(\d+)\.(\d+)(?:-rc(\d+))?\s*$")
+
+
+def parse_version(text: str):
+    """'1.0.0-rc279' -> (1, 0, 0, 279). A final release (no -rc) sorts after
+    its release candidates. None if the text isn't a recognised version."""
+    m = _VER_RE.match(text or "")
+    if not m:
+        return None
+    major, minor, patch, rc = m.groups()
+    return (int(major), int(minor), int(patch), int(rc) if rc is not None else 10 ** 9)
+
+
+def is_newer(latest: str, current: str) -> bool:
+    a, b = parse_version(latest), parse_version(current)
+    return bool(a and b and a > b)
+
+
+# Cached so every page load by every admin costs at most one GitHub request
+# per UPDATE_CHECK_TTL (raw.githubusercontent.com, not the rate-limited API).
+UPDATE_CHECK_TTL = 6 * 3600
+UPDATE_CHECK_RETRY = 15 * 60
+_avail_cache: dict = {"ts": 0.0, "ttl": 0.0, "latest": "", "error": ""}
+
+
+async def update_available(current: str, branch: str = "main", force: bool = False) -> dict:
+    """Is GitHub's VERSION newer than the running one? Never raises."""
+    now = time.time()
+    if force or now - _avail_cache["ts"] >= _avail_cache["ttl"]:
+        latest, error = "", ""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{branch}/VERSION"
+                resp = await client.get(url)
+                resp.raise_for_status()
+                latest = resp.text.strip()
+        except Exception as exc:  # network down, GitHub unreachable, 404 ...
+            error = f"{type(exc).__name__}: {exc}"[:200]
+        if parse_version(latest) is None and not error:
+            error = "unrecognised VERSION file on GitHub"
+        _avail_cache.update(ts=now, ttl=UPDATE_CHECK_TTL if not error else UPDATE_CHECK_RETRY,
+                            latest=latest if not error else "", error=error)
+    latest = _avail_cache["latest"]
+    return {"available": is_newer(latest, current), "current": current, "latest": latest,
+            "branch": branch, "checked_at": _avail_cache["ts"], "error": _avail_cache["error"]}
 
 
 async def _fetch_remote_version(client: httpx.AsyncClient, branch: str) -> str:

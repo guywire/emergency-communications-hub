@@ -478,6 +478,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
   <a href="/status-board" data-p="/status-board" title="Local Emergency Status Board">&#127973;</a>
   <a href="/remote-hw" data-p="/remote-hw" title="Remote Hardware">&#128268;</a>
   <a href="/simulation" data-p="/simulation" id="ech-topnav-sim" title="Simulation">&#129514;</a>
+  <a href="/settings#selfupdate" id="ech-topnav-update" title="Update available" style="display:none;position:relative">&#128276;<i style="position:absolute;top:1px;right:1px;width:7px;height:7px;border-radius:50%;background:#f0883e"></i></a>
   <a href="/settings" data-p="/settings" id="ech-topnav-settings" title="Settings">&#9881;&#65039;</a>
 </nav>
 <script>
@@ -490,12 +491,28 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
       a.style.boxShadow = 'inset 0 0 0 1px rgba(56,139,253,.5)';
     }
   });
+  var updA = document.getElementById('ech-topnav-update');
+  if (updA) { updA.style.display = 'none'; updA.style.position = 'relative'; }
   // Settings/Simulation are admin-only — hide until we know the caller's role
   // (matches the auth middleware's own role check, so the link never dead-ends).
   var settingsA = document.getElementById('ech-topnav-settings');
   var simA = document.getElementById('ech-topnav-sim');
   if (settingsA) settingsA.style.visibility = 'hidden';
   if (simA) simA.style.visibility = 'hidden';
+  // GitHub update notice: admin-only endpoint (403 for others -> stays hidden).
+  // Server caches the GitHub lookup for 6 h, so polling hourly is cheap.
+  function checkUpdate(){
+    fetch('/api/system/update-available').then(function(r){ return r.ok ? r.json() : null; }).then(function(u){
+      var a = document.getElementById('ech-topnav-update');
+      if (!a || !u) return;
+      if (u.available) {
+        a.style.display = 'flex';
+        a.title = 'Update available: v' + u.latest + ' (this install: v' + u.current + ') - click to open Settings';
+      } else { a.style.display = 'none'; }
+    }).catch(function(){});
+  }
+  checkUpdate();
+  setInterval(checkUpdate, 3600000);
   fetch('/api/auth/me').then(function(r){ return r.ok ? r.json() : {authenticated:false}; }).then(function(d){
     var isAdmin = !d.authenticated || d.role === 'admin';
     if (settingsA) settingsA.style.visibility = isAdmin ? 'visible' : 'hidden';
@@ -3200,6 +3217,13 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return {"status": "ok", "branch": branch, **commit}
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}
+
+    @app.get("/api/system/update-available")
+    async def update_available(refresh: bool = False):
+        """Cheap, cached "is GitHub ahead of this install?" for the nav
+        notification icon. Admin-only like the rest of /api/system/."""
+        from ech.core import self_update
+        return await self_update.update_available(ECH_VERSION, force=refresh)
 
     @app.post("/api/system/selfupdate")
     async def selfupdate_start(request: Request):

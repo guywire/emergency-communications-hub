@@ -8,6 +8,15 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc280 (2026-10-13)
+
+### Added
+- **Update-available notification:** a bell icon with an amber dot appears in the top
+  navigation (admins only) when GitHub's `VERSION` is newer than the running install.
+  Hover for the versions; click to open Settings -> Software update. The check is cached
+  server-side for 6 hours (retried after 15 minutes on failure) and reads only the raw
+  VERSION file, so it costs one small request per 6 h however many pages are open.
+
 ## v1.0.0-rc279 (2026-10-13)
 
 ### Changed
