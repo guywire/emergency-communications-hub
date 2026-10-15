@@ -11,6 +11,9 @@ from v1.0.0-rc198 — earlier history predates this file.
 ## v1.0.0-rc283 (2026-10-14)
 
 ### Added
+- **Signed release provenance:** the SLSA workflow now builds a real release tarball from
+  `VERSION`/`git archive`, signs SLSA L3 provenance (generator v2.1.0) and attaches both to
+  the GitHub Release; README gains "Verifying a release" with the `slsa-verifier` command.
 - README: **Legal, licensing and interference** section (licence/ID, automatic control,
   bridging onto amateur RF, Part 15/ISM limits, PSTN gateways, service terms, receive-only
   data, privacy, emergency-use limits); the installer prints a short reminder.

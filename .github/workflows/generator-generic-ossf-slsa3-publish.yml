@@ -1,66 +1,68 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-# This workflow lets you generate SLSA provenance file for your project.
-# The generation satisfies level 3 for the provenance requirements - see https://slsa.dev/spec/v0.1/requirements
-# The project is an initiative of the OpenSSF (openssf.org) and is developed at
-# https://github.com/slsa-framework/slsa-github-generator.
-# The provenance file can be verified using https://github.com/slsa-framework/slsa-verifier.
-# For more information about SLSA and how it improves the supply-chain, visit slsa.dev.
-
+# Builds the release tarball and signs a SLSA level 3 provenance statement for it.
+#
+# Runs when a GitHub Release is published (the tarball and the provenance file
+# are attached to that release), or manually from Actions > "SLSA generic
+# generator" > Run workflow (artifacts are then kept on the workflow run only).
+#
+# Verify a download with slsa-verifier - see "Verifying a release" in README.md.
 name: SLSA generic generator
+
 on:
   workflow_dispatch:
   release:
-    types: [created]
+    types: [published]
+
+permissions: read-all
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # attach the tarball to the release
     outputs:
       digests: ${{ steps.hash.outputs.digests }}
-
+      name: ${{ steps.build.outputs.name }}
     steps:
       - uses: actions/checkout@v4
 
-      # ========================================================
-      #
-      # Step 1: Build your artifacts.
-      #
-      # ========================================================
-      - name: Build artifacts
+      - name: Build release tarball
+        id: build
         run: |
-            # These are some amazing artifacts.
-            echo "artifact1" > artifact1
-            echo "artifact2" > artifact2
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          name="signalmatrix-${version}.tar.gz"
+          mkdir -p dist
+          git archive --format=tar.gz --prefix="signalmatrix-${version}/" -o "dist/${name}" HEAD
+          echo "name=${name}" >> "${GITHUB_OUTPUT}"
+          ls -l dist
 
-      # ========================================================
-      #
-      # Step 2: Add a step to generate the provenance subjects
-      #         as shown below. Update the sha256 sum arguments
-      #         to include all binaries that you generate
-      #         provenance for.
-      #
-      # ========================================================
       - name: Generate subject for provenance
         id: hash
         run: |
           set -euo pipefail
+          cd dist
+          echo "digests=$(sha256sum ./*.tar.gz | base64 -w0)" >> "${GITHUB_OUTPUT}"
 
-          # List the artifacts the provenance will refer to.
-          files=$(ls artifact*)
-          # Generate the subjects (base64 encoded).
-          echo "hashes=$(sha256sum $files | base64 -w0)" >> "${GITHUB_OUTPUT}"
+      - name: Upload tarball (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.name }}
+          path: dist/${{ steps.build.outputs.name }}
+          if-no-files-found: error
+
+      - name: Attach tarball to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "dist/${{ steps.build.outputs.name }}" --clobber
 
   provenance:
     needs: [build]
     permissions:
-      actions: read   # To read the workflow path.
-      id-token: write # To sign the provenance.
-      contents: write # To add assets to a release.
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.4.0
+      actions: read     # read the workflow path
+      id-token: write   # sign the provenance (Sigstore keyless)
+      contents: write   # add the provenance file to the release
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.build.outputs.digests }}"
-      upload-assets: true # Optional: Upload to a new release
+      upload-assets: ${{ github.event_name == 'release' }}

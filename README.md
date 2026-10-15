@@ -1059,6 +1059,28 @@ pip install skyfield
 
 ---
 
+## Verifying a release
+
+Each GitHub Release carries the source tarball (`signalmatrix-<version>.tar.gz`) and a signed
+[SLSA](https://slsa.dev) provenance file (`*.intoto.jsonl`) produced by the
+`SLSA generic generator` workflow. The provenance proves the tarball was built by that
+workflow, from this repository, at the tagged commit - not on someone's laptop and not
+modified afterwards. It does **not** prove the code is free of bugs.
+
+```bash
+# one-time: install the verifier (https://github.com/slsa-framework/slsa-verifier)
+go install github.com/slsa-framework/slsa-verifier/v2/cli/slsa-verifier@latest
+
+# download the tarball and its .intoto.jsonl from the Release page, then:
+slsa-verifier verify-artifact signalmatrix-<version>.tar.gz   --provenance-path multiple.intoto.jsonl   --source-uri github.com/guywire/emergency-communications-hub   --source-tag v<version>
+```
+
+A successful run ends with `PASSED: Verified SLSA provenance`. Do not deploy a tarball that
+fails verification. (Maintainers: publish a Release to trigger the build, or use
+Actions > *SLSA generic generator* > *Run workflow* for a dry run.)
+
+---
+
 ## License
 
 SignalMatrix is provided for use by amateur radio operators and served emergency agencies. See LICENSE for terms.
