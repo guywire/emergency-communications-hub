@@ -1,0 +1,123 @@
+/* SignalMatrix shared UI layer (rc285 refresh).
+   Injected by _render_template() AFTER each page's own <style>, so these
+   tokens and the shell rules win; page-specific layout stays in the pages.
+   Chrome (nav, headings, tabs) uses a sans UI face; data stays monospace. */
+
+:root {
+  --bg:#0a0d12; --bg2:#10151c; --bg3:#161d27; --bg4:#1d2633;
+  --border:#232c38; --border2:#2f3a49;
+  --text:#e4e9f0; --muted:#8a95a5; --dim:#5d6878;
+  --accent:#3fb950; --accent-soft:rgba(63,185,80,.12);
+  --sans:'Inter','Segoe UI Variable','Segoe UI',system-ui,-apple-system,Roboto,'Helvetica Neue',sans-serif;
+  --radius:5px;
+  --shadow:0 8px 28px rgba(0,0,0,.45);
+}
+
+html { -webkit-font-smoothing:antialiased; }
+body { background:var(--bg); }
+::selection { background:rgba(56,139,253,.35); }
+
+/* thin, quiet scrollbars everywhere */
+* { scrollbar-width:thin; scrollbar-color:var(--border2) transparent; }
+::-webkit-scrollbar { width:9px; height:9px; }
+::-webkit-scrollbar-thumb { background:var(--border2); border-radius:9px; border:2px solid transparent; background-clip:content-box; }
+::-webkit-scrollbar-track { background:transparent; }
+
+:focus-visible { outline:2px solid rgba(56,139,253,.7); outline-offset:1px; }
+
+/* ── App header / shell ─────────────────────────────────────────────── */
+#header {
+  height:48px !important;
+  background:linear-gradient(180deg,#121821 0%,#0e131a 100%) !important;
+  border-bottom:1px solid var(--border) !important;
+  box-shadow:0 1px 0 rgba(255,255,255,.02);
+}
+/* the shell brand + nav replace each page's own "← SM" / "▣ SM / Page" */
+#header > .back, #header > .logo, #header > .hdr-sep:first-of-type, #header > svg { display:none !important; }
+#header > * { white-space:nowrap; }
+/* sm-compact / sm-tight: set by the shell script when a busy page header
+   would overflow - nav drops to icons, then the wordmark goes too. */
+#header.sm-compact #ech-topnav .lbl { display:none; }
+#header.sm-compact #ech-topnav .nv, #header.sm-compact #ech-topnav .grp > button { padding:0 8px; }
+#header.sm-tight #sm-brand .wm, #header.sm-tight #sm-brand .pg { display:none; }
+#header.sm-tight #sm-links span { display:none; }
+
+#sm-brand { display:flex; align-items:center; gap:9px; text-decoration:none; flex-shrink:0; margin-right:4px; }
+#sm-brand svg { display:block; }
+#sm-brand .wm { font-family:var(--sans); font-size:14px; font-weight:650; letter-spacing:.01em; color:var(--text); white-space:nowrap; }
+#sm-brand .wm b { font-weight:650; color:var(--accent); }
+#sm-brand .pg { font-family:var(--sans); font-size:12px; font-weight:500; color:var(--muted); padding-left:9px; border-left:1px solid var(--border2); white-space:nowrap; }
+
+#ech-topnav { display:flex; align-items:stretch; gap:2px; height:48px; margin:0 6px 0 4px; flex-shrink:0; font-family:var(--sans); }
+#ech-topnav .nv, #ech-topnav .grp > button {
+  display:flex; align-items:center; gap:6px; height:100%; padding:0 11px;
+  font:500 12.5px/1 var(--sans); color:var(--muted); text-decoration:none;
+  background:none; border:0; border-bottom:2px solid transparent; cursor:pointer; white-space:nowrap;
+  transition:color .12s, border-color .12s, background .12s;
+}
+#ech-topnav .nv:hover, #ech-topnav .grp > button:hover, #ech-topnav .grp.open > button { color:var(--text); background:rgba(255,255,255,.03); }
+#ech-topnav .nv.active, #ech-topnav .grp.active > button { color:var(--text); border-bottom-color:var(--accent); }
+#ech-topnav .ico { width:15px; height:15px; flex-shrink:0; opacity:.85; }
+#ech-topnav .car { width:9px; height:9px; opacity:.55; margin-left:-1px; }
+#ech-topnav .grp { position:relative; display:flex; }
+#ech-topnav .menu {
+  display:none; position:absolute; top:100%; left:0; min-width:230px; z-index:3000;
+  background:#121922; border:1px solid var(--border2); border-radius:0 0 var(--radius) var(--radius);
+  box-shadow:var(--shadow); padding:5px;
+}
+#ech-topnav .grp.open .menu { display:block; }
+#ech-topnav .menu a { display:flex; flex-direction:column; gap:2px; padding:7px 10px; border-radius:4px; text-decoration:none; color:var(--text); font:500 12.5px/1.2 var(--sans); }
+#ech-topnav .menu a small { font:400 11px/1.3 var(--sans); color:var(--muted); }
+#ech-topnav .menu a:hover { background:var(--bg4); }
+#ech-topnav .menu a.active { background:var(--accent-soft); box-shadow:inset 2px 0 0 var(--accent); }
+#ech-topnav .icon-only { padding:0 9px; }
+#ech-topnav .badge-dot { width:7px; height:7px; border-radius:50%; background:#f0883e; margin-left:-4px; align-self:flex-start; margin-top:14px; }
+
+#sm-links {
+  display:none; align-items:center; gap:6px; padding:3px 9px; margin-left:4px; border-radius:20px;
+  font:600 10.5px/1 var(--sans); letter-spacing:.04em; text-transform:uppercase; text-decoration:none;
+  border:1px solid var(--border2); color:var(--muted); background:var(--bg3); white-space:nowrap; flex-shrink:0;
+}
+#sm-links i { width:7px; height:7px; border-radius:50%; background:var(--dim); }
+#sm-links.ok { color:#7ee2a0; border-color:rgba(63,185,80,.35); }
+#sm-links.ok i { background:#3fb950; box-shadow:0 0 6px #3fb950; }
+#sm-links.warn { color:#f2cc60; border-color:rgba(210,153,34,.4); }
+#sm-links.warn i { background:#d29922; }
+#sm-links.bad { color:#ff8b84; border-color:rgba(248,81,73,.4); }
+#sm-links.bad i { background:#f85149; }
+
+@media (max-width:1380px) { #ech-topnav .nv .lbl, #ech-topnav .grp > button .lbl { display:none; } #ech-topnav .nv, #ech-topnav .grp > button { padding:0 9px; } }
+@media (max-width:900px)  { #sm-brand .wm, #sm-brand .pg, #sm-links { display:none !important; } }
+
+/* ── Sub-tab bars (APRS, Settings, Ham Log...) ─────────────────────── */
+.tabs, #tabs, .tab-bar, .subnav { background:var(--bg2); border-bottom:1px solid var(--border); }
+.tab, .tab-btn { font-family:var(--sans) !important; font-size:12.5px !important; font-weight:500; letter-spacing:.01em; }
+.tab .cnt, .tab-count, .tab .count {
+  font-family:var(--mono); font-size:10px; padding:1px 6px; border-radius:10px; background:var(--bg4); color:var(--muted);
+}
+
+/* ── Panels, cards, headings ───────────────────────────────────────── */
+.card, .panel, .section, .box { border-color:var(--border); border-radius:var(--radius); }
+h1, h2, h3, .section-title, .panel-title, .card-title { font-family:var(--sans); letter-spacing:.01em; }
+
+/* ── Tables: dense, sticky, uppercase headers ─────────────────────── */
+table th {
+  font-family:var(--sans); font-size:10.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--muted); background:var(--bg2);
+}
+table tbody tr:hover td { background:rgba(255,255,255,.025); }
+
+/* ── Form controls ─────────────────────────────────────────────────── */
+input[type=text], input[type=number], input[type=search], input[type=password], input[type=email],
+input[type=url], input[type=datetime-local], input[type=date], input[type=time], select, textarea {
+  border-radius:4px;
+  transition:border-color .12s, box-shadow .12s;
+}
+input:focus, select:focus, textarea:focus { border-color:rgba(56,139,253,.75) !important; box-shadow:0 0 0 3px rgba(56,139,253,.15); outline:none; }
+button { transition:border-color .12s, color .12s, background .12s; }
+
+/* ── Leaflet popups (every map-bearing page) ───────────────────────── */
+.leaflet-popup-content-wrapper { border-radius:var(--radius) !important; box-shadow:var(--shadow) !important; border-color:var(--border2) !important; }
+.leaflet-control-zoom a { background:var(--bg2) !important; color:var(--text) !important; border-color:var(--border) !important; }
+.leaflet-control-zoom a:hover { background:var(--bg4) !important; }
+.leaflet-bar { border:1px solid var(--border) !important; box-shadow:var(--shadow) !important; }

@@ -16,6 +16,7 @@ FastAPI application. Exposes:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -458,48 +459,92 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # ── UI ────────────────────────────────────────────────────────────────
     _NO_CACHE = {"Cache-Control": "no-store"}
 
+    # Shared app shell (rc285 UI refresh): brand + grouped text nav + links
+    # pill, injected at the start of every page's #header. Styling lives in
+    # /static/ech-ui.css, linked after each page's own <style>.
     _TOPNAV_HTML = """
-<style>
-/* Same header height on every page so the nav sits in the same vertical
-   spot regardless of which page injected it — each template previously
-   declared its own slightly different #header height (44-48px). Padding is
-   deliberately left alone — some pages tighten it responsively for small
-   screens, and forcing it here would fight that. */
-#header { height:44px !important; }
-</style>
-<nav id="ech-topnav" style="display:flex;gap:1px;align-items:center;margin-left:10px;padding-left:10px;border-left:1px solid rgba(139,148,158,.3);flex-shrink:0">
-  <a href="/" data-p="/" title="Messages">&#128172;</a>
-  <a href="/map" data-p="/map" title="Map">&#128506;&#65039;</a>
-  <a href="/hamlog" data-p="/hamlog" title="Ham Log">&#128251;</a>
-  <a href="/aprs" data-p="/aprs" title="APRS">&#128205;</a>
-  <a href="/logs" data-p="/logs" title="Logs">&#128220;</a>
-  <a href="/anomalies" data-p="/anomalies" title="Anomalies">&#9888;&#65039;</a>
-  <a href="/analytics" data-p="/analytics" title="Analytics">&#128202;</a>
-  <a href="/skywarn" data-p="/skywarn" title="Reports (SKYWARN + Strip)">&#127786;&#65039;</a>
-  <a href="/status-board" data-p="/status-board" title="Local Emergency Status Board">&#127973;</a>
-  <a href="/remote-hw" data-p="/remote-hw" title="Remote Hardware">&#128268;</a>
-  <a href="/simulation" data-p="/simulation" id="ech-topnav-sim" title="Simulation">&#129514;</a>
-  <a href="/settings#selfupdate" id="ech-topnav-update" title="Update available" style="display:none;position:relative">&#128276;<i style="position:absolute;top:1px;right:1px;width:7px;height:7px;border-radius:50%;background:#f0883e"></i></a>
-  <a href="/settings" data-p="/settings" id="ech-topnav-settings" title="Settings">&#9881;&#65039;</a>
+<a id="sm-brand" href="/" title="SignalMatrix — messages">
+  <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0f1620" stroke="#2a3644"/><path d="M12,13 Q16,8 20,13" fill="none" stroke="#3fb950" stroke-width="1.7" stroke-linecap="round"/><path d="M9,16 Q16,5 23,16" fill="none" stroke="#3fb950" stroke-width="1.2" stroke-linecap="round" opacity=".55"/><line x1="16" y1="13" x2="16" y2="24" stroke="#f0a500" stroke-width="2" stroke-linecap="round"/><line x1="16" y1="24" x2="11" y2="28" stroke="#f0a500" stroke-width="1.6" stroke-linecap="round"/><line x1="16" y1="24" x2="21" y2="28" stroke="#f0a500" stroke-width="1.6" stroke-linecap="round"/><circle cx="11" cy="28" r="1.9" fill="#388bfd"/><circle cx="21" cy="28" r="1.9" fill="#388bfd"/></svg>
+  <span class="wm">Signal<b>Matrix</b></span>
+  <span class="pg" id="sm-page"></span>
+</a>
+<nav id="ech-topnav" aria-label="Main">
+  <a class="nv" href="/" data-p="/" data-t="Messages" title="Messages — all networks"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" stroke-linejoin="round"/></svg><span class="lbl">Messages</span></a>
+  <a class="nv" href="/map" data-p="/map" data-t="Map" title="Live map"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.5 3.5l4-1.5 5 1.5 4-1.5v10.5l-4 1.5-5-1.5-4 1.5z M5.5 2v10.5 M10.5 3.5V14" stroke-linejoin="round"/></svg><span class="lbl">Map</span></a>
+  <div class="grp" data-grp="radio">
+    <button type="button" title="Radio"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="6" width="12" height="8" rx="1.5"/><path d="M4 6l8-4"/><circle cx="10.5" cy="10" r="1.8"/><path d="M4 9h3M4 11h3"/></svg><span class="lbl">Radio</span><svg class="car" viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+    <div class="menu">
+      <a href="/aprs" data-p="/aprs" data-t="APRS">APRS<small>Messages, objects, bulletins, packets, weather</small></a>
+      <a href="/hamlog" data-p="/hamlog" data-t="Ham Log">Ham Log<small>QSO logging, contests, rig control</small></a>
+      <a href="/remote-hw" data-p="/remote-hw" data-t="Remote Hardware">Remote hardware<small>Radios and devices on other machines</small></a>
+    </div>
+  </div>
+  <div class="grp" data-grp="incident">
+    <button type="button" title="Incident"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 14V2.5M3 3h9l-2 3 2 3H3" stroke-linejoin="round"/></svg><span class="lbl">Incident</span><svg class="car" viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+    <div class="menu">
+      <a href="/skywarn" data-p="/skywarn /strips /reports" data-t="Reports">Reports<small>SKYWARN spotter and strip reports</small></a>
+      <a href="/status-board" data-p="/status-board" data-t="Status Board">Status board<small>Local emergency status: shelters, beds, vehicles</small></a>
+    </div>
+  </div>
+  <div class="grp" data-grp="monitor">
+    <button type="button" title="Monitor"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.5 9h3l2-5 3 9 2-4h3" stroke-linejoin="round" stroke-linecap="round"/></svg><span class="lbl">Monitor</span><svg class="car" viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+    <div class="menu">
+      <a href="/analytics" data-p="/analytics" data-t="Analytics">Analytics<small>Traffic and adapter history</small></a>
+      <a href="/anomalies" data-p="/anomalies" data-t="Anomalies">Anomalies<small>Unusual node behaviour and alerts</small></a>
+      <a href="/logs" data-p="/logs" data-t="Logs">Logs<small>Service log viewer</small></a>
+    </div>
+  </div>
+  <a class="nv icon-only" href="/simulation" data-p="/simulation" data-t="Simulation" id="ech-topnav-sim" title="Simulation"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 2h4M7 2v4l-4 7.5h10L9 6V2" stroke-linejoin="round"/></svg></a>
+  <a class="nv icon-only" href="/settings#selfupdate" id="ech-topnav-update" title="Update available" style="display:none"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 11V7a4 4 0 018 0v4l1 1.5H3z M6.5 14h3" stroke-linejoin="round"/></svg><i class="badge-dot"></i></a>
+  <a class="nv icon-only" href="/settings" data-p="/settings" data-t="Settings" id="ech-topnav-settings" title="Settings"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke-linecap="round"/></svg></a>
 </nav>
+<a id="sm-links" href="/settings#adapters" title="Network links">
+  <i></i><span>links</span>
+</a>
 <script>
 (function(){
-  document.querySelectorAll('#ech-topnav a').forEach(function(a){
-    a.style.cssText = 'display:flex;align-items:center;justify-content:center;width:23px;height:23px;'
-      + 'border-radius:5px;font-size:13px;text-decoration:none;flex-shrink:0;line-height:1';
-    if (a.dataset.p === location.pathname) {
-      a.style.background = 'rgba(56,139,253,.18)';
-      a.style.boxShadow = 'inset 0 0 0 1px rgba(56,139,253,.5)';
-    }
+  var bp = window.ECH_BASE_PATH || '';
+  var path = location.pathname;
+  if (bp && path.indexOf(bp) === 0) path = path.slice(bp.length) || '/';
+  var nav = document.getElementById('ech-topnav');
+  var title = '';
+  nav.querySelectorAll('[data-p]').forEach(function(a){
+    if (a.dataset.p.split(' ').indexOf(path) < 0) return;
+    a.classList.add('active');
+    title = a.dataset.t || '';
+    var g = a.closest('.grp');
+    if (g) g.classList.add('active');
   });
-  var updA = document.getElementById('ech-topnav-update');
-  if (updA) { updA.style.display = 'none'; updA.style.position = 'relative'; }
+  var pg = document.getElementById('sm-page');
+  if (pg) { if (title && path !== '/') pg.textContent = title; else pg.style.display = 'none'; }
+  // Dropdowns: hover on desktop, click/tap anywhere (touch), Esc closes.
+  var groups = nav.querySelectorAll('.grp');
+  function closeAll(except){ groups.forEach(function(g){ if (g !== except) g.classList.remove('open'); }); }
+  groups.forEach(function(g){
+    var t = null;
+    g.querySelector('button').addEventListener('click', function(e){ e.stopPropagation(); var o = !g.classList.contains('open'); closeAll(); g.classList.toggle('open', o); });
+    g.addEventListener('mouseenter', function(){ if (matchMedia('(hover:hover)').matches) { clearTimeout(t); closeAll(g); g.classList.add('open'); } });
+    g.addEventListener('mouseleave', function(){ if (matchMedia('(hover:hover)').matches) { t = setTimeout(function(){ g.classList.remove('open'); }, 180); } });
+  });
+  document.addEventListener('click', function(){ closeAll(); });
+  // Busy page headers (Ham Log, Messages) degrade the shell instead of overflowing.
+  var hdr = document.getElementById('header');
+  function fit(){
+    if (!hdr) return;
+    hdr.classList.remove('sm-compact', 'sm-tight');
+    if (hdr.scrollWidth > hdr.clientWidth + 1) hdr.classList.add('sm-compact');
+    if (hdr.scrollWidth > hdr.clientWidth + 1) hdr.classList.add('sm-tight');
+  }
+  fit();
+  window.addEventListener('resize', fit);
+  window.addEventListener('load', fit);
+  setTimeout(fit, 1500);
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeAll(); });
   // Settings/Simulation are admin-only — hide until we know the caller's role
   // (matches the auth middleware's own role check, so the link never dead-ends).
   var settingsA = document.getElementById('ech-topnav-settings');
   var simA = document.getElementById('ech-topnav-sim');
-  if (settingsA) settingsA.style.visibility = 'hidden';
-  if (simA) simA.style.visibility = 'hidden';
+  settingsA.style.display = 'none'; simA.style.display = 'none';
   // GitHub update notice: admin-only endpoint (403 for others -> stays hidden).
   // Server caches the GitHub lookup for 6 h, so polling hourly is cheap.
   function checkUpdate(){
@@ -507,7 +552,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
       var a = document.getElementById('ech-topnav-update');
       if (!a || !u) return;
       if (u.available) {
-        a.style.display = 'flex';
+        a.style.display = '';
         a.title = 'Update available: v' + u.latest + ' (this install: v' + u.current + ') - click to open Settings';
       } else { a.style.display = 'none'; }
     }).catch(function(){});
@@ -516,12 +561,26 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
   setInterval(checkUpdate, 3600000);
   fetch('/api/auth/me').then(function(r){ return r.ok ? r.json() : {authenticated:false}; }).then(function(d){
     var isAdmin = !d.authenticated || d.role === 'admin';
-    if (settingsA) settingsA.style.visibility = isAdmin ? 'visible' : 'hidden';
-    if (simA) simA.style.visibility = isAdmin ? 'visible' : 'hidden';
-  }).catch(function(){
-    if (settingsA) settingsA.style.visibility = 'visible';
-    if (simA) simA.style.visibility = 'visible';
-  });
+    settingsA.style.display = isAdmin ? '' : 'none';
+    simA.style.display = isAdmin ? '' : 'none';
+  }).catch(function(){ settingsA.style.display = ''; simA.style.display = ''; });
+  // Links pill: how many configured adapters are connected right now.
+  function checkLinks(){
+    fetch('/api/channels').then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
+      var el = document.getElementById('sm-links');
+      if (!el || !d || !d.channels) return;
+      var all = d.channels.filter(function(c){ return c.state !== 'disabled'; });
+      var up = all.filter(function(c){ return c.state === 'connected'; });
+      var down = all.filter(function(c){ return c.state !== 'connected'; }).map(function(c){ return c.adapter + ' (' + c.state + ')'; });
+      el.className = !all.length ? '' : up.length === all.length ? 'ok' : up.length ? 'warn' : 'bad';
+      el.querySelector('span').textContent = up.length + '/' + all.length + ' links';
+      el.title = down.length ? 'Not connected: ' + down.join(', ') : 'All ' + all.length + ' network links connected';
+      el.style.display = 'flex';
+      fit();
+    }).catch(function(){});
+  }
+  checkLinks();
+  setInterval(checkLinks, 30000);
 })();
 </script>"""
 
@@ -537,7 +596,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if ech_state and ech_state.simulation_enabled:
             injections.append("window.ECH_SIM=true;")
         content = content.replace("</head>",
-            f"<script>{''.join(injections)}</script></head>", 1)
+            f"<script>{''.join(injections)}</script>"
+            '<link rel="stylesheet" href="/static/ech-ui.css"></head>', 1)
         content = content.replace('id="header">', 'id="header">' + _TOPNAV_HTML, 1)
         content = rewrite_base_path_links(content, _base_path)
         return content
@@ -1300,15 +1360,22 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     @app.get("/api/map/tracks")
     async def map_tracks(hours: float = 24.0):
         """Recorded position history for moving nodes (server keeps 7 days).
-        {"tracks": {node_id: [[ts_ms, lat, lon], ...]}} - only nodes with at
-        least two points, each thinned to <= 2000 points."""
+        {"tracks": {node_id: [[ts_ms, lat, lon, info|null], ...]}} - only nodes
+        with at least two points, each thinned to <= 2000 points. ``info`` is
+        what the node reported when that point was stored (speed, alt, SNR...)."""
         import time as _time
         from ech.core.track_history import downsample
         hours = min(max(hours, 0.1), 24 * 7)
         rows = await db.get_tracks(_time.time() - hours * 3600)
         tracks: dict[str, list] = {}
-        for nid, ts, lat, lon in rows:
-            tracks.setdefault(nid, []).append([int(ts * 1000), lat, lon])
+        for nid, ts, lat, lon, info in rows:
+            pt = [int(ts * 1000), lat, lon]
+            if info:
+                try:
+                    pt.append(json.loads(info))
+                except ValueError:
+                    pass
+            tracks.setdefault(nid, []).append(pt)
         return {"hours": hours,
                 "tracks": {k: downsample(v) for k, v in tracks.items() if len(v) >= 2}}
 

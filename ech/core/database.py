@@ -137,7 +137,8 @@ CREATE TABLE IF NOT EXISTS node_positions (
     adapter TEXT NOT NULL,
     ts      REAL NOT NULL,
     lat     REAL NOT NULL,
-    lon     REAL NOT NULL
+    lon     REAL NOT NULL,
+    info    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_node_positions_ts ON node_positions (ts);
 CREATE INDEX IF NOT EXISTS idx_node_positions_node ON node_positions (node_id, ts);
@@ -423,6 +424,13 @@ class Database:
                 pass  # column already exists (or table doesn't exist yet — CREATE below adds it)
         try:
             await self._db.execute("ALTER TABLE skywarn_reports ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")
+            await self._db.commit()
+        except Exception:
+            pass  # column already exists
+
+        # Per-point snapshot (speed/alt/SNR...) for clickable map track points
+        try:
+            await self._db.execute("ALTER TABLE node_positions ADD COLUMN info TEXT")
             await self._db.commit()
         except Exception:
             pass  # column already exists
@@ -1093,16 +1101,17 @@ class Database:
         await self._db.commit()
 
     async def record_positions(self, rows: list[tuple]) -> None:
-        """rows: (node_id, adapter, ts, lat, lon) - map track history."""
+        """rows: (node_id, adapter, ts, lat, lon[, info_json]) - map track history."""
         if not rows:
             return
+        rows = [tuple(r) + (None,) * (6 - len(r)) for r in rows]
         await self._db.executemany(
-            "INSERT INTO node_positions(node_id, adapter, ts, lat, lon) VALUES(?,?,?,?,?)", rows)
+            "INSERT INTO node_positions(node_id, adapter, ts, lat, lon, info) VALUES(?,?,?,?,?,?)", rows)
         await self._db.commit()
 
     async def get_tracks(self, since_ts: float, limit: int = 400000) -> list[tuple]:
         async with self._db.execute(
-            "SELECT node_id, ts, lat, lon FROM node_positions WHERE ts >= ? ORDER BY node_id, ts LIMIT ?",
+            "SELECT node_id, ts, lat, lon, info FROM node_positions WHERE ts >= ? ORDER BY node_id, ts LIMIT ?",
             (since_ts, limit),
         ) as cur:
             return await cur.fetchall()

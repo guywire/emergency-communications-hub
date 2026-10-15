@@ -6,7 +6,7 @@ import aiosqlite
 
 from ech.core import database as _dbmod
 from ech.core.database import Database
-from ech.core.track_history import TrackHistory, downsample
+from ech.core.track_history import TrackHistory, downsample, point_info
 
 
 class _Router:
@@ -72,3 +72,18 @@ def test_downsample_keeps_ends():
     out = downsample(pts, 100)
     assert len(out) == 100 and out[0] == pts[0] and out[-1] == pts[-1]
     assert downsample(pts[:50], 100) == pts[:50]
+
+
+def test_point_info_snapshot(tmp_path):
+    async def go():
+        db = await _open(tmp_path / "t.db")
+        r = _Router()
+        r.nodes = [{"node_id": "icao:abc", "lat": 44.0, "lon": -69.0, "snr": 7.5,
+                    "meta": {"altitude_ft": 12000, "speed_kts": 310, "junk": [1, 2]}}]
+        assert await TrackHistory(r, db, {}).sample_once() == 1
+        rows = await db.get_tracks(0)
+        import json
+        assert json.loads(rows[0][4]) == {"snr": 7.5, "altitude_ft": 12000, "speed_kts": 310}
+        await db._db.close()
+    _run(go())
+    assert point_info({"lat": 1, "lon": 2}) is None

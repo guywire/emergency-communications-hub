@@ -8,6 +8,7 @@ pruned after ``keep_days`` (default 7). GET /api/map/tracks serves them.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import time
@@ -30,8 +31,30 @@ def _dist_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
+# What a node reported at the moment a track point was stored - shown when the
+# operator clicks that point on the map. Scalars only, kept small.
+_INFO_TOP = ("altitude", "snr", "rssi", "battery_level", "hops_away")
+_INFO_META = ("altitude_ft", "speed_kts", "track_deg", "course_deg", "squawk", "flight",
+              "nav_status", "speed_kmh", "course", "speed", "comment", "status")
+
+
+def point_info(node: dict) -> str | None:
+    info = {}
+    for k in _INFO_TOP:
+        v = node.get(k)
+        if isinstance(v, (int, float, str)) and v != "":
+            info[k] = v
+    meta = node.get("meta") or {}
+    if isinstance(meta, dict):
+        for k in _INFO_META:
+            v = meta.get(k)
+            if isinstance(v, (int, float, str)) and v != "":
+                info[k] = v[:80] if isinstance(v, str) else v
+    return json.dumps(info, separators=(",", ":")) if info else None
+
+
 def downsample(points: list, limit: int = MAX_POINTS_PER_NODE) -> list:
-    """Evenly thin a [ts, lat, lon] list to at most ``limit`` points, always
+    """Evenly thin a [ts, lat, lon, ...] list to at most ``limit`` points, always
     keeping the first and last."""
     n = len(points)
     if n <= limit or limit < 2:
@@ -102,7 +125,7 @@ class TrackHistory:
                     if _dist_m(prev[1], prev[2], lat, lon) < MOVE_THRESHOLD_M:
                         continue
                 self._last[key] = (now, lat, lon)
-                rows.append((nid, name, now, lat, lon))
+                rows.append((nid, name, now, lat, lon, point_info(n)))
         if rows:
             await self._db.record_positions(rows)
         return len(rows)

@@ -59,6 +59,9 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 .legend-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
 .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 #node-count{font-size:11px;color:var(--muted)}
+.trk-tbl{border-collapse:collapse;margin-top:4px;font-size:10px}
+.trk-tbl td{padding:1px 8px 1px 0;vertical-align:top}
+.trk-tbl td:first-child{color:var(--muted);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -66,9 +69,6 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 <div id="header">
   <a class="back" href="/">← ECH</a>
   <div class="logo">▣ SM / Node Map</div>
-  <a href="/hamlog" title="Go to Ham Logger"
-     style="font-family:var(--mono);font-size:10px;color:var(--muted);text-decoration:none;padding:2px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg3);margin-left:6px"
-     onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">&#9783; Ham Log</a>
   <span id="node-count">Loading…</span>
   <div class="spacer"></div>
   <div id="controls">
@@ -109,7 +109,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row on" id="panel-moon-btn" onclick="togglePanel('moon')" title="Show or hide the moon phase panel">🌙 Moon status</button>
     <button class="ctrl-btn layer-row on" id="panel-key-btn"  onclick="togglePanel('key')"  title="Show or hide the map key (legend)">🗝 Map key</button>
     <div class="layer-group-title">Movement tracks</div>
-    <button class="ctrl-btn layer-row on" id="track-btn" onclick="toggleTracks()" title="Draw a trail behind anything that moves (APRS, MeshCore, Meshtastic, aircraft, vessels) and glow it by speed: cyan walking, green/yellow vehicle, orange highway, red/magenta aircraft. Recorded on the server for up to 7 days.">〰 Tracks + speed glow</button>
+    <button class="ctrl-btn layer-row on" id="track-btn" onclick="toggleTracks()" title="Draw a trail in the adapter colour behind anything that moves (APRS, MeshCore, Meshtastic, aircraft, vessels). Click a dot on a trail to see what was reported at that point. The moving marker glows by speed: cyan walking, green/yellow vehicle, orange highway, red/magenta aircraft. Recorded on the server for up to 7 days.">〰 Movement tracks</button>
     <label style="display:flex;align-items:center;gap:6px;margin:2px 4px;font-size:11px;color:var(--muted)">Keep
       <select id="track-len" onchange="setTrackMinutes(this.value)" style="flex:1;background:var(--panel,#161b22);color:inherit;border:1px solid var(--border,#30363d);border-radius:4px;padding:2px 4px">
         <option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option>
@@ -215,6 +215,7 @@ document.addEventListener('keydown', (e) => {
 
 const markers = {};
 let followMode = false;
+let _booting = true;     // see _bootMap(): nothing is drawn until the layer profile is applied
 let _showAircraft = true;
 let _showVessels  = true;
 
@@ -439,7 +440,12 @@ function popupContent(node, isAlert, lastMsg) {
   // instead of offering a Message button that silently goes nowhere.
   const NON_MSG = ['REP', 'SENS', 'REPEATER', 'ROUTER', 'DIGI', 'WX', 'IGATE', 'RPTR', 'OBJECT', 'WAYPOINT', 'RMS'];
   const ntype = node.node_type || '';
-  const messageable = !NON_MSG.includes(ntype);
+  // Broadcast-only sources (aircraft, vessels, AIS/ADS-B feeds) have no inbox
+  // at all, so they get no Message button.
+  const nidL = (node.node_id || '').toLowerCase(), adL = (node._adapter || '').toLowerCase();
+  const broadcastOnly = nidL.startsWith('icao:') || nidL.startsWith('mmsi:') || nodeIsVessel(node)
+    || /adsb|ads-b|opensky|ais/.test(adL);
+  const messageable = !broadcastOnly && !NON_MSG.includes(ntype);
   const typeBadge = ntype
     ? `<span style="font-family:var(--mono);font-size:9px;padding:0 4px;margin-left:4px;border:1px solid ${messageable ? '#3fb950' : '#d29922'};border-radius:3px;color:${messageable ? '#3fb950' : '#d29922'}">${esc(ntype)}</span>` : '';
   const msgUrl = `/?to=${encodeURIComponent(node.node_id)}&adapter=${encodeURIComponent(node._adapter || '')}`;
@@ -448,7 +454,7 @@ function popupContent(node, isAlert, lastMsg) {
     : 'This node type routes packets but has no message inbox';
   const msgAction = messageable
     ? `<a href="${msgUrl}" target="_top" style="flex:1;text-align:center;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.4);color:#388bfd;border-radius:3px;text-decoration:none">📨 Message</a>`
-    : `<span style="flex:1;text-align:center;font-family:var(--mono);font-size:9px;padding:4px 2px;border:1px solid var(--border);color:var(--muted);border-radius:3px" title="${notMsgTitle}">not messageable</span>`;
+    : (broadcastOnly ? '' : `<span style="flex:1;text-align:center;font-family:var(--mono);font-size:9px;padding:4px 2px;border:1px solid var(--border);color:var(--muted);border-radius:3px" title="${notMsgTitle}">not messageable</span>`);
   const actionBtns = `<div style="display:flex;gap:5px;margin-top:8px">
     ${msgAction}
     ${(node.lat != null && !(node._adapter || '').toLowerCase().includes('aprs'))
@@ -685,6 +691,7 @@ async function fetchLastMsg(nodeId) {
 let _baseLL = null;   // ECH base position from live state
 
 async function loadNodes() {
+  if (_booting) return;   // first draw waits until the saved layer profile is applied
   try {
     const r = await fetch('/api/channels');
     const data = await r.json();
@@ -743,7 +750,7 @@ async function loadNodes() {
       const size  = isAlert ? 16 : 12;
       const popup = popupContent(node, isAlert);
       const icon  = makeNodeIcon(node, color, size);
-      _trackRecord(id, node.lat, node.lon, color);
+      _trackRecord(id, node.lat, node.lon, isVessel ? adapterColor('ais') : adapterColor(node._adapter), _trackInfo(node));
 
       if (markers[id]) {
         markers[id].setLatLng([node.lat, node.lon]);
@@ -757,12 +764,13 @@ async function loadNodes() {
         marker.on('popupopen', () => onPopupOpen(marker, node));
         markers[id] = marker;
       }
+      markers[id]._echName = node.display_name || id;
     });
 
     Object.keys(markers).forEach(id => {
       if (!seen.has(id)) { markers[id].remove(); delete markers[id]; }
     });
-    _trackRedraw(seen);
+    _trackRedraw();
 
     const total = Object.keys(markers).length;
     document.getElementById('node-count').textContent = `${total} node${total!==1?'s':''} with position`;
@@ -847,8 +855,7 @@ function toggleTracks() {
   try { localStorage.setItem('ech.map.tracks', _trackEnabled ? '1' : '0'); } catch (e) {}
   _trackSyncUI();
   if (!_trackEnabled) {
-    Object.values(_trackLines).forEach(l => l.remove());
-    _trackLines = {};
+    _trackRedraw();
   } else {
     _trackLoadedMinutes = 0;
     _trackLoadHistory();
@@ -865,16 +872,40 @@ function setTrackMinutes(v) {
   _trackRedraw();
 }
 
-function _trackRecord(id, lat, lon, color) {
+function _trackRecord(id, lat, lon, color, info) {
   if (!_trackEnabled) return;
   const now = Date.now();
   const h = _trackHist[id] || (_trackHist[id] = []);
   const last = h[h.length - 1];
   if (!last || Math.abs(last[1] - lat) > 0.0003 || Math.abs(last[2] - lon) > 0.0004) {
-    h.push([now, lat, lon]);
+    h.push(info ? [now, lat, lon, info] : [now, lat, lon]);
     if (h.length > 3000) h.splice(0, h.length - 3000);
   }
   h.color = color;
+}
+
+// What the node reported, kept with each live breadcrumb (mirrors the
+// server's track_history.point_info so live and stored points look alike).
+function _trackInfo(node) {
+  const info = {};
+  ['altitude', 'snr', 'rssi', 'battery_level', 'hops_away'].forEach(k => {
+    const v = node[k];
+    if (v != null && v !== '' && typeof v !== 'object') info[k] = v;
+  });
+  const m = node.meta || {};
+  ['altitude_ft', 'speed_kts', 'track_deg', 'course_deg', 'squawk', 'flight', 'nav_status',
+   'speed_kmh', 'course', 'speed', 'comment', 'status'].forEach(k => {
+    const v = m[k];
+    if (v != null && v !== '' && typeof v !== 'object') info[k] = v;
+  });
+  return Object.keys(info).length ? info : null;
+}
+
+function _kmBetween(a, b) {
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (b[1] - a[1]) * rad, dLon = (b[2] - a[2]) * rad;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * rad) * Math.cos(b[1] * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
 }
 
 // Ground speed (km/h) from the recent breadcrumbs; 0 once a node has not
@@ -887,14 +918,12 @@ function _trackSpeedKmh(h) {
   for (let i = h.length - 2; i >= 0 && last[0] - h[i][0] <= 300000; i--) first = h[i];
   const dt = (last[0] - first[0]) / 3600000;
   if (dt <= 0) return 0;
-  const R = 6371, rad = Math.PI / 180;
-  const dLat = (last[1] - first[1]) * rad, dLon = (last[2] - first[2]) * rad;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(first[1] * rad) * Math.cos(last[1] * rad) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a)) / dt;
+  return _kmBetween(first, last) / dt;
 }
 
-// Glow colour by speed: walking -> cyan, vehicle -> green/yellow, highway
-// -> orange, aircraft-class -> red/magenta.
+// Marker glow colour by speed: walking -> cyan, vehicle -> green/yellow,
+// highway -> orange, aircraft-class -> red/magenta. The track line itself is
+// always the adapter colour so a trail is identifiable at a glance.
 function _speedColor(kmh) {
   if (kmh < 2)   return null;
   if (kmh < 8)   return '#39d0ff';
@@ -905,8 +934,57 @@ function _speedColor(kmh) {
   return '#d946ef';
 }
 
-function _trackRedraw(seen) {
+const _TRACK_INFO_LABELS = {
+  altitude: ['Alt', v => `${Math.round(v)} m`], altitude_ft: ['Alt', v => `${Number(v).toLocaleString()} ft`],
+  speed_kts: ['Speed', v => `${Math.round(v)} kt`], speed_kmh: ['Speed', v => `${Math.round(v)} km/h`],
+  speed: ['Speed', v => String(v)], track_deg: ['Heading', v => `${Math.round(v)}°`],
+  course_deg: ['Course', v => `${Math.round(v)}°`], course: ['Course', v => `${v}°`],
+  snr: ['SNR', v => `${v} dB`], rssi: ['RSSI', v => `${v} dBm`], battery_level: ['Battery', v => `${v}%`],
+  hops_away: ['Hops', v => String(v)], squawk: ['Squawk', v => String(v)], flight: ['Flight', v => String(v).trim()],
+  nav_status: ['Status', v => String(v)], status: ['Status', v => String(v)], comment: ['Comment', v => String(v)],
+};
+
+function _trackPointPopup(id, h, i) {
+  const p = h[i], prev = i > 0 ? h[i - 1] : null;
+  if (!p) return '';
+  const t = new Date(p[0]);
+  const m = markers[id];
+  const name = (m && m._echName) || id;
+  const rows = [
+    ['Time', `${t.toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'})} (${_heardAgo(t.toISOString())})`],
+    ['Position', `${p[1].toFixed(5)}, ${p[2].toFixed(5)}`],
+  ];
+  if (prev && p[0] > prev[0]) {
+    const km = _kmBetween(prev, p);
+    rows.push(['Avg speed', `${Math.round(km / ((p[0] - prev[0]) / 3600000))} km/h over ${km < 1 ? Math.round(km * 1000) + ' m' : km.toFixed(1) + ' km'}`]);
+  }
+  const info = p[3] || {};
+  const seen = new Set();
+  Object.keys(_TRACK_INFO_LABELS).forEach(k => {
+    if (info[k] == null) return;
+    const [label, fmt] = _TRACK_INFO_LABELS[k];
+    if (seen.has(label)) return;
+    seen.add(label);
+    rows.push([label, fmt(info[k])]);
+  });
+  return `<div class="node-popup"><div class="node-name">${esc(name)}</div>`
+    + `<div class="node-stat">Track point ${i + 1} of ${h.length}</div>`
+    + `<table class="trk-tbl">${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table></div>`;
+}
+
+// Tracks share one canvas renderer: hundreds of clickable breadcrumb dots as
+// SVG elements would bog the map down.
+const _trackRenderer = L.canvas({padding: 0.3, tolerance: 4});
+const _TRACK_MAX_DOTS = 400;
+
+function _trackRemove(id) {
+  const t = _trackLines[id];
+  if (t) { t.line.remove(); t.dots.remove(); delete _trackLines[id]; }
+}
+
+function _trackRedraw() {
   if (!_trackEnabled) {
+    Object.keys(_trackLines).forEach(_trackRemove);
     Object.values(markers).forEach(m => { if (m._icon) m._icon.style.filter = ''; });
     return;
   }
@@ -914,29 +992,36 @@ function _trackRedraw(seen) {
   Object.keys(_trackHist).forEach(id => {
     const h = _trackHist[id];
     while (h.length && h[0][0] < cutoff) h.shift();
-    const visible = !seen || seen.has(id);
-    if (!h.length || (seen && !visible && !markers[id])) {
-      if (!h.length) delete _trackHist[id];
-      if (_trackLines[id]) { _trackLines[id].remove(); delete _trackLines[id]; }
-      return;
-    }
-    if (h.length < 2 || !visible) {
-      if (_trackLines[id]) { _trackLines[id].remove(); delete _trackLines[id]; }
-      return;
-    }
+    if (!h.length) delete _trackHist[id];
+    // Only draw trails for markers actually on the map, so a layer that is
+    // switched off (or not yet applied from a profile) never flashes its tracks.
+    if (h.length < 2 || !markers[id]) { _trackRemove(id); return; }
+    const color = h.color || '#58a6ff';
     const pts = h.map(p => [p[1], p[2]]);
-    const glow = _speedColor(_trackSpeedKmh(h));
-    const lineColor = glow || h.color || '#58a6ff';
-    if (_trackLines[id]) {
-      _trackLines[id].setLatLngs(pts);
-      _trackLines[id].setStyle({color: lineColor});
+    let t = _trackLines[id];
+    if (!t) {
+      t = _trackLines[id] = {
+        line: L.polyline(pts, {color, weight: 2.5, opacity: 0.75, renderer: _trackRenderer, interactive: false}).addTo(map),
+        dots: L.layerGroup().addTo(map), n: -1, first: -1,
+      };
     } else {
-      _trackLines[id] = L.polyline(pts, {
-        color: lineColor, weight: 2, opacity: 0.7, interactive: false,
-      }).addTo(map);
+      t.line.setLatLngs(pts);
+      t.line.setStyle({color});
     }
-    h.glow = glow;
+    if (t.n !== h.length || t.first !== h[0][0] || t.color !== color) {
+      t.dots.clearLayers();
+      const step = Math.max(1, Math.ceil(h.length / _TRACK_MAX_DOTS));
+      for (let i = 0; i < h.length; i += step) {
+        const idx = i;
+        L.circleMarker(pts[i], {
+          renderer: _trackRenderer, radius: 3, weight: 1.5, color, fillColor: '#0d1117', fillOpacity: 0.9,
+        }).bindPopup(() => _trackPointPopup(id, _trackHist[id] || h, idx)).addTo(t.dots);
+      }
+      t.n = h.length; t.first = h[0][0]; t.color = color;
+    }
+    h.glow = _speedColor(_trackSpeedKmh(h));
   });
+  Object.keys(_trackLines).forEach(id => { if (!_trackHist[id]) _trackRemove(id); });
   // Variable glow on the moving markers (setIcon recreates the element every
   // refresh, so it is re-applied here each time).
   Object.keys(markers).forEach(id => {
@@ -957,6 +1042,7 @@ async function _trackLoadHistory() {
     if (!r.ok) return;
     const d = await r.json();
     Object.entries(d.tracks || {}).forEach(([id, pts]) => {
+      if (!pts.length) return;
       const cur = _trackHist[id] || [];
       const lastSrv = pts[pts.length - 1][0];
       const merged = pts.concat(cur.filter(p => p[0] > lastSrv));
@@ -964,12 +1050,11 @@ async function _trackLoadHistory() {
       _trackHist[id] = merged;
     });
     _trackLoadedMinutes = Math.max(_trackLoadedMinutes, _trackMinutes);
-    loadNodes();
+    await loadNodes();
   } catch (e) {}
 }
 document.addEventListener('DOMContentLoaded', () => { _trackSyncUI(); _applyPanels(); });
 _trackSyncUI();
-setTimeout(_trackLoadHistory, 1500);
 
 function toggleAircraft() {
   _showAircraft = !_showAircraft;
@@ -1087,6 +1172,7 @@ function connectWS() {
   const ws = new WebSocket(`${proto}//${location.host}/ws`);
   ws.onmessage = (e) => {
     const pkt = JSON.parse(e.data);
+    if (_booting) return;
     if (pkt.type === 'rf_traffic') {
       const drawn = _showTraffic ? drawTraffic(pkt.data) : false;
       // A trace reply is an operator-requested measurement — announce it when
@@ -1127,6 +1213,7 @@ function connectWS() {
       delete lastMsgCache[id];
       if (markers[id]) {
         markers[id].setLatLng([d.lat, d.lon]);
+        _trackRecord(id, d.lat, d.lon, color, null);
       } else {
         const nodeStub = {node_id: id, display_name: d.from_display||id, _adapter: d.source_adapter};
         const marker = L.marker([d.lat, d.lon], {icon: makeIcon(color)})
@@ -1152,14 +1239,77 @@ function togglePSKReporter() {
   btn.style.color = _pskEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _pskEnabled ? 'var(--green)' : '';
   btn.classList.toggle('on', _pskEnabled);
+  setSpotLegend('psk', _pskEnabled);
   if (_pskEnabled) {
     loadPSKReporter();
     toast('PSKReporter: fetching recent spots…');
   } else {
     _pskMarkers.forEach(m => m.remove());
     _pskMarkers = [];
+    _pskClearLinks();
     toast('PSKReporter overlay off');
   }
+}
+
+function _kmBearing(a, b) {
+  const rad = Math.PI / 180, R = 6371;
+  const dLat = (b[0] - a[0]) * rad, dLon = (b[1] - a[1]) * rad;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dLon / 2) ** 2;
+  const km = 2 * R * Math.asin(Math.sqrt(x));
+  const y = Math.sin(dLon) * Math.cos(b[0] * rad);
+  const z = Math.cos(a[0] * rad) * Math.sin(b[0] * rad) - Math.sin(a[0] * rad) * Math.cos(b[0] * rad) * Math.cos(dLon);
+  return [km, (Math.atan2(y, z) / rad + 360) % 360];
+}
+const _COMPASS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+
+function _pskPopup(st) {
+  const s = SPOT_STYLE.psk, latest = st.reports[0];
+  const ago = latest.flowStartSeconds ? _heardAgo(new Date(latest.flowStartSeconds * 1000).toISOString()) : '';
+  const bands = [...new Set(st.reports.map(r => _band((r.frequency || 0) / 1000)).filter(Boolean))];
+  const modes = [...new Set(st.reports.map(r => r.mode).filter(Boolean))];
+  const rx = new Set(st.reports.map(r => r.receiverCallsign));
+  const best = st.reports.reduce((m, r) => r.sNR != null && (m == null || r.sNR > m) ? r.sNR : m, null);
+  let far = 0;
+  st.reports.forEach(r => { if (r.rxLat != null) far = Math.max(far, _kmBearing([st.lat, st.lon], [r.rxLat, r.rxLon])[0]); });
+  const rows = [];
+  if (_baseLL) {
+    const [km, brg] = _kmBearing(_baseLL, [st.lat, st.lon]);
+    rows.push(['From you', `${km < 10 ? km.toFixed(1) : Math.round(km)} km ${_COMPASS[Math.round(brg / 22.5) % 16]} (${Math.round(brg)}°)`]);
+  }
+  if (st.grid) rows.push(['Grid', st.grid]);
+  rows.push(['Last heard', `${ago}${latest.frequency ? ` on ${(latest.frequency / 1e6).toFixed(4)} MHz` : ''}`]);
+  rows.push(['Bands / modes', `${bands.join(', ') || '?'} · ${modes.join(', ') || '?'}`]);
+  rows.push(['Heard by', `${rx.size} station${rx.size === 1 ? '' : 's'}${far ? `, farthest ${Math.round(far)} km` : ''}${best != null ? `, best ${best} dB` : ''}`]);
+  const recent = st.reports.slice(0, 8).map(r => {
+    const d = r.rxLat != null ? Math.round(_kmBearing([st.lat, st.lon], [r.rxLat, r.rxLon])[0]) + ' km' : '';
+    return `<tr><td>${esc(r.receiverCallsign || '?')}</td><td>${esc(_band((r.frequency || 0) / 1000))} ${esc(r.mode || '')}</td>`
+      + `<td>${r.sNR != null ? esc(r.sNR) + ' dB' : ''}</td><td>${d}</td></tr>`;
+  }).join('');
+  return `<div class="node-popup" style="max-width:320px"><div class="node-name">${s.icon} ${esc(st.call)}</div>`
+    + `<div class="node-stat" style="color:${s.color}">${esc(s.label)}</div>`
+    + `<table class="trk-tbl">${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>`
+    + `<div class="node-stat" style="margin-top:6px">Recent receptions (lines on the map):</div>`
+    + `<table class="trk-tbl">${recent}</table>`
+    + `<div class="node-ext-links"><a href="https://www.qrz.com/db/${encodeURIComponent(st.call)}" target="_blank" rel="noopener">QRZ</a>`
+    + ` &bull; <a href="https://pskreporter.info/pskmap.html?callsign=${encodeURIComponent(st.call)}" target="_blank" rel="noopener">PSK Reporter map</a></div></div>`;
+}
+
+// While a station's popup is open, draw its signal reports to each receiver.
+let _pskLinks = [];
+function _pskShowLinks(st) {
+  _pskClearLinks();
+  const seen = new Set();
+  st.reports.forEach(r => {
+    if (r.rxLat == null || r.rxLon == null || seen.has(r.receiverCallsign)) return;
+    seen.add(r.receiverCallsign);
+    _pskLinks.push(L.polyline([[st.lat, st.lon], [r.rxLat, r.rxLon]], {
+      color: SPOT_STYLE.psk.color, weight: 1.2, opacity: 0.55, dashArray: '3 5', interactive: false,
+    }).addTo(map));
+  });
+}
+function _pskClearLinks() {
+  _pskLinks.forEach(l => l.remove());
+  _pskLinks = [];
 }
 
 async function loadPSKReporter() {
@@ -1181,17 +1331,24 @@ async function loadPSKReporter() {
     }
     _pskMarkers.forEach(m => m.remove());
     _pskMarkers = [];
+    _pskClearLinks();
+    // One marker per transmitting station, summarising every report of it.
+    const bySender = new Map();
     (data.spots || []).forEach(spot => {
-      if (spot.txLat == null || spot.txLon == null) return;
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="font-family:monospace;font-size:9px;color:#ffcb6b;background:rgba(0,0,0,.7);padding:1px 3px;border-radius:2px;border:1px solid #ffcb6b;white-space:nowrap">${spot.senderCallsign||'?'}</div>`,
-        iconSize: [60, 16],
-        iconAnchor: [30, 8],
-      });
-      const m = L.marker([spot.txLat, spot.txLon], {icon})
-        .bindPopup(`<div class="node-popup"><div class="node-name">${spot.senderCallsign}</div><div class="node-stat">Heard by: ${spot.receiverCallsign}</div><div class="node-stat">Mode: ${spot.mode} | Band: ${spot.band}</div><div class="node-stat">SNR: ${spot.sNR}dB</div><div class="node-stat">${new Date(spot.flowStartSeconds*1000).toUTCString().slice(5,22)}</div></div>`)
+      if (spot.txLat == null || spot.txLon == null || !spot.senderCallsign) return;
+      const k = spot.senderCallsign.toUpperCase();
+      if (!bySender.has(k)) bySender.set(k, {call: k, lat: spot.txLat, lon: spot.txLon, grid: spot.senderLocator || '', reports: []});
+      bySender.get(k).reports.push(spot);
+    });
+    bySender.forEach(st => {
+      st.reports.sort((a, b) => (b.flowStartSeconds || 0) - (a.flowStartSeconds || 0));
+      const latest = st.reports[0];
+      const band = _band((latest.frequency || 0) / 1000);
+      const m = L.marker([st.lat, st.lon], {icon: spotIcon('psk', st.call, [band, latest.mode].filter(Boolean).join(' '))})
+        .bindPopup(() => _pskPopup(st), {maxWidth: 340})
         .addTo(map);
+      m.on('popupopen', () => _pskShowLinks(st));
+      m.on('popupclose', _pskClearLinks);
       _pskMarkers.push(m);
     });
     toast(`PSKReporter: ${_pskMarkers.length} station(s) transmitting nearby`);
@@ -1232,6 +1389,7 @@ const SPOT_STYLE = {
   sota: {icon: '⛰', tag: 'SOTA', color: '#f0b429', label: 'Summits on the Air'},
   ota:  {icon: '📻', tag: 'OTA',  color: '#56d3c8', label: 'WWFF IOTA BOTA'},
   dx:   {icon: '📡', tag: 'DX',   color: '#ff7eb6', label: 'DX heard by spotters near you (at the DX station)'},
+  psk:  {icon: '📶', tag: 'PSK',  color: '#ffcb6b', label: 'PSK Reporter: digital-mode stations transmitting near you'},
 };
 
 function _band(khz) {
@@ -2160,10 +2318,18 @@ fetch('/api/map-colors').then(r => r.json()).then(d => {
   // uses adapterColor() (override or default) so it's always in sync even
   // with no saved override.
   ['meshtastic', 'meshcore', 'aprs'].forEach(_applyProtoButtonColor);
-}).catch(() => {}).finally(() => {
-  loadNodes();
+}).catch(() => {}).finally(_bootMap);
+
+// Boot order matters: apply the default layer profile BEFORE the first draw
+// and before live WS positions are accepted, so layers that are off in the
+// profile (e.g. ADS-B) never flash onto the map and then vanish.
+async function _bootMap() {
+  try { await _profLoad(); } catch (e) {}
+  _booting = false;
+  await _trackLoadHistory();
+  if (!Object.keys(markers).length) await loadNodes();
   setInterval(loadNodes, 30000);
-});
+}
 // ── Moon phase / rise / set (computed locally — no API) ──────────────────
 // Low-precision lunar & solar position formulas (the standard algorithms
 // used by common sky-calc libraries): phase and illumination good to ~1 %,
@@ -2407,7 +2573,6 @@ async function _profLoad() {
     profApply(_profData.default);
   }
 }
-setTimeout(_profLoad, 2500);
 
 // ── Satellites ───────────────────────────────────────────────────────────
 let _satEnabled = false;

@@ -8,6 +8,34 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc285 (2026-10-15)
+
+### Changed
+- **New app shell (UI refresh, phase 1):** every page now shares one header: SignalMatrix
+  brand + page title, a labelled grouped nav (Messages, Map, Radio, Incident, Monitor,
+  Settings) in place of the 12 unlabelled emoji icons, and a live "links" pill showing how
+  many network adapters are connected. Shared stylesheet `/static/ech-ui.css` sharpens
+  colours, tables, inputs, tab bars and map popups site-wide. Busy headers degrade to an
+  icon-only nav instead of overflowing.
+- **Map tracks** are drawn in the adapter's colour (no longer the speed colour); the speed
+  glow stays on the moving marker. Each point on a track is a clickable dot showing the
+  time, position, average speed since the previous point, and what the node reported there
+  (altitude, speed, heading, SNR, battery...). Stored with each server-side track point.
+- **PSK Reporter** map layer: listed in the map key; one marker per transmitting station
+  with band/mode label; popup shows distance and bearing from you, grid, bands/modes, how
+  many stations heard it (farthest, best SNR), recent receptions, and draws lines to the
+  receivers while open.
+
+### Fixed
+- Map: aircraft/vessels (and other broadcast-only sources) no longer show a Message button.
+- Map: on open, layers that are off in your default profile (e.g. ADS-B) no longer flash
+  their markers/tracks before clearing - the profile is applied before the first draw, and
+  tracks are only drawn for markers actually shown.
+
+### Notes
+- Rollback point is tag `v1.0.0-rc284` (local source archive `ECH_rc284_backup.tar.gz`).
+- DB: `node_positions` gains an `info` column (auto-migrated).
+
 ## v1.0.0-rc284 (2026-10-14)
 
 ### Added
