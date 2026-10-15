@@ -2,6 +2,7 @@
 # ECH install script — Debian 12 / Ubuntu 22.04 (LXC container or bare metal)
 # Run as root or with sudo.
 # Usage: bash install.sh [--no-systemd] [--with-mdns] [--with-prometheus]
+#                        [--backup-disk DEVICE|DIR]
 #
 #   --no-systemd       don't install/enable the ech systemd unit
 #   --with-mdns        install avahi and advertise the hub as <hostname>.local
@@ -9,6 +10,11 @@
 #   --with-prometheus  install a local Prometheus server scraping ECH's
 #                      /metrics (OFF by default - ECH does not need it; it only
 #                      keeps history for Grafana-style dashboards)
+#   --backup-disk X    nightly backup of the database + config to a second disk
+#                      or USB stick (e.g. /dev/sdb1, must already have a
+#                      filesystem - it is never formatted) or to a directory.
+#                      Keeps 14 archives. OFF by default. Can also be run later:
+#                      sudo bash scripts/setup_backup.sh /dev/sdb1
 
 set -euo pipefail
 
@@ -27,13 +33,17 @@ err()  { echo -e "${RED}[ERR]${NC} $*"; exit 1; }
 USE_SYSTEMD=true
 WITH_MDNS=false
 WITH_PROMETHEUS=false
-for arg in "$@"; do
-  case "$arg" in
+BACKUP_DISK=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --no-systemd)      USE_SYSTEMD=false ;;
     --with-mdns)       WITH_MDNS=true ;;
     --with-prometheus) WITH_PROMETHEUS=true ;;
-    *) err "Unknown option: $arg (see usage at the top of this script)" ;;
+    --backup-disk)     [[ $# -ge 2 ]] || err "--backup-disk needs a device or directory"
+                       BACKUP_DISK="$2"; shift ;;
+    *) err "Unknown option: $1 (see usage at the top of this script)" ;;
   esac
+  shift
 done
 
 log "=== Emergency Communications Hub installer ==="
@@ -245,11 +255,21 @@ log "Sudoers entry written to /etc/sudoers.d/ech-services"
 
 chown -R "$ECH_USER:$ECH_USER" "$ECH_DIR"
 
+# ── Scheduled backups (optional: --backup-disk) ────────────────────────────
+if [[ -n "$BACKUP_DISK" ]]; then
+  log "Setting up nightly backups to $BACKUP_DISK…"
+  bash "$ECH_DIR/scripts/setup_backup.sh" "$BACKUP_DISK"     || warn "backup setup failed - run: sudo bash $ECH_DIR/scripts/setup_backup.sh $BACKUP_DISK"
+else
+  log "Backups not configured (use --backup-disk /dev/sdX1 or a directory to enable)"
+fi
+
 echo ""
 log "=== Installation complete ==="
 log "UI: http://$(hostname -I | awk '{print $1}'):8765"
 log "Config: $ECH_CONFIG"
 log "Database: /var/lib/ech/ech.db"
+warn "ECH can transmit, including automatically. You are responsible for licensing, station"
+warn "identification and interference - see 'Legal, licensing and interference' in README.md."
 if $USE_SYSTEMD && command -v systemctl &>/dev/null; then
   log "Start: systemctl start ech"
 fi

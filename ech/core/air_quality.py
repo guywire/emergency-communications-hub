@@ -465,11 +465,17 @@ class AirQualityService:
         bbox = f"{self._lon - b:.2f},{self._lat - b:.2f},{self._lon + b:.2f},{self._lat + b:.2f}"
         now = datetime.now(timezone.utc)
         hour = now.strftime("%Y-%m-%dT%H")
-        records = await self._fetch_bbox_hour(bbox, hour)
-        if not records:
-            # AirNow typically posts a given hour ~30-60min late — retry the previous hour.
-            prev_hour = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H")
-            records = await self._fetch_bbox_hour(bbox, prev_hour)
+        prev_hour = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H")
+        # AirNow posts the current hour state-by-state, so early in the hour the
+        # response can hold only a handful of states (2026-10-14: 6 Rhode Island
+        # sites at 00:08Z while Maine hadn't posted yet; 71 sites ~20 min later).
+        # "Retry only if empty" therefore left a partial map. Always read the
+        # previous hour too and let the newest report per site win.
+        records = await self._fetch_bbox_hour(bbox, prev_hour)
+        try:
+            records = records + await self._fetch_bbox_hour(bbox, hour)
+        except httpx.HTTPError:
+            pass   # previous hour alone is still a complete picture
 
         sites: dict[tuple, dict] = {}
         for r in records:
@@ -479,7 +485,9 @@ class AirQualityService:
                 continue
             key = (round(lat, 3), round(lon, 3))
             cur = sites.get(key)
-            if cur is not None and cur["aqi"] >= aqi:
+            utc = r.get("UTC") or ""
+            # newest hour wins; within the same hour the worst pollutant wins
+            if cur is not None and (cur["_utc"] > utc or (cur["_utc"] == utc and cur["aqi"] >= aqi)):
                 continue
             # dataType=A returns Category as a plain int (1-6), not the nested
             # {Number,Name} object the latLong/current point-lookup uses —
@@ -492,8 +500,9 @@ class AirQualityService:
                 "parameter": r.get("Parameter") or r.get("ParameterName"),
                 "site_name": r.get("SiteName", ""),
                 "color": color,
+                "_utc": utc,
             }
-        self._stations = list(sites.values())
+        self._stations = [{k: v for k, v in st.items() if k != "_utc"} for st in sites.values()]
 
     # ── PurpleAir: denser crowd-sourced sensor network ────────────────────
 

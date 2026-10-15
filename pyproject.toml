@@ -30,6 +30,7 @@ dependencies = [
     "sounddevice>=0.4",
     "numpy<2",                    # CW/RTTY/PSK31 DSP — pinned <2 for SSE2-only ARM/older CPUs (numpy>=2 needs AVX2)
     "pycryptodome>=3.20",         # MeshCore channel-key AES decrypt (falls back to `cryptography` if absent)
+    "sgp4>=2.20",                 # satellite map layer (vectorised SGP4)
     "skyfield>=1.49",             # mesh bot `satpass` command
     "rns>=0.8",                   # Reticulum adapter
     "lxmf>=0.5",                  # Reticulum adapter

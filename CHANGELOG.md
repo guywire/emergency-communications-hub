@@ -8,6 +8,61 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc283 (2026-10-14)
+
+### Added
+- README: **Legal, licensing and interference** section (licence/ID, automatic control,
+  bridging onto amateur RF, Part 15/ISM limits, PSTN gateways, service terms, receive-only
+  data, privacy, emergency-use limits); the installer prints a short reminder.
+
+
+### Fixed
+- Satellites: retired NOAA 15/18/19 replaced by Meteor-M2 3/4 (LRPT) and GOES-19/18; a
+  failed CelesTrak download is retried after 2 h (CelesTrak answers 403 to repeat downloads).
+
+## v1.0.0-rc282 (2026-10-14)
+
+### Added
+- **Satellites map layer** (Layers > Satellites): ISS, amateur satellites with CW beacons
+  (AO-7, FO-29, AO-73, RS-44, CAS-9, JO-97, LilacSat-2), QO-100 (FT8 narrow-band
+  transponder, GEO), NOAA weather satellites, plus **Starlink trains** (a fresh launch still
+  in a line) with their next passes over the base. Click a satellite for its ground track.
+  Elements from CelesTrak (cached 12 h on disk); positions via vectorised SGP4.
+- Layers > Panels: hide the **Moon status** panel and the **Map key** entirely (remembered).
+
+## v1.0.0-rc281 (2026-10-14)
+
+### Added
+- **Movement tracks on the map:** a trail is drawn behind anything that moves (aircraft,
+  vessels, mobile stations). New "Movement tracks" group in the Layers menu: on/off toggle
+  and a length selector (5 min - 6 h); applies to APRS, MeshCore, Meshtastic, aircraft and
+  vessels, with a speed glow on the marker and trail (cyan walking, green/yellow vehicle,
+  orange highway, red/magenta aircraft). Positions are recorded on the server (new `node_positions`
+  table, `track_history` config: enabled/keep_days) and kept 7 days, so trails exist the
+  moment the map opens; selectable 5 min - 7 days. Fixed stations (GPS jitter under ~30 m)
+  draw nothing. `GET /api/map/tracks?hours=N`.
+- **Scheduled backups to a second disk:** `scripts/setup_backup.sh <device|dir>` (and
+  `install.sh --backup-disk X`) mounts a USB stick/disk by UUID (`nofail`), installs
+  `ech-backup` and a daily timer (03:30) that snapshots the database (consistent SQLite
+  backup), `/etc/ech` and `/etc/asterisk`, keeping 14 archives. Never formats a disk and
+  skips (rather than filling the root disk) if the stick is missing.
+- Map: Winlink RMS stations have their own toggle in "Node types".
+- Messages page > Nodes tab: each adapter chip shows its node count (shown/total when
+  searching).
+
+### Changed
+- POTA and SOTA map layers now show activators worldwide (the 500 km filter is gone);
+  `?radius_km=N` still works on the API. Legend entries shortened ("Parks on the Air",
+  "WWFF IOTA BOTA").
+- Untyped MeshCore/Meshtastic nodes (such as this hub's own radio) count as Companion.
+
+### Fixed
+- **AQI layer showed only Rhode Island:** AirNow posts the current hour state by state;
+  ECH only fell back to the previous hour when the response was empty. It now merges the
+  previous and current hour, newest report per station winning.
+- **ADS-B/AIS markers reappeared with the layer switched off:** live position updates
+  from the WebSocket bypassed the layer toggles.
+
 ## v1.0.0-rc280 (2026-10-13)
 
 ### Added

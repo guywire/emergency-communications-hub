@@ -1231,6 +1231,48 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     async def get_channels():
         return {"channels": await router.all_health()}
 
+    # ── Satellites (map layer) ──────────────────────────────────────────────
+    from pathlib import Path as _SatPath
+    from ech.core.satellites import SatelliteService as _SatService
+    try:
+        _sat_dir = _SatPath(getattr(db, "_path", "ech.db")).resolve().parent
+    except Exception:
+        _sat_dir = None
+    _sat_service = _SatService(cache_dir=_sat_dir)
+
+    def _sat_hub():
+        la = getattr(ech_state, "_base_lat", None) if ech_state else None
+        lo = getattr(ech_state, "_base_lon", None) if ech_state else None
+        return (la, lo) if la is not None and lo is not None else None
+
+    @app.get("/api/satellites")
+    async def satellites(starlink: bool = False):
+        """Tracked amateur/weather satellites (+ Starlink trains when asked)
+        with current sub-satellite points and elevation from the base."""
+        try:
+            return await _sat_service.snapshot(_sat_hub(), include_starlink=starlink)
+        except Exception as exc:
+            return {"satellites": [], "starlink": None, "error": f"{exc.__class__.__name__}: {exc}"}
+
+    @app.get("/api/satellites/track")
+    async def satellite_track(name: str, minutes: int = 100):
+        return {"name": name, "points": await _sat_service.ground_track(name, min(max(minutes, 10), 240))}
+
+    @app.get("/api/map/tracks")
+    async def map_tracks(hours: float = 24.0):
+        """Recorded position history for moving nodes (server keeps 7 days).
+        {"tracks": {node_id: [[ts_ms, lat, lon], ...]}} - only nodes with at
+        least two points, each thinned to <= 2000 points."""
+        import time as _time
+        from ech.core.track_history import downsample
+        hours = min(max(hours, 0.1), 24 * 7)
+        rows = await db.get_tracks(_time.time() - hours * 3600)
+        tracks: dict[str, list] = {}
+        for nid, ts, lat, lon in rows:
+            tracks.setdefault(nid, []).append([int(ts * 1000), lat, lon])
+        return {"hours": hours,
+                "tracks": {k: downsample(v) for k, v in tracks.items() if len(v) >= 2}}
+
     @app.get("/api/nodes/{adapter_name}")
     async def get_nodes(adapter_name: str):
         return {"nodes": await router.nodes_for(adapter_name)}
@@ -3681,8 +3723,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # ── POTA / SOTA activation spots ────────────────────────────────────────
 
     @app.get("/api/pota/spots")
-    async def pota_spots_endpoint(radius_km: float = 500.0):
-        """Parks on the Air activator spots within radius_km of the base
+    async def pota_spots_endpoint(radius_km: float = 0.0):
+        """Parks on the Air activator spots. radius_km=0 (default) = worldwide;
+        a positive radius keeps only spots within that distance of the base
         position. POTA's spot API already includes lat/lon per spot."""
         import time as _time
         cache_key = f"{radius_km}"
@@ -3691,7 +3734,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return cached[1]
         base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
         base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
-        if base_lat is None or base_lon is None:
+        if radius_km > 0 and (base_lat is None or base_lon is None):
             return {"spots": [], "total": 0,
                     "error": "Set a base position (Settings → GPS, or base_lat/base_lon) to see nearby POTA activity"}
         try:
@@ -3706,7 +3749,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 lat, lon = s.get("latitude"), s.get("longitude")
                 if lat is None or lon is None:
                     continue
-                if _haversine_km(base_lat, base_lon, lat, lon) > radius_km:
+                if radius_km > 0 and _haversine_km(base_lat, base_lon, lat, lon) > radius_km:
                     continue
                 spots.append({
                     "activator": s.get("activator", ""),
@@ -3803,9 +3846,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return {"stations": [], "error": f"NOAA tides fetch failed: {exc.__class__.__name__}"}
 
     @app.get("/api/sota/spots")
-    async def sota_spots_endpoint(radius_km: float = 500.0):
-        """Summits on the Air activator spots within radius_km of the base
-        position. SOTA's spot API has no lat/lon, only a summit code — resolve
+    async def sota_spots_endpoint(radius_km: float = 0.0):
+        """Summits on the Air activator spots (radius_km=0 = worldwide, else
+        within radius_km of the base position). SOTA's spot API has no lat/lon, only a summit code — resolve
         each summit's coordinates via a lookup, cached forever since summit
         locations don't change."""
         import time as _time
@@ -3836,7 +3879,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return cached[1]
         base_lat = getattr(ech_state, "_base_lat", None) if ech_state else None
         base_lon = getattr(ech_state, "_base_lon", None) if ech_state else None
-        if base_lat is None or base_lon is None:
+        if radius_km > 0 and (base_lat is None or base_lon is None):
             return {"spots": [], "total": 0,
                     "error": "Set a base position (Settings → GPS, or base_lat/base_lon) to see nearby SOTA activity"}
         try:
@@ -3873,7 +3916,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 lat, lon, summit_name = _sota_summit_cache.get(key, (None, None, ""))
                 if lat is None or lon is None:
                     continue
-                if _haversine_km(base_lat, base_lon, lat, lon) > radius_km:
+                if radius_km > 0 and _haversine_km(base_lat, base_lon, lat, lon) > radius_km:
                     continue
                 spots.append({
                     "activator": s.get("activatorCallsign") or s.get("callsign", ""),

@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.0.0-rc280** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
+**Version 1.0.0-rc283** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -10,6 +10,70 @@ SignalMatrix is a Python/FastAPI application that bridges multiple emergency-com
 - Served agencies that want radio traffic visible in a browser without installing amateur-radio software on every workstation
 - Ham operators running ARRL Field Day, POTA, or SOTA activations who want integrated logging and CAT radio control
 - Emergency management exercises where simulated traffic needs to flow through real comms gear
+
+---
+
+## Legal, licensing and interference - read before you transmit
+
+SignalMatrix can **transmit**: over amateur-radio frequencies (APRS, packet, Winlink, DMR, M17,
+JS8Call, CW/digital modes via CAT control), over licence-free ISM bands (MeshCore, Meshtastic,
+LoRa), and across a telephone/VoIP gateway. It can also do so **automatically and unattended**
+(bots, beacons, APRS objects, bridge rules, auto-acks, scheduled bulletins). You, the operator
+and the station licensee, are responsible for everything your station sends - including
+anything this software sends on your behalf. Nothing here is legal advice; rules differ by
+country and change over time, so check the current regulations that apply to you.
+
+**Interference.** Radio spectrum is shared. A misconfigured or runaway station (a bridge loop,
+a too-fast beacon, a bot answering itself, a stuck PTT, an adapter pointed at the wrong
+frequency) can block other users, including emergency traffic, and can cause harmful
+interference to other services. Before going on the air: use the built-in **simulation mode**
+or a dummy load, start at low power, listen before transmitting, keep beacon/object/bulletin
+intervals sensible, and never operate on frequencies you are not authorised to use or that
+are reserved for emergency or safety services.
+
+**Penalties.** In the United States, violating FCC rules can bring warnings, fines (often
+many thousands of dollars per violation) and licence revocation; other countries have
+comparable regimes. "The software did it" is not a defence.
+
+Things to keep in mind (US references shown; equivalents exist elsewhere):
+
+- **Licence and identification.** Transmitting on amateur frequencies requires a valid
+  amateur licence for the mode and band you use and station identification with your own call
+  sign (47 CFR 97.119). Do not transmit using someone else's call sign, and do not let other
+  people's traffic go out under yours without a control operator responsible for it (97.103,
+  97.109).
+- **Automatic control and unattended operation.** Beacons, bots, digipeating, bridging and
+  auto-replies are subject to the automatic-control rules (97.109, 97.221). Know whether your
+  band/mode permits automatic or unattended transmission and who the control operator is.
+- **Bridging networks.** A bridge rule can forward messages from licence-free radios, the
+  internet or other users onto amateur frequencies. Whatever is sent over amateur RF must
+  comply with Part 97 regardless of where it came from: no business or pecuniary-interest
+  traffic (97.113), no messages encoded to obscure their meaning (97.113(a)(4) - so do not
+  bridge encrypted content onto amateur bands), no false or deceptive signals, and
+  third-party traffic only as allowed (97.115). Treat bridging to RF as you would
+  re-transmitting that content by hand.
+- **Licence-free (ISM / "Part 15") links.** LoRa mesh radios operate on shared bands with
+  power, antenna, duty-cycle and channel limits that vary by region (for example 902-928 MHz
+  in the US, 868 MHz with duty-cycle limits in the EU). You must accept interference and may
+  not cause harmful interference. Use the correct regional preset.
+- **Telephony / PSTN gateways.** Connecting radio networks to the telephone system (Asterisk,
+  autopatch, VoIP trunks) has its own rules for amateur stations and for emergency-number
+  calling. Do not use it for business traffic over amateur links.
+- **Services with their own rules.** Winlink, APRS-IS, DAPNET, DMR/M17 networks, POTA/SOTA and
+  data providers (AirNow, NASA FIRMS, NOAA, SOTA, CelesTrak, AISHub, OpenSky ...) have terms of
+  service and licence requirements. Obtain your own accounts and keys, honour rate limits, and
+  respect any restriction on automated or AI-written clients.
+- **Receive-only data.** AIS, ADS-B, GOES and satellite receivers are receive-only here.
+  Never use transmit-capable hardware on those services. Intercepting or divulging the
+  contents of communications not intended for the public can be restricted by law (in the US,
+  e.g. 47 U.S.C. 605 and 18 U.S.C. 2511) - do not decode, store or publish private traffic.
+- **Privacy and records.** Messages, positions and logs are personal data; protect the
+  database, backups and the config file (they contain keys and passwords) and follow the
+  retention and privacy rules that apply to you and to any served agency.
+- **Emergency use.** SignalMatrix is a coordination aid. It is not certified, is not a
+  substitute for 911/EAS or official channels, and may fail, lose or delay messages.
+
+The software is provided as is, without warranty of any kind; see [License](#license).
 
 ---
 

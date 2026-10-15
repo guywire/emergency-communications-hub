@@ -132,6 +132,16 @@ CREATE TABLE IF NOT EXISTS mesh_nodes (
     PRIMARY KEY (node_id, adapter)
 );
 
+CREATE TABLE IF NOT EXISTS node_positions (
+    node_id TEXT NOT NULL,
+    adapter TEXT NOT NULL,
+    ts      REAL NOT NULL,
+    lat     REAL NOT NULL,
+    lon     REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_node_positions_ts ON node_positions (ts);
+CREATE INDEX IF NOT EXISTS idx_node_positions_node ON node_positions (node_id, ts);
+
 CREATE TABLE IF NOT EXISTS anomaly_findings (
     id              TEXT PRIMARY KEY,
     adapter         TEXT NOT NULL,
@@ -1081,6 +1091,27 @@ class Database:
              getattr(node, "lat", None), getattr(node, "lon", None), lh, meta),
         )
         await self._db.commit()
+
+    async def record_positions(self, rows: list[tuple]) -> None:
+        """rows: (node_id, adapter, ts, lat, lon) - map track history."""
+        if not rows:
+            return
+        await self._db.executemany(
+            "INSERT INTO node_positions(node_id, adapter, ts, lat, lon) VALUES(?,?,?,?,?)", rows)
+        await self._db.commit()
+
+    async def get_tracks(self, since_ts: float, limit: int = 400000) -> list[tuple]:
+        async with self._db.execute(
+            "SELECT node_id, ts, lat, lon FROM node_positions WHERE ts >= ? ORDER BY node_id, ts LIMIT ?",
+            (since_ts, limit),
+        ) as cur:
+            return await cur.fetchall()
+
+    async def purge_positions(self, days: int = 7) -> int:
+        import time as _t
+        cur = await self._db.execute("DELETE FROM node_positions WHERE ts < ?", (_t.time() - days * 86400,))
+        await self._db.commit()
+        return cur.rowcount
 
     async def get_mesh_nodes(self, adapter: str) -> list[dict]:
         """Return all persisted nodes for a given adapter."""

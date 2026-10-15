@@ -2985,6 +2985,7 @@ async function loadAllNodes(channels) {
     .filter(c => c.adapter.includes('meshtastic') || c.adapter.includes('meshcore') || c.adapter.includes('aprs'))
     .map(c => c.adapter);
 
+  _nodeAdapters = nodeAdapters;
   const results = await Promise.all(nodeAdapters.map(a =>
     fetch(`/api/nodes/${a}`).then(r => r.json()).then(d => d.nodes.map(n => ({...n, _adapter: a}))).catch(() => [])
   ));
@@ -2992,6 +2993,7 @@ async function loadAllNodes(channels) {
 }
 
 let _allNodes = [];  // full node list for filter
+let _nodeAdapters = [];  // adapters the Nodes tab loads (for per-adapter counts)
 
 function filterNodes(q) {
   const term = (q || '').toLowerCase().trim();
@@ -3020,11 +3022,18 @@ function _renderNodeCards(nodes, totalCount) {
   if (cnt) cnt.textContent = totalCount != null ? `${nodes.length} / ${totalCount}` : `${nodes.length}`;
   const el = document.getElementById('panel-nodes');
   if (!nodes.length) { el.innerHTML = '<div style="padding:12px;font-family:var(--mono);font-size:11px;color:var(--dim)">No mesh nodes</div>'; return; }
-  const adaptersWithNodes = [...new Set(nodes.map(n => n._adapter).filter(Boolean))];
+  // Per-adapter counts: shown / total (total = everything loaded for that
+  // adapter, so a search filter reads e.g. "meshcore-usb 3/27").
+  const _shown = {}, _total = {};
+  nodes.forEach(n => { if (n._adapter) _shown[n._adapter] = (_shown[n._adapter] || 0) + 1; });
+  _allNodes.forEach(n => { if (n._adapter) _total[n._adapter] = (_total[n._adapter] || 0) + 1; });
+  const adaptersWithNodes = [...new Set([..._nodeAdapters, ...Object.keys(_total), ...Object.keys(_shown)])];
   const clearBtn = adaptersWithNodes.length
-    ? `<div style="display:flex;gap:4px;flex-wrap:wrap;padding:4px 8px 0">${adaptersWithNodes.map(a =>
-        `<button onclick="clearAdapterNodes('${escHtml(a)}')" style="font-family:var(--mono);font-size:9px;padding:2px 6px;border:1px solid var(--border);background:var(--bg);color:var(--dim);border-radius:2px;cursor:pointer" title="Clear cached nodes for ${escHtml(a)}">✕ ${escHtml(a)}</button>`
-      ).join('')}</div>` : '';
+    ? `<div style="display:flex;gap:4px;flex-wrap:wrap;padding:4px 8px 0">${adaptersWithNodes.map(a => {
+        const sh = _shown[a] || 0, tot = _total[a] != null ? _total[a] : sh;
+        const cnt = sh === tot ? `${tot}` : `${sh}/${tot}`;
+        return `<button onclick="clearAdapterNodes('${escHtml(a)}')" style="font-family:var(--mono);font-size:9px;padding:2px 6px;border:1px solid var(--border);background:var(--bg);color:var(--dim);border-radius:2px;cursor:pointer" title="${cnt} node(s) from ${escHtml(a)} - click to clear its cached nodes">${escHtml(a)} <b style="color:var(--text,inherit)">${cnt}</b> ✕</button>`;
+      }).join('')}</div>` : '';
   const _now = Date.now();
   function _agoStr(isoStr) {
     if (!isoStr) return '--';

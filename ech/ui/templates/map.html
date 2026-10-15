@@ -82,7 +82,8 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <div class="layer-group-title">Node types</div>
     <button class="ctrl-btn layer-row on" id="bucket-repeater-btn"  onclick="toggleNodeBucket('repeater')"  title="Toggle repeater/infrastructure nodes (routers, digipeaters, IGates)">🔁 Repeater / infrastructure</button>
     <button class="ctrl-btn layer-row on" id="bucket-companion-btn" onclick="toggleNodeBucket('companion')" title="Toggle companion/operator nodes (messageable devices, mobile/fixed stations)">👤 Companion / operator</button>
-    <button class="ctrl-btn layer-row on" id="bucket-other-btn"     onclick="toggleNodeBucket('other')"     title="Toggle other node types (sensors, weather stations, unknown, AIS/ADS-B, etc.)">❓ Other</button>
+    <button class="ctrl-btn layer-row on" id="bucket-winlink-btn"   onclick="toggleNodeBucket('winlink')"   title="Toggle Winlink RMS gateway stations">📧 Winlink RMS</button>
+    <button class="ctrl-btn layer-row on" id="bucket-other-btn"     onclick="toggleNodeBucket('other')"     title="Toggle other node types (APRS objects, weather stations, unknown, AIS/ADS-B, etc.)">❓ Other</button>
     <div class="layer-group-title">Protocols</div>
     <button class="ctrl-btn layer-row on" id="proto-meshtastic-btn" onclick="toggleNodeProtocol('meshtastic')" title="Toggle Meshtastic nodes — button border/text matches its map marker color">Meshtastic (MSHT)</button>
     <button class="ctrl-btn layer-row on" id="proto-meshcore-btn"   onclick="toggleNodeProtocol('meshcore')"   title="Toggle MeshCore nodes — button border/text matches its map marker color">MeshCore (MSHC)</button>
@@ -91,13 +92,25 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row on" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADS-B aircraft</button>
     <button class="ctrl-btn layer-row on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS vessels</button>
     <button class="ctrl-btn layer-row on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Live traffic</button>
+    <button class="ctrl-btn layer-row" id="sat-btn" onclick="toggleSatellites()" title="Tracked satellites: ISS, amateur satellites with CW beacons (AO-7, FO-29, AO-73, RS-44, ...), QO-100 (FT8), NOAA weather, and Starlink trains with their next passes. Click a satellite for its ground track.">🛰 Satellites</button>
+    <div class="layer-group-title">Panels</div>
+    <button class="ctrl-btn layer-row on" id="panel-moon-btn" onclick="togglePanel('moon')" title="Show or hide the moon phase panel">🌙 Moon status</button>
+    <button class="ctrl-btn layer-row on" id="panel-key-btn"  onclick="togglePanel('key')"  title="Show or hide the map key (legend)">🗝 Map key</button>
+    <div class="layer-group-title">Movement tracks</div>
+    <button class="ctrl-btn layer-row on" id="track-btn" onclick="toggleTracks()" title="Draw a trail behind anything that moves (APRS, MeshCore, Meshtastic, aircraft, vessels) and glow it by speed: cyan walking, green/yellow vehicle, orange highway, red/magenta aircraft. Recorded on the server for up to 7 days.">〰 Tracks + speed glow</button>
+    <label style="display:flex;align-items:center;gap:6px;margin:2px 4px;font-size:11px;color:var(--muted)">Keep
+      <select id="track-len" onchange="setTrackMinutes(this.value)" style="flex:1;background:var(--panel,#161b22);color:inherit;border:1px solid var(--border,#30363d);border-radius:4px;padding:2px 4px">
+        <option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option>
+        <option value="60">1 hour</option><option value="120">2 hours</option><option value="360">6 hours</option>
+        <option value="1440">24 hours</option><option value="4320">3 days</option><option value="10080">7 days</option>
+      </select></label>
     <div class="layer-group-title">Activity</div>
     <button class="ctrl-btn layer-row" id="strips-btn" onclick="toggleStripReports()" title="Strip reports with a known MGRS or LAT/LON field (mesh bot 'strip' command)">📋 Strip reports</button>
     <button class="ctrl-btn layer-row" id="estatus-btn" onclick="toggleEmergencyStatus()" title="Emergency-status board entries with a lat/lon set (hospital beds, shelters, vehicles, etc. — see /status-board)">🏣 Emergency status</button>
     <button class="ctrl-btn layer-row" id="hamlog-btn" onclick="toggleHamLog()" title="Show Ham Log worked stations">📓 Ham Log QSOs</button>
     <button class="ctrl-btn layer-row" id="psk-btn" onclick="togglePSKReporter()" title="Show ham stations transmitting near your base position (PSKReporter, 300km radius)">📻 PSK Reporter</button>
-    <button class="ctrl-btn layer-row" id="pota-btn" onclick="togglePOTA()" title="Show active Parks on the Air activators near your base position">🏞 POTA</button>
-    <button class="ctrl-btn layer-row" id="sota-btn" onclick="toggleSOTA()" title="Show active Summits on the Air activators near your base position">⛰ SOTA</button>
+    <button class="ctrl-btn layer-row" id="pota-btn" onclick="togglePOTA()" title="Show active Parks on the Air activators worldwide">🏞 POTA</button>
+    <button class="ctrl-btn layer-row" id="sota-btn" onclick="toggleSOTA()" title="Show active Summits on the Air activators worldwide">⛰ SOTA</button>
     <button class="ctrl-btn layer-row" id="ota-btn" onclick="toggleOTA()" title="On-the-Air activations spotted on the DX cluster in the last hour, worldwide — WWFF, IOTA, SOTA, Bunkers/Beaches (BOTA), lighthouses, castles, LLOTA, HSOTA, boats. Click a spot to see which program. (POTA has its own layer.)">📻 On the Air</button>
     <button class="ctrl-btn layer-row" id="dx-btn" onclick="toggleDXCluster()" title="DX stations being heard by spotters within 500 km of you in the last hour, plotted at the DX station — zoom out to see them">🌐 DX Cluster</button>
     <button class="ctrl-btn layer-row" id="grid-btn" onclick="toggleGridSquares()" title="Show Maidenhead grid squares">▦ Grid squares</button>
@@ -196,12 +209,16 @@ let _showVessels  = true;
 // Node-type filter buckets — repeater/infrastructure, companion/operator, other (default catch-all)
 const _REPEATER_TYPES  = new Set(['REP', 'REPEATER', 'ROUTER', 'DIGI', 'RPTR', 'IGATE']);
 const _COMPANION_TYPES = new Set(['CLI', 'ROOM', 'MOBILE', 'FIXED']);
-let _showBuckets = new Set(['repeater', 'companion', 'other']);
+let _showBuckets = new Set(['repeater', 'companion', 'winlink', 'other']);
 
 function nodeBucket(node) {
   const t = node.node_type || '';
   if (_REPEATER_TYPES.has(t))  return 'repeater';
   if (_COMPANION_TYPES.has(t)) return 'companion';
+  if (t === 'RMS')             return 'winlink';
+  // Untyped MeshCore/Meshtastic nodes (e.g. this hub's own radio before it
+  // has advertised a role) are client devices, not "other" things.
+  if (!t) { const p = nodeProtocol(node); if (p === 'meshcore' || p === 'meshtastic') return 'companion'; }
   return 'other';
 }
 
@@ -714,6 +731,7 @@ async function loadNodes() {
       const size  = isAlert ? 16 : 12;
       const popup = popupContent(node, isAlert);
       const icon  = makeNodeIcon(node, color, size);
+      _trackRecord(id, node.lat, node.lon, color);
 
       if (markers[id]) {
         markers[id].setLatLng([node.lat, node.lon]);
@@ -732,6 +750,7 @@ async function loadNodes() {
     Object.keys(markers).forEach(id => {
       if (!seen.has(id)) { markers[id].remove(); delete markers[id]; }
     });
+    _trackRedraw(seen);
 
     const total = Object.keys(markers).length;
     document.getElementById('node-count').textContent = `${total} node${total!==1?'s':''} with position`;
@@ -787,6 +806,158 @@ function toggleFollow() {
   document.getElementById('follow-btn').style.color = followMode ? 'var(--green)' : '';
   if (followMode) loadNodes();
 }
+
+// ── Movement tracks ─────────────────────────────────────────────────────
+// Client-side breadcrumb trail per moving node. A point is recorded only when
+// the node has moved more than ~30 m (so GPS jitter on fixed stations draws
+// nothing), points older than the chosen window are dropped, and the history
+// is kept in localStorage so a page reload doesn't lose the trails.
+let _trackEnabled = true;
+let _trackMinutes = 30;
+let _trackHist = {};     // id -> [[ms, lat, lon], ...]
+let _trackLines = {};    // id -> L.polyline
+try {
+  const raw = localStorage.getItem('ech.map.tracks');
+  if (raw !== null) _trackEnabled = raw === '1';
+  const m = parseInt(localStorage.getItem('ech.map.trackMinutes') || '', 10);
+  if (m > 0) _trackMinutes = m;
+} catch (e) {}
+
+function _trackSyncUI() {
+  const b = document.getElementById('track-btn');
+  if (b) b.classList.toggle('on', _trackEnabled);
+  const sel = document.getElementById('track-len');
+  if (sel) { sel.value = String(_trackMinutes); sel.disabled = !_trackEnabled; }
+}
+
+function toggleTracks() {
+  _trackEnabled = !_trackEnabled;
+  try { localStorage.setItem('ech.map.tracks', _trackEnabled ? '1' : '0'); } catch (e) {}
+  _trackSyncUI();
+  if (!_trackEnabled) {
+    Object.values(_trackLines).forEach(l => l.remove());
+    _trackLines = {};
+  } else {
+    _trackLoadedMinutes = 0;
+    _trackLoadHistory();
+    loadNodes();
+  }
+}
+
+function setTrackMinutes(v) {
+  const m = parseInt(v, 10);
+  if (!(m > 0)) return;
+  _trackMinutes = m;
+  try { localStorage.setItem('ech.map.trackMinutes', String(m)); } catch (e) {}
+  _trackLoadHistory();
+  _trackRedraw();
+}
+
+function _trackRecord(id, lat, lon, color) {
+  if (!_trackEnabled) return;
+  const now = Date.now();
+  const h = _trackHist[id] || (_trackHist[id] = []);
+  const last = h[h.length - 1];
+  if (!last || Math.abs(last[1] - lat) > 0.0003 || Math.abs(last[2] - lon) > 0.0004) {
+    h.push([now, lat, lon]);
+    if (h.length > 3000) h.splice(0, h.length - 3000);
+  }
+  h.color = color;
+}
+
+// Ground speed (km/h) from the recent breadcrumbs; 0 once a node has not
+// moved for ~2.5 minutes.
+function _trackSpeedKmh(h) {
+  if (h.length < 2) return 0;
+  const last = h[h.length - 1];
+  if (Date.now() - last[0] > 150000) return 0;
+  let first = h[h.length - 2];
+  for (let i = h.length - 2; i >= 0 && last[0] - h[i][0] <= 300000; i--) first = h[i];
+  const dt = (last[0] - first[0]) / 3600000;
+  if (dt <= 0) return 0;
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (last[1] - first[1]) * rad, dLon = (last[2] - first[2]) * rad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(first[1] * rad) * Math.cos(last[1] * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a)) / dt;
+}
+
+// Glow colour by speed: walking -> cyan, vehicle -> green/yellow, highway
+// -> orange, aircraft-class -> red/magenta.
+function _speedColor(kmh) {
+  if (kmh < 2)   return null;
+  if (kmh < 8)   return '#39d0ff';
+  if (kmh < 40)  return '#3fb950';
+  if (kmh < 90)  return '#f2cc60';
+  if (kmh < 200) return '#f0883e';
+  if (kmh < 600) return '#f85149';
+  return '#d946ef';
+}
+
+function _trackRedraw(seen) {
+  if (!_trackEnabled) {
+    Object.values(markers).forEach(m => { if (m._icon) m._icon.style.filter = ''; });
+    return;
+  }
+  const cutoff = Date.now() - _trackMinutes * 60000;
+  Object.keys(_trackHist).forEach(id => {
+    const h = _trackHist[id];
+    while (h.length && h[0][0] < cutoff) h.shift();
+    const visible = !seen || seen.has(id);
+    if (!h.length || (seen && !visible && !markers[id])) {
+      if (!h.length) delete _trackHist[id];
+      if (_trackLines[id]) { _trackLines[id].remove(); delete _trackLines[id]; }
+      return;
+    }
+    if (h.length < 2 || !visible) {
+      if (_trackLines[id]) { _trackLines[id].remove(); delete _trackLines[id]; }
+      return;
+    }
+    const pts = h.map(p => [p[1], p[2]]);
+    const glow = _speedColor(_trackSpeedKmh(h));
+    const lineColor = glow || h.color || '#58a6ff';
+    if (_trackLines[id]) {
+      _trackLines[id].setLatLngs(pts);
+      _trackLines[id].setStyle({color: lineColor});
+    } else {
+      _trackLines[id] = L.polyline(pts, {
+        color: lineColor, weight: 2, opacity: 0.7, interactive: false,
+      }).addTo(map);
+    }
+    h.glow = glow;
+  });
+  // Variable glow on the moving markers (setIcon recreates the element every
+  // refresh, so it is re-applied here each time).
+  Object.keys(markers).forEach(id => {
+    const m = markers[id], h = _trackHist[id];
+    if (!m || !m._icon) return;
+    const g = h && h.glow;
+    m._icon.style.filter = g ? `drop-shadow(0 0 4px ${g}) drop-shadow(0 0 8px ${g})` : '';
+  });
+}
+
+// Seed trails from the server's recorded history (kept 7 days) so tracks exist
+// from the moment the page opens, not only after it has been watched.
+let _trackLoadedMinutes = 0;
+async function _trackLoadHistory() {
+  if (!_trackEnabled || _trackMinutes <= _trackLoadedMinutes) return;
+  try {
+    const r = await fetch('/api/map/tracks?hours=' + (_trackMinutes / 60));
+    if (!r.ok) return;
+    const d = await r.json();
+    Object.entries(d.tracks || {}).forEach(([id, pts]) => {
+      const cur = _trackHist[id] || [];
+      const lastSrv = pts[pts.length - 1][0];
+      const merged = pts.concat(cur.filter(p => p[0] > lastSrv));
+      if (cur.color) merged.color = cur.color;
+      _trackHist[id] = merged;
+    });
+    _trackLoadedMinutes = Math.max(_trackLoadedMinutes, _trackMinutes);
+    loadNodes();
+  } catch (e) {}
+}
+document.addEventListener('DOMContentLoaded', () => { _trackSyncUI(); _applyPanels(); });
+_trackSyncUI();
+setTimeout(_trackLoadHistory, 1500);
 
 function toggleAircraft() {
   _showAircraft = !_showAircraft;
@@ -932,6 +1103,14 @@ function connectWS() {
       const d = pkt.data;
       const color = adapterColor(d.source_adapter);
       const id = d.from_id;
+      // Live position updates must honour the same layer toggles as
+      // loadNodes() - ADS-B/AIS adapters emit position "messages" too, and
+      // without this check deselected aircraft/vessels kept reappearing.
+      const lid = (id || '').toLowerCase();
+      if ((!_showAircraft && lid.startsWith('icao:')) || (!_showVessels && lid.startsWith('mmsi:'))) {
+        if (markers[id]) { markers[id].remove(); delete markers[id]; }
+        return;
+      }
       // Invalidate last-msg cache so next popup-open re-fetches
       delete lastMsgCache[id];
       if (markers[id]) {
@@ -1023,7 +1202,7 @@ function togglePOTA() {
   setSpotLegend('pota', _potaEnabled);
   if (_potaEnabled) {
     loadPOTA();
-    toast('POTA: fetching nearby activators…');
+    toast('POTA: fetching activators…');
   } else {
     _potaMarkers.forEach(m => m.remove());
     _potaMarkers = [];
@@ -1037,9 +1216,9 @@ function togglePOTA() {
 // band), each type its own colour, listed in the map legend while on. All
 // spot text comes from public spotting networks — always escaped.
 const SPOT_STYLE = {
-  pota: {icon: '🏞', tag: 'POTA', color: '#7ee787', label: 'Parks on the Air activator (at the park)'},
-  sota: {icon: '⛰', tag: 'SOTA', color: '#f0b429', label: 'Summits on the Air activator (at the summit)'},
-  ota:  {icon: '📻', tag: 'OTA',  color: '#56d3c8', label: 'On-the-Air activation (WWFF, IOTA, SOTA, BOTA, lighthouse, castle…) — worldwide, from the DX cluster; click for the program'},
+  pota: {icon: '🏞', tag: 'POTA', color: '#7ee787', label: 'Parks on the Air'},
+  sota: {icon: '⛰', tag: 'SOTA', color: '#f0b429', label: 'Summits on the Air'},
+  ota:  {icon: '📻', tag: 'OTA',  color: '#56d3c8', label: 'WWFF IOTA BOTA'},
   dx:   {icon: '📡', tag: 'DX',   color: '#ff7eb6', label: 'DX heard by spotters near you (at the DX station)'},
 };
 
@@ -1111,11 +1290,11 @@ async function _loadSpotLayer(kind, url, state, build, emptyNote) {
 const _potaState = {markers: []};
 async function loadPOTA() {
   if (!_potaEnabled) return;
-  await _loadSpotLayer('pota', '/api/pota/spots?radius_km=500', _potaState, s => [
+  await _loadSpotLayer('pota', '/api/pota/spots', _potaState, s => [
     s.activator, s.reference, `${s.activator} @ ${s.reference}`,
     [['Park', `${s.parkName || ''}${s.locationDesc ? ' (' + s.locationDesc + ')' : ''}`],
      ['Frequency', s.frequency ? `${s.frequency} kHz ${_band(s.frequency)} ${s.mode || ''}` : ''],
-     ['Comment', s.comments], ['Spotted', s.spotTime]]], 'none within 500 km right now');
+     ['Comment', s.comments], ['Spotted', s.spotTime]]], 'no POTA activators spotted right now');
   _potaMarkers = _potaState.markers;
   if (_potaEnabled) setTimeout(loadPOTA, 90000);
 }
@@ -1123,10 +1302,10 @@ async function loadPOTA() {
 const _sotaState = {markers: []};
 async function loadSOTA() {
   if (!_sotaEnabled) return;
-  const data = await _loadSpotLayer('sota', '/api/sota/spots?radius_km=500', _sotaState, s => [
+  const data = await _loadSpotLayer('sota', '/api/sota/spots', _sotaState, s => [
     s.activator, s.summitCode, `${s.activator} @ ${s.summitCode}`,
     [['Summit', s.summitName], ['Frequency', `${s.frequency} MHz ${s.mode || ''}`],
-     ['Comment', s.comments], ['Spotted', s.spotTime]]], 'none within 500 km right now');
+     ['Comment', s.comments], ['Spotted', s.spotTime]]], 'no SOTA activators spotted right now');
   _sotaMarkers = _sotaState.markers;
   if (data && data.disabled) {
     // Server reports SOTA spots unavailable — say so plainly, stay off.
@@ -2057,9 +2236,31 @@ function _setMoonCollapsed(on) {
   updateMoon();
 }
 
+function _panelHidden(which) {
+  try { return localStorage.getItem('ech.map.hide.' + which) === '1'; } catch (e) { return false; }
+}
+
+// Moon status / map key can be hidden outright from the Layers menu (the
+// moon panel can also still be collapsed to a chip with its own X).
+function togglePanel(which) {
+  const hide = !_panelHidden(which);
+  try { localStorage.setItem('ech.map.hide.' + which, hide ? '1' : '0'); } catch (e) {}
+  _applyPanels();
+}
+
+function _applyPanels() {
+  const moon = document.getElementById('moon-panel'), key = document.getElementById('legend');
+  if (moon) moon.style.display = _panelHidden('moon') ? 'none' : '';
+  if (key)  key.style.display  = _panelHidden('key')  ? 'none' : '';
+  const mb = document.getElementById('panel-moon-btn'), kb = document.getElementById('panel-key-btn');
+  if (mb) mb.classList.toggle('on', !_panelHidden('moon'));
+  if (kb) kb.classList.toggle('on', !_panelHidden('key'));
+}
+
 function updateMoon() {
   const el = document.getElementById('moon-panel');
   if (!el) return;
+  _applyPanels();
   const now = new Date();
   const {fraction, phase} = MOON.illumination(now);
   const [icon, label] = MOON.name(phase);
@@ -2083,6 +2284,99 @@ function updateMoon() {
     `<div style="font-size:12px"><span style="font-size:15px">${icon}</span> ${label} — ${Math.round(fraction * 100)}% lit</div>` +
     rs + `<div style="color:var(--muted)">Full ${day(np.full)} · New ${day(np.new)}</div>`;
   el.title = 'Moon phase, illumination and rise/set at your base position (computed locally)';
+}
+
+// ── Satellites ───────────────────────────────────────────────────────────
+let _satEnabled = false;
+let _satLayers = [];
+let _satTrack = null;
+let _satTimer = null;
+
+function toggleSatellites() {
+  _satEnabled = !_satEnabled;
+  const btn = document.getElementById('sat-btn');
+  btn.classList.toggle('on', _satEnabled);
+  btn.style.color = _satEnabled ? 'var(--green)' : '';
+  btn.style.borderColor = _satEnabled ? 'var(--green)' : '';
+  if (_satEnabled) {
+    loadSatellites();
+  } else {
+    _satLayers.forEach(l => l.remove()); _satLayers = [];
+    if (_satTrack) { _satTrack.remove(); _satTrack = null; }
+    if (_satTimer) { clearTimeout(_satTimer); _satTimer = null; }
+  }
+}
+
+function _satColor(sat) {
+  const m = (sat.modes || []).join(' ');
+  if (/FT8/.test(m)) return '#d946ef';          // FT8 capable (QO-100)
+  if (/CW/.test(m))  return '#3fb950';          // CW beacon / telemetry
+  if (/APT|LRPT|HRIT/.test(m)) return '#56d3c8';          // weather
+  return '#e6edf3';
+}
+
+async function showSatTrack(name) {
+  try {
+    const d = await (await fetch('/api/satellites/track?name=' + encodeURIComponent(name))).json();
+    if (_satTrack) { _satTrack.remove(); _satTrack = null; }
+    if (d.points && d.points.length > 1) {
+      // split at the antimeridian so the line doesn't streak across the map
+      const segs = []; let cur = [];
+      d.points.forEach((p, i) => {
+        if (i && Math.abs(p[1] - d.points[i - 1][1]) > 180) { segs.push(cur); cur = []; }
+        cur.push(p);
+      });
+      segs.push(cur);
+      _satTrack = L.layerGroup(segs.map(sg => L.polyline(sg, {color: '#e6edf3', weight: 1.5, dashArray: '4 4', opacity: 0.8, interactive: false}))).addTo(map);
+    }
+  } catch (e) {}
+}
+
+async function loadSatellites() {
+  if (!_satEnabled) return;
+  try {
+    const r = await fetch('/api/satellites?starlink=1');
+    const d = await r.json();
+    _satLayers.forEach(l => l.remove()); _satLayers = [];
+    (d.satellites || []).forEach(sat => {
+      const col = _satColor(sat);
+      const icon = L.divIcon({className: '', iconSize: [60, 16], iconAnchor: [8, 8],
+        html: `<div style="white-space:nowrap;font-size:11px;color:${col};text-shadow:0 0 3px #000,0 0 3px #000">🛰 ${esc(sat.label)}</div>`});
+      const modes = (sat.modes || []).map(m => `<div class="node-stat">${esc(m)}</div>`).join('');
+      const vis = sat.elevation != null
+        ? `<div class="node-stat">${sat.above_horizon ? '<b>Above your horizon</b> — ' : 'Below horizon — '}el ${sat.elevation}°</div>` : '';
+      const m = L.marker([sat.lat, sat.lon], {icon, zIndexOffset: 500})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${esc(sat.name)}</div>${modes}` +
+                   `<div class="node-stat">Altitude ${sat.alt_km} km</div>${vis}</div>`)
+        .addTo(map);
+      m.on('click', () => showSatTrack(sat.name));
+      _satLayers.push(m);
+    });
+    const sl = d.starlink;
+    if (sl) {
+      (sl.trains || []).forEach(t => {
+        const col = t.visible_now ? '#f2cc60' : '#8b949e';
+        const icon = L.divIcon({className: '', iconSize: [70, 16], iconAnchor: [8, 8],
+          html: `<div style="white-space:nowrap;font-size:11px;color:${col};text-shadow:0 0 3px #000,0 0 3px #000">✦ Starlink ×${t.count}</div>`});
+        const passes = (t.passes || []).map(p => {
+          const a = new Date(p.rise), b = new Date(p.set);
+          const f = x => x.toLocaleString([], {weekday: 'short', hour: '2-digit', minute: '2-digit'});
+          return `<div class="node-stat">${f(a)} → ${b.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} · max ${p.max_elevation}°</div>`;
+        }).join('') || '<div class="node-stat">No pass over you in the next 24 h</div>';
+        const m = L.marker([t.lat, t.lon], {icon, zIndexOffset: 400})
+          .bindPopup(`<div class="node-popup"><div class="node-name">Starlink train (launch ${esc(t.id)})</div>` +
+                     `<div class="node-stat">${t.count} satellites in a line, ${t.alt_km} km</div>` +
+                     (t.max_elevation != null ? `<div class="node-stat">Max elevation now ${t.max_elevation}°</div>` : '') +
+                     `<div class="node-stat" style="margin-top:4px"><b>Passes (geometric)</b></div>${passes}</div>`)
+          .addTo(map);
+        _satLayers.push(m);
+      });
+    }
+    if (d.error) toast('Satellites: ' + d.error, 'err');
+  } catch (e) {
+    toast('Satellites fetch failed: ' + e.message);
+  }
+  if (_satEnabled) _satTimer = setTimeout(loadSatellites, 15000);
 }
 
 // ── Tides (NOAA CO-OPS predictions, nearest stations) ────────────────────

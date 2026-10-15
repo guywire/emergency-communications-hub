@@ -337,6 +337,9 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     await pota_service.start()
     await mc_hub_compare.start()
     await goes_service.start()
+    from ech.core.track_history import TrackHistory
+    track_history = TrackHistory(router, db, config)
+    await track_history.start()
 
     # CAT radio control via rigctld (Hamlib)
     from ech.core.cat_rigctld import CATController
@@ -440,6 +443,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
             await gps_reader.stop()
         if 'wx_service' in dir():
             await wx_service.stop()
+        if 'track_history' in dir():
+            await track_history.stop()
         if 'aq_service' in dir():
             await aq_service.stop()
         if 'wb_service' in dir():
