@@ -79,6 +79,18 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn" id="layers-btn" onclick="toggleLayersMenu(event)" title="Show/hide map layer filters">☰ Layers</button>
   </div>
   <div id="layers-menu">
+    <div class="layer-group-title">My layer profiles</div>
+    <div id="prof-box" style="margin:0 4px 4px">
+      <select id="prof-sel" onchange="profApply(this.value)" title="Switch to a saved set of layers" style="width:100%;background:var(--panel,#161b22);color:inherit;border:1px solid var(--border,#30363d);border-radius:4px;padding:3px 4px;font-size:11px">
+        <option value="">— current layers —</option>
+      </select>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <button class="ctrl-btn" style="flex:1" onclick="profSave()" title="Save the layers you have on now as a named profile">💾 Save as…</button>
+        <button class="ctrl-btn" onclick="profSetDefault()" title="Load the selected profile automatically whenever you open the map">★ Default</button>
+        <button class="ctrl-btn" onclick="profDelete()" title="Delete the selected profile">🗑</button>
+      </div>
+      <div id="prof-note" style="font-size:9px;color:var(--muted);margin-top:3px"></div>
+    </div>
     <div class="layer-group-title">Node types</div>
     <button class="ctrl-btn layer-row on" id="bucket-repeater-btn"  onclick="toggleNodeBucket('repeater')"  title="Toggle repeater/infrastructure nodes (routers, digipeaters, IGates)">🔁 Repeater / infrastructure</button>
     <button class="ctrl-btn layer-row on" id="bucket-companion-btn" onclick="toggleNodeBucket('companion')" title="Toggle companion/operator nodes (messageable devices, mobile/fixed stations)">👤 Companion / operator</button>
@@ -92,7 +104,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row on" id="adsb-btn" onclick="toggleAircraft()" title="Toggle ADS-B aircraft">✈ ADS-B aircraft</button>
     <button class="ctrl-btn layer-row on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS vessels</button>
     <button class="ctrl-btn layer-row on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Live traffic</button>
-    <button class="ctrl-btn layer-row" id="sat-btn" onclick="toggleSatellites()" title="Tracked satellites: ISS, amateur satellites with CW beacons (AO-7, FO-29, AO-73, RS-44, ...), QO-100 (FT8), NOAA weather, and Starlink trains with their next passes. Click a satellite for its ground track.">🛰 Satellites</button>
+    <button class="ctrl-btn layer-row" id="satellites-btn" onclick="toggleSatellites()" title="Tracked satellites: ISS, amateur satellites with CW beacons (AO-7, FO-29, AO-73, RS-44, ...), QO-100 (FT8), NOAA weather, and Starlink trains with their next passes. Click a satellite for its ground track.">🛰 Satellites (tracked)</button>
     <div class="layer-group-title">Panels</div>
     <button class="ctrl-btn layer-row on" id="panel-moon-btn" onclick="togglePanel('moon')" title="Show or hide the moon phase panel">🌙 Moon status</button>
     <button class="ctrl-btn layer-row on" id="panel-key-btn"  onclick="togglePanel('key')"  title="Show or hide the map key (legend)">🗝 Map key</button>
@@ -2286,6 +2298,117 @@ function updateMoon() {
   el.title = 'Moon phase, illumination and rise/set at your base position (computed locally)';
 }
 
+// ── My layer profiles (O139) ─────────────────────────────────────────────
+// A profile is {buttons:{id:bool}, wx:{src:bool}, trackMinutes:n}: which
+// Layers-menu toggles are on. Applying one clicks only the toggles whose state
+// differs, so each layer's own handler does its normal loading. Stored per
+// login on the server (so it follows the account), cached in localStorage.
+let _profData = {default: null, profiles: {}};
+
+function _profCapture() {
+  const buttons = {}, wx = {};
+  document.querySelectorAll('#layers-menu .layer-row[id]').forEach(b => {
+    buttons[b.id] = b.classList.contains('on');
+  });
+  document.querySelectorAll('#layers-menu .wxsrc[data-src]').forEach(b => {
+    wx[b.dataset.src] = b.classList.contains('on');
+  });
+  return {buttons, wx, trackMinutes: _trackMinutes};
+}
+
+function profApply(name) {
+  const st = name ? _profData.profiles[name] : null;
+  if (!st) return;
+  Object.entries(st.buttons || {}).forEach(([id, want]) => {
+    const b = document.getElementById(id);
+    if (b && b.classList.contains('on') !== !!want) b.click();
+  });
+  Object.entries(st.wx || {}).forEach(([src, want]) => {
+    const b = document.querySelector(`#layers-menu .wxsrc[data-src="${src}"]`);
+    if (b && b.classList.contains('on') !== !!want) b.click();
+  });
+  if (st.trackMinutes && st.trackMinutes !== _trackMinutes) {
+    setTrackMinutes(st.trackMinutes);
+    _trackSyncUI();
+  }
+  _profNote(`Applied “${name}”`);
+}
+
+function _profNote(t) {
+  const n = document.getElementById('prof-note');
+  if (n) n.textContent = t;
+}
+
+function _profRender(selected) {
+  const sel = document.getElementById('prof-sel');
+  if (!sel) return;
+  const cur = selected !== undefined ? selected : sel.value;
+  sel.innerHTML = '<option value="">— current layers —</option>' +
+    Object.keys(_profData.profiles).sort().map(n =>
+      `<option value="${esc(n)}">${n === _profData.default ? '★ ' : ''}${esc(n)}</option>`).join('');
+  sel.value = _profData.profiles[cur] ? cur : '';
+}
+
+async function _profPersist() {
+  try { localStorage.setItem('ech.map.profiles', JSON.stringify(_profData)); } catch (e) {}
+  try {
+    const r = await fetch('/api/user/map-profiles', {method: 'PUT', headers: {'Content-Type': 'application/json'},
+                                                      body: JSON.stringify(_profData)});
+    if (!r.ok) { _profNote('Saved on this browser only (server said ' + r.status + ')'); return false; }
+    return true;
+  } catch (e) { _profNote('Saved on this browser only'); return false; }
+}
+
+async function profSave() {
+  const sel = document.getElementById('prof-sel');
+  const name = (prompt('Save the layers you have on now as profile name:', sel.value || '') || '').trim().slice(0, 40);
+  if (!name) return;
+  if (!_profData.profiles[name] && Object.keys(_profData.profiles).length >= 20) {
+    toast('At most 20 profiles - delete one first', 'err'); return;
+  }
+  _profData.profiles[name] = _profCapture();
+  if (!_profData.default) _profData.default = name;
+  _profRender(name);
+  if (await _profPersist()) _profNote(`Saved “${name}”${_profData.default === name ? ' (default)' : ''}`);
+}
+
+async function profSetDefault() {
+  const name = document.getElementById('prof-sel').value;
+  if (!name) { toast('Pick a saved profile first (or Save as… to make one)'); return; }
+  _profData.default = name;
+  _profRender(name);
+  if (await _profPersist()) _profNote(`“${name}” now loads when you open the map`);
+}
+
+async function profDelete() {
+  const name = document.getElementById('prof-sel').value;
+  if (!name || !confirm(`Delete profile “${name}”?`)) return;
+  delete _profData.profiles[name];
+  if (_profData.default === name) _profData.default = null;
+  _profRender('');
+  if (await _profPersist()) _profNote(`Deleted “${name}”`);
+}
+
+async function _profLoad() {
+  let d = null;
+  try {
+    const r = await fetch('/api/user/map-profiles');
+    if (r.ok) d = await r.json();
+  } catch (e) {}
+  if (!d) {
+    try { d = JSON.parse(localStorage.getItem('ech.map.profiles') || 'null'); } catch (e) {}
+  }
+  if (d && d.profiles) {
+    _profData = {default: d.default || null, profiles: d.profiles};
+    try { localStorage.setItem('ech.map.profiles', JSON.stringify(_profData)); } catch (e) {}
+  }
+  _profRender(_profData.default || '');
+  if (_profData.default && _profData.profiles[_profData.default]) {
+    profApply(_profData.default);
+  }
+}
+setTimeout(_profLoad, 2500);
+
 // ── Satellites ───────────────────────────────────────────────────────────
 let _satEnabled = false;
 let _satLayers = [];
@@ -2294,7 +2417,7 @@ let _satTimer = null;
 
 function toggleSatellites() {
   _satEnabled = !_satEnabled;
-  const btn = document.getElementById('sat-btn');
+  const btn = document.getElementById('satellites-btn');
   btn.classList.toggle('on', _satEnabled);
   btn.style.color = _satEnabled ? 'var(--green)' : '';
   btn.style.borderColor = _satEnabled ? 'var(--green)' : '';

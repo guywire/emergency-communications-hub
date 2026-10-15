@@ -297,6 +297,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         VIEWER_ALLOWED_MUTATIONS = (
             "/api/hamlog/",              # logging a QSO isn't transmitting
             "/api/ping",                 # trace probe — diagnostic, not a composed message
+            "/api/user/map-profiles",    # a user's own map-layer preferences
         )
         if session.get("role") == "viewer" and method in ("POST", "PUT", "DELETE"):
             if not any(path == p or path.startswith(p) for p in VIEWER_ALLOWED_MUTATIONS):
@@ -1257,6 +1258,44 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     @app.get("/api/satellites/track")
     async def satellite_track(name: str, minutes: int = 100):
         return {"name": name, "points": await _sat_service.ground_track(name, min(max(minutes, 10), 240))}
+
+    # ── Per-user map layer profiles (O139) ──────────────────────────────────
+    async def _map_prof_user(request: Request) -> str:
+        session = await auth.require_session(request) if auth else {"username": "guest"}
+        return (session or {}).get("username") or "guest"
+
+    @app.get("/api/user/map-profiles")
+    async def get_map_profiles(request: Request):
+        import json as _json
+        user = await _map_prof_user(request)
+        raw = await db.get_kv(f"map_profiles:{user}")
+        try:
+            data = _json.loads(raw) if raw else {}
+        except Exception:
+            data = {}
+        return {"default": data.get("default"), "profiles": data.get("profiles", {})}
+
+    @app.put("/api/user/map-profiles")
+    async def put_map_profiles(request: Request):
+        """Replace the caller's saved map profiles: {default, profiles:{name:state}}."""
+        import json as _json
+        from fastapi.responses import JSONResponse
+        user = await _map_prof_user(request)
+        body = await request.json()
+        profiles = body.get("profiles") or {}
+        if not isinstance(profiles, dict) or len(profiles) > 20:
+            return JSONResponse({"detail": "profiles must be an object of at most 20 entries"}, status_code=400)
+        clean = {}
+        for name, state in profiles.items():
+            name = str(name).strip()[:40]
+            if not name or not isinstance(state, dict) or len(_json.dumps(state)) > 8000:
+                return JSONResponse({"detail": f"invalid profile {name!r}"}, status_code=400)
+            clean[name] = state
+        default = body.get("default")
+        if default not in clean:
+            default = None
+        await db.set_kv(f"map_profiles:{user}", _json.dumps({"default": default, "profiles": clean}))
+        return {"status": "ok", "default": default, "profiles": clean}
 
     @app.get("/api/map/tracks")
     async def map_tracks(hours: float = 24.0):

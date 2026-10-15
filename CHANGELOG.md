@@ -8,6 +8,18 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc284 (2026-10-14)
+
+### Added
+- **My layer profiles** (map > Layers, top group): save the layers you have switched on as
+  named profiles, pick one from a list, mark one as your default so it loads whenever you
+  open the map. Stored per login on the server (follows your account across browsers) with a
+  local cache; viewers can keep their own. `GET/PUT /api/user/map-profiles`.
+
+### Fixed
+- Layers menu: the new Satellites button shared an id with "Satellite IR" (GOES imagery);
+  renamed so both work independently.
+
 ## v1.0.0-rc283 (2026-10-14)
 
 ### Added
