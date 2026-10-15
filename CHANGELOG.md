@@ -8,6 +8,17 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc286 (2026-10-15)
+
+### Changed
+- **Ham Log header** (UI refresh, phase 2): the top bar now holds only the shared nav, clock,
+  connection dot and sign-out. Contest/station/operator, QSO count + score + bonuses, CAT /
+  Connect Radio, My station (callsign, grid, band, mode, Set) and the colour theme moved
+  into a grouped, labelled station toolbar that wraps cleanly on narrow screens. Fits at
+  1440 px with full nav labels (previously cut off on the right).
+- Clicking the SignalMatrix logo/page name in the header now reloads the page you are on
+  instead of jumping to Messages.
+
 ## v1.0.0-rc285 (2026-10-15)
 
 ### Changed

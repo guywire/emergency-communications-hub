@@ -203,7 +203,7 @@ html, body {
   letter-spacing: 0.08em;
   white-space: nowrap;
 }
-#header select {
+#station-bar select {
   background: var(--bg3);
   border: 1px solid var(--border);
   color: var(--text);
@@ -214,7 +214,7 @@ html, body {
   outline: none;
   cursor: pointer;
 }
-#header select:focus { border-color: var(--blue); }
+#station-bar select:focus { border-color: var(--blue); }
 #op-callsign {
   font-family: var(--mono);
   font-size: 12px;
@@ -680,6 +680,18 @@ html, body {
   flex-wrap: wrap;
 }
 #station-bar-tiles { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
+#station-bar { padding: 6px 12px; gap: 6px 10px; }
+#station-bar .sb-group { display: flex; align-items: center; gap: 6px; padding: 0 10px 0 0; border-right: 1px solid var(--border); flex-shrink: 0; }
+#station-bar .sb-group:last-child, #station-bar #my-station { border-right: 0; }
+#station-bar .sb-label { font-family: var(--sans, system-ui); font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+#station-bar .sb-score { gap: 10px; }
+#station-bar .sb-theme { padding: 0; border: 0; }
+#station-bar #my-station { padding-left: 10px; border-left: 1px solid var(--border); }
+#station-bar .sb-group:empty { display: none; }
+#station-bar .sb-rig { border-right: 0; padding-right: 0; }
+#station-bar #my-op { width: 112px; }
+#station-bar #my-grid { width: 92px !important; }
+#station-bar #theme-sel { width: auto; }
 .stn-tile {
   display: flex; gap: 5px; align-items: center;
   background: var(--bg3); border: 1px solid var(--border);
@@ -782,51 +794,10 @@ html, body {
   <!-- ── Header ── -->
   <div id="header">
     <a class="back" href="/">← SM</a>
-    <div class="hdr-sep"></div>
-
-    <select id="contest-sel" onchange="onContestChange()" title="Contest / operating mode">
-      <option value="ARRL-FIELD-DAY">ARRL-FIELD-DAY</option>
-      <option value="POTA">POTA</option>
-      <option value="SOTA">SOTA</option>
-      <option value="GENERAL">GENERAL</option>
-    </select>
-
-    <div class="hdr-sep"></div>
-    <span class="hdr-label">Stn</span>
-    <select id="station-sel" onchange="onStationChange()" title="Your station number (1–5)">
-      <option value="1">1</option>
-      <option value="2">2</option>
-      <option value="3">3</option>
-      <option value="4">4</option>
-      <option value="5">5</option>
-    </select>
-
-    <div class="hdr-sep"></div>
-    <span id="op-callsign" title="Operator callsign from config">—</span>
 
     <div class="spacer"></div>
 
-    <select id="theme-sel" onchange="setTheme(this.value)" title="Color scheme"
-      style="font-family:var(--mono);font-size:10px;padding:2px 5px;border-radius:4px;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;outline:none">
-      <option value="dark">Dark</option>
-      <option value="light">Light</option>
-      <option value="blue">Blue</option>
-      <option value="green">Green</option>
-      <option value="hc">High Contrast</option>
-    </select>
-    <div class="hdr-sep"></div>
-
-    <span id="qso-count">0 QSOs</span>
-    <span id="score-display" title="Field Day score — click for bonus points" onclick="openBonusPanel()" style="cursor:pointer">0 pts</span>
-    <button id="bonus-btn" onclick="openBonusPanel()" title="ARRL Field Day bonus points"
-      style="display:none;font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg3);color:var(--yellow);border-radius:3px;cursor:pointer;margin-left:2px">+ Bonuses</button>
     <span class="conn-dot" id="ws-dot" title="WebSocket"></span>
-    <span id="cat-pill" title="CAT radio control" style="display:none;align-items:center;gap:4px;font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);border-radius:3px;background:var(--bg3);cursor:default">
-      <span id="cat-dot" style="width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block"></span>
-      <span id="cat-label">CAT</span>
-    </span>
-    <button id="webserial-btn" onclick="toggleRigModal()" style="display:none;font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);border-radius:3px;cursor:pointer"
-      title="Connect radio via USB serial (Web Serial API — requires HTTPS)">🔌 Connect Radio</button>
     <span id="clock">00:00:00Z</span>
     <span id="auth-user-wrap" style="display:none;align-items:center;gap:5px;margin-left:6px">
       <span id="auth-username" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
@@ -838,8 +809,41 @@ html, body {
 
   <!-- ── Station Bar ── -->
   <div id="station-bar">
-    <div id="station-bar-tiles"></div>
-    <div id="my-station">
+    <div class="sb-group" title="Contest / operating mode and your station number">
+      <span class="sb-label">Contest</span>
+      <select id="contest-sel" onchange="onContestChange()" title="Contest / operating mode">
+        <option value="ARRL-FIELD-DAY">ARRL-FIELD-DAY</option>
+        <option value="POTA">POTA</option>
+        <option value="SOTA">SOTA</option>
+        <option value="GENERAL">GENERAL</option>
+      </select>
+      <span class="sb-label">Stn</span>
+      <select id="station-sel" onchange="onStationChange()" title="Your station number (1–5)">
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+      </select>
+      <span id="op-callsign" title="Operator callsign from config">—</span>
+    </div>
+    <div class="sb-group sb-score">
+      <span id="qso-count">0 QSOs</span>
+      <span id="score-display" title="Field Day score — click for bonus points" onclick="openBonusPanel()" style="cursor:pointer">0 pts</span>
+      <button id="bonus-btn" onclick="openBonusPanel()" title="ARRL Field Day bonus points"
+        style="display:none;font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg3);color:var(--yellow);border-radius:3px;cursor:pointer;margin-left:2px">+ Bonuses</button>
+    </div>
+    <div id="station-bar-tiles" title="Other operating positions"></div>
+    <div class="sb-group sb-rig">
+      <span id="cat-pill" title="CAT radio control" style="display:none;align-items:center;gap:4px;font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);border-radius:3px;background:var(--bg3);cursor:default">
+        <span id="cat-dot" style="width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block"></span>
+        <span id="cat-label">CAT</span>
+      </span>
+      <button id="webserial-btn" onclick="toggleRigModal()" style="display:none;font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);border-radius:3px;cursor:pointer"
+        title="Connect radio via USB serial (Web Serial API — requires HTTPS)">🔌 Connect Radio</button>
+    </div>
+    <div id="my-station" class="sb-group" title="Register this position on the band map">
+      <span class="sb-label">My station</span>
       <input id="my-op" type="text" placeholder="Your callsign" maxlength="8" autocomplete="off" value="">
       <input id="my-grid" type="text" placeholder="Grid (e.g. DN41)" maxlength="8" autocomplete="off"
         style="width:70px;font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.05em;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;outline:none"
@@ -849,6 +853,16 @@ html, body {
       <select id="my-band-sel"></select>
       <select id="my-mode-sel"></select>
       <button onclick="updateMyStation()" class="btn btn-blue" style="padding:3px 8px;font-size:11px">Set</button>
+    </div>
+    <div class="sb-group sb-theme">
+      <select id="theme-sel" onchange="setTheme(this.value)" title="Color scheme"
+        style="font-family:var(--mono);font-size:10px;padding:2px 5px;border-radius:4px;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;outline:none">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+        <option value="blue">Blue</option>
+        <option value="green">Green</option>
+        <option value="hc">High Contrast</option>
+      </select>
     </div>
   </div>
 

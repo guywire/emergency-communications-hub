@@ -463,7 +463,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # pill, injected at the start of every page's #header. Styling lives in
     # /static/ech-ui.css, linked after each page's own <style>.
     _TOPNAV_HTML = """
-<a id="sm-brand" href="/" title="SignalMatrix — messages">
+<a id="sm-brand" href="/" title="SignalMatrix">
   <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0f1620" stroke="#2a3644"/><path d="M12,13 Q16,8 20,13" fill="none" stroke="#3fb950" stroke-width="1.7" stroke-linecap="round"/><path d="M9,16 Q16,5 23,16" fill="none" stroke="#3fb950" stroke-width="1.2" stroke-linecap="round" opacity=".55"/><line x1="16" y1="13" x2="16" y2="24" stroke="#f0a500" stroke-width="2" stroke-linecap="round"/><line x1="16" y1="24" x2="11" y2="28" stroke="#f0a500" stroke-width="1.6" stroke-linecap="round"/><line x1="16" y1="24" x2="21" y2="28" stroke="#f0a500" stroke-width="1.6" stroke-linecap="round"/><circle cx="11" cy="28" r="1.9" fill="#388bfd"/><circle cx="21" cy="28" r="1.9" fill="#388bfd"/></svg>
   <span class="wm">Signal<b>Matrix</b></span>
   <span class="pg" id="sm-page"></span>
@@ -517,6 +517,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
   });
   var pg = document.getElementById('sm-page');
   if (pg) { if (title && path !== '/') pg.textContent = title; else pg.style.display = 'none'; }
+  // The brand shows the page you are on, so clicking it reloads that page
+  // (Messages is in the nav) instead of jumping somewhere else.
+  var brand = document.getElementById('sm-brand');
+  if (brand) { brand.href = location.pathname + location.search; brand.title = 'Reload ' + (title || 'this page'); }
   // Dropdowns: hover on desktop, click/tap anywhere (touch), Esc closes.
   var groups = nav.querySelectorAll('.grp');
   function closeAll(except){ groups.forEach(function(g){ if (g !== except) g.classList.remove('open'); }); }
