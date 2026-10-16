@@ -1955,6 +1955,32 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         result = await a.ping(node_id, via=via)
         return result
 
+    _sweep_tasks: set = set()
+
+    @app.post("/api/trace_sweep")
+    async def trace_sweep(request: Request):
+        """Hop-by-hop trace over every candidate route to a MeshCore node
+        (operator idea 2026-10-16). Takes minutes - runs in the background and
+        posts one summary to the message feed. Not viewer-allowed: it keys up
+        the radio up to trace_sweep_max_probes times."""
+        data = await request.json()
+        a = router._adapters.get(data.get("adapter") or "")
+        node_id = str(data.get("node_id") or "").strip()
+        if a is None or not hasattr(a, "trace_sweep"):
+            return {"status": "error", "detail": "a MeshCore adapter is required"}
+        if not node_id:
+            return {"status": "error", "detail": "node_id required"}
+        if not a._connected:
+            return {"status": "error", "detail": "adapter not connected"}
+        if getattr(a, "_sweep_running", False):
+            return {"status": "error", "detail": "a sweep is already running"}
+        routes = a._infer_routes(node_id[:2]) if hasattr(a, "_infer_routes") else []
+        t = asyncio.create_task(a.trace_sweep(node_id))
+        _sweep_tasks.add(t)
+        t.add_done_callback(_sweep_tasks.discard)
+        return {"status": "started", "candidate_routes": max(1, len(routes)),
+                "max_probes": int(a.config.get("trace_sweep_max_probes", 8))}
+
     # ── Prometheus metrics ────────────────────────────────────────────────
 
     @app.get("/metrics")

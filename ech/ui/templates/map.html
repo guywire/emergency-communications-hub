@@ -463,6 +463,7 @@ function popupContent(node, isAlert, lastMsg) {
           comment: `${node.display_name || node.node_id} via ${node._adapter || ''}`,
           src: {kind: 'node', adapter: node._adapter, id: node.node_id}})}</span>` : ''}
     ${isMeshCore ? `<button onclick="mapTrace('${esc(node._adapter)}','${esc(node.node_id)}',this)" style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);color:#3fb950;border-radius:3px;cursor:pointer">📡 Trace</button>` : ''}
+    ${isMeshCore ? `<button onclick="mapSweep('${esc(node._adapter)}','${esc(node.node_id)}',this)" title="Trace every likely route hop by hop and report where it breaks (takes a few minutes; result in Messages)" style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(56,139,253,.1);border:1px solid rgba(56,139,253,.3);color:#58a6ff;border-radius:3px;cursor:pointer">🔍 Sweep</button>` : ''}
   </div>`;
 
   // External lookup links — AIS vessels and ADS-B aircraft
@@ -677,6 +678,28 @@ async function mapTrace(adapter, nodeId, btn) {
   } catch(e) {
     if (btn) { btn.textContent = '✗ Err'; btn.disabled = false; }
     toast('Trace failed: ' + e.message, 'err');
+  }
+}
+
+// Hop-by-hop sweep over every candidate route: runs on the server for a few
+// minutes and posts one summary to the message feed (traceroute channel).
+async function mapSweep(adapter, nodeId, btn) {
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+  try {
+    const d = await fetch('/api/trace_sweep', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({adapter, node_id: nodeId}),
+    }).then(r => r.json());
+    if (d.status === 'started') {
+      if (btn) btn.textContent = '✓ Running';
+      toast(`Sweep started: up to ${d.max_probes} probes, one at a time - the result appears in Messages in a few minutes`, 'ok');
+    } else {
+      if (btn) { btn.textContent = '🔍 Sweep'; btn.disabled = false; }
+      toast(`Sweep not started: ${d.detail || d.status}`, 'err');
+    }
+  } catch (e) {
+    if (btn) { btn.textContent = '🔍 Sweep'; btn.disabled = false; }
+    toast('Sweep failed: ' + e.message, 'err');
   }
 }
 

@@ -167,3 +167,73 @@ def test_inferred_route_rejects_far_hash_collisions_and_long_chains():
     a._learn_topology(["ee", "dd", "cc", "bb", "aa"])
     assert a._infer_route("ee") is None                          # would need 3 relays (cap is 2)
     assert a._infer_route("ee", max_hops=4) == ["aa", "bb", "cc", "dd"]
+
+
+def _sweep_adapter(answers):
+    """Adapter whose probes answer according to ``answers``: tuple(outbound) -> bool."""
+    from ech.core.models import MeshNode
+    a = _adapter()
+    a._connected = True
+    a._base_lat, a._base_lon = 44.16, -69.12
+    for nid, name in (("15AAAAAAAAAA", "RKDRPTMON"), ("6BAAAAAAAAAA", "LandOfLucy"),
+                      ("C2AAAAAAAAAA", "Ragged"), ("E7AAAAAAAAAA", "SouthThomaston")):
+        a._nodes[nid] = MeshNode(node_id=nid, display_name=name)
+        a._nodes[nid].lat, a._nodes[nid].lon = 44.15, -69.1
+    probed = []
+
+    async def fake_probe(outbound, timeout):
+        probed.append(tuple(outbound))
+        ok = answers.get(tuple(outbound), False)
+        return {"ok": ok, "hops": 2 * len(outbound) - 1, "snrs": [8.5] * (2 * len(outbound)),
+                "heard": 0 if ok else 1}
+
+    a._probe = fake_probe
+    return a, probed
+
+
+def test_sweep_walks_hop_by_hop_and_names_the_break():
+    a, probed = _sweep_adapter({("15",): True})
+    a._learn_topology(["e7", "6b", "15"])           # e7-6b-15, 15 heard direct
+    out = asyncio.run(a.trace_sweep("E7AAAAAAAAAA", gap=0))
+    assert probed == [("15",), ("15", "6b")]          # stops at the first failing hop
+    assert out["reached"] is False
+    assert "✓ us → RKDRPTMON" in out["summary"] and "✗ RKDRPTMON → LandOfLucy" in out["summary"]
+    assert "we heard it get 1 of 3 hops" in out["summary"]
+    assert a._rx_queue.get_nowait().raw["trace_result"] == "sweep"
+
+
+def test_sweep_tries_next_route_and_reuses_proven_hops():
+    a, probed = _sweep_adapter({("15",): True, ("15", "c2"): True, ("15", "c2", "e7"): True})
+    a._learn_topology(["e7", "6b", "15"])
+    a._learn_topology(["e7", "c2", "15"])
+    out = asyncio.run(a.trace_sweep("E7AAAAAAAAAA", gap=0))
+    assert out["reached"] is True
+    assert probed.count(("15",)) == 1                 # first hop probed once, reused
+    assert ("15", "c2", "e7") in probed and "REACHED" in out["summary"]
+
+
+def test_sweep_respects_probe_limit_and_single_run():
+    a, probed = _sweep_adapter({})
+    a._learn_topology(["e7", "6b", "15"])
+    out = asyncio.run(a.trace_sweep("E7AAAAAAAAAA", max_probes=1, gap=0))
+    assert len(probed) == 1 and out["probes"] == 1
+    a._sweep_running = True
+    assert asyncio.run(a.trace_sweep("E7AAAAAAAAAA", gap=0))["status"] == "error"
+
+
+def test_probe_resolves_on_trace_data_and_stays_quiet():
+    a = _adapter()
+    a._connected = True
+
+    async def fake_send(payload):
+        assert payload[0] == 0x24 and payload[10:] == bytes([0x15, 0x6B, 0x15])
+        tag = payload[1:5]
+        reply = (bytes([0x89, 0, 3, 0]) + tag + b"\x00" * 4 + bytes([0x15, 0x6B, 0x15])
+                 + bytes([34, 20, 30, 40]))
+        asyncio.get_running_loop().call_soon(lambda: asyncio.ensure_future(a._dispatch_frame(reply)))
+
+    a._send_cmd = fake_send
+    res = asyncio.run(a._probe(["15", "6b"], timeout=2))
+    assert res["ok"] and res["snrs"][0] == 8.5
+    assert a._rx_queue.empty()                       # no per-probe feed message
+    assert not a._pending_trace_tags and not a._quiet_tags

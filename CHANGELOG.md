@@ -8,6 +8,14 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.1 (2026-10-16)
+
+### Added
+- **MeshCore trace sweep** ("Sweep" button next to Trace in a MeshCore node's map popup): tries
+  every likely route to the node one hop at a time and posts a single summary to Messages saying
+  which link breaks (for example "✓ us → RKDRPTMON, ✗ RKDRPTMON → LandOfLucy"). Hops already
+  proven aren't re-probed; at most 8 probes, one at a time. Takes a few minutes.
+
 ## v1.1.0 (2026-10-16)
 
 First release numbered without a release-candidate suffix: from here on each release bumps the

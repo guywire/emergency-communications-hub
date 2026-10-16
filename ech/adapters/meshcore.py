@@ -423,6 +423,11 @@ class MeshCoreAdapter(Adapter):
         # Pending path discoveries, keyed by the target's 6-byte pubkey prefix
         # (lower hex) — resolved by the PATH_DISCOVERY_RESP (0x8D) handler.
         self._path_futures: dict[str, asyncio.Future] = {}
+        # Trace sweep: tag -> hops of our probe overheard in flight; tags whose
+        # replies shouldn't each post to the feed (the sweep posts a summary).
+        self._trace_progress: dict[int, int] = {}
+        self._quiet_tags: set[int] = set()
+        self._sweep_running = False
         # Tags of traces WE sent, so a raw LOG_DATA sighting of a TRACE-type OTA
         # packet can be recognized as "our probe, still in flight" instead of
         # either being ignored or misreported as a completed reply (only the
@@ -587,6 +592,8 @@ class MeshCoreAdapter(Adapter):
             candidate = int.from_bytes(payload[:4], "little")
             if candidate in self._pending_trace_tags:
                 seen_tag = candidate
+                # TRACE path_len = hops already made (one SNR byte per hop)
+                self._trace_progress[candidate] = max(self._trace_progress.get(candidate, 0), path_len)
         self._broadcast_traffic_event(route, ptype, snr, rssi, path_len, hashes, origin_id, tag=seen_tag)
 
     def _learn_topology(self, hashes: list, confirmed_from_us: bool = False,
@@ -1565,6 +1572,168 @@ class MeshCoreAdapter(Adapter):
             log.error("MeshCore %s: SEND_TRACE_PATH error: %s", self.name, exc)
             return {"status": "error", "detail": str(exc)}
 
+    # ── Trace sweep (operator idea, 2026-10-16) ──────────────────────────────
+    # A single trace only says "no reply". A sweep walks each candidate route
+    # one hop further at a time - [r1], then [r1,r2,r1], ..., then the target -
+    # so the result names the hop where it breaks, and tries the next candidate
+    # route when one dies. Overheard forwards of our own probe (LOG_DATA) show
+    # how far a failed probe got before going silent.
+
+    def _infer_routes(self, target_hash: str, target_pos: "tuple | None" = None,
+                      max_relays: "int | None" = None, limit: int = 4) -> list:
+        """Up to ``limit`` distinct relay chains to target_hash (shortest
+        first), with the same relay cap and distance plausibility as
+        _infer_route(). [] in the list = heard direct."""
+        target_hash = target_hash.lower()
+        if max_relays is None:
+            max_relays = int(self.config.get("trace_infer_max_relays", 2))
+        self._prune_topology()
+        routes: list = [[]] if target_hash in self._direct_hashes else []
+        me = [(self._base_lat, self._base_lon)] if self._base_lat is not None else None
+        tgt = [target_pos] if target_pos and target_pos[0] is not None else self._hash_positions(target_hash)
+        from collections import deque
+        q = deque([d] for d in sorted(self._direct_hashes)
+                  if d != target_hash and self._link_plausible(me, self._hash_positions(d)))
+        while q and len(routes) < limit:
+            path = q.popleft()
+            last = self._hash_positions(path[-1])
+            for nb in sorted(self._rf_adjacency.get(path[-1], ())):
+                if nb == target_hash:
+                    if self._link_plausible(last, tgt) and path not in routes:
+                        routes.append(path)
+                    continue
+                if (len(path) < max_relays and nb not in path and nb != target_hash
+                        and self._link_plausible(last, self._hash_positions(nb))):
+                    q.append(path + [nb])
+        return routes[:limit]
+
+    async def _probe(self, outbound: list, timeout: float) -> dict:
+        """One quiet trace along ``outbound`` (1-byte hashes, us -> ... -> last)
+        and back the same way. Returns ok + per-hop SNRs, or how many hops of
+        the probe our radio overheard before it went silent."""
+        import random as _random
+        hops = outbound + list(reversed(outbound[:-1])) if len(outbound) >= 2 else list(outbound)
+        tag = _random.randint(1, 0xFFFFFFFF)
+        payload = (bytes([CMD_SEND_TRACE_PATH]) + tag.to_bytes(4, "little") + (0).to_bytes(4, "little")
+                   + bytes([0]) + b"".join(bytes.fromhex(h) for h in hops))
+        if len(payload) <= 10:
+            payload += b"\x00"
+        fut = asyncio.get_running_loop().create_future()
+        self._trace_futures[tag] = fut
+        self._pending_trace_tags.add(tag)
+        self._quiet_tags.add(tag)
+        try:
+            await self._send_cmd(payload)
+            log.info("MeshCore %s: SWEEP probe tag=%08x hops=%s", self.name, tag, hops)
+            data = await asyncio.wait_for(fut, timeout=timeout)
+            return {"ok": True, "hops": len(hops), "snrs": data.get("snrs", []), "heard": len(hops)}
+        except asyncio.TimeoutError:
+            return {"ok": False, "hops": len(hops), "heard": self._trace_progress.get(tag, 0)}
+        finally:
+            self._trace_futures.pop(tag, None)
+            self._pending_trace_tags.discard(tag)
+            self._quiet_tags.discard(tag)
+            self._trace_progress.pop(tag, None)
+
+    def _hash_label(self, h: str) -> str:
+        r = self._resolve_traffic_node(h)
+        if r is None:
+            return f"{h}?"
+        return r["name"] + (f" (or {r['ambiguous'] - 1} other{'s' if r['ambiguous'] > 2 else ''} with ID {h})"
+                            if r.get("ambiguous") else "")
+
+    async def trace_sweep(self, node_id: str, max_probes: "int | None" = None,
+                          timeout: float = 20.0, gap: float = 2.0) -> dict:
+        """Probe every candidate route to ``node_id`` hop by hop (see above).
+        Sequential, capped at ``trace_sweep_max_probes`` (default 8) probes;
+        posts one summary to the message feed and returns it."""
+        if not self._connected:
+            return {"status": "error", "detail": "not connected"}
+        if self._sweep_running:
+            return {"status": "error", "detail": "a sweep is already running"}
+        n = self._nodes.get((node_id or "").strip()) or self._nodes.get((node_id or "").strip().upper())
+        if n is None:
+            return {"status": "error", "detail": f"unknown node {node_id!r}"}
+        if max_probes is None:
+            max_probes = int(self.config.get("trace_sweep_max_probes", 8))
+        tgt = n.node_id[:2].lower()
+        routes: list = []
+        try:
+            stored = bytes.fromhex((n.meta or {}).get("out_path") or "")
+        except ValueError:
+            stored = b""
+        if 0 < len(stored) <= 16:
+            routes.append([f"{b:02x}" for b in stored])
+        for r in self._infer_routes(tgt, target_pos=(n.lat, n.lon)):
+            if r not in routes:
+                routes.append(r)
+        if not routes:
+            routes = [[]]          # nothing known: a bare probe is all there is
+        self._sweep_running = True
+        tried: dict = {}
+        probes = 0
+        report = []
+        reached = False
+        try:
+            for route in routes:
+                stages = [route[:i] for i in range(1, len(route) + 1)] + [route + [tgt]]
+                steps = []
+                done = True
+                for st in stages:
+                    key = tuple(st)
+                    final = st is stages[-1]
+                    if key not in tried:
+                        if probes >= max_probes:
+                            done = False
+                            steps.append({"to": st[-1], "result": "skipped (probe limit)"})
+                            break
+                        probes += 1
+                        tried[key] = await self._probe(list(st), timeout)
+                        await asyncio.sleep(gap)
+                    res = tried[key]
+                    step = {"to": st[-1], "ok": res["ok"], "final": final}
+                    if res["ok"]:
+                        snr = res["snrs"][len(st) - 1] if len(res["snrs"]) >= len(st) else None
+                        step["result"] = f"answered{'' if snr is None else f' ({snr:+.1f} dB at that hop)'}"
+                    else:
+                        step["result"] = ("no answer" if res["heard"] == 0 else
+                                          f"no answer (we heard it get {res['heard']} of {res['hops']} hops)")
+                    steps.append(step)
+                    if not res["ok"]:
+                        done = False
+                        break
+                report.append({"route": route, "steps": steps, "complete": done})
+                if done:
+                    reached = True
+                    break
+                if probes >= max_probes:
+                    break
+        finally:
+            self._sweep_running = False
+
+        lines = [f"📡 TRACE SWEEP to {n.display_name}: "
+                 + ("REACHED" if reached else "not reached") + f" ({probes} probe{'s' if probes != 1 else ''})"]
+        for i, r in enumerate(report, 1):
+            chain = " → ".join(["us"] + [self._hash_label(h) for h in r["route"]] + [n.display_name])
+            lines.append(f"Route {i}: {chain}")
+            prev = "us"
+            for s in r["steps"]:
+                name = n.display_name if s.get("final") else self._hash_label(s["to"])
+                mark = "✓" if s.get("ok") else "✗"
+                lines.append(f"  {mark} {prev} → {name}: {s['result']}")
+                prev = name
+        if not reached:
+            lines.append("A ✗ means that link failed in at least one direction (a trace must come back the "
+                         "way it went). Same-ID repeaters (1-byte hashes) can make a guessed route wrong.")
+        body = "\n".join(lines)
+        log.info("MeshCore %s: SWEEP %s reached=%s probes=%d", self.name, n.display_name, reached, probes)
+        await self._enqueue(NormalizedMessage(
+            source_adapter=self.name, source_channel="traceroute", from_id="local",
+            from_display=self._device_name or self.name, body=body, priority=Priority.NORMAL,
+            raw={"trace_result": "sweep", "target": n.node_id, "reached": reached, "probes": probes,
+                 "routes": report}))
+        return {"status": "ok", "reached": reached, "probes": probes, "routes": report, "summary": body}
+
     async def trace_and_wait(self, timeout: float = 25.0) -> dict:
         """Send a trace probe and await its TRACE_DATA result — used by anomaly
         verification to get a live path measurement synchronously. The probe is
@@ -2326,7 +2495,10 @@ class MeshCoreAdapter(Adapter):
                     raw={"tag": tag, "hop_count": path_len, "path": path_nodes,
                          "snr_values": snr_values, "raw_hex": data.hex()},
                 )
-                await self._enqueue(trace_msg)
+                if tag in self._quiet_tags:
+                    self._quiet_tags.discard(tag)   # a sweep probe: the sweep posts one summary
+                else:
+                    await self._enqueue(trace_msg)
 
         elif pkt_type == PUSH_ADVERT:
             # PUSH_ADVERT format (companion protocol v1.15):
