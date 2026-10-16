@@ -8,6 +8,12 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.5 (2026-10-16)
+
+### Fixed
+- Calls panel: the 🔊 Intercom button was cut off the right edge of the panel. Extension and text
+  now sit on one row with "📞 Ring + speak" and "🔊 Intercom" as equal buttons underneath.
+
 ## v1.1.4 (2026-10-16)
 
 ### Fixed

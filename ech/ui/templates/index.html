@@ -3839,11 +3839,15 @@ async function loadCallLog() {
       <label for="pbx-my-ext" title="When you dial from ECH, this phone rings first; answer it and you're connected">📞 My phone</label>
       <select id="pbx-my-ext" onchange="pbxSetMyExt(this.value)" style="flex:1;font-size:11px;padding:2px 4px"><option value="">ext ${escHtml(_pbxDefaultExt || '?')}</option></select>
     </div>` : ''}
-    ${canTransmit ? `<div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:4px;align-items:center">
-      <input type="text" id="tts-ext" placeholder="ext" style="width:44px;font-size:11px;padding:3px 5px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
-      <input type="text" id="tts-text" placeholder="Text to speak…" style="flex:1;font-size:11px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
-      <button onclick="pbxSpeak()" style="font-size:10px;padding:3px 8px" title="Ring the extension normally; when someone picks up, read this text aloud">📞 Ring &amp; speak</button>
-      <button onclick="pbxIntercom()" style="font-size:10px;padding:3px 8px" title="Intercom: the phone(s) auto-answer on the loudspeaker. With text it is spoken; with no text your phone rings and you talk live. Extension can be a list (102,103) or all.">🔊 Intercom</button>
+    ${canTransmit ? `<div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;gap:4px;min-width:0">
+        <input type="text" id="tts-ext" placeholder="ext" title="One extension, a list (102,103) or all" style="width:52px;flex-shrink:0;font-size:11px;padding:3px 5px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+        <input type="text" id="tts-text" placeholder="Text to speak (empty = talk live)" style="flex:1;min-width:0;font-size:11px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+      </div>
+      <div style="display:flex;gap:4px">
+        <button onclick="pbxSpeak()" style="flex:1;min-width:0;font-size:10px;padding:3px 4px" title="Ring the extension normally; when someone picks up, read this text aloud">📞 Ring + speak</button>
+        <button onclick="pbxIntercom()" style="flex:1;min-width:0;font-size:10px;padding:3px 4px" title="Intercom: the phone(s) auto-answer on the loudspeaker. With text it is spoken; with no text your phone rings and you talk live.">🔊 Intercom</button>
+      </div>
     </div>` : ''}
     <div id="pbx-endpoint-status"></div>`;
     if (active.length) {

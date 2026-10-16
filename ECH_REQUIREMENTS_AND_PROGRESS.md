@@ -907,6 +907,7 @@ verbatim, wire them to `dmr_utils3` for the FEC primitives, then build
 | v1.0.0-rc280 | **Deployed** (2026-10-13) | Deployed | Nav bell icon when a newer VERSION is on GitHub (admin-only, 6 h cache). |
 | v1.0.0-rc284 | **Deployed** (2026-10-14) | Deployed | O139: per-user map layer profiles + default; duplicate sat-btn id fix. |
 | v1.0.0-rc285 | **Deployed** (2026-10-15) | Deployed | O142-O145: UI refresh phase 1 (shared shell + ech-ui.css), adapter-coloured clickable tracks, no Message button on broadcast-only, no ADS-B flash on map open, PSK Reporter legend + detail. |
+| v1.1.5 | **Deployed** (2026-10-16) | Deployed | O155: Intercom button was clipped by the 260 px right panel (overflow hidden) - two-row layout, verified by screenshot with the mock PBX. |
 | v1.1.4 | **Deployed** (2026-10-16) | Deployed | O153: rx_link / tx_answered / long_seen persisted with the topology (48 h), so deploys don't wipe link evidence. 1.1.3 + 1.1.4 committed together. |
 | v1.1.3 | **Deployed** (2026-10-16) | Deployed | O153 follow-up: hash-width topology bug, one-way-link verdicts, 2-byte trace hashes when hops resolve, no path discovery to repeaters; O155 button relabel. |
 | v1.1.2 | **Deployed** (2026-10-16) | Deployed | O154 click-to-call "My phone" picker; O155 intercom (auto-answer on speaker, TTS or live via ConfBridge). |
