@@ -8,6 +8,30 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.4 (2026-10-16)
+
+### Fixed
+- The MeshCore link evidence behind the "one-way link" verdicts and the longer repeater IDs is
+  now saved with the route map, so a restart or update no longer wipes it (1.1.3 kept it in
+  memory only).
+
+## v1.1.3 (2026-10-16)
+
+### Changed
+- **MeshCore traces use longer repeater IDs** (2 bytes instead of 1) whenever every hop can be
+  pinned to one specific repeater, so a trace no longer gets picked up by a different repeater
+  that happens to share the same 1-byte ID.
+- **Trace and sweep results now say when a link is one-way**: e.g. "We hear LandOfLucy directly
+  (… packets, avg SNR +4.6 dB) but it has not answered a trace from us", which points at your
+  node's antenna/height/placement rather than the route.
+- Calls panel buttons renamed: "📞 Ring & speak" rings normally; "🔊 Intercom" auto-answers on the
+  phone's loudspeaker.
+
+### Fixed
+- MeshCore route map treated the same repeater as several when the mesh used 2- or 3-byte IDs,
+  splitting known routes apart.
+- Traces to repeaters no longer wait 15 s for a route discovery that repeaters don't answer.
+
 ## v1.1.2 (2026-10-16)
 
 ### Added

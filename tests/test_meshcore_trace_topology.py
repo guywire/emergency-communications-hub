@@ -9,6 +9,7 @@ and an unanswered trace posts a "no reply" result instead of vanishing.
 """
 
 import asyncio
+import collections
 import json
 import time
 
@@ -181,7 +182,7 @@ def _sweep_adapter(answers):
         a._nodes[nid].lat, a._nodes[nid].lon = 44.15, -69.1
     probed = []
 
-    async def fake_probe(outbound, timeout):
+    async def fake_probe(outbound, timeout, last_full=None):
         probed.append(tuple(outbound))
         ok = answers.get(tuple(outbound), False)
         return {"ok": ok, "hops": 2 * len(outbound) - 1, "snrs": [8.5] * (2 * len(outbound)),
@@ -237,3 +238,99 @@ def test_probe_resolves_on_trace_data_and_stays_quiet():
     assert res["ok"] and res["snrs"][0] == 8.5
     assert a._rx_queue.empty()                       # no per-probe feed message
     assert not a._pending_trace_tags and not a._quiet_tags
+
+
+def test_mixed_width_hashes_are_one_repeater():
+    """2026-10-16: the mesh mixes 1/2/3-byte path hashes; "15", "1551" and
+    "1551f6" were stored as three repeaters, splitting the graph."""
+    a = _adapter()
+    a._learn_topology(["6b0896", "1551f6"])
+    a._learn_topology(["c2", "6b"])
+    assert a._direct_hashes == {"15", "6b"}               # last hop of each chain
+    assert a._rf_adjacency["6b"] == {"15", "c2"}
+    saved = {}
+
+    class DB:
+        async def get_kv(self, k):
+            return json.dumps({"v": 2, "direct_seen": {"1551": time.time(), "15": time.time() - 60},
+                               "edges": [["1551", "6b0896", time.time()], ["15", "6b", time.time() - 5]]})
+
+    b = _adapter()
+    b._db = DB()
+    asyncio.run(b._restore_topology())
+    assert b._direct_hashes == {"15"} and b._rf_adjacency["15"] == {"6b"}
+
+
+def test_one_way_link_is_called_out():
+    from ech.core.models import MeshNode
+    a = _adapter()
+    a._nodes["6B0896049993"] = MeshNode(node_id="6B0896049993", display_name="LandOfLucy")
+    now = time.time()
+    a._rx_link["6b"] = collections.deque([(now - 60, 4.5), (now - 30, 5.0), (now, 4.0)])
+    hint = a._one_way_hint("6b")
+    assert "one-way link" in hint and "LandOfLucy" in hint and "+4.5 dB" in hint
+    a._tx_answered["6b"] = now
+    assert a._one_way_hint("6b") == ""                  # it has answered us: not one-way
+    assert "out of range" in a._one_way_hint("e7")
+
+
+def _wide_adapter():
+    from ech.core.models import MeshNode
+    a = _adapter()
+    a._connected = True
+    for nid, name, typ in (("1551F6BB53BC", "RKDRPTMON", "REP"), ("15AA00000000", "SWANS-EAST", "REP"),
+                           ("6B0896049993", "LandOfLucy", "REP"), ("6BFF00000000", "NH node", "REP"),
+                           ("E7E22EB637A3", "South Thomaston", "REP")):
+        a._nodes[nid] = MeshNode(node_id=nid, display_name=name)
+        a._nodes[nid].meta["node_type"] = typ
+    return a
+
+
+def test_trace_uses_two_byte_hashes_when_every_hop_resolves():
+    """Operator 2026-10-16: use the longer repeater addresses to avoid
+    same-ID duplicates. Long hashes seen in traffic pin each hop."""
+    a = _wide_adapter()
+    a._learn_topology(["e7", "6b0896", "1551f6"])      # adverts relayed with 3-byte hashes
+    sent = []
+
+    async def fake_send(payload):
+        sent.append(payload)
+
+    a._send_cmd = fake_send
+    a.config["path_discovery_timeout"] = 0.01
+    asyncio.run(a.ping("E7E22EB637A3"))
+    trace = sent[-1]
+    assert trace[0] == 0x24 and trace[9] == 1                       # flags: 2-byte hashes
+    assert trace[10:] == bytes.fromhex("1551" "6b08" "e7e2" "6b08" "1551")
+
+
+def test_unknown_repeater_sharing_a_byte_keeps_one_byte_hashes():
+    a = _wide_adapter()
+    a._learn_topology(["e7", "6b0896", "1551f6"])
+    a._learn_topology(["15cc11", "6b"])                # a long "15" hash matching no known node
+    assert a._resolve_hop("15") is None
+    assert a._resolve_hop("6b") == "6B0896049993"
+    assert a._widen(["15", "6b", "e7"], last_full="E7E22EB637A3") is None
+
+
+def test_link_evidence_survives_restart():
+    a = _adapter()
+    a._learn_topology(["6b0896", "1551f6"])
+    a._rx_link["6b"] = collections.deque([(time.time(), 4.5)])
+    a._tx_answered["15"] = time.time()
+    saved = {}
+
+    class DB:
+        async def set_kv(self, k, v):
+            saved["v"] = v
+
+        async def get_kv(self, k):
+            return saved["v"]
+
+    a._db = DB()
+    asyncio.run(a._persist_topology())
+    b = _adapter()
+    b._db = DB()
+    asyncio.run(b._restore_topology())
+    assert list(b._rx_link["6b"])[0][1] == 4.5 and "15" in b._tx_answered
+    assert "1551f6" in b._long_seen["15"]

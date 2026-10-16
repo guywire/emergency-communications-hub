@@ -426,6 +426,15 @@ class MeshCoreAdapter(Adapter):
         # Trace sweep: tag -> hops of our probe overheard in flight; tags whose
         # replies shouldn't each post to the feed (the sweep posts a summary).
         self._trace_progress: dict[int, int] = {}
+        # Link check: SNRs of packets we heard DIRECTLY from each 1-byte hash
+        # (last relay, or a 0-hop advert's origin), and when each first hop
+        # last answered one of our traces - "we hear it, it never hears us"
+        # is the usual reason traces fail (2026-10-16 field data).
+        self._rx_link: dict[str, collections.deque] = {}
+        self._tx_answered: dict[str, float] = {}
+        # 1-byte hash -> {longer hash seen in traffic: ts}. Lets a trace use a
+        # 2-byte hash for a repeater instead of a 1-byte one many nodes share.
+        self._long_seen: dict[str, dict[str, float]] = {}
         self._quiet_tags: set[int] = set()
         self._sweep_running = False
         # Tags of traces WE sent, so a raw LOG_DATA sighting of a TRACE-type OTA
@@ -552,6 +561,9 @@ class MeshCoreAdapter(Adapter):
         # direct probe. Direct reception now wins.
         origin_hash = origin_id[:2].lower() if origin_id else None
         self._learn_topology(([origin_hash] if origin_hash else []) + hashes)
+        heard_from = (hashes[-1][:2].lower() if hashes and hashes[-1] else origin_hash)
+        if heard_from and payload_type != 9 and snr is not None:
+            self._rx_link.setdefault(heard_from, collections.deque(maxlen=300)).append((time.time(), snr))
         # Any node we hear as a relay in someone else's traffic is proof it's
         # still on the mesh RIGHT NOW — just as much as a PUSH_ADVERT is, which
         # was previously the ONLY thing that refreshed last_heard. A repeater
@@ -609,10 +621,16 @@ class MeshCoreAdapter(Adapter):
         THAT observer, not by us — learn the adjacencies only, never mark
         anything direct to us (it used to, which would have pointed traces at
         links our radio doesn't have)."""
-        hashes = [h.lower() for h in hashes if h]
+        # One key per repeater: the mesh mixes 1-, 2- and 3-byte path hashes
+        # ("15", "1551", "1551f6" are the same repeater), and our traces use
+        # 1-byte hashes - so the graph is keyed by the first byte only.
+        now = time.time()
+        for h in hashes:
+            if h and len(h) > 2:
+                self._long_seen.setdefault(h[:2].lower(), {})[h.lower()] = now
+        hashes = [h.lower()[:2] for h in hashes if h]
         if not hashes:
             return
-        now = time.time()
         if not observer:
             d = hashes[0] if confirmed_from_us else hashes[-1]
             self._direct_hashes.add(d)
@@ -653,10 +671,17 @@ class MeshCoreAdapter(Adapter):
         import json as _json
         try:
             self._prune_topology()
+            cutoff = time.time() - 48 * 3600
             await self._db.set_kv(
                 f"meshcore_topology_{self.name}",
                 _json.dumps({"v": 2, "direct_seen": self._direct_seen,
-                             "edges": [[a, b, t] for (a, b), t in self._edge_seen.items()]}))
+                             "edges": [[a, b, t] for (a, b), t in self._edge_seen.items()],
+                             # link-check evidence survives deploys too (last 48 h)
+                             "rx_link": {h: [[round(t), v] for t, v in d if t >= cutoff]
+                                         for h, d in self._rx_link.items()},
+                             "tx_answered": self._tx_answered,
+                             "long_seen": {h: {L: t for L, t in m.items() if t >= cutoff}
+                                           for h, m in self._long_seen.items()}}))
             self._topology_dirty = False
         except Exception as exc:
             log.debug("MeshCore %s: topology persist error: %s", self.name, exc)
@@ -670,10 +695,22 @@ class MeshCoreAdapter(Adapter):
             if raw:
                 data = _json.loads(raw)
                 if data.get("v") == 2:
-                    self._direct_seen = {h: float(t) for h, t in data.get("direct_seen", {}).items()}
-                    self._edge_seen = {((a, b) if a < b else (b, a)): float(t)
-                                       for a, b, t in data.get("edges", [])}
+                    self._direct_seen = {}
+                    for h, t in data.get("direct_seen", {}).items():
+                        k = h.lower()[:2]
+                        self._direct_seen[k] = max(float(t), self._direct_seen.get(k, 0.0))
+                    self._edge_seen = {}
+                    for a, b, t in data.get("edges", []):
+                        a, b = a.lower()[:2], b.lower()[:2]
+                        if a != b:
+                            e = (a, b) if a < b else (b, a)
+                            self._edge_seen[e] = max(float(t), self._edge_seen.get(e, 0.0))
                     self._direct_hashes = set(self._direct_seen)
+                    for h, pts in (data.get("rx_link") or {}).items():
+                        self._rx_link[h] = collections.deque(((float(t), float(v)) for t, v in pts), maxlen=300)
+                    self._tx_answered.update({h: float(t) for h, t in (data.get("tx_answered") or {}).items()})
+                    for h, m in (data.get("long_seen") or {}).items():
+                        self._long_seen.setdefault(h, {}).update({L: float(t) for L, t in m.items()})
                     self._prune_topology()
                     log.info("MeshCore %s: restored topology (%d direct, %d nodes in graph)",
                              self.name, len(self._direct_hashes), len(self._rf_adjacency))
@@ -686,6 +723,67 @@ class MeshCoreAdapter(Adapter):
                     self._topology_dirty = True
         except Exception as exc:
             log.debug("MeshCore %s: topology restore error: %s", self.name, exc)
+
+    def _resolve_hop(self, h: str) -> "str | None":
+        """The full node_id of the repeater behind path hash ``h`` - only when
+        the evidence points at exactly one known node, else None. Evidence:
+        longer hashes for this byte seen in traffic (a seen long hash that
+        matches NO known node means an unknown repeater shares the byte ->
+        ambiguous), then repeater type."""
+        h = (h or "").lower()
+        cands = [n for nid, n in self._nodes.items() if nid.lower().startswith(h)]
+        if not cands:
+            return None
+        longs = self._long_seen.get(h[:2], {})
+        if longs:
+            if any(not any(n.node_id.lower().startswith(L) or L.startswith(n.node_id.lower()) for n in cands)
+                   for L in longs):
+                return None
+            matched = [n for n in cands if any(n.node_id.lower().startswith(L) for L in longs)]
+            if len(matched) == 1:
+                return matched[0].node_id
+            if matched:
+                cands = matched
+        reps = [n for n in cands if (n.meta or {}).get("node_type") == "REP"]
+        if len(reps) == 1 and (len(cands) == 1 or longs):
+            return reps[0].node_id
+        if len(cands) == 1 and longs:
+            return cands[0].node_id
+        return None
+
+    def _widen(self, hops: list, last_full: "str | None" = None, width: int = 2) -> "list | None":
+        """1-byte hop hashes -> ``width``-byte hashes (hex), or None if any hop
+        can't be pinned to one repeater (the whole trace then stays 1-byte:
+        a trace has one hash size for every hop)."""
+        out = []
+        for i, h in enumerate(hops):
+            full = last_full if (last_full and i == len(hops) - 1) else self._resolve_hop(h)
+            if not full or len(full) < 2 * width:
+                return None
+            out.append(full[:2 * width].lower())
+        return out
+
+    def link_report(self, h: str, hours: float = 24.0) -> dict:
+        """How well WE hear hash ``h`` directly, and whether it has ever
+        answered a trace from us (since the last restart)."""
+        h = (h or "").lower()[:2]
+        cutoff = time.time() - hours * 3600
+        snrs = [v for t, v in self._rx_link.get(h, ()) if t >= cutoff]
+        return {"hash": h, "heard": len(snrs), "hours": hours,
+                "avg_snr": round(sum(snrs) / len(snrs), 1) if snrs else None,
+                "answered_at": self._tx_answered.get(h)}
+
+    def _one_way_hint(self, h: str) -> str:
+        """Plain-language verdict for a first hop that did not answer."""
+        r = self.link_report(h)
+        if r["heard"] >= 3 and not r["answered_at"]:
+            return (f"We hear {self._hash_label(h)} directly ({r['heard']} packets in 24 h, avg SNR "
+                    f"{r['avg_snr']:+.1f} dB) but it has not answered a trace from us: a one-way link - "
+                    "it most likely can't hear your node's transmissions (antenna, height, placement "
+                    "or TX power at your end).")
+        if r["heard"] == 0:
+            return f"We have not heard {self._hash_label(h)} directly in 24 h, so it is probably out of range."
+        return ""
 
     def _hash_positions(self, h: str) -> list:
         """Known positions of every node whose pubkey starts with hash ``h``
@@ -1372,9 +1470,11 @@ class MeshCoreAdapter(Adapter):
             evidence = "no recent direct reception of the first hop"
         else:
             evidence = "no observed route — sent as a bare probe"
+        hint = self._one_way_hint(ctx.get("first_hash", "")) if ctx.get("first_hash") else ""
         body = (f"📡 TRACE: no reply from {ctx.get('target', '?')} within {int(after)} s "
                 f"(via {ctx.get('route', '?')}, {ctx.get('route_src', '-')}; {evidence}). "
-                "A trace needs a two-way link at every hop: we may hear a node that can't "
+                + (hint + " " if hint else "")
+                + "A trace needs a two-way link at every hop: we may hear a node that can't "
                 "hear us, it may not be a repeater, or another node may share its 1-byte hash.")
         log.info("MeshCore %s: TRACE tag=%08x no reply in %ds (via %s, %s)", self.name, tag,
                  int(after), ctx.get("route", "?"), ctx.get("route_src", "-"))
@@ -1394,6 +1494,11 @@ class MeshCoreAdapter(Adapter):
         has no full key for it or nothing came back in time."""
         pubkey = (n.meta or {}).get("pubkey") or ""
         if len(pubkey) != 64:
+            return None
+        # Repeaters only answer path discovery for logged-in clients (field
+        # evidence 2026-10-16: RKDRPTMON rebroadcast our request, never
+        # answered) - don't spend 15 s on it.
+        if (n.meta or {}).get("node_type") == "REP":
             return None
         pre = pubkey[:12].lower()
         loop = asyncio.get_running_loop()
@@ -1443,10 +1548,13 @@ class MeshCoreAdapter(Adapter):
         # are available (flags: 0→1B, 1→2B, 2→4B) but off-mainstream on real
         # meshes. Ambiguity is handled at RESOLUTION time (recency-weighted
         # prefix match) rather than on the wire.
-        hash_bytes = int(self.config.get("trace_hash_bytes", 1))
-        if hash_bytes not in (1, 2, 4):
-            hash_bytes = 1
-        flags = {1: 0, 2: 1, 4: 2}[hash_bytes]
+        # Trace hash width: "auto" (default) uses 2-byte hashes whenever every
+        # hop resolves to one known repeater (far fewer same-ID collisions than
+        # 1 byte; the firmware reads flags' low bits as the size, v1.11+), and
+        # 1 byte otherwise. 1 / 2 / 4 force a width (2/4 fall back to 1 if a
+        # hop can't be resolved).
+        hash_mode = str(self.config.get("trace_hash_bytes", "auto")).strip().lower()
+        flags = 0
         # DIRECTED trace: route the probe along the device's own stored path
         # to the target (contact out_path — the repeater hashes between us and
         # it) plus the target's hash. A bare single-hop path only works for
@@ -1510,15 +1618,12 @@ class MeshCoreAdapter(Adapter):
                 if relay_hashes and relay_hashes[-1] == n.node_id[:2].lower():
                     relay_hashes = relay_hashes[:-1]
                 path_truncated = via is not None and len(relay_hashes) > 5
-                if hash_bytes == 1:
-                    outbound = relay_hashes[:5] + [n.node_id[:2].lower()]
-                else:
-                    # Wider hashes need full node identities per hop — drop
-                    # hops that don't resolve (rare, opt-in mode only).
-                    width = 2 * hash_bytes
-                    resolved = [self._resolve_traffic_node(h) for h in relay_hashes[:5]]
-                    outbound = ([r["id"][:width].lower() for r in resolved if r is not None]
-                                + [n.node_id[:width].lower()])
+                outbound = relay_hashes[:5] + [n.node_id[:2].lower()]
+                if hash_mode != "1":
+                    width = 4 if hash_mode == "4" else 2
+                    wide = self._widen(outbound, last_full=n.node_id, width=width)
+                    if wide:
+                        outbound, flags = wide, {2: 1, 4: 2}[width]
                 # RECIPROCAL path (the meshcore-bot pattern that actually
                 # works in the field): a trace reply does not route itself
                 # home — the probe must carry its own return path. Mirror the
@@ -1556,6 +1661,7 @@ class MeshCoreAdapter(Adapter):
             self._trace_ctx[tag] = {"target": target or "flood", "route": route_names or "flood",
                                     "route_src": route_src or "-", "hops": hops,
                                     "first_hop_seen": self._direct_seen.get(first_hash),
+                                    "first_hash": first_hash,
                                     "target_hash": tgt_hash}
             asyncio.ensure_future(self._expire_pending_tag(tag, 30.0))
             log.info("MeshCore %s: SEND_TRACE_PATH tag=%08x via=%s hops=%d src=%s — response arrives as TRACE_DATA (0x89)",
@@ -1607,15 +1713,20 @@ class MeshCoreAdapter(Adapter):
                     q.append(path + [nb])
         return routes[:limit]
 
-    async def _probe(self, outbound: list, timeout: float) -> dict:
+    async def _probe(self, outbound: list, timeout: float, last_full: "str | None" = None) -> dict:
         """One quiet trace along ``outbound`` (1-byte hashes, us -> ... -> last)
         and back the same way. Returns ok + per-hop SNRs, or how many hops of
         the probe our radio overheard before it went silent."""
         import random as _random
+        flags = 0
+        if str(self.config.get("trace_hash_bytes", "auto")).strip().lower() != "1":
+            wide = self._widen(list(outbound), last_full=last_full)
+            if wide:
+                outbound, flags = wide, 1
         hops = outbound + list(reversed(outbound[:-1])) if len(outbound) >= 2 else list(outbound)
         tag = _random.randint(1, 0xFFFFFFFF)
         payload = (bytes([CMD_SEND_TRACE_PATH]) + tag.to_bytes(4, "little") + (0).to_bytes(4, "little")
-                   + bytes([0]) + b"".join(bytes.fromhex(h) for h in hops))
+                   + bytes([flags]) + b"".join(bytes.fromhex(h) for h in hops))
         if len(payload) <= 10:
             payload += b"\x00"
         fut = asyncio.get_running_loop().create_future()
@@ -1626,9 +1737,11 @@ class MeshCoreAdapter(Adapter):
             await self._send_cmd(payload)
             log.info("MeshCore %s: SWEEP probe tag=%08x hops=%s", self.name, tag, hops)
             data = await asyncio.wait_for(fut, timeout=timeout)
-            return {"ok": True, "hops": len(hops), "snrs": data.get("snrs", []), "heard": len(hops)}
+            return {"ok": True, "hops": len(hops), "snrs": data.get("snrs", []), "heard": len(hops),
+                    "width": 2 if flags else 1}
         except asyncio.TimeoutError:
-            return {"ok": False, "hops": len(hops), "heard": self._trace_progress.get(tag, 0)}
+            return {"ok": False, "hops": len(hops), "heard": self._trace_progress.get(tag, 0),
+                    "width": 2 if flags else 1}
         finally:
             self._trace_futures.pop(tag, None)
             self._pending_trace_tags.discard(tag)
@@ -1688,7 +1801,8 @@ class MeshCoreAdapter(Adapter):
                             steps.append({"to": st[-1], "result": "skipped (probe limit)"})
                             break
                         probes += 1
-                        tried[key] = await self._probe(list(st), timeout)
+                        tried[key] = await self._probe(list(st), timeout,
+                                                       last_full=n.node_id if final else None)
                         await asyncio.sleep(gap)
                     res = tried[key]
                     step = {"to": st[-1], "ok": res["ok"], "final": final}
@@ -1723,6 +1837,11 @@ class MeshCoreAdapter(Adapter):
                 lines.append(f"  {mark} {prev} → {name}: {s['result']}")
                 prev = name
         if not reached:
+            first_fail = next((s for r in report for s in r["steps"]
+                               if not s.get("ok") and s is r["steps"][0]), None)
+            hint = self._one_way_hint(first_fail["to"]) if first_fail else ""
+            if hint:
+                lines.append(hint)
             lines.append("A ✗ means that link failed in at least one direction (a trace must come back the "
                          "way it went). Same-ID repeaters (1-byte hashes) can make a guessed route wrong.")
         body = "\n".join(lines)
@@ -2469,6 +2588,8 @@ class MeshCoreAdapter(Adapter):
                          self.name, tag, path_len, named_nodes)
                 # A successful trace CONFIRMS the chain outward from us
                 self._learn_topology(path_nodes, confirmed_from_us=True)
+                if path_nodes:
+                    self._tx_answered[path_nodes[0][:2].lower()] = time.time()
                 for h in path_nodes:
                     self._touch_heard_node(h)
                 # Resolve an awaiting trace_and_wait() caller (anomaly verification)
