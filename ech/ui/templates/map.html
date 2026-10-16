@@ -982,6 +982,19 @@ function _trackRemove(id) {
   if (t) { t.line.remove(); t.dots.remove(); delete _trackLines[id]; }
 }
 
+// Would this history-only track's station be shown with the current layer
+// toggles? Mirrors the filters in loadNodes().
+function _trackLayerOn(id, h) {
+  if (!h.adapter) return false;
+  const node = {node_id: id, _adapter: h.adapter};
+  const nid = id.toLowerCase();
+  if (nid.startsWith('icao:')) return _showAircraft;
+  if (nodeIsVessel(node)) return _showVessels;
+  if (!_showBuckets.has(nodeBucket(node))) return false;
+  const proto = nodeProtocol(node);
+  return !proto || _showProtocols.has(proto);
+}
+
 function _trackRedraw() {
   if (!_trackEnabled) {
     Object.keys(_trackLines).forEach(_trackRemove);
@@ -993,9 +1006,12 @@ function _trackRedraw() {
     const h = _trackHist[id];
     while (h.length && h[0][0] < cutoff) h.shift();
     if (!h.length) delete _trackHist[id];
-    // Only draw trails for markers actually on the map, so a layer that is
-    // switched off (or not yet applied from a profile) never flashes its tracks.
-    if (h.length < 2 || !markers[id]) { _trackRemove(id); return; }
+    // Only draw trails whose layer is switched on, so a layer that is off (or
+    // not yet applied from a profile) never flashes its tracks. Stations that
+    // have dropped off the live list (APRS forgets a station after an hour
+    // without a beacon) keep their trail, dashed, while their layer is on.
+    const live = !!markers[id];
+    if (h.length < 2 || !(live || _trackLayerOn(id, h))) { _trackRemove(id); return; }
     const color = h.color || '#58a6ff';
     const pts = h.map(p => [p[1], p[2]]);
     let t = _trackLines[id];
@@ -1008,6 +1024,7 @@ function _trackRedraw() {
       t.line.setLatLngs(pts);
       t.line.setStyle({color});
     }
+    if (t.live !== live) { t.line.setStyle({dashArray: live ? null : '5 6', opacity: live ? 0.75 : 0.55}); t.live = live; }
     if (t.n !== h.length || t.first !== h[0][0] || t.color !== color) {
       t.dots.clearLayers();
       const step = Math.max(1, Math.ceil(h.length / _TRACK_MAX_DOTS));
@@ -1046,7 +1063,9 @@ async function _trackLoadHistory() {
       const cur = _trackHist[id] || [];
       const lastSrv = pts[pts.length - 1][0];
       const merged = pts.concat(cur.filter(p => p[0] > lastSrv));
-      if (cur.color) merged.color = cur.color;
+      const ad = (d.adapters || {})[id];
+      if (ad) merged.adapter = ad;
+      merged.color = cur.color || (ad ? (id.toLowerCase().startsWith('mmsi:') ? adapterColor('ais') : adapterColor(ad)) : undefined);
       _trackHist[id] = merged;
     });
     _trackLoadedMinutes = Math.max(_trackLoadedMinutes, _trackMinutes);

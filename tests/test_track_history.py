@@ -49,6 +49,7 @@ def test_records_only_moved_nodes_and_serves_tracks(tmp_path):
         rows = await db.get_tracks(t0 - 1)
         assert sorted({x[0] for x in rows}) == ["A", "B"]
         assert [x[0] for x in rows].count("B") == 2
+        assert {x[5] for x in rows} == {"aprs"}   # adapter comes back for the map
         # purge removes everything older than keep_days
         await db._db.execute("UPDATE node_positions SET ts = ts - ?", (8 * 86400,))
         await db._db.commit()

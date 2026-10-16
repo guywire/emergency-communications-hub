@@ -8,6 +8,26 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc288 (2026-10-16)
+
+### Added
+- **USGS "Did You Feel It?" (DYFI) Winlink template** (USGS group): same JSON format, address and
+  subject as Winlink's standard DYFI form, so USGS's automated mailbox can ingest it. Covers the
+  main questionnaire and the building-damage checklist (tick all that apply); the estimated
+  intensity is computed the same way the official form does. Send through an Internet-connected
+  gateway, and mark drills as EXERCISE.
+
+### Fixed
+- **Map: 24-hour APRS tracks.** Stations that haven't beaconed in the last hour drop off the live
+  map, and their recorded tracks disappeared with them. Tracks now stay visible while their layer
+  is on, drawn dashed when the station is no longer live.
+- **MeshCore trace** now asks the mesh for the real route to a repeater (path discovery, as the
+  official MeshCore apps do) before falling back to a route guessed from overheard traffic.
+
+### Changed
+- M17: received messages record the sender's frame type/metadata, to compare with what we send
+  when replies go unseen.
+
 ## v1.0.0-rc287 (2026-10-16)
 
 ### Changed

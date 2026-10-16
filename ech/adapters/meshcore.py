@@ -59,6 +59,7 @@ CMD_SYNC_NEXT_MESSAGE   = 0x0A
 CMD_SEND_TRACEROUTE     = 0x0D   # actually RESET_PATH; kept for backward compat
 CMD_REMOVE_CONTACT      = 0x0F   # delete a stored contact: [pubkey:32] → PACKET_CONTACT_DELETED
 CMD_SEND_TRACE_PATH     = 0x24   # real traceroute: tag(4)+auth(4)+flags(1)+[path]; returns TRACE_DATA 0x89
+CMD_SEND_PATH_DISCOVERY = 0x34   # ask the mesh for the real route to a contact: [0x00][pubkey:32] → PATH_DISCOVERY_RESP 0x8D
 CMD_GET_BATTERY         = 0x14
 CMD_DEVICE_QUERY        = 0x16
 CMD_EXPORT_PRIVATE_KEY  = 0x17   # gated behind firmware's ENABLE_PRIVATE_KEY_EXPORT compile flag —
@@ -98,6 +99,7 @@ PUSH_SEND_CONFIRMED     = 0x82   # ACK for sent message: [ack_code:4]
 PUSH_MSG_WAITING        = 0x83
 PUSH_CHANNEL_MSG        = 0x88   # LOG_DATA per meshcore-py v2.3: [SNR:1][RSSI:1][raw_OTA_packet:N]
 TRACE_DATA              = 0x89   # traceroute result: [reserved:1][path_len:1][flags:1][tag:4][auth:4][hashes...][snrs...][final_snr:1]
+PATH_DISCOVERY_RESP     = 0x8D   # [reserved:1][pubkey_prefix:6][out_len:1][out_path][in_len:1][in_path]
 PACKET_CONTACT_DELETED  = 0x8F   # confirmation after CMD_REMOVE_CONTACT: [pubkey:32]
 
 FRAME_OUT_HEADER = b'<'
@@ -417,6 +419,9 @@ class MeshCoreAdapter(Adapter):
         # TRACE_DATA (0x89) handler so callers (anomaly verification) can await
         # a live path measurement instead of fishing it out of the message feed.
         self._trace_futures: dict[int, asyncio.Future] = {}
+        # Pending path discoveries, keyed by the target's 6-byte pubkey prefix
+        # (lower hex) — resolved by the PATH_DISCOVERY_RESP (0x8D) handler.
+        self._path_futures: dict[str, asyncio.Future] = {}
         # Tags of traces WE sent, so a raw LOG_DATA sighting of a TRACE-type OTA
         # packet can be recognized as "our probe, still in flight" instead of
         # either being ignored or misreported as a completed reply (only the
@@ -1340,6 +1345,42 @@ class MeshCoreAdapter(Adapter):
         except Exception as exc:
             log.debug("MeshCore %s: trace no-reply report failed: %s", self.name, exc)
 
+    async def _discover_path(self, n) -> "list[str] | None":
+        """Ask the mesh for the real route to contact ``n`` (CMD 0x34 - what
+        the official MeshCore apps and meshcore_py's send_path_discovery do)
+        instead of guessing one from overheard traffic. Returns the outbound
+        relay hashes (1-byte hex, [] = heard direct), or None if the device
+        has no full key for it or nothing came back in time."""
+        pubkey = (n.meta or {}).get("pubkey") or ""
+        if len(pubkey) != 64:
+            return None
+        pre = pubkey[:12].lower()
+        loop = asyncio.get_running_loop()
+        fut = self._path_futures.get(pre)
+        if fut is None or fut.done():
+            fut = self._path_futures[pre] = loop.create_future()
+            try:
+                await self._send_cmd(bytes([CMD_SEND_PATH_DISCOVERY, 0x00]) + bytes.fromhex(pubkey))
+            except Exception as exc:
+                self._path_futures.pop(pre, None)
+                log.info("MeshCore %s: path discovery to %s not sent: %s", self.name, n.display_name, exc)
+                return None
+            log.info("MeshCore %s: PATH_DISCOVERY to %s (%s)", self.name, n.display_name, pre)
+        timeout = float(self.config.get("path_discovery_timeout", 15))
+        try:
+            hashes = await asyncio.wait_for(asyncio.shield(fut), timeout)
+        except asyncio.TimeoutError:
+            log.info("MeshCore %s: PATH_DISCOVERY to %s - no answer in %.0fs, falling back",
+                     self.name, n.display_name, timeout)
+            return None
+        finally:
+            if fut.done():
+                self._path_futures.pop(pre, None)
+        # Remember it like a device-stored route so the next trace is instant.
+        n.meta["out_path"] = "".join(hashes)
+        n.meta["expected_hops"] = len(hashes)
+        return hashes
+
     async def ping(self, node_id: str, via: "list[str] | None" = None) -> dict:
         """Send CMD_SEND_TRACE_PATH (0x24) — broadcasts a trace packet onto the mesh.
         Results arrive as TRACE_DATA (0x89) and appear in the message feed.
@@ -1413,6 +1454,10 @@ class MeshCoreAdapter(Adapter):
                     if 0 < len(stored) <= 16:
                         relay_hashes = [f"{b:02x}" for b in stored]
                         route_src = "device route"
+                    elif (discovered := await self._discover_path(n)) is not None:
+                        # The mesh's own answer beats guessing from overheard traffic.
+                        relay_hashes = discovered
+                        route_src = "path discovery" if discovered else "path discovery (direct)"
                     else:
                         inferred = self._infer_route(n.node_id[:2])
                         if inferred:
@@ -1917,6 +1962,7 @@ class MeshCoreAdapter(Adapter):
                     self._nodes[node_id].meta["expected_hops"] = expected_hops
                     self._nodes[node_id].meta["out_path"] = out_path_hex
                     self._nodes[node_id].meta["node_type"] = node_type
+                    self._nodes[node_id].meta["pubkey"] = pubkey
                     if adv_name:
                         self._drop_placeholder(adv_name)
                 else:
@@ -1935,6 +1981,7 @@ class MeshCoreAdapter(Adapter):
                     n.meta["expected_hops"] = expected_hops
                     n.meta["out_path"] = out_path_hex
                     n.meta["node_type"] = node_type
+                    n.meta["pubkey"] = pubkey
                 log.debug("MeshCore %s: contact %s = %r lat=%s lon=%s",
                           self.name, node_id, adv_name, lat, lon)
             else:
@@ -2142,6 +2189,24 @@ class MeshCoreAdapter(Adapter):
                     )
                 else:
                     self._nodes[node_id].last_heard = now
+
+        elif pkt_type == PATH_DISCOVERY_RESP:
+            # Layout per meshcore_py reader.py: [reserved:1][pubkey_prefix:6]
+            # [out_len:1][out_path][in_len:1][in_path]; each len byte is
+            # (hash_mode << 6) | hop_count, hash size = hash_mode + 1 bytes.
+            if len(data) >= 8:
+                pre = data[1:7].hex()
+                opl = data[7]
+                hlen, hops = (opl >> 6) + 1, opl & 0x3F
+                out = data[8:8 + hops * hlen]
+                # Our traces use 1-byte hashes: the first byte of a wider hash
+                # is the same pubkey prefix.
+                hashes = [out[i * hlen:i * hlen + 1].hex() for i in range(len(out) // hlen)]
+                log.info("MeshCore %s: PATH_DISCOVERY reply from %s: %d hop(s) %s",
+                         self.name, pre, len(hashes), hashes)
+                fut = self._path_futures.get(pre)
+                if fut is not None and not fut.done():
+                    fut.set_result(hashes)
 
         elif pkt_type == TRACE_DATA:
             # 0x89 TRACE_DATA: result of CMD_SEND_TRACE_PATH (0x24).

@@ -4028,6 +4028,11 @@ function renderWinlinkTemplatePicker(selectedId) {
     if (f.kind === 'choice' && f.choices && f.choices.length) {
       input = `<select id="wlf-${f.key}" class="wl-field" style="width:100%"><option value="">${f.required ? '— choose —' : '(none)'}</option>` +
         f.choices.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('') + `</select>`;
+    } else if (f.kind === 'multichoice' && f.choices && f.choices.length) {
+      // Tick-all-that-apply list; the value sent is the ticked labels joined by "|".
+      input = `<div id="wlf-${f.key}" style="display:grid;grid-template-columns:1fr 1fr;gap:3px 10px">` +
+        f.choices.map(c => `<label style="display:flex;gap:5px;align-items:flex-start;font-size:11px;color:var(--text)">` +
+          `<input type="checkbox" class="wlf-mc-${f.key}" value="${escHtml(c)}" style="margin-top:2px">${escHtml(c)}</label>`).join('') + `</div>`;
     } else if (f.kind === 'multiline' || f.kind === 'timelog' || f.key === 'message' || f.key === 'text' || f.key === 'query') {
       input = `<textarea id="wlf-${f.key}" rows="${f.kind === 'timelog' ? 6 : 4}" class="wl-field" style="width:100%"${ml} placeholder="${escHtml(f.placeholder||'')}"></textarea>`;
     } else {
@@ -4057,7 +4062,11 @@ async function useWinlinkTemplate(templateId) {
   const tmpl = _wlTemplates.find(t => t.id === templateId);
   if (!tmpl) return;
   const values = {};
-  tmpl.fields.forEach(f => { values[f.key] = document.getElementById(`wlf-${f.key}`)?.value || ''; });
+  tmpl.fields.forEach(f => {
+    values[f.key] = f.kind === 'multichoice'
+      ? [...document.querySelectorAll(`.wlf-mc-${f.key}:checked`)].map(cb => cb.value).join('|')
+      : (document.getElementById(`wlf-${f.key}`)?.value || '');
+  });
 
   const errEl = document.getElementById('wlf-error');
   errEl.style.display = 'none';

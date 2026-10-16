@@ -388,7 +388,10 @@ class M17ReflectorAdapter(Adapter):
             from_display=sender,
             body=text,
             priority=_priority(text),
-            raw={"dst": decode_callsign(dst)},
+            # LSF TYPE + META as the sender's client set them: compare with
+            # what send() uses (TYPE 0000, META zeros) when replies go unseen.
+            raw={"dst": decode_callsign(dst), "lsf_type": data[16:18].hex(),
+                 "lsf_meta": data[18:32].hex(), "payload_len": len(payload)},
         )
         asyncio.ensure_future(self._enqueue(msg))
 

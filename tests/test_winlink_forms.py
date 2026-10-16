@@ -122,7 +122,8 @@ def test_every_template_renders_with_only_required_fields():
     # that its own validator accepts — still exercises every render path.
     samples = ["x", "W1AW", "14244", "1640", "2026-10-11 0800", "111630Z", "111630Z OCT 2026",
                "10-11-2026", "1430L", "ME", "ME GYX", "GYX", "44.1620N", "069.1210W", "19TDJ9172",
-               "0800 Checked in at EOC", "NNE 7 21G", "2.6", "a@example.org", "US-2664", "29.92"]
+               "0800 Checked in at EOC", "NNE 7 21G", "2.6", "a@example.org", "US-2664", "29.92",
+               "10/16/2026", "09:15"]
 
     def valid(f):
         if f.choices:
@@ -215,3 +216,39 @@ def test_render_endpoint_returns_per_field_errors():
         assert {"period_from", "period_to", "individual_name", "activity_log", "prepared_by"} <= set(d["errors"])
         groups = {t["group"] for t in c.get("/api/winlink/templates").json()["templates"]}
         assert {"ICS", "SHARES Region 1", "On the Air", "Winlink services", "General"} <= groups
+
+
+def test_usgs_dyfi_matches_winlink_standard_form_json():
+    """USGS's dyfi_reports_automated mailbox ingests the JSON between the
+    BEGIN/END markers of Winlink's standard "USGS DYFI" form and drops anything
+    else - keys, codes (incl. trailing spaces) and wrapper must match it."""
+    import json as _json
+    from ech.core.winlink_forms import render_template, dyfi_intensity
+    r = render_template("usgs_dyfi", {
+        "eventType": "EXERCISE", "fldSituation_felt": "Yes", "quake_date": "10/16/2026", "quake_time": "09:15",
+        "ciim_mapAddress": "1 Main St, Rockland, ME", "fldSituation_others": "Most felt it",
+        "fldExperience_shaking": "Moderate", "fldEffects_shelved": "Rattled loudly",
+        "fldEffects_pictures": "Yes, but did not fall", "damage": "Hairline cracks in walls|Cracks in chimney",
+        "eventid": "", "user_id": "kn0o"})
+    assert r["to"] == "dyfi_reports_automated@usgs.gov"
+    assert r["subject"] == "DYFI Automatic Entry - Winlink EXERCISE"
+    assert r["body"].startswith("\n--- BEGIN json ---\n\n{\n  \"eventType\": \"EXERCISE\",")
+    assert r["body"].endswith("\n\n--- END json ---\n\n[No changes or editing of this message are allowed]\n")
+    j = _json.loads(r["body"].split("--- BEGIN json ---")[1].split("--- END json ---")[0])
+    assert j["fldSituation_felt"] == "1" and j["ciim_time"] == "10/16/2026 09:15"
+    assert j["fldEffects_shelved"] == "0 rattled_loudly " and j["fldEffects_pictures"] == "1 did_not_fall "
+    assert j["d_text"] == "_crackmin _crackchim " and j["BuildingDamage"] == "YES"
+    assert j["mapmmscale"] == "5"           # cws 15 -> 3.3996*ln(15)-4.3781 = 4.83 -> 5
+    assert j["user_id"] == "KN0O" and j["form_version"] == "DYFI Winlink form Ver 11.0.5 en"
+    assert "eventid" not in j and "ciim_mapLat" not in j and "location_source" not in j   # blanks omitted
+    assert all(isinstance(x, str) for x in j.values())
+    assert dyfi_intensity({}) == 1
+
+
+def test_usgs_dyfi_validation():
+    from ech.core.winlink_forms import validate_template
+    errs = validate_template("usgs_dyfi", {"eventType": "EXERCISE", "fldSituation_felt": "Yes",
+                                           "quake_date": "2/30/2026", "quake_time": "25:00",
+                                           "ciim_mapAddress": "x", "user_id": "KN0O", "eventid": "ci123",
+                                           "damage": "Nope"})
+    assert set(errs) == {"quake_date", "quake_time", "eventid", "damage"}

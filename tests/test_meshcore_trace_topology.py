@@ -102,3 +102,48 @@ def test_compare_adapter_parses_comma_paths_as_observer():
     asyncio.run(cmp_._handle_message("meshcore/RKD/x/packets", payload))
     assert cmp_._paths_merged == 1
     assert mc._direct_hashes == set() and mc._rf_adjacency["e2"] == {"c2", "7a"}
+
+
+def test_trace_uses_path_discovery_before_guessing():
+    """Field report (2026-10-16): multi-hop traces went out along routes guessed
+    from overheard traffic ("0f? -> Brunswick-RPT-1 -> 0f?") and never came back.
+    With no stored route, ping() now asks the mesh for the real one (CMD 0x34,
+    as the official apps do) and builds the trace from the 0x8D answer."""
+    from ech.core.models import MeshNode
+    a = _adapter(path_discovery_timeout=2)
+    a._connected = True
+    key = "C2" + "11" * 31
+    a._nodes[key[:12]] = MeshNode(node_id=key[:12], display_name="LandOfLucy")
+    a._nodes[key[:12]].meta.update({"pubkey": key, "out_path": ""})
+    sent = []
+
+    async def fake_send(payload):
+        sent.append(payload)
+        if payload[0] == 0x34:   # answer the discovery: out path 15 -> 8b
+            assert payload[1:] == b"\x00" + bytes.fromhex(key)
+            reply = bytes([0x8D, 0]) + bytes.fromhex(key[:12]) + bytes([2, 0x15, 0x8B, 0])
+            asyncio.get_running_loop().call_soon(lambda: asyncio.ensure_future(a._dispatch_frame(reply)))
+
+    a._send_cmd = fake_send
+    asyncio.run(a.ping(key[:12]))
+    trace = sent[-1]
+    assert trace[0] == 0x24
+    assert trace[10:] == bytes([0x15, 0x8B, 0xC2, 0x8B, 0x15])   # out via relays, back the same way
+    assert a._nodes[key[:12]].meta["out_path"] == "158b"           # remembered for next time
+
+
+def test_trace_falls_back_when_discovery_gets_no_answer():
+    from ech.core.models import MeshNode
+    a = _adapter(path_discovery_timeout=0.05)
+    a._connected = True
+    key = "C2" + "22" * 31
+    a._nodes[key[:12]] = MeshNode(node_id=key[:12], display_name="Quiet")
+    a._nodes[key[:12]].meta.update({"pubkey": key, "out_path": ""})
+    sent = []
+
+    async def fake_send(payload):
+        sent.append(payload)
+
+    a._send_cmd = fake_send
+    asyncio.run(a.ping(key[:12]))
+    assert sent[0][0] == 0x34 and sent[-1][0] == 0x24

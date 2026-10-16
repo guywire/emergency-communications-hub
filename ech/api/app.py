@@ -1373,15 +1373,20 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     @app.get("/api/map/tracks")
     async def map_tracks(hours: float = 24.0):
         """Recorded position history for moving nodes (server keeps 7 days).
-        {"tracks": {node_id: [[ts_ms, lat, lon, info|null], ...]}} - only nodes
-        with at least two points, each thinned to <= 2000 points. ``info`` is
-        what the node reported when that point was stored (speed, alt, SNR...)."""
+        {"tracks": {node_id: [[ts_ms, lat, lon, info|null], ...]},
+         "adapters": {node_id: adapter}} - only nodes with at least two points,
+        each thinned to <= 2000 points. ``info`` is what the node reported when
+        that point was stored (speed, alt, SNR...). ``adapters`` lets the map
+        show tracks of stations that have since dropped off the live node list
+        (APRS forgets a station after an hour without a beacon)."""
         import time as _time
         from ech.core.track_history import downsample
         hours = min(max(hours, 0.1), 24 * 7)
         rows = await db.get_tracks(_time.time() - hours * 3600)
         tracks: dict[str, list] = {}
-        for nid, ts, lat, lon, info in rows:
+        adapters: dict[str, str] = {}
+        for nid, ts, lat, lon, info, adapter in rows:
+            adapters[nid] = adapter
             pt = [int(ts * 1000), lat, lon]
             if info:
                 try:
@@ -1389,8 +1394,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 except ValueError:
                     pass
             tracks.setdefault(nid, []).append(pt)
-        return {"hours": hours,
-                "tracks": {k: downsample(v) for k, v in tracks.items() if len(v) >= 2}}
+        kept = {k: downsample(v) for k, v in tracks.items() if len(v) >= 2}
+        return {"hours": hours, "tracks": kept, "adapters": {k: adapters[k] for k in kept}}
 
     @app.get("/api/nodes/{adapter_name}")
     async def get_nodes(adapter_name: str):

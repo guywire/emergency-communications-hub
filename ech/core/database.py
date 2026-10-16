@@ -1111,7 +1111,7 @@ class Database:
 
     async def get_tracks(self, since_ts: float, limit: int = 400000) -> list[tuple]:
         async with self._db.execute(
-            "SELECT node_id, ts, lat, lon, info FROM node_positions WHERE ts >= ? ORDER BY node_id, ts LIMIT ?",
+            "SELECT node_id, ts, lat, lon, info, adapter FROM node_positions WHERE ts >= ? ORDER BY node_id, ts LIMIT ?",
             (since_ts, limit),
         ) as cur:
             return await cur.fetchall()

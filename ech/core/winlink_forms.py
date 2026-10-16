@@ -58,7 +58,10 @@ mail, not an instant HTTP response — it shows up on your next connect).
 
 from __future__ import annotations
 
+import json
+import math
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -158,6 +161,11 @@ def _check(f: TemplateField, raw: str) -> str | None:
         conv = resolve_mgrs_answer(v)            # "lat,lon" → MGRS when possible
         if not _MGRS_RE.fullmatch(conv.replace(" ", "").upper()):
             return "enter an MGRS grid (e.g. 19TDJ9172) or lat,lon (e.g. 44.16,-69.12)"
+    elif k == "multichoice":
+        allowed = {c.upper() for c in f.choices}
+        bad = [x for x in v.split("|") if x.strip() and x.strip().upper() not in allowed]
+        if bad:
+            return f'"{bad[0].strip()[:40]}" is not one of the listed options'
     elif k == "timelog":
         bad = [ln for ln in v.splitlines() if ln.strip() and not _TIMELOG_LINE_RE.fullmatch(ln.strip())]
         if bad:
@@ -182,6 +190,8 @@ def validate_template(template_id: str, values: dict) -> dict[str, str]:
         err = _check(f, v)
         if err:
             errors[f.key] = err
+    if template_id == "usgs_dyfi":
+        errors.update(_dyfi_cross_check(values, errors))
     # Cross-field: the reference format depends on which program was chosen
     if template_id == "ota_report" and "reference" not in errors:
         rule = _OTA_REF_RULES.get(str(values.get("program") or "").strip())
@@ -483,6 +493,245 @@ TEMPLATES["local_wx_report"].id = "local_wx_report"
 TEMPLATES.update(_SHARES)
 
 
+# ── USGS "Did You Feel It?" (DYFI) ───────────────────────────────────────────
+# Unlike the plain-text templates above, this one reproduces the real Winlink
+# Standard Form (Standard_Forms 1.1.22.0, "USGS/USGS DYFI.txt" + "USGS
+# DYFI.html", form_version "DYFI Winlink form Ver 11.0.5 en", read from the
+# copy Pat downloads): USGS's dyfi_reports_automated mailbox ingests the JSON
+# between the BEGIN/END markers and drops anything else. The JSON is what the
+# form's formDataToObject() builds: every non-"x" field in page order, empty
+# values left out, all values strings. Answer codes (including the trailing
+# spaces in "0 rattled_loudly " and "1 did_not_fall ") are copied verbatim.
+# The optional ShakeAlert ("sup_*") section is not offered; unanswered, the
+# real form omits those keys too.
+
+DYFI_TO = "dyfi_reports_automated@usgs.gov"
+DYFI_FORM_VERSION = "DYFI Winlink form Ver 11.0.5 en"
+
+# key -> [(code sent to USGS, label shown to the operator)], in form order
+_DYFI_CHOICES: dict[str, list[tuple[str, str]]] = {
+    "eventType": [("EXERCISE", "EXERCISE"), ("REAL EVENT", "REAL EVENT")],
+    "fldSituation_felt": [("1", "Yes"), ("0", "No")],
+    "fldSituation_situation": [("inside", "Inside a building"), ("outside", "Outside a building"),
+                               ("veh_stopped", "In a stopped vehicle"), ("veh_moving", "In a moving vehicle"),
+                               ("other", "Other (describe below)")],
+    "fldSituation_floor": [("underground", "Underground"), ("ground", "Ground floor"), ("floor2", "2nd floor"),
+                           ("floor3", "3rd floor"), ("other", "Higher (describe below)")],
+    "fldSituation_structureStories": [("story1", "1 story"), ("story2", "2 stories"), ("story3", "3 stories"),
+                                      ("other", "Taller (describe below)")],
+    "fldSituation_sleep": [("no", "No"), ("slept", "Slept through it"), ("woke", "Woke up")],
+    "fldSituation_others": [("2", "No others felt it"), ("3", "Some felt it, most did not"),
+                            ("4", "Most felt it"), ("5", "Everyone/almost everyone felt it")],
+    "fldExperience_shaking": [("0", "Not felt"), ("1", "Weak"), ("2", "Mild"), ("3", "Moderate"),
+                              ("4", "Strong"), ("5", "Violent")],
+    "fldExperience_reaction": [("0", "No reaction/not felt"), ("1", "Very little reaction"), ("2", "Excitement"),
+                               ("3", "Somewhat frightened"), ("4", "Very frightened"), ("5", "Extremely frightened")],
+    "fldExperience_response": [("no_action", "Took no action"), ("doorway", "Moved to doorway"),
+                               ("duck", "Dropped and covered"), ("ran_outside", "Ran outside"),
+                               ("other", "Other (describe below)")],
+    "fldExperience_stand": [("0", "No"), ("1", "Yes")],
+    "fldEffects_doors": [("0", "No"), ("1 slight", "Yes, slight swinging"), ("1 violent", "Yes, violent swinging")],
+    "fldEffects_sounds": [("0", "No"), ("1 slight", "Yes, slight noise"), ("1 loud", "Yes, loud noise")],
+    "fldEffects_shelved": [("0", "No"), ("0 rattled_slightly", "Rattled slightly"),
+                           ("0 rattled_loudly ", "Rattled loudly"),
+                           ("1 few_toppled_or_fell", "A few toppled or fell off"),
+                           ("2 many_toppled_or_fell", "Many fell off"),
+                           ("2 many_toppled_or_fell", "Nearly everything fell off")],
+    "fldEffects_pictures": [("0", "No"), ("1 did_not_fall ", "Yes, but did not fall"),
+                            ("1 some_fell", "Yes, and some fell")],
+    "fldEffects_furniture": [("0", "No"), ("1", "Yes")],
+    "fldEffects_appliances": [("0", "No"), ("fell", "Yes, some contents fell out"),
+                              ("shifted", "Yes, shifted by inches"),
+                              ("shifted_foot", "Yes, shifted by a foot or more"), ("overturned", "Yes, overturned")],
+    "fldEffects_walls": [("0", "No"), ("cracked", "Yes, some were cracked"),
+                         ("fell_partial", "Yes, some partially fell"),
+                         ("fell_complete", "Yes, some fell completely")],
+}
+
+_DYFI_DAMAGE: list[tuple[str, str]] = [
+    ("_none", "No damage"), ("_crackmin", "Hairline cracks in walls"),
+    ("_crackwallfew", "A few large cracks in walls"), ("_crackwallmany", "Many large cracks in walls"),
+    ("_tilesfell", "Ceiling tiles or lighting fixtures fell"), ("_crackchim", "Cracks in chimney"),
+    ("_crackwindows", "One or several cracked windows"), ("_brokenwindows", "Many windows cracked or some broken out"),
+    ("_masonryfell", "Masonry fell from block or brick wall(s)"),
+    ("_majoroldchim", "Old chimney, major damage or fell down"),
+    ("_majormodernchim", "Modern chimney, major damage or fell down"),
+    ("_tiltedwall", "Side walls tilted over/collapsed completely"),
+    ("_porch", "Separation of porch, balcony, or other addition from building"),
+    ("_move", "Building permanently shifted over foundation"),
+]
+
+
+def _dyfi_choice(key: str, label: str, required: bool = False) -> TemplateField:
+    return TemplateField(key, label, required=required, kind="choice",
+                         choices=[lbl for _code, lbl in _DYFI_CHOICES[key]])
+
+
+def _dyfi_code(key: str, label: str) -> str:
+    for code, lbl in _DYFI_CHOICES[key]:
+        if lbl.upper() == label.strip().upper():
+            return code
+    return ""
+
+
+def _dyfi_cross_check(values: dict, errors: dict) -> dict:
+    out = {}
+    if "quake_date" not in errors and values.get("quake_date"):
+        mo, d, y = (int(x) for x in str(values["quake_date"]).strip().split("/"))
+        try:
+            datetime(y, mo, d)
+        except ValueError:
+            out["quake_date"] = "is not a real calendar date"
+    eid = str(values.get("eventid") or "").strip()
+    if eid and "eventid" not in errors and str(values.get("eventType") or "").strip().upper() != "REAL EVENT":
+        out["eventid"] = "only applies to a REAL EVENT report"
+    return out
+
+
+def _dyfi_int(v: str) -> int:
+    """The form's parseInt(getinteger(v)): drop the first run of non-digits."""
+    m = re.match(r"\d+", re.sub(r"[^\d.]+", "", v or "", count=1))
+    return int(m.group(0)) if m else 0
+
+
+def dyfi_intensity(j: dict) -> int:
+    """Port of the form's intensity1() (USGS's community decimal intensity:
+    weighted sum of felt/experience/effects/damage, then 3.3996*ln(cws)-4.3781).
+    Written into "mapmmscale" exactly as the form does before sending."""
+    other = _dyfi_int(j.get("fldSituation_others", ""))
+    felt = _dyfi_int(j.get("fldSituation_felt", ""))
+    felt_v = felt if other <= 2 else (0.72 if other == 3 else 1)
+    d = j.get("d_text", "")
+    if any(t in d for t in ("_move", "_chim", "_found", "_collapse", "_porch", "_majormodernchim", "_tiltedwall")):
+        dmg = 3
+    elif any(t in d for t in ("_wall", "_pipe", "_win", "_brokenwindows", "_majoroldchim", "_masonryfell")):
+        dmg = 2
+    elif any(t in d for t in ("_crackwallmany", "_crackwall", "_crackfloor", "_crackchim", "_tilesfell")):
+        dmg = 1
+    elif "_crackwallfew" in d:
+        dmg = 0.75
+    elif "_crackmin" in d or "_crackwindows" in d:
+        dmg = 0.5
+    else:
+        dmg = 0
+    cws = (felt_v * 5 + _dyfi_int(j.get("fldExperience_shaking", ""))
+           + _dyfi_int(j.get("fldExperience_reaction", ""))
+           + _dyfi_int(j.get("fldExperience_stand", "")) * 2 + _dyfi_int(j.get("fldEffects_shelved", "")) * 5
+           + _dyfi_int(j.get("fldEffects_pictures", "")) * 2 + _dyfi_int(j.get("fldEffects_furniture", "")) * 3
+           + dmg * 5)
+    i = 3.3996 * math.log(cws) - 4.3781 if cws > 0 else 1
+    if i <= 1:
+        i = 1
+    elif i < 2:
+        i = 2
+    return int(i + 0.5)
+
+
+def _render_dyfi(v: dict[str, str]) -> dict[str, str]:
+    j: dict[str, str] = {}
+
+    def put(k, val):
+        if val not in (None, ""):
+            j[k] = str(val)
+
+    etype = _dyfi_code("eventType", v["eventType"])
+    put("eventType", etype)
+    if etype == "EXERCISE":
+        put("exercise_id", v["exercise_id"])
+    else:
+        put("eventid", v["eventid"].replace(" ", ""))
+    put("fldSituation_felt", _dyfi_code("fldSituation_felt", v["fldSituation_felt"]))
+    put("ciim_time", f"{v['quake_date']} {v['quake_time']}")
+    put("ciim_mapAddress", v["ciim_mapAddress"])
+    put("ciim_mapLat", v["ciim_mapLat"])
+    put("ciim_mapLon", v["ciim_mapLon"])
+    if v["ciim_mapLat"] or v["ciim_mapLon"]:
+        put("location_source", "FORM ENTRY")
+    for key, other in (("fldSituation_situation", "fldSituation_situation_other"),
+                       ("fldSituation_floor", "ifHigherPleaseDescribe"),
+                       ("fldSituation_structureStories", "howTallPleaseDescribe"),
+                       ("fldSituation_sleep", None), ("fldSituation_others", None),
+                       ("fldExperience_shaking", None), ("fldExperience_reaction", None),
+                       ("fldExperience_response", "fldExperience_response_other"),
+                       ("fldExperience_stand", None), ("fldEffects_doors", None), ("fldEffects_sounds", None),
+                       ("fldEffects_shelved", None), ("fldEffects_pictures", None), ("fldEffects_furniture", None),
+                       ("fldEffects_appliances", None), ("fldEffects_walls", None)):
+        if v[key]:
+            put(key, _dyfi_code(key, v[key]))
+        if other:
+            put(other, v[other])
+    picked = {x.strip().upper() for x in v["damage"].split("|") if x.strip()}
+    codes = [code for code, lbl in _DYFI_DAMAGE if lbl.upper() in picked]
+    if codes:
+        put("d_text", "".join(c + " " for c in codes))      # the form's collect(): "code " per box
+    put("mapmmscale", dyfi_intensity(j))
+    if codes:
+        put("BuildingDamage", "YES" if any(c != "_none" for c in codes) else "NO")
+    put("comments", v["comments"])
+    put("language", "en")
+    put("timestamp", int(time.time() * 1000))
+    put("user_id", v["user_id"].upper())
+    put("user_id_type", "Callsign")
+    put("form_version", DYFI_FORM_VERSION)
+    body = ("\n--- BEGIN json ---\n\n" + json.dumps(j, indent=2, ensure_ascii=False)
+            + "\n\n--- END json ---\n\n[No changes or editing of this message are allowed]\n")
+    return {"subject": f"DYFI Automatic Entry - Winlink {etype}", "body": body, "to": DYFI_TO}
+
+
+_DYFI_TEMPLATE = Template(
+    id="usgs_dyfi",
+    name="USGS Did You Feel It? (DYFI)",
+    description="Earthquake felt report for the USGS DYFI system, in the same JSON format as Winlink's "
+                "standard \"USGS DYFI\" form. USGS only receives it through an Internet-connected gateway "
+                "(CMS/Telnet) - not P2P or radio-only. Mark drills as EXERCISE. Send it unedited.",
+    to_address=DYFI_TO,
+    group="USGS",
+    fields=[
+        _dyfi_choice("eventType", "This earthquake report is", required=True),
+        TemplateField("exercise_id", "Exercise ID (optional, exercises only)", max_len=40,
+                      placeholder="e.g. 2026SHAKEOUT"),
+        TemplateField("eventid", "USGS Event ID (real events, if known)", max_len=40, kind="pattern",
+                      pattern=r"[A-Za-z0-9]+", hint="letters and digits, no spaces (e.g. ci40851816)"),
+        _dyfi_choice("fldSituation_felt", "Did you feel it?", required=True),
+        TemplateField("quake_date", "Date of the earthquake (local)", required=True, kind="pattern",
+                      pattern=r"(0?[1-9]|1[0-2])/(0?[1-9]|[12]\d|3[01])/\d{4}", hint="M/D/YYYY, e.g. 1/31/2026"),
+        TemplateField("quake_time", "Time of the earthquake (local, 24 h)", required=True, kind="pattern",
+                      pattern=r"([01]?\d|2[0-3]):[0-5]\d", hint="HH:MM, e.g. 09:15"),
+        TemplateField("ciim_mapAddress", "Your location: street address, city and state", required=True,
+                      max_len=200, placeholder="Street address, city, state (not a P.O. box)"),
+        TemplateField("ciim_mapLat", "Latitude (optional)", kind="number", min=-90, max=90,
+                      placeholder="e.g. 44.1037"),
+        TemplateField("ciim_mapLon", "Longitude (optional)", kind="number", min=-180, max=180,
+                      placeholder="e.g. -69.1089"),
+        _dyfi_choice("fldSituation_situation", "Your situation during the earthquake"),
+        TemplateField("fldSituation_situation_other", "Situation - other", max_len=80),
+        _dyfi_choice("fldSituation_floor", "If inside, on what floor?"),
+        TemplateField("ifHigherPleaseDescribe", "Floor - if higher, which?", max_len=40),
+        _dyfi_choice("fldSituation_structureStories", "How tall is the building?"),
+        TemplateField("howTallPleaseDescribe", "Building - if taller, how many stories?", max_len=40),
+        _dyfi_choice("fldSituation_sleep", "Were you asleep?"),
+        _dyfi_choice("fldSituation_others", "Did others nearby feel it?"),
+        _dyfi_choice("fldExperience_shaking", "How would you describe the shaking?"),
+        _dyfi_choice("fldExperience_reaction", "How did you react?"),
+        _dyfi_choice("fldExperience_response", "How did you respond?"),
+        TemplateField("fldExperience_response_other", "Response - other", max_len=80),
+        _dyfi_choice("fldExperience_stand", "Was it difficult to stand or walk?"),
+        _dyfi_choice("fldEffects_doors", "Did doors, windows or hanging objects swing?"),
+        _dyfi_choice("fldEffects_sounds", "Did you hear creaking or other noises?"),
+        _dyfi_choice("fldEffects_shelved", "Did objects rattle, topple over or fall off shelves?"),
+        _dyfi_choice("fldEffects_pictures", "Did pictures on walls move or get knocked askew?"),
+        _dyfi_choice("fldEffects_furniture", "Did furniture or appliances slide, topple or move?"),
+        _dyfi_choice("fldEffects_appliances", "Was a heavy appliance (refrigerator, range) affected?"),
+        _dyfi_choice("fldEffects_walls", "Were free-standing walls or fences damaged?"),
+        TemplateField("damage", "Damage to the building you were in (tick all that apply)", kind="multichoice",
+                      choices=[lbl for _c, lbl in _DYFI_DAMAGE]),
+        TemplateField("comments", "Comments", kind="multiline", max_len=1000),
+        TemplateField("user_id", "Your callsign", required=True, kind="callsign"),
+    ],
+)
+TEMPLATES[_DYFI_TEMPLATE.id] = _DYFI_TEMPLATE
+
+
 def list_templates() -> list[dict]:
     return [
         {
@@ -538,6 +787,9 @@ def render_template(template_id: str, values: dict[str, str]) -> dict[str, str]:
             answers[extract_question_key(_label)] = val
         strip = build_response_strip(strip_name, answers)   # byte-compatible with Response Creator
         return {"subject": strip_name, "body": strip + "\n", "to": tmpl.to_address}
+
+    if template_id == "usgs_dyfi":
+        return _render_dyfi(v)
 
     if template_id == "ai_help":
         return {"subject": "AI", "body": v["query"], "to": tmpl.to_address}
