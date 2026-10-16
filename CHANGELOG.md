@@ -8,6 +8,17 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc287 (2026-10-16)
+
+### Changed
+- **Messages header** (UI refresh, phase 3): fits at 1440 px with full nav labels again
+  (it was dropping to icons only). The "live" text is gone (the connection dot shows the
+  state, with a tooltip); the clock itself now switches UTC / local / both (the separate
+  UTC button is gone); the version number moved to the right end of the system bar; the
+  STANDARD mode badge only appears when the hub is in a non-standard mode (e.g. EMERGENCY).
+- Header status chips (sessions, bot, operator) share one height and style; Sign out is
+  an icon button on every page that has one (Messages, Ham Log).
+
 ## v1.0.0-rc286 (2026-10-15)
 
 ### Changed

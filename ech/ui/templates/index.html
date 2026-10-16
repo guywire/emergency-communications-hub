@@ -1103,10 +1103,10 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
       <line x1="28" y1="22" x2="21" y2="29" stroke="#388bfd" stroke-width="0.7" opacity="0.4"/>
     </svg>
     <div class="incident-badge" id="incident-name">EXERCISE MODE</div>
-    <span class="conn-dot" id="ws-dot"></span>
-    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)" id="ws-status">connecting…</span>
+    <span class="conn-dot" id="ws-dot" title="Live feed: connecting…"></span>
+    <span style="display:none" id="ws-status">connecting…</span>
     <div class="spacer"></div>
-    <span id="mode-indicator" style="font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:3px;background:#122a1a;color:var(--green);margin-right:4px">STANDARD</span>
+    <span id="mode-indicator" style="display:none;font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:3px;background:#122a1a;color:var(--green);margin-right:4px">STANDARD</span>
     <span id="bot-stats-wrap" style="position:relative;margin-left:6px;display:none" title="Mesh bot — click for activity">
       <button id="bot-stats-btn" onclick="toggleBotStats(event)"
         style="font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:4px"
@@ -1133,9 +1133,8 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
       </div>
     </span>
     <span class="operator" id="operator-display" style="margin-left:8px;cursor:pointer" title="Click to set operator callsign" onclick="promptOperator()">OP: —</span>
-    <button id="tz-btn" onclick="toggleTimezone()" style="font-family:var(--mono);font-size:10px;padding:2px 6px;border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:3px;cursor:pointer;margin-left:4px">UTC</button>
-    <div id="clock"></div>
-    <span id="ech-version" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:4px;cursor:default" title="ECH version"></span>
+    <button id="tz-btn" onclick="toggleTimezone()" style="display:none">UTC</button>
+    <div id="clock" onclick="toggleTimezone()" style="cursor:pointer" title="Click to switch UTC / local / both"></div>
     <span id="auth-user-wrap" style="display:none;align-items:center;gap:5px;margin-left:6px">
       <span id="auth-username" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
       <button id="logout-btn" onclick="doLogout()"
@@ -1175,6 +1174,9 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
     <div class="sbar-sep"></div>
     <div class="sbar-item" style="border-right:none">
       <span class="sbar-val" id="sysbar-ts" style="color:#2d3540">--</span>
+    </div>
+    <div class="sbar-item" style="border-right:none">
+      <span class="sbar-val" id="ech-version" style="color:var(--dim)" title="SignalMatrix version"></span>
     </div>
   </div>
 
@@ -1385,6 +1387,7 @@ function connectWS() {
 function setWsState(live) {
   document.getElementById('ws-dot').className = `conn-dot${live ? ' live' : ''}`;
   document.getElementById('ws-status').textContent = live ? 'live' : 'reconnecting…';
+  document.getElementById('ws-dot').title = live ? 'Live feed: connected' : 'Live feed: reconnecting…';
 }
 
 // ── Message handling ─────────────────────────────────────────────────────
@@ -4182,6 +4185,8 @@ async function updateModeIndicator() {
     const el = document.getElementById('mode-indicator');
     if (el) {
       el.textContent = (s.mode||'standard').toUpperCase();
+      // Standard is the normal state - only call out a non-standard mode.
+      el.style.display = (s.mode||'standard') === 'standard' ? 'none' : '';
       el.style.background = s.mode==='emergency' ? 'rgba(248,81,73,.15)' : '#122a1a';
       el.style.color = s.mode==='emergency' ? 'var(--red)' : 'var(--green)';
       if (s.incident_name) document.getElementById('incident-name') && (document.getElementById('incident-name').textContent = s.incident_name);

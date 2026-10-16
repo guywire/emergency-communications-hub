@@ -517,6 +517,15 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
   });
   var pg = document.getElementById('sm-page');
   if (pg) { if (title && path !== '/') pg.textContent = title; else pg.style.display = 'none'; }
+  // Sign-out becomes an icon button. The page's own header items are parsed
+  // after this script, so wait for them.
+  document.addEventListener('DOMContentLoaded', function () {
+  var lo = document.getElementById('logout-btn');
+  if (lo) {
+    lo.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2.5H3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1H6M10.5 11l3-3-3-3M13.5 8H6"/></svg>';
+    lo.title = 'Sign out'; lo.setAttribute('aria-label', 'Sign out'); lo.classList.add('sm-iconbtn');
+  }
+  });
   // The brand shows the page you are on, so clicking it reloads that page
   // (Messages is in the nav) instead of jumping somewhere else.
   var brand = document.getElementById('sm-brand');

@@ -86,6 +86,16 @@ body { background:var(--bg); }
 #sm-links.bad { color:#ff8b84; border-color:rgba(248,81,73,.4); }
 #sm-links.bad i { background:#f85149; }
 
+/* right-hand status chips: one height, one shape */
+#header #who-online-btn, #header #bot-stats-btn, #header .operator, #header #logout-btn {
+  height:24px; border-radius:4px !important; border:1px solid var(--border2) !important; background:var(--bg3) !important;
+}
+#header .operator { display:inline-flex; align-items:center; padding:0 8px; font-size:10.5px; }
+#header #who-online-btn:hover, #header #bot-stats-btn:hover, #header .operator:hover, #header #logout-btn:hover { color:var(--text) !important; border-color:var(--muted) !important; }
+#header .sm-iconbtn { display:inline-flex !important; align-items:center; justify-content:center; width:26px; padding:0 !important; }
+#header #clock { padding:3px 6px; border-radius:4px; }
+#header #clock[onclick]:hover { background:var(--bg3); }
+
 @media (max-width:1380px) { #ech-topnav .nv .lbl, #ech-topnav .grp > button .lbl { display:none; } #ech-topnav .nv, #ech-topnav .grp > button { padding:0 9px; } }
 @media (max-width:900px)  { #sm-brand .wm, #sm-brand .pg, #sm-links { display:none !important; } }
 
