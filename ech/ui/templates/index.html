@@ -2191,11 +2191,18 @@ function applyFilter() {
 }
 
 // ── Compose ──────────────────────────────────────────────────────────────
+// Radio text is capped at 900 chars; Winlink is email, so a Winlink-only send
+// (e.g. a USGS DYFI form, ~1.2k) gets the larger limit the server allows too.
+function _bodyLimit() {
+  const a = getSelectedAdapters();
+  return a.length && a.every(n => n.includes('winlink') || n.includes('pat')) ? 100000 : 900;
+}
 function updateCharCount() {
   const body = document.getElementById('compose-body').value;
   const counter = document.getElementById('char-counter');
-  counter.textContent = `${body.length} / 900`;
-  counter.className = body.length > 900 ? 'over' : body.length > 700 ? 'warn' : '';
+  const lim = _bodyLimit();
+  counter.textContent = lim > 900 ? `${body.length} (Winlink)` : `${body.length} / ${lim}`;
+  counter.className = body.length > lim ? 'over' : body.length > lim * 0.78 ? 'warn' : '';
 }
 
 // ── @mention autocomplete ────────────────────────────────────────────────
@@ -2281,6 +2288,7 @@ function updateSubjectVisibility() {
   const show = getSelectedAdapters().some(n => n.includes('winlink') || n.includes('pat'));
   field.style.display = show ? '' : 'none';
   if (!show) field.value = '';
+  updateCharCount();
 }
 
 // Channel picker (mirrors the Subject field's show-only-when-relevant

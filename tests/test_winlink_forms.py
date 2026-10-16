@@ -134,6 +134,8 @@ def test_every_template_renders_with_only_required_fields():
         values = {f.key: valid(f) for f in tmpl.fields if f.required}
         if tid == "ota_report":
             values["reference"] = "US-2664"     # must match the program (first choice: POTA)
+        if tid == "usgs_dyfi":
+            values["user_id"] = "W1AW"          # the render API fills the station callsign
         out = render_template(tid, values)
         assert out["subject"]
         assert out["body"]
@@ -252,3 +254,25 @@ def test_usgs_dyfi_validation():
                                            "ciim_mapAddress": "x", "user_id": "KN0O", "eventid": "ci123",
                                            "damage": "Nope"})
     assert set(errs) == {"quake_date", "quake_time", "eventid", "damage"}
+
+
+def test_dyfi_render_api_fills_winlink_callsign_and_long_winlink_send_allowed():
+    """Field report (2026-10-16): the DYFI form asked for a callsign Winlink's
+    own form fills in, and the ~1.2k body hit the 900-char radio limit."""
+    from unittest.mock import MagicMock
+    from starlette.testclient import TestClient
+    from ech.api.app import create_app
+
+    class PatWinlinkAdapter:          # name is what the API keys off
+        _callsign = "KN0O"
+
+    router = MagicMock()
+    router._adapters = {"winlink": PatWinlinkAdapter(), "meshcore-usb": object()}
+    with TestClient(create_app(router, MagicMock())) as c:
+        d = c.post("/api/winlink/templates/usgs_dyfi/render", json={"values": {
+            "eventType": "EXERCISE", "fldSituation_felt": "Yes", "quake_date": "10/16/2026",
+            "quake_time": "09:15", "ciim_mapAddress": "1 Main St, Rockland, ME"}}).json()
+        assert d["status"] == "ok" and '"user_id": "KN0O"' in d["body"]
+        long = "x" * 1500
+        r = c.post("/api/messages", json={"body": long, "adapters": ["meshcore-usb", "winlink"]}).json()
+        assert "max 900" in r.get("error", "")

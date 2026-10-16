@@ -676,8 +676,14 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         channel_idx = data.get("channel_idx")
         if not body or not body.strip():
             return {"error": "Message body is empty"}
-        if len(body) > 900:
-            return {"error": f"Message too long ({len(body)} chars, max 900)"}
+        # Radio text is capped at 900; Winlink is email, so a send that goes
+        # ONLY to Winlink adapters (e.g. a ~1.2k USGS DYFI form) may be longer.
+        winlink_only = bool(adapters) and all(
+            "winlink" in type(router._adapters.get(a)).__name__.lower() for a in adapters)
+        limit = 100_000 if winlink_only else 900
+        if len(body) > limit:
+            return {"error": f"Message too long ({len(body)} chars, max {limit}"
+                             + ("" if winlink_only else "; Winlink-only sends allow more") + ")"}
         # subject: consumed by pat_winlink.py's send() (Winlink's email-style
         # Subject, distinct from the body). channel_idx: an explicit per-send
         # channel override, consumed by meshcore.py/meshtastic_adapter.py's
@@ -4467,6 +4473,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         values = data.get("values", {})
         if not isinstance(values, dict):
             return {"status": "error", "error": "values must be an object"}
+        # Forms that carry the sender's callsign (USGS DYFI) default it to the
+        # station's Winlink callsign, as Winlink's own forms fill {Callsign}.
+        if template_id == "usgs_dyfi" and not str(values.get("user_id") or "").strip():
+            values["user_id"] = next((a._callsign for a in router._adapters.values()
+                                      if getattr(a, "_callsign", "") and "winlink" in type(a).__name__.lower()),
+                                     "" if _op_callsign == "N0CALL" else _op_callsign)
         try:
             rendered = render_template(template_id, values)
         except KeyError:

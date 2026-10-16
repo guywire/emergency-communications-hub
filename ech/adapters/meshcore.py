@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import logging
+import math
 import struct
 import time
 from datetime import datetime, timezone
@@ -679,27 +680,60 @@ class MeshCoreAdapter(Adapter):
         except Exception as exc:
             log.debug("MeshCore %s: topology restore error: %s", self.name, exc)
 
-    def _infer_route(self, target_hash: str, max_hops: int = 8) -> "list | None":
+    def _hash_positions(self, h: str) -> list:
+        """Known positions of every node whose pubkey starts with hash ``h``
+        (1-byte hashes collide, so there can be several, or none)."""
+        h = h.lower()
+        return [(n.lat, n.lon) for nid, n in self._nodes.items()
+                if nid.lower().startswith(h) and n.lat is not None and n.lon is not None]
+
+    def _link_plausible(self, a: "list | None", b: "list | None") -> bool:
+        """Could two hops really hear each other? Unknown positions pass; with
+        positions on both sides, at least one candidate pair must lie within
+        ``trace_max_link_km`` (default 100). This is what rejects a route
+        through a Boston repeater that only shares a hash byte with a local one."""
+        if not a or not b:
+            return True
+        lim = float(self.config.get("trace_max_link_km", 100))
+        for la1, lo1 in a:
+            for la2, lo2 in b:
+                p1, p2 = math.radians(la1), math.radians(la2)
+                x = (math.sin((p2 - p1) / 2) ** 2
+                     + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lo2 - lo1) / 2) ** 2)
+                if 2 * 6371 * math.asin(math.sqrt(x)) <= lim:
+                    return True
+        return False
+
+    def _infer_route(self, target_hash: str, max_hops: "int | None" = None,
+                     target_pos: "tuple | None" = None) -> "list | None":
         """BFS from us over observed adjacencies → relay chain to reach
         target_hash (relays only, target excluded). [] = target is direct.
-        None = no known path."""
+        None = no known path. Guesses are limited to ``trace_infer_max_relays``
+        relays (default 2 - a trace is a round trip, so 2 relays already means
+        5 transmissions) and to geographically plausible links."""
         target_hash = target_hash.lower()
+        if max_hops is None:
+            max_hops = int(self.config.get("trace_infer_max_relays", 2))
         self._prune_topology()
         if target_hash in self._direct_hashes:
             return []
+        me = [(self._base_lat, self._base_lon)] if self._base_lat is not None else None
+        tgt = [target_pos] if target_pos and target_pos[0] is not None else self._hash_positions(target_hash)
         from collections import deque
-        q = deque([d] for d in sorted(self._direct_hashes))
-        seen = set(self._direct_hashes)
+        q = deque([d] for d in sorted(self._direct_hashes) if self._link_plausible(me, self._hash_positions(d)))
+        seen = {p[0] for p in q}
         while q:
             path = q.popleft()
-            if len(path) >= max_hops:
-                continue
+            last = self._hash_positions(path[-1])
             for nb in sorted(self._rf_adjacency.get(path[-1], ())):
                 if nb == target_hash:
-                    return path
-                if nb not in seen:
-                    seen.add(nb)
-                    q.append(path + [nb])
+                    if self._link_plausible(last, tgt):
+                        return path
+                    continue
+                if len(path) >= max_hops or nb in seen or not self._link_plausible(last, self._hash_positions(nb)):
+                    continue
+                seen.add(nb)
+                q.append(path + [nb])
         return None
 
     def _resolve_traffic_node(self, prefix_hex: str) -> dict | None:
@@ -1459,7 +1493,7 @@ class MeshCoreAdapter(Adapter):
                         relay_hashes = discovered
                         route_src = "path discovery" if discovered else "path discovery (direct)"
                     else:
-                        inferred = self._infer_route(n.node_id[:2])
+                        inferred = self._infer_route(n.node_id[:2], target_pos=(n.lat, n.lon))
                         if inferred:
                             relay_hashes = list(inferred)
                             route_src = "observed topology"

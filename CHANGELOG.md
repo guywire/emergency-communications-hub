@@ -8,6 +8,28 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.0.0-rc290 (2026-10-16)
+
+### Security
+- Log masking also covers API keys that sit in a URL path (NASA FIRMS) rather than a `key=`
+  parameter: any secret value from the config is masked wherever it appears in a log line.
+
+## v1.0.0-rc289 (2026-10-16)
+
+### Fixed
+- **USGS DYFI reports would not send**: the form is ~1,200 characters and the compose box
+  capped every message at 900. Messages going only to Winlink now allow far longer bodies
+  (radio networks keep the 900 limit). The callsign is filled in automatically from the
+  station's Winlink callsign, as Winlink's own form does.
+- **MeshCore trace routes**: guessed routes are limited to two relays and every hop must be
+  within a plausible radio distance, so traces no longer go out through same-ID repeaters
+  hundreds of km away or as 9-hop round trips. (Seeing a repeater twice in a trace is
+  normal: a trace returns along the path it went out on.)
+
+### Security
+- Log lines now mask `key=`, `token=`, `password=` and similar values, which were appearing
+  in the server log in request URLs.
+
 ## v1.0.0-rc288 (2026-10-16)
 
 ### Added

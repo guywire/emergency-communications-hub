@@ -582,6 +582,8 @@ def _dyfi_cross_check(values: dict, errors: dict) -> dict:
             datetime(y, mo, d)
         except ValueError:
             out["quake_date"] = "is not a real calendar date"
+    if not str(values.get("user_id") or "").strip():
+        out["user_id"] = "is required (no Winlink callsign is configured to fill it in)"
     eid = str(values.get("eventid") or "").strip()
     if eid and "eventid" not in errors and str(values.get("eventType") or "").strip().upper() != "REAL EVENT":
         out["eventid"] = "only applies to a REAL EVENT report"
@@ -726,7 +728,8 @@ _DYFI_TEMPLATE = Template(
         TemplateField("damage", "Damage to the building you were in (tick all that apply)", kind="multichoice",
                       choices=[lbl for _c, lbl in _DYFI_DAMAGE]),
         TemplateField("comments", "Comments", kind="multiline", max_len=1000),
-        TemplateField("user_id", "Your callsign", required=True, kind="callsign"),
+        # Optional in the UI: the render API fills the station's Winlink callsign.
+        TemplateField("user_id", "Your callsign (blank = this station's Winlink callsign)", kind="callsign"),
     ],
 )
 TEMPLATES[_DYFI_TEMPLATE.id] = _DYFI_TEMPLATE

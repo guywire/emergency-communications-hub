@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import re
 import signal
 import sys
 from pathlib import Path
@@ -168,6 +169,45 @@ def build_adapter(cfg: dict):
     return instance
 
 
+class RedactSecretsFilter(logging.Filter):
+    """Mask credentials in log lines - e.g. httpx logs every request URL, and
+    MeshMapper/AirNow/FIRMS put their API key in the query string."""
+    _RE = re.compile(r"(?i)(?<![A-Za-z0-9_])(map_key|api_?key|apikey|key|token|password|passwd|secret|passcode)=([^&\s\"']+)")
+
+    # Config values under secret-looking keys, masked wherever they appear
+    # (FIRMS puts its key in the URL PATH, where the key= pattern can't see it).
+    _SECRET_KEY = re.compile(r"(?i)(key|token|pass|secret|pwd|auth|credential|private)")
+
+    def __init__(self, config: dict | None = None):
+        super().__init__()
+        vals: set[str] = set()
+
+        def walk(o, key=""):
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    walk(v, str(k))
+            elif isinstance(o, list):
+                for v in o:
+                    walk(v, key)
+            elif isinstance(o, str) and len(o) >= 8 and self._SECRET_KEY.search(key):
+                vals.add(o)
+        walk(config or {})
+        self._values = sorted(vals, key=len, reverse=True)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        red = self._RE.sub(lambda m: f"{m.group(1)}=***", msg)
+        for v in self._values:
+            if v in red:
+                red = red.replace(v, "***")
+        if red != msg:
+            record.msg, record.args = red, None
+        return True
+
+
 async def run(config: dict, config_path: str = "config.yaml") -> None:
     from ech.core.database import Database
     from ech.core.router import Router
@@ -180,6 +220,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
         format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
         datefmt="%H:%M:%S",
     )
+    for _h in logging.getLogger().handlers:
+        _h.addFilter(RedactSecretsFilter(config))
 
     # Database
     db_path = config.get("database", {}).get("path", "ech.db")
@@ -221,6 +263,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     db_handler = DBLogHandler(db, asyncio.get_running_loop())
     db_handler.setLevel(logging.INFO)
     db_handler.setFormatter(logging.Formatter("%(message)s"))
+    db_handler.addFilter(RedactSecretsFilter(config))
     logging.getLogger().addHandler(db_handler)
 
     # Auth manager

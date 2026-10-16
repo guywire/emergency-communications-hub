@@ -147,3 +147,23 @@ def test_trace_falls_back_when_discovery_gets_no_answer():
     a._send_cmd = fake_send
     asyncio.run(a.ping(key[:12]))
     assert sent[0][0] == 0x34 and sent[-1][0] == 0x24
+
+
+def test_inferred_route_rejects_far_hash_collisions_and_long_chains():
+    """Field report (2026-10-16): guessed trace routes ran through a Boston
+    repeater sharing a 1-byte hash with a local one, and 9-hop round trips."""
+    from ech.core.models import MeshNode
+    a = _adapter()
+    a._base_lat, a._base_lon = 44.16, -69.12                     # Rockland, ME
+    for nid, lat, lon in (("AA0000000001", 44.10, -69.10),       # local direct repeater
+                          ("BB0000000001", 42.33, -71.08),       # "bb" only known in Boston
+                          ("CC0000000001", 44.30, -69.00)):      # target near us
+        a._nodes[nid] = MeshNode(node_id=nid, display_name=nid)
+        a._nodes[nid].lat, a._nodes[nid].lon = lat, lon
+    a._learn_topology(["cc", "bb", "aa"])                        # cc-bb-aa adjacency, aa heard direct
+    assert a._infer_route("cc") is None                          # aa -> Boston -> cc is impossible
+    a._nodes["BB0000000001"].lat, a._nodes["BB0000000001"].lon = 44.2, -69.05
+    assert a._infer_route("cc") == ["aa", "bb"]                  # same hops, plausible positions
+    a._learn_topology(["ee", "dd", "cc", "bb", "aa"])
+    assert a._infer_route("ee") is None                          # would need 3 relays (cap is 2)
+    assert a._infer_route("ee", max_hops=4) == ["aa", "bb", "cc", "dd"]
