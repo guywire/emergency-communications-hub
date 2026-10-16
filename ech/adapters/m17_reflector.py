@@ -69,7 +69,10 @@ Config keys:
   name              str   adapter name (default: m17)
   reflector_host    str   reflector hostname/IP (REQUIRED)
   reflector_port    int   reflector UDP port (default: 17000)
-  module            str   single letter A-Z, the reflector "room" to join (REQUIRED)
+  module            str   single letter A-Z, the reflector "room" to join (REQUIRED).
+                          The operator can switch rooms at runtime (set_module, from the
+                          compose bar); the API writes the new letter back here, so the
+                          choice is remembered until changed (O152).
   callsign          str   your callsign, used to identify this connection (REQUIRED)
   listen_only       bool  join as a listen-only client (LSTRN, never transmits) (default: False)
 """
@@ -231,6 +234,7 @@ class M17ReflectorAdapter(Adapter):
         self._rx_count = 0
         self._tx_count = 0
         self._last_error: str | None = None
+        self._switching = False      # set_module() in progress: a DISC echo is expected
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -266,6 +270,49 @@ class M17ReflectorAdapter(Adapter):
         self._watchdog_task = asyncio.create_task(self._watchdog(), name=f"{self.name}-watchdog")
         log.info("M17 %s: linked to %s:%d module %s as %s",
                   self.name, self._host, self._port, self._module, self._callsign)
+
+    async def set_module(self, module: str) -> str:
+        """Move this link to another reflector module ("room") in place. mrefd
+        routes per module, so this is DISC + CONN on the new letter; if the
+        reflector doesn't ACKN within 10 s the link goes back to the previous
+        module and ValueError says why. Persisting the choice (config.yaml) is
+        the API's job, same as the Settings server switch (O99)."""
+        module = (module or "").strip().upper()
+        if len(module) != 1 or not module.isalpha():
+            raise ValueError("module must be a single letter A-Z")
+        if not self._transport or not self._connected:
+            raise ValueError("M17 link is not connected")
+        if module == self._module:
+            return module
+        old = self._module
+
+        async def link(letter: str) -> bool:
+            self._linked.clear()
+            self._transport.sendto(b"DISC" + self._own_addr)
+            self._module = letter
+            self._transport.sendto((b"LSTN" if self._listen_only else b"CONN")
+                                   + self._own_addr + letter.encode("ascii"))
+            try:
+                await asyncio.wait_for(self._linked.wait(), timeout=10.0)
+                return True
+            except asyncio.TimeoutError:
+                return False
+
+        self._switching = True
+        try:
+            ok = await link(module)
+            relinked = ok or await link(old)
+        finally:
+            self._switching = False
+        if not ok:
+            log.warning("M17 %s: module %s refused or silent - back on %s%s", self.name, module, old,
+                        "" if relinked else " (relink also unanswered)")
+            raise ValueError(f"reflector did not accept module {module} - still on {old}")
+        self._last_rx_from_reflector = time.monotonic()
+        self.config["module"] = module
+        log.info("M17 %s: switched from module %s to %s on %s:%d", self.name, old, module,
+                 self._host, self._port)
+        return module
 
     async def disconnect(self) -> None:
         self._connected = False
@@ -361,6 +408,8 @@ class M17ReflectorAdapter(Adapter):
         if magic in (b"PING", b"PONG"):
             return   # keepalive only
         if magic == b"DISC":
+            if self._switching:
+                return   # the reflector acknowledging our own DISC during a module switch
             log.warning("M17 %s: reflector sent DISC — link dropped (blacklisted? config changed?)", self.name)
             self._connected = False
             return

@@ -104,7 +104,9 @@ class MockPatWinlinkAdapter(Adapter):
                 if self.is_paused():
                     await asyncio.sleep(1.0)
                     continue
-                await asyncio.sleep(self._interval + random.uniform(-10, 10))
+                # jitter scales with the interval: a fixed +/-10 s made a 0.05 s test
+                # interval wait up to 10 s per message (flaky test timeout)
+                await asyncio.sleep(self._interval * random.uniform(0.8, 1.2))
                 self._tick += 1
                 self._rx_count += 1
 

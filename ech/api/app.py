@@ -836,6 +836,38 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     # ── MeshCore channel switch ───────────────────────────────────────────
 
+    @app.post("/api/adapters/{adapter_name}/m17/module")
+    async def set_m17_module(adapter_name: str, request: Request):
+        """Switch an M17 reflector link to another module ("room") in place, and
+        write the module into config.yaml (as the Settings server switch, O99,
+        does) so it is remembered until changed (O152). Viewers are blocked by
+        auth_middleware."""
+        adapter = router._adapters.get(adapter_name)
+        if adapter is None or not hasattr(adapter, "set_module"):
+            raise HTTPException(status_code=404, detail=f"No M17 adapter '{adapter_name}'")
+        data = await request.json()
+        try:
+            module = await adapter.set_module(str(data.get("module") or ""))
+        except ValueError as exc:
+            return {"status": "error", "detail": str(exc), "module": getattr(adapter, "_module", None)}
+        import yaml
+        cfg_path = Path("/etc/ech/config.yaml")
+        if not cfg_path.exists():
+            cfg_path = Path("config.yaml")
+        try:
+            with open(cfg_path, encoding="utf-8") as f:
+                full_cfg = yaml.safe_load(f) or {}
+            acfg = next((a for a in full_cfg.get("adapters", []) if a.get("name") == adapter_name), None)
+            if acfg is not None and acfg.get("module") != module:
+                acfg["module"] = module
+                atomic_write_yaml(cfg_path, full_cfg)
+        except (OSError, yaml.YAMLError) as exc:
+            log.warning("set_m17_module %s: switched to %s but config.yaml not updated: %s",
+                        adapter_name, module, exc)
+            return {"status": "ok", "module": module,
+                    "warning": "switched, but could not save it - it will revert on restart"}
+        return {"status": "ok", "module": module}
+
     @app.post("/api/adapters/{adapter_name}/channel")
     async def set_adapter_channel(adapter_name: str, request: Request):
         import yaml as _yaml

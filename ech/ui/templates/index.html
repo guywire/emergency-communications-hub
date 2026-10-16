@@ -1258,6 +1258,7 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
         <input type="text" id="compose-to" placeholder="To: node ID or callsign">
         <input type="text" id="compose-subject" placeholder="Subject (Winlink only, optional)" style="display:none">
         <select id="compose-channel" class="wl-field" style="display:none" title="Channel to send on — overrides the adapter's currently-tuned channel for just this message"></select>
+        <select id="compose-m17-module" class="wl-field" style="display:none" onchange="setM17Module(this)" title="M17 reflector module (room) to send and listen on. Switching relinks the adapter and is remembered until you change it."></select>
         <select id="priority-select" onchange="updateSendBtn()">
           <option value="0">Normal</option>
           <option value="1">Elevated</option>
@@ -2268,7 +2269,7 @@ function updateSendBtn() {
 function toggleAdapter(el) {
   el.classList.toggle('on');
   updateSubjectVisibility();
-  updateChannelVisibility();  updateModemBar();
+  updateChannelVisibility();  updateM17ModuleVisibility();  updateModemBar();
 }
 
 function selectAllAdapters(on) {
@@ -2276,7 +2277,7 @@ function selectAllAdapters(on) {
     if (on) el.classList.add('on'); else el.classList.remove('on');
   });
   updateSubjectVisibility();
-  updateChannelVisibility();  updateModemBar();
+  updateChannelVisibility();  updateM17ModuleVisibility();  updateModemBar();
 }
 
 // Subject is only meaningful to Winlink (email-style, distinct from the
@@ -2324,6 +2325,59 @@ function updateChannelVisibility() {
     chList.map(c => `<option value="${c.idx}">${c.idx}: ${escHtml(c.name)}</option>`).join('');
   if ([...sel.options].some(o => o.value === curVal)) sel.value = curVal;
   sel.style.display = '';
+}
+
+// M17 module (reflector "room") picker: shown when an M17 adapter is selected.
+// Unlike the channel picker this is not per-message - mrefd routes per module,
+// so switching relinks the adapter and the server remembers it (O152).
+function _m17Selected() {
+  return getSelectedAdapters().filter(n => {
+    const d = _lastChannelsDetail.find(a => a.adapter === n);
+    return d && d.detail && d.detail.module && d.detail.reflector;
+  });
+}
+
+function updateM17ModuleVisibility() {
+  const sel = document.getElementById('compose-m17-module');
+  if (!sel || sel.dataset.busy) return;
+  const names = _m17Selected();
+  if (!names.length) { sel.style.display = 'none'; return; }
+  const cur = _lastChannelsDetail.find(a => a.adapter === names[0]).detail.module;
+  if (!sel.options.length) {
+    sel.innerHTML = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(l => `<option value="${l}">M17 module ${l}</option>`).join('');
+  }
+  sel.value = cur;
+  sel.style.display = '';
+}
+
+async function setM17Module(sel) {
+  const names = _m17Selected();
+  const want = sel.value;
+  if (!names.length) return;
+  sel.dataset.busy = '1';
+  sel.disabled = true;
+  toast(`Switching M17 to module ${want}…`, 'ok');
+  try {
+    for (const name of names) {
+      const d = await fetch(`/api/adapters/${encodeURIComponent(name)}/m17/module`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({module: want}),
+      }).then(r => r.json());
+      const entry = _lastChannelsDetail.find(a => a.adapter === name);
+      if (d.status === 'ok') {
+        if (entry) entry.detail.module = d.module;
+        toast(`M17 now on module ${d.module} (remembered until changed)`, 'ok');
+      } else {
+        if (d.module && entry) entry.detail.module = d.module;
+        toast(d.detail || d.error || 'Module switch failed', 'err');
+      }
+    }
+  } catch (e) {
+    toast('Module switch failed: ' + e.message, 'err');
+  } finally {
+    delete sel.dataset.busy;
+    sel.disabled = false;
+    updateM17ModuleVisibility();
+  }
 }
 
 // ── Sound-card modem bar (CW / RTTY / PSK31) ─────────────────────────────
@@ -3378,6 +3432,7 @@ async function buildDynamicUI() {
     updateHealthDots(data.channels);
     updateSubjectVisibility();
     updateChannelVisibility();
+    updateM17ModuleVisibility();
     updateModemBar();
   } catch(e) {
     console.error('buildDynamicUI failed:', e);

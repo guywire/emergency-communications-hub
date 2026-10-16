@@ -8,6 +8,17 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.0 (2026-10-16)
+
+First release numbered without a release-candidate suffix: from here on each release bumps the
+third number (1.1.1, 1.1.2, ...). 1.1.0 is v1.0.0-rc291; everything below it is the rc series.
+
+### Added
+- **M17 module picker in the compose bar**: with an M17 network selected, choose the reflector
+  module (room, A-Z) next to the message box. Switching relinks in a few seconds and is
+  remembered until you change it, including across restarts. If the reflector refuses the new
+  module, the link stays on the old one and says so.
+
 ## v1.0.0-rc290 (2026-10-16)
 
 ### Security

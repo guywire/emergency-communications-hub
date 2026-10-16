@@ -11,6 +11,9 @@ def test_parse_version():
     assert su.parse_version(" v1.2.3 \n")[:3] == (1, 2, 3)
     assert su.parse_version("garbage") is None
     assert su.parse_version("") is None
+    # 2026-10-16: numbering switched from 1.0.0-rcN to 1.1.x
+    assert su.is_newer("1.1.0", "1.0.0-rc290") and su.is_newer("1.1.1", "1.1.0")
+    assert not su.is_newer("1.0.0-rc291", "1.1.0")
 
 
 @pytest.mark.parametrize("latest,current,expected", [
