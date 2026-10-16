@@ -4386,7 +4386,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         """Click-to-call: ring local phone then bridge to destination."""
         data = await request.json()
         destination = data.get("destination", "").strip()
-        caller_ext  = data.get("caller_extension", None)
+        caller_ext  = (data.get("caller_extension") or "").strip() or None
         if not destination:
             return {"status": "error", "detail": "destination required"}
         a = _find_pbx_adapter()
@@ -4394,8 +4394,55 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return {"status": "error", "detail": "No PBX adapter configured"}
         if not a._connected:
             return {"status": "error", "detail": "PBX adapter not connected"}
+        # O154: the operator picks which of their phones rings first; refuse a
+        # phone the PBX knows is not registered instead of ringing nothing.
+        err = _pbx_ext_problem(a, caller_ext) if caller_ext else None
+        if err:
+            return {"status": "error", "detail": err}
         ok = await a.originate(destination, caller_ext)
-        return {"status": "ok" if ok else "error", "destination": destination}
+        return {"status": "ok" if ok else "error", "destination": destination,
+                "caller_extension": caller_ext or getattr(a, "_local_ext", None)}
+
+    def _pbx_ext_problem(a, ext: str) -> "str | None":
+        from ech.adapters.asterisk_adapter import valid_extension
+        if not valid_extension(ext):
+            return f"'{ext}' is not a valid extension"
+        known = {e["extension"]: e for e in (a.list_endpoint_status() if hasattr(a, "list_endpoint_status") else [])}
+        if ext in known and not known[ext].get("online"):
+            return f"ext {ext} has no phone connected ({known[ext].get('device_state') or 'unavailable'})"
+        return None
+
+    @app.post("/api/pbx/intercom")
+    async def pbx_intercom(request: Request):
+        """O155: open the loudspeaker of one or more phones (auto-answer).
+        {targets: ["102"] | "all", text?: str, caller_extension?: str} -
+        with text it is spoken (TTS); without, the caller's phone rings and is
+        joined live to the targets. Viewers are blocked by auth_middleware."""
+        data = await request.json()
+        a = _find_pbx_adapter()
+        if not a or not hasattr(a, "intercom"):
+            return {"status": "error", "detail": "No PBX adapter configured"}
+        if not a._connected:
+            return {"status": "error", "detail": "PBX adapter not connected"}
+        caller_ext = (data.get("caller_extension") or "").strip() or None
+        targets = data.get("targets")
+        if targets == "all":
+            targets = [e["extension"] for e in a.list_endpoint_status()
+                       if e.get("online") and e["extension"] != (caller_ext or getattr(a, "_local_ext", ""))]
+        if isinstance(targets, str):
+            targets = [t.strip() for t in targets.split(",")]
+        if not isinstance(targets, list) or not [t for t in targets if str(t).strip()]:
+            return {"status": "error", "detail": "no target extensions (none online?)"}
+        targets = [str(t).strip() for t in targets if str(t).strip()]
+        for t in targets + ([caller_ext] if caller_ext else []):
+            err = _pbx_ext_problem(a, t)
+            if err:
+                return {"status": "error", "detail": err}
+        text = (data.get("text") or "").strip()[:500] or None
+        res = await a.intercom(targets, text=text, caller_extension=caller_ext)
+        if not res.get("ok"):
+            return {"status": "error", "detail": res.get("detail", "intercom failed")}
+        return {"status": "ok", **{k: v for k, v in res.items() if k != "ok"}}
 
     @app.post("/api/pbx/announce")
     async def pbx_announce(request: Request):

@@ -8,6 +8,10 @@ Capabilities
 - Inbound call logging → NormalizedMessage in the ECH message feed
 - Click-to-call: originate(channel, destination) via AMI Originate
 - Page / announce: page(target) rings one or more extensions simultaneously
+- Intercom (O155): intercom(targets, text | caller_extension) - phones auto-answer
+  on speaker (Call-Info answer-after=0 / Alert-Info alert-autoanswer, honoured by
+  Yealinks with Features > Intercom > Allow). Text is spoken by TTS; without text
+  the operator's own phone and the targets are joined in a quiet ConfBridge room.
 - Active call tracking (health endpoint shows live call count)
 
 Screen phone hooks (stubs — no-op until a screen phone is added)
@@ -80,6 +84,15 @@ log = logging.getLogger(__name__)
 
 _MAILBOX_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _MSGID_RE   = re.compile(r"^msg\d{4}$")
+
+
+_EXT_RE = re.compile(r"[0-9A-Za-z_-]{1,20}")
+
+
+def valid_extension(ext) -> bool:
+    """A plain extension/endpoint name. Anything else ("101&PJSIP/x",
+    "Local/..@ctx") would let a typed value dial channels it shouldn't."""
+    return bool(ext) and bool(_EXT_RE.fullmatch(str(ext)))
 
 
 class AsteriskAdapter(Adapter):
@@ -255,7 +268,8 @@ class AsteriskAdapter(Adapter):
         self._action_counter += 1
         lines = []
         for k, v in fields.items():
-            lines.append(f"{k}: {v}")
+            for item in (v if isinstance(v, (list, tuple)) else [v]):
+                lines.append(f"{k}: {item}")
         lines.append(f"ActionID: ech-{self._action_counter}")
         lines.append("")   # blank line terminates action (AMI needs \r\n\r\n)
         payload = "\r\n".join(lines) + "\r\n"
@@ -418,6 +432,9 @@ class AsteriskAdapter(Adapter):
         if not self._connected:
             return False
         src = caller_extension or self._local_ext
+        if not valid_extension(src):
+            log.warning("%s: refusing originate from invalid extension %r", self.name, src)
+            return False
         # If destination looks like a bare number/extension, dial via dialplan
         if not destination.startswith("SIP/") and not destination.startswith("PJSIP/"):
             await self._send_action({
@@ -457,8 +474,26 @@ class AsteriskAdapter(Adapter):
         /tmp — both true in the supported deployment (ECH and Asterisk on
         the same box).
         """
-        if not self._connected or not text.strip():
+        if not self._connected or not text.strip() or not valid_extension(extension):
             return False
+        stem = await self._render_tts(text)
+        if stem is None:
+            return False
+        await self._send_action({
+            "Action":      "Originate",
+            "Channel":     f"{self._channel_driver}/{extension}",
+            "Application": "Playback",
+            "Data":        stem,   # Playback wants the path without extension
+            "CallerID":    self._caller_id,
+            "Timeout":     "30000",
+            "Async":       "true",
+        })
+        log.info("AMI TTS Originate: ext %s: %r", extension, text.strip()[:60])
+        return True
+
+    async def _render_tts(self, text: str) -> "str | None":
+        """espeak-ng -> sox 8 kHz WAV; returns the Playback path stem (file
+        auto-deleted after 90 s) or None if rendering failed."""
         text = text.strip()[:500]
         stem = f"/tmp/ech_tts_{uuid.uuid4().hex}"
         raw_wav = f"{stem}_raw.wav"
@@ -496,19 +531,77 @@ class AsteriskAdapter(Adapter):
             log.warning("%s: sox resample failed (rc=%s)", self.name, sox_proc.returncode)
             return False
         Path(wav_path).chmod(0o644)
-
-        await self._send_action({
-            "Action":      "Originate",
-            "Channel":     f"{self._channel_driver}/{extension}",
-            "Application": "Playback",
-            "Data":        stem,   # Playback wants the path without extension
-            "CallerID":    self._caller_id,
-            "Timeout":     "30000",
-            "Async":       "true",
-        })
-        log.info("AMI TTS Originate: ext %s: %r", extension, text[:60])
         asyncio.create_task(self._cleanup_tts_file(wav_path))
-        return True
+        return stem
+
+    # ── Intercom (O155) ───────────────────────────────────────────────────
+    # Auto-answer headers on the OUTBOUND INVITE. Set as Originate channel
+    # variables: Originate requests the channel, applies the variables (PJSIP
+    # session exists, INVITE not yet sent), then calls - so PJSIP_HEADER(add)
+    # lands on the INVITE. Both common forms are sent; Yealink accepts either.
+    AUTO_ANSWER_VARS = [
+        "PJSIP_HEADER(add,Call-Info)=<sip:intercom@127.0.0.1>;answer-after=0",
+        "PJSIP_HEADER(add,Alert-Info)=<http://127.0.0.1>;info=alert-autoanswer",
+    ]
+    INTERCOM_TIMEOUT_S = 120   # a target never sits open on speaker longer than this
+
+    async def intercom(self, targets: "list[str]", text: "str | None" = None,
+                       caller_extension: "str | None" = None) -> dict:
+        """Open the loudspeaker of each target phone.
+
+        With ``text``: each target auto-answers and hears it spoken (TTS).
+        Without: targets auto-answer into a quiet ConfBridge room and wait
+        (silently) for the operator; the operator's own phone
+        (caller_extension, default local_extension) rings normally and joins
+        as the marked user - when it hangs up, the room closes for everyone.
+        Targets are dropped after INTERCOM_TIMEOUT_S regardless."""
+        if not self._connected:
+            return {"ok": False, "detail": "PBX not connected"}
+        targets = [t.strip() for t in targets if t and t.strip()]
+        if not targets:
+            return {"ok": False, "detail": "no target extensions"}
+        bad = [t for t in targets if not valid_extension(t)]
+        if bad:
+            return {"ok": False, "detail": f"invalid extension(s): {', '.join(bad)}"}
+        drv = self._channel_driver
+        if text and text.strip():
+            stem = await self._render_tts(text)
+            if stem is None:
+                return {"ok": False, "detail": "text-to-speech failed (espeak-ng/sox)"}
+            for t in targets:
+                await self._send_action({
+                    "Action": "Originate", "Channel": f"{drv}/{t}",
+                    "Application": "Playback", "Data": stem,
+                    "CallerID": self._caller_id, "Timeout": "30000", "Async": "true",
+                    "Variable": self.AUTO_ANSWER_VARS,
+                })
+            log.info("AMI intercom TTS -> %s: %r", ",".join(targets), text.strip()[:60])
+            return {"ok": True, "mode": "speak", "targets": targets}
+
+        me = caller_extension or self._local_ext
+        if not valid_extension(me):
+            return {"ok": False, "detail": f"invalid extension {me!r}"}
+        if me in targets:
+            return {"ok": False, "detail": f"ext {me} is your own phone - pick other targets"}
+        room = f"ech-intercom-{uuid.uuid4().hex[:8]}"
+        quiet = ["CONFBRIDGE(user,quiet)=yes", "CONFBRIDGE(user,announce_only_user)=no"]
+        for t in targets:
+            await self._send_action({
+                "Action": "Originate", "Channel": f"{drv}/{t}",
+                "Application": "ConfBridge", "Data": room,
+                "CallerID": self._caller_id, "Timeout": "30000", "Async": "true",
+                "Variable": self.AUTO_ANSWER_VARS + quiet + [
+                    "CONFBRIDGE(user,wait_marked)=yes", "CONFBRIDGE(user,end_marked)=yes",
+                    f"CONFBRIDGE(user,timeout)={self.INTERCOM_TIMEOUT_S}"],
+            })
+        await self._send_action({
+            "Action": "Originate", "Channel": f"{drv}/{me}",
+            "Application": "ConfBridge", "Data": room,
+            "CallerID": self._caller_id, "Timeout": "30000", "Async": "true",
+            "Variable": quiet + ["CONFBRIDGE(user,marked)=yes"],
+        })
+        log.info("AMI intercom talk: ext %s -> %s (room %s)", me, ",".join(targets), room)
+        return {"ok": True, "mode": "talk", "targets": targets, "caller_extension": me}
 
     async def _cleanup_tts_file(self, path: str, delay: float = 90.0) -> None:
         await asyncio.sleep(delay)

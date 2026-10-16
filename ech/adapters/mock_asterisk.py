@@ -92,6 +92,17 @@ class MockAsteriskAdapter(Adapter):
         log.info("Mock PBX originate: %s → %s", src, destination)
         return True
 
+    def list_endpoint_status(self) -> list[dict]:
+        return [{"extension": e, "device_state": "Not in use" if e in ("101", "102") else "Unavailable",
+                 "online": e in ("101", "102"), "contacts": ""} for e in ("101", "102", "103", "104")]
+
+    async def intercom(self, targets: list, text: str | None = None,
+                       caller_extension: str | None = None) -> dict:
+        mode = "speak" if text and text.strip() else "talk"
+        log.info("Mock PBX intercom (%s): %s -> %s", mode, caller_extension or self._local_ext, targets)
+        return {"ok": True, "mode": mode, "targets": list(targets),
+                **({} if mode == "speak" else {"caller_extension": caller_extension or self._local_ext})}
+
     async def page(self, target: str | None = None) -> bool:
         log.info("Mock PBX page: target=%s", target or "all")
         return True

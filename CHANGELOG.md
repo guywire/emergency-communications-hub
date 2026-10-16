@@ -8,6 +8,21 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.2 (2026-10-16)
+
+### Added
+- **Calls: choose your phone.** A "📞 My phone" picker on the Calls panel sets which extension
+  rings first when you dial from ECH (it then connects you to the number). Previously this was
+  always ext 101. Extensions with no phone connected can't be picked.
+- **Intercom ("🔊 On speaker")**: the chosen phone(s) answer automatically on the loudspeaker.
+  Type text to have it spoken, or leave the text empty and your own phone rings so you can talk
+  live; hanging up ends it. Works with Yealink phones (Intercom allowed, which is the default).
+  The extension box takes one extension, a list (102,103) or "all".
+
+### Security
+- Extensions typed into Calls are checked to be plain extension names before they reach the
+  phone system.
+
 ## v1.1.1 (2026-10-16)
 
 ### Added

@@ -3735,6 +3735,20 @@ async function nodeAnnounce() {
 }
 
 // ── PBX / Calls ───────────────────────────────────────────────────────────
+// O154: which of the operator's phones rings first on click-to-call (it then
+// bridges to the number dialled). Per-browser choice; the server's
+// local_extension is the default.
+let _pbxDefaultExt = '';
+function _pbxMyExt() {
+  const sel = document.getElementById('pbx-my-ext');
+  if (sel && sel.value) return sel.value;
+  try { return localStorage.getItem('ech_pbx_my_ext') || _pbxDefaultExt; } catch (e) { return _pbxDefaultExt; }
+}
+function pbxSetMyExt(v) {
+  try { localStorage.setItem('ech_pbx_my_ext', v); } catch (e) {}
+  toast(`Calls you place will ring ext ${v} first`, 'ok');
+}
+
 async function pbxCallNode(nodeId, btn) {
   if (btn) { btn.textContent = '…'; btn.disabled = true; }
   try {
@@ -3742,10 +3756,11 @@ async function pbxCallNode(nodeId, btn) {
     const r = await fetch('/api/pbx/call', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({destination}),
+      body: JSON.stringify({destination, caller_extension: _pbxMyExt() || undefined}),
     });
     const d = await r.json();
-    toast(d.status === 'ok' ? `Calling ${destination}…` : `Call failed: ${d.detail || d.status}`,
+    toast(d.status === 'ok' ? `Ringing your ext ${d.caller_extension || ''} - answer it to be connected to ${destination}`
+                            : `Call failed: ${d.detail || d.status}`,
           d.status === 'ok' ? 'ok' : 'err');
   } catch(e) {
     toast('PBX error', 'err');
@@ -3780,6 +3795,31 @@ async function pbxSpeak() {
   if (d?.status === 'ok') document.getElementById('tts-text').value = '';
 }
 
+// O155: auto-answer on the target phones' loudspeaker. With text it is spoken;
+// with the text box empty your own phone rings and you talk live.
+async function pbxIntercom() {
+  const raw = document.getElementById('tts-ext').value.trim();
+  const text = document.getElementById('tts-text').value.trim();
+  if (!raw) { toast('Enter the extension(s) to open, e.g. 102, 102,103 or all', 'err'); return; }
+  const targets = raw.toLowerCase() === 'all' ? 'all' : raw.split(/[\s,]+/).filter(Boolean);
+  const me = _pbxMyExt();
+  const what = text ? `speak "${text.slice(0, 40)}${text.length > 40 ? '…' : ''}" on the speaker of`
+                    : `open the speaker of`;
+  if (!confirm(`This will auto-answer and ${what} ext ${raw}${text ? '' : `, then ring your ext ${me} so you can talk`}. Continue?`)) return;
+  const d = await fetch('/api/pbx/intercom', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({targets, text: text || undefined, caller_extension: me || undefined}),
+  }).then(r => r.json()).catch(e => ({status: 'error', detail: e.message}));
+  if (d.status === 'ok') {
+    toast(d.mode === 'speak'
+      ? `Speaking on ext ${d.targets.join(', ')} (auto-answer)`
+      : `Speaker open on ext ${d.targets.join(', ')} - answer your ext ${d.caller_extension} to talk; hang up to end`, 'ok');
+    if (text) document.getElementById('tts-text').value = '';
+  } else {
+    toast(`Intercom failed: ${d.detail || 'error'}`, 'err');
+  }
+}
+
 async function loadCallLog() {
   const el = document.getElementById('panel-calls');
   try {
@@ -3790,14 +3830,20 @@ async function loadCallLog() {
     const active = d.active_calls || [];
     const recent = d.recent_calls || [];
     const canTransmit = _myRole !== 'viewer';
+    _pbxDefaultExt = (d.detail && d.detail.local_ext) || '';
     let html = `<div style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted)">
       PBX: <b>${escHtml(d.adapter)}</b> · <span style="color:${d.connected?'var(--green)':'var(--red)'}">${d.connected?'connected':'offline'}</span>
       ${canTransmit ? `&emsp;<button onclick="pbxPage()" style="font-size:10px;padding:2px 6px">📢 Page all</button>` : ''}
     </div>
+    ${canTransmit ? `<div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:center;font-size:10px;color:var(--muted)">
+      <label for="pbx-my-ext" title="When you dial from ECH, this phone rings first; answer it and you're connected">📞 My phone</label>
+      <select id="pbx-my-ext" onchange="pbxSetMyExt(this.value)" style="flex:1;font-size:11px;padding:2px 4px"><option value="">ext ${escHtml(_pbxDefaultExt || '?')}</option></select>
+    </div>` : ''}
     ${canTransmit ? `<div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:4px;align-items:center">
       <input type="text" id="tts-ext" placeholder="ext" style="width:44px;font-size:11px;padding:3px 5px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
       <input type="text" id="tts-text" placeholder="Text to speak…" style="flex:1;font-size:11px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
       <button onclick="pbxSpeak()" style="font-size:10px;padding:3px 8px" title="Ring the extension and read this text aloud">🗣 Speak</button>
+      <button onclick="pbxIntercom()" style="font-size:10px;padding:3px 8px" title="Intercom: the phone(s) auto-answer on the loudspeaker. With text it is spoken; with no text your phone rings and you talk live. Extension can be a list (102,103) or all.">🔊 On speaker</button>
     </div>` : ''}
     <div id="pbx-endpoint-status"></div>`;
     if (active.length) {
@@ -3894,6 +3940,14 @@ async function loadEndpointStatus() {
     const d = await r.json();
     const eps = d.endpoints || [];
     if (!eps.length) return;
+    const pick = document.getElementById('pbx-my-ext');
+    if (pick) {
+      const want = _pbxMyExt();
+      pick.innerHTML = eps.map(e => `<option value="${escHtml(e.extension)}"${e.online ? '' : ' disabled'}>`
+        + `ext ${escHtml(e.extension)}${e.online ? '' : ' (no phone)'}</option>`).join('');
+      if ([...pick.options].some(o => o.value === want && !o.disabled)) pick.value = want;
+      else { const dflt = [...pick.options].find(o => o.value === _pbxDefaultExt && !o.disabled) || [...pick.options].find(o => !o.disabled); if (dflt) pick.value = dflt.value; }
+    }
     el.innerHTML = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted)">EXTENSIONS</div>` +
       eps.map(e => `<div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px">
         <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${e.online ? 'var(--green)' : 'var(--dim)'}"></span>
