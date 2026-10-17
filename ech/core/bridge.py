@@ -339,6 +339,10 @@ class BridgeEngine:
         (multi-radio merge, O131) — relaying to them would duplicate it there."""
         if (msg.raw or {}).get("_bridged_by"):
             return                                       # never re-bridge our own output
+        if msg.source_channel == "traceroute" or (msg.raw or {}).get("ech_status"):
+            # ECH's own status notices (trace/sweep/traceroute results) are for
+            # the operator's feed, not for the air on another network.
+            return
         now = time.monotonic()
         src_adapter = adapters.get(msg.source_adapter)
         if src_adapter is None:

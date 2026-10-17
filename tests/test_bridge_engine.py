@@ -170,3 +170,20 @@ async def test_aprs_target_without_addressee_does_not_send():
     await eng.apply(mesh_msg("hello"), ad)
     assert ad["aprs"].sent == []
     assert "needs a 'to' addressee" in eng.status()["log"][-1]["outcome"]
+
+
+@pytest.mark.asyncio
+async def test_ech_status_notices_are_never_bridged():
+    """Operator 2026-10-16: trace no-reply notices were going out on Meshtastic."""
+    eng, ad = setup({"name": "all", "a": {"adapter": "mesh"}, "b": {"adapter": "aprs", "to": "EMCOMM"},
+                     "direction": "a_to_b", "rate_per_min": 60})
+    trace = NormalizedMessage(source_adapter="mesh", source_channel="traceroute", from_id="local",
+                              from_display="SignalMatrix", body="📡 TRACE: no reply from X within 30 s",
+                              raw={"trace_result": "no_reply"})
+    flagged = mesh_msg("status", ch=0)
+    flagged.raw["ech_status"] = True
+    await eng.apply(trace, ad)
+    await eng.apply(flagged, ad)
+    assert ad["aprs"].sent == []
+    await eng.apply(mesh_msg("real chatter", ch=0), ad)
+    assert len(ad["aprs"].sent) == 1

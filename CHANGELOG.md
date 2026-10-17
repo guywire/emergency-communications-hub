@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.10 (2026-10-16)
+
+### Fixed
+- Bridges no longer forward ECH's own status notices to other networks. Trace and sweep results
+  ("📡 TRACE: no reply …") and traceroute reports had been going out on Meshtastic through the
+  meshtastic-meshcore bridge. They now appear only in ECH's feed.
+
 ## v1.1.9 (2026-10-16)
 
 ### Fixed
