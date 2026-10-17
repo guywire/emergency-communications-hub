@@ -128,6 +128,15 @@ class LetsMeshCompareAdapter(MQTTAdapter):
         if origin_id:
             self._seen_origins[origin_id[:2].lower()] = time.monotonic()
 
+        # Our own trace probes as heard by this observer -> sweep progress
+        if str(data.get("packet_type")) == "9" and data.get("raw"):
+            target = self._target_adapter()
+            if target is not None and hasattr(target, "note_observer_trace"):
+                try:
+                    target.note_observer_trace(bytes.fromhex(str(data["raw"])), str(data.get("origin") or ""))
+                except ValueError:
+                    pass
+
         path = data.get("path")
         if path:
             # meshcore-packet-capture joins hops with "," (format_packet_data);

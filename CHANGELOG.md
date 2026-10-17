@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.7 (2026-10-16)
+
+### Added
+- MeshCore: when a second MeshCore receiver on the LAN sends its packets to ECH, the trace packets
+  it hears now count toward trace and sweep progress. ECH then learns how many hops a probe made
+  even when its own radio missed a hop's retransmission.
+
 ## v1.1.6 (2026-10-16)
 
 ### Changed

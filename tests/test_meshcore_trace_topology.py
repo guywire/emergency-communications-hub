@@ -334,3 +334,16 @@ def test_link_evidence_survives_restart():
     asyncio.run(b._restore_topology())
     assert list(b._rx_link["6b"])[0][1] == 4.5 and "15" in b._tx_answered
     assert "1551f6" in b._long_seen["15"]
+
+
+def test_observer_heard_trace_counts_as_sweep_progress():
+    from ech.adapters.meshcore import MeshCoreAdapter
+    a = MeshCoreAdapter({"name": "mc", "port": "/dev/null"})
+    tag = 0xA53C4FC4
+    a._pending_trace_tags.add(tag)
+    # header 0x26 (direct, TRACE), path_len 1 (one SNR byte), tag, auth, flags, hash
+    raw = bytes([0x26, 0x01, 0x2D]) + tag.to_bytes(4, "little") + bytes(4) + b"\x01" + bytes.fromhex("1551")
+    assert a.note_observer_trace(raw, "MQTT Listener")
+    assert a._trace_progress[tag] == 1
+    assert not a.note_observer_trace(bytes([0x26, 0x00]) + (123).to_bytes(4, "little") + bytes(5))
+    assert not a.note_observer_trace(bytes([0x12, 0x00]) + bytes(40))      # an advert

@@ -608,6 +608,30 @@ class MeshCoreAdapter(Adapter):
                 self._trace_progress[candidate] = max(self._trace_progress.get(candidate, 0), path_len)
         self._broadcast_traffic_event(route, ptype, snr, rssi, path_len, hashes, origin_id, tag=seen_tag)
 
+    def note_observer_trace(self, pkt: bytes, observer: str = "") -> bool:
+        """A TRACE packet another observer (e.g. a packet-capture node on the
+        LAN) heard. If it is one of our pending probes, its SNR count is how
+        many hops it has made - so a sweep learns how far a probe got even when
+        our own radio missed that hop's retransmission. Returns True if it was
+        one of ours."""
+        if len(pkt) < 2 or (pkt[0] & 0x3C) >> 2 != 9:
+            return False
+        off = 1 + (4 if (pkt[0] & 0x03) in (0, 3) else 0)
+        if off >= len(pkt):
+            return False
+        path_len = pkt[off] & 0x3F
+        payload = pkt[off + 1 + path_len:]
+        if len(payload) < 4:
+            return False
+        tag = int.from_bytes(payload[:4], "little")
+        if tag not in self._pending_trace_tags:
+            return False
+        if path_len > self._trace_progress.get(tag, 0):
+            self._trace_progress[tag] = path_len
+            log.info("MeshCore %s: observer %s heard probe %08x after %d hop(s)",
+                     self.name, observer or "?", tag, path_len)
+        return True
+
     def _learn_topology(self, hashes: list, confirmed_from_us: bool = False,
                         observer: bool = False) -> None:
         """Update the observed adjacency graph from a relay-hash chain.
