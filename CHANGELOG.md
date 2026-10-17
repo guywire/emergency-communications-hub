@@ -8,6 +8,20 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.9 (2026-10-16)
+
+### Fixed
+- MeshCore: a trace path drawn on the map that started at ECH's own node never left the radio.
+  The node was sent as the first hop, and a node never repeats its own packet. ECH now treats its
+  own node as the starting point and leaves it out of the hop list.
+
+## v1.1.8 (2026-10-16)
+
+### Changed
+- MeshCore: ECH's node now adverts once an hour instead of every 5 minutes. The contact list still
+  refreshes every 5 minutes. The interval is set by `advert_interval`, in seconds; 0 turns automatic
+  adverts off, leaving only the Announce button.
+
 ## v1.1.7 (2026-10-16)
 
 ### Added

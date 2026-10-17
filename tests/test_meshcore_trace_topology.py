@@ -347,3 +347,54 @@ def test_observer_heard_trace_counts_as_sweep_progress():
     assert a._trace_progress[tag] == 1
     assert not a.note_observer_trace(bytes([0x26, 0x00]) + (123).to_bytes(4, "little") + bytes(5))
     assert not a.note_observer_trace(bytes([0x12, 0x00]) + bytes(40))      # an advert
+
+
+def test_discovery_pulse_adverts_hourly_not_every_pulse(monkeypatch):
+    import asyncio
+    import ech.adapters.meshcore as mod
+    from ech.adapters.meshcore import MeshCoreAdapter, CMD_SEND_ADVERT
+    a = MeshCoreAdapter({"name": "mc", "port": "/dev/null"})
+    a._connected = True
+    sent = []
+
+    async def cmd(b):
+        sent.append(b[0])
+
+    async def nosleep(_):
+        pass
+
+    a._send_cmd = cmd
+    monkeypatch.setattr(mod.asyncio, "sleep", nosleep)
+    clock = [1000.0]
+    monkeypatch.setattr(mod.time, "monotonic", lambda: clock[0])
+    adverts = lambda: sent.count(CMD_SEND_ADVERT)
+    asyncio.run(a._discovery_pulse())
+    assert adverts() == 1                      # first pulse adverts
+    clock[0] += 300
+    asyncio.run(a._discovery_pulse())
+    assert adverts() == 1                      # 5 min later: contacts only
+    clock[0] += 3300
+    asyncio.run(a._discovery_pulse())
+    assert adverts() == 2                      # an hour after the last advert
+    asyncio.run(a.announce())
+    assert adverts() == 3                      # manual Announce: exactly one more
+
+
+def test_manual_path_starting_at_our_own_node_drops_it():
+    """Field 2026-10-16 (tag b4cfd7c5): a map-drawn path that began at ECH's
+    own node went out as [C6, C2, 4E, C2, C6] and died at 0 hops."""
+    from ech.core.models import MeshNode
+    a = _wide_adapter()
+    a.config["trace_hash_bytes"] = "1"
+    a._self_node_id = "C65FDBF8C77E"
+    for nid, name in (("C65FDBF8C77E", "SignalMatrix"), ("C29986EE51CC", "Ragged-RPT-1"),
+                      ("4E982D8E2B12", "WRKD-RPT-02")):
+        a._nodes[nid] = MeshNode(node_id=nid, display_name=name)
+    sent = []
+
+    async def fake_send(payload):
+        sent.append(payload)
+
+    a._send_cmd = fake_send
+    asyncio.run(a.ping("4E982D8E2B12", via=["C65FDBF8C77E", "C29986EE51CC"]))
+    assert sent[-1][10:] == bytes.fromhex("c2" "4e" "c2")

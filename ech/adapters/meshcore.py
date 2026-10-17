@@ -358,6 +358,12 @@ class MeshCoreAdapter(Adapter):
         self._channel_name_resolved = False
         self._poll_interval      = config.get("poll_interval", 2.0)
         self._discovery_interval = float(config.get("discovery_interval", 300.0))
+        # How often the discovery pulse also broadcasts our own advert. It used
+        # to go out on every pulse (every 5 min) - a lot of airtime on a shared
+        # mesh; 1 h is the usual companion interval. Contacts still refresh
+        # every discovery_interval. 0 = never auto-advert (manual Announce only).
+        self._advert_interval = float(config.get("advert_interval", 3600.0))
+        self._last_advert_mono = 0.0
         # Lightweight contacts-only refresh — just CMD_GET_CONTACTS, no announce.
         # Catches nodes the device learned about via PUSH_ADVERT that haven't sent
         # a channel message yet.  Shorter than discovery_interval.
@@ -1467,6 +1473,7 @@ class MeshCoreAdapter(Adapter):
         try:
             # Phase 1: push our presence to the mesh
             await self._send_cmd(bytes([CMD_SEND_ADVERT, self._channel_idx]))
+            self._last_advert_mono = time.monotonic()   # the pulse below must not advert again
             await asyncio.sleep(0.1)
             # Phase 2: pull known contacts + drain queued messages
             await self._discovery_pulse()
@@ -1612,6 +1619,15 @@ class MeshCoreAdapter(Adapter):
                     # whole probe — better a shorter drawn path goes out than
                     # nothing at all.
                     for vid in via:
+                        # Our own node is where the trace STARTS, not a hop:
+                        # a node never repeats its own packet, so a drawn path
+                        # that begins at ECH's node (the natural first click
+                        # on the map) went out as [us, ...] and died at 0 hops
+                        # (field case 2026-10-16, tag b4cfd7c5).
+                        if self._self_node_id and str(vid).upper()[:12] == self._self_node_id.upper()[:12]:
+                            log.info("MeshCore %s: manual path - dropped our own node %s (the start, not a hop)",
+                                     self.name, vid)
+                            continue
                         vn = self._nodes.get(vid) or self._nodes.get(vid.upper())
                         if vn is None:
                             log.warning("MeshCore %s: manual path hop %r not a known node — skipped",
@@ -1966,8 +1982,13 @@ class MeshCoreAdapter(Adapter):
             await asyncio.sleep(0.3)
             # Broadcast our presence — not a discovery request, but prompts neighbours to
             # update routing tables and may cause unsolicited PUSH_ADVERT from them.
-            await self._send_cmd(bytes([CMD_SEND_ADVERT, self._channel_idx]))
-            await asyncio.sleep(0.2)
+            # Only every advert_interval (default 1 h), not on every pulse.
+            now = time.monotonic()
+            if self._advert_interval > 0 and (not self._last_advert_mono
+                                              or now - self._last_advert_mono >= self._advert_interval):
+                await self._send_cmd(bytes([CMD_SEND_ADVERT, self._channel_idx]))
+                self._last_advert_mono = now
+                await asyncio.sleep(0.2)
             # Drain queued messages
             for _ in range(10):
                 await self._send_cmd(bytes([CMD_SYNC_NEXT_MESSAGE]))
@@ -3235,6 +3256,7 @@ class MeshCoreAdapter(Adapter):
             "node_count": len(self._nodes),
             "max_hops": self._max_hops,
             "discovery_interval": self._discovery_interval,
+            "advert_interval": self._advert_interval,
             "last_discovery_ago": round(time.monotonic() - self._last_discovery_ts) if self._last_discovery_ts else None,
         }
         if self._hw_model:
