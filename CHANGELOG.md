@@ -8,6 +8,19 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.6 (2026-10-16)
+
+### Changed
+- Spoken intercom now waits 1.5 s after the phone auto-answers, then plays a soft two-note chime
+  before the speech. The first words were being lost under the phone's own intercom tone.
+  Both are configurable (`intercom_lead_s`, `intercom_chime`).
+
+### Fixed
+- Intercom calls no longer appear in the Messages pane as "[INBOUND]". They are listed only in
+  the Calls panel log, as "[INTERCOM]". Calls ECH places (click-to-call, Ring + speak) are now
+  labelled "[OUTBOUND]" instead of "[INBOUND]".
+- A text-to-speech failure now reports an error. Before, it could send a call with no audio.
+
 ## v1.1.5 (2026-10-16)
 
 ### Fixed

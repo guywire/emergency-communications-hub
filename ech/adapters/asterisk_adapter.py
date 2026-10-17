@@ -40,6 +40,10 @@ Config keys (under adapters: in config.yaml)
   caller_id       str     Outbound caller ID      (default: ECH <100>)
   log_inbound     bool    Log inbound calls       (default: true)
   log_outbound    bool    Log ECH-originated calls (default: true)
+  intercom_lead_s float   Silence before a spoken intercom message, so the
+                          phone has auto-answered (and played its own intercom
+                          tone) before the speech starts (default: 1.5)
+  intercom_chime  bool    Play a two-note chime before the speech (default: true)
   vm_context      str     Voicemail context (mailboxes are "{ext}@{vm_context}")
                           (default: default)
   vm_spool_dir    str     Voicemail spool directory override — defaults to
@@ -117,6 +121,8 @@ class AsteriskAdapter(Adapter):
         self._caller_id      = config.get("caller_id", "ECH <100>")
         self._log_inbound    = bool(config.get("log_inbound", True))
         self._log_outbound   = bool(config.get("log_outbound", True))
+        self._intercom_lead  = max(0.0, min(5.0, float(config.get("intercom_lead_s", 1.5))))
+        self._intercom_chime = bool(config.get("intercom_chime", True))
         self._vm_context     = config.get("vm_context", "default")
         self._vm_spool_dir   = config.get("vm_spool_dir") or f"/var/spool/asterisk/voicemail/{self._vm_context}"
         self._vm_counts: dict[str, tuple[int, int]] = {}   # mailbox -> (new, old)
@@ -135,6 +141,9 @@ class AsteriskAdapter(Adapter):
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._active_calls: dict[str, dict] = {}   # uniqueid → call info
+        # Calls ECH itself placed: Originate ChannelId → {kind, target, ts}.
+        # Lets Newchannel label them (outbound / intercom) instead of "inbound".
+        self._originated: dict[str, dict] = {}
         self._call_log: list[dict] = []             # recent completed calls (last 50)
         self._action_counter = 0
         self._run_task: asyncio.Task | None = None
@@ -284,6 +293,11 @@ class AsteriskAdapter(Adapter):
         callerid = pkt.get("CallerIDNum", "unknown")
         exten    = pkt.get("Exten", "")
         direction = "inbound" if not channel.startswith("Local/") else "internal"
+        tag = self._originated.pop(uid, None)
+        if tag:
+            direction = tag["kind"]
+            exten = tag["target"]
+            callerid = "ECH"
         self._active_calls[uid] = {
             "uid":       uid,
             "channel":   channel,
@@ -313,6 +327,16 @@ class AsteriskAdapter(Adapter):
             return
 
         status = "answered" if answered else "missed"
+        if direction == "intercom":
+            # Not a message - the Calls panel log only.
+            self._call_log.insert(0, {
+                "call_uid": uid, "direction": direction, "callerid": call["callerid"],
+                "exten": call["exten"], "duration_s": duration, "status": status, "cause": cause,
+                "body": f"🔊 [INTERCOM] → ext {call['exten']} | {status} | {dur_str}",
+                "timestamp": call["start_dt"].isoformat()})
+            del self._call_log[50:]
+            log.info("AMI intercom leg ended: ext %s %s %s", call["exten"], status, dur_str)
+            return
         icon   = "📞" if answered else "📵"
         body   = (
             f"{icon} [{direction.upper()}] {call['callerid']} → ext {call['exten']} "
@@ -417,6 +441,16 @@ class AsteriskAdapter(Adapter):
             "contacts":     pkt.get("Contacts", ""),
         }
 
+    def _tag_originate(self, kind: str, target: str) -> str:
+        """A ChannelId for an Originate, remembered so the channel's events
+        are recognised as ours (kind = "outbound" or "intercom")."""
+        now = time.time()
+        for k in [k for k, v in self._originated.items() if now - v["ts"] > 300]:
+            del self._originated[k]
+        cid = f"ech-{kind}-{uuid.uuid4().hex[:16]}"
+        self._originated[cid] = {"kind": kind, "target": str(target), "ts": now}
+        return cid
+
     def list_endpoint_status(self) -> list[dict]:
         return sorted(self._endpoint_status.values(), key=lambda e: e["extension"])
 
@@ -440,6 +474,7 @@ class AsteriskAdapter(Adapter):
             await self._send_action({
                 "Action":   "Originate",
                 "Channel":  f"{self._channel_driver}/{src}",
+                "ChannelId": self._tag_originate("outbound", src),
                 "Context":  self._context,
                 "Exten":    destination,
                 "Priority": "1",
@@ -452,6 +487,7 @@ class AsteriskAdapter(Adapter):
             await self._send_action({
                 "Action":      "Originate",
                 "Channel":     f"{self._channel_driver}/{src}",
+                "ChannelId":   self._tag_originate("outbound", src),
                 "Application": "Dial",
                 "Data":        destination,
                 "CallerID":    self._caller_id,
@@ -482,6 +518,7 @@ class AsteriskAdapter(Adapter):
         await self._send_action({
             "Action":      "Originate",
             "Channel":     f"{self._channel_driver}/{extension}",
+            "ChannelId":   self._tag_originate("outbound", extension),
             "Application": "Playback",
             "Data":        stem,   # Playback wants the path without extension
             "CallerID":    self._caller_id,
@@ -491,13 +528,21 @@ class AsteriskAdapter(Adapter):
         log.info("AMI TTS Originate: ext %s: %r", extension, text.strip()[:60])
         return True
 
-    async def _render_tts(self, text: str) -> "str | None":
+    async def _render_tts(self, text: str, lead_s: float = 0.0, chime: bool = False) -> "str | None":
         """espeak-ng -> sox 8 kHz WAV; returns the Playback path stem (file
-        auto-deleted after 90 s) or None if rendering failed."""
+        auto-deleted after 90 s) or None if rendering failed.
+
+        ``lead_s`` seconds of silence go first (an auto-answering phone needs
+        a moment, and plays its own intercom tone, before audio is heard -
+        otherwise the first words are lost); ``chime`` adds a soft two-note
+        ding-dong between that silence and the speech."""
         text = text.strip()[:500]
         stem = f"/tmp/ech_tts_{uuid.uuid4().hex}"
         raw_wav = f"{stem}_raw.wav"
         wav_path = f"{stem}.wav"
+        speech = f"{stem}_8k.wav" if (lead_s > 0 or chime) else wav_path
+        ding, dong = f"{stem}_ding.wav", f"{stem}_dong.wav"
+        fmt = ["-r", "8000", "-c", "1", "-b", "16"]
         # Two sequential file-to-file steps, not a piped chain — asyncio subprocess
         # stdout is an async StreamReader, not a real fd a second subprocess can
         # inherit as stdin the way the synchronous subprocess module allows.
@@ -512,24 +557,38 @@ class AsteriskAdapter(Adapter):
             await asyncio.wait_for(espeak_proc.wait(), timeout=10)
             if espeak_proc.returncode != 0 or not Path(raw_wav).is_file():
                 log.warning("%s: espeak-ng TTS render failed (rc=%s)", self.name, espeak_proc.returncode)
-                return False
+                return None
 
-            sox_proc = await asyncio.create_subprocess_exec(
-                "sox", raw_wav, "-r", "8000", "-c", "1", "-b", "16", wav_path,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-            )
-            await asyncio.wait_for(sox_proc.wait(), timeout=10)
+            steps = [["sox", raw_wav, *fmt, speech]]
+            if lead_s > 0 or chime:
+                parts = []
+                if chime:
+                    steps += [
+                        ["sox", "-n", *fmt, ding, "synth", "0.35", "sine", "880", "fade", "q", "0.01", "0.35", "0.3", "vol", "0.35"],
+                        ["sox", "-n", *fmt, dong, "synth", "0.6", "sine", "660", "fade", "q", "0.01", "0.6", "0.5", "vol", "0.35", "pad", "0", "0.35"],
+                    ]
+                    parts = [ding, dong]
+                steps.append(["sox", *parts, speech, wav_path, "pad", f"{lead_s:.2f}"])
+            for cmd in steps:
+                sox_proc = await asyncio.create_subprocess_exec(
+                    *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(sox_proc.wait(), timeout=10)
+                if sox_proc.returncode != 0:
+                    log.warning("%s: sox step failed (rc=%s): %s", self.name, sox_proc.returncode, cmd[-1])
+                    return None
         except FileNotFoundError as exc:
             log.error("%s: TTS tool not installed (%s) — apt install espeak-ng sox", self.name, exc)
-            return False
+            return None
         except asyncio.TimeoutError:
             log.warning("%s: TTS render timed out", self.name)
-            return False
+            return None
         finally:
-            Path(raw_wav).unlink(missing_ok=True)
-        if sox_proc.returncode != 0 or not Path(wav_path).is_file():
-            log.warning("%s: sox resample failed (rc=%s)", self.name, sox_proc.returncode)
-            return False
+            for f in {raw_wav, speech, ding, dong} - {wav_path}:
+                Path(f).unlink(missing_ok=True)
+        if not Path(wav_path).is_file():
+            log.warning("%s: sox output missing", self.name)
+            return None
         Path(wav_path).chmod(0o644)
         asyncio.create_task(self._cleanup_tts_file(wav_path))
         return stem
@@ -565,12 +624,13 @@ class AsteriskAdapter(Adapter):
             return {"ok": False, "detail": f"invalid extension(s): {', '.join(bad)}"}
         drv = self._channel_driver
         if text and text.strip():
-            stem = await self._render_tts(text)
+            stem = await self._render_tts(text, lead_s=self._intercom_lead, chime=self._intercom_chime)
             if stem is None:
                 return {"ok": False, "detail": "text-to-speech failed (espeak-ng/sox)"}
             for t in targets:
                 await self._send_action({
                     "Action": "Originate", "Channel": f"{drv}/{t}",
+                    "ChannelId": self._tag_originate("intercom", t),
                     "Application": "Playback", "Data": stem,
                     "CallerID": self._caller_id, "Timeout": "30000", "Async": "true",
                     "Variable": self.AUTO_ANSWER_VARS,
@@ -588,6 +648,7 @@ class AsteriskAdapter(Adapter):
         for t in targets:
             await self._send_action({
                 "Action": "Originate", "Channel": f"{drv}/{t}",
+                "ChannelId": self._tag_originate("intercom", t),
                 "Application": "ConfBridge", "Data": room,
                 "CallerID": self._caller_id, "Timeout": "30000", "Async": "true",
                 "Variable": self.AUTO_ANSWER_VARS + quiet + [
@@ -596,6 +657,7 @@ class AsteriskAdapter(Adapter):
             })
         await self._send_action({
             "Action": "Originate", "Channel": f"{drv}/{me}",
+            "ChannelId": self._tag_originate("intercom", me),
             "Application": "ConfBridge", "Data": room,
             "CallerID": self._caller_id, "Timeout": "30000", "Async": "true",
             "Variable": quiet + ["CONFBRIDGE(user,marked)=yes"],
