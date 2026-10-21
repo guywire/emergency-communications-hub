@@ -892,6 +892,15 @@ async function onPopupOpen(marker, node) {
   updatePopupMsg(marker, node, msg);
 }
 
+// Keep what was just written into an open popup. popup.update() re-renders
+// from the popup's ORIGINAL HTML string, which wiped the filled-in slot and
+// left every popup on "Loading…"; re-set the content from the live DOM instead.
+function _commitPopup(marker) {
+  const p = marker.getPopup(), el = p && p.getElement();
+  const c = el && el.querySelector('.leaflet-popup-content');
+  if (c) p.setContent(c.innerHTML);
+}
+
 // APRS weather for the WX-station popup. /api/aprs/weather is metric (aprslib):
 // °C, m/s, hPa, mm. One fetch serves every popup for a minute.
 let _aprsWxCache = {t: 0, stations: []};
@@ -925,7 +934,7 @@ function updatePopupWx(marker, node, st) {
     const ago = st.ts ? _heardAgo(new Date(st.ts * 1000).toISOString()) : '';
     slot.innerHTML = rows.map(r => `<div>${r}</div>`).join('') + (ago ? `<div style="color:var(--muted);font-size:9px">report ${ago}</div>` : '');
   }
-  marker.getPopup().update();
+  _commitPopup(marker);
 }
 
 function updatePopupMsg(marker, node, msg) {
@@ -940,7 +949,7 @@ function updatePopupMsg(marker, node, msg) {
   } else {
     slot.innerHTML = '<span style="color:var(--muted);font-size:9px">No messages in log</span>';
   }
-  marker.getPopup().update();
+  _commitPopup(marker);
 }
 
 function toggleFollow() {
