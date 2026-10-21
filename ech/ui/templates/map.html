@@ -484,6 +484,9 @@ function popupContent(node, isAlert, lastMsg) {
     const ts = lastMsg.timestamp ? new Date(lastMsg.timestamp).toUTCString().slice(5,22) : '';
     const body = esc(lastMsg.body || '').slice(0, 200);
     msgBlock = `<div class="node-last-msg"><span class="msg-ts">${ts}</span>${body}</div>`;
+  } else if (node.node_type === 'WX') {
+    // APRS weather station: its current conditions, not a (nonexistent) last message
+    msgBlock = `<div class="node-last-msg" id="lastmsg-${esc(node.node_id)}"><span style="color:var(--muted);font-size:9px">Loading weather…</span></div>`;
   } else {
     msgBlock = `<div class="node-last-msg" id="lastmsg-${esc(node.node_id)}"><span style="color:var(--muted);font-size:9px">Loading last message…</span></div>`;
   }
@@ -506,6 +509,8 @@ function popupContent(node, isAlert, lastMsg) {
     : 'This node type routes packets but has no message inbox';
   const msgAction = messageable
     ? `<a href="${msgUrl}" target="_top" style="flex:1;text-align:center;font-family:var(--mono);font-size:10px;padding:4px 0;background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.4);color:#388bfd;border-radius:3px;text-decoration:none">📨 Message</a>`
+    : ntype === 'WX'
+    ? `<a href="/aprs?tab=weather" target="_top" style="flex:1;text-align:center;font-family:var(--mono);font-size:10px;padding:4px 0;border:1px solid rgba(56,139,253,.4);color:#388bfd;border-radius:3px;text-decoration:none" title="All APRS weather stations, with 24 h temperature trend">🌡 Weather list</a>`
     : (broadcastOnly ? '' : `<span style="flex:1;text-align:center;font-family:var(--mono);font-size:9px;padding:4px 2px;border:1px solid var(--border);color:var(--muted);border-radius:3px" title="${notMsgTitle}">not messageable</span>`);
   const actionBtns = `<div style="display:flex;gap:5px;margin-top:8px">
     ${msgAction}
@@ -832,11 +837,15 @@ async function loadNodes() {
         markers[id].setIcon(icon);
         markers[id].getPopup().setContent(popup);
         markers[id].setOpacity(isOnline ? 1.0 : 0.45);
+        markers[id]._echNode = node;
+        // The refresh just reset an open popup to "Loading…" - fill it again
+        if (markers[id].isPopupOpen()) onPopupOpen(markers[id], node);
       } else {
         const marker = L.marker([node.lat, node.lon], {icon, opacity: isOnline ? 1.0 : 0.45})
           .bindPopup(popup)
           .addTo(map);
-        marker.on('popupopen', () => onPopupOpen(marker, node));
+        marker._echNode = node;
+        marker.on('popupopen', () => onPopupOpen(marker, marker._echNode));
         markers[id] = marker;
       }
       markers[id]._echName = node.display_name || id;
@@ -870,15 +879,53 @@ async function onPopupOpen(marker, node) {
     return;
   }
   const nodeId = node.node_id;
-  // If we already cached it, just update; otherwise fetch
+  if (node.node_type === 'WX') { updatePopupWx(marker, node, await fetchAprsWx(nodeId)); return; }
+  // If we already cached it, just update; otherwise fetch. (A cached "no
+  // message" must update too, or the popup sat on "Loading…" forever.)
   const cached = lastMsgCache[nodeId];
   if (cached !== undefined) {
-    if (cached) updatePopupMsg(marker, node, cached);
+    updatePopupMsg(marker, node, cached);
     return;
   }
   const msg = await fetchLastMsg(nodeId);
   lastMsgCache[nodeId] = msg;
   updatePopupMsg(marker, node, msg);
+}
+
+// APRS weather for the WX-station popup. /api/aprs/weather is metric (aprslib):
+// °C, m/s, hPa, mm. One fetch serves every popup for a minute.
+let _aprsWxCache = {t: 0, stations: []};
+async function fetchAprsWx(call) {
+  if (Date.now() - _aprsWxCache.t > 60000) {
+    try { _aprsWxCache = {t: Date.now(), stations: (await fetch('/api/aprs/weather').then(r => r.json())).stations || []}; }
+    catch (e) { return null; }
+  }
+  return _aprsWxCache.stations.find(s => (s.call || '').toUpperCase() === (call || '').toUpperCase()) || null;
+}
+
+function updatePopupWx(marker, node, st) {
+  const el = marker.getPopup().getElement();
+  const slot = el && el.querySelector(`#lastmsg-${CSS.escape(node.node_id)}`);
+  if (!slot) return;
+  const w = (st && st.wx) || {};
+  if (!st || !Object.keys(w).length) {
+    slot.innerHTML = '<span style="color:var(--muted);font-size:9px">No weather report heard in the last 6 h</span>';
+  } else {
+    const n = (v, d = 0) => (+v).toFixed(d);
+    const C = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    const rows = [];
+    if (w.temperature != null) rows.push(`🌡 <b>${n(w.temperature * 9 / 5 + 32)}°F</b> <span style="color:var(--muted)">${n(w.temperature, 1)}°C</span>`);
+    if (w.humidity != null) rows.push(`💧 ${w.humidity}% humidity`);
+    if (w.wind_speed != null || w.wind_direction != null) {
+      const dir = w.wind_direction != null ? C[Math.round(w.wind_direction / 22.5) % 16] + ' ' : '';
+      rows.push(`💨 ${dir}${w.wind_speed != null ? n(w.wind_speed * 2.23694) + ' mph' : ''}${w.wind_gust != null ? `, gust ${n(w.wind_gust * 2.23694)}` : ''}`);
+    }
+    if (w.pressure != null) rows.push(`⏲ ${(w.pressure * 0.02953).toFixed(2)} inHg`);
+    if (w.rain_1h != null || w.rain_24h != null) rows.push(`🌧 ${n((w.rain_1h || 0) / 25.4, 2)}" 1h · ${n((w.rain_24h || 0) / 25.4, 2)}" 24h`);
+    const ago = st.ts ? _heardAgo(new Date(st.ts * 1000).toISOString()) : '';
+    slot.innerHTML = rows.map(r => `<div>${r}</div>`).join('') + (ago ? `<div style="color:var(--muted);font-size:9px">report ${ago}</div>` : '');
+  }
+  marker.getPopup().update();
 }
 
 function updatePopupMsg(marker, node, msg) {
