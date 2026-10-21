@@ -79,6 +79,13 @@ class PacketCompare:
                 pass
         return h
 
+    def heard_locally(self, h: str) -> bool:
+        e = self._pkts.get((h or "").upper())
+        return bool(e and e["local"])
+
+    def is_own(self, origin: str) -> bool:
+        return bool(origin) and self._is_own(origin.upper())
+
     def record_observer(self, data: dict, source: str = "") -> str | None:
         """One packet JSON as observers publish it (hash and/or raw)."""
         origin = str(data.get("origin_id") or "").upper()

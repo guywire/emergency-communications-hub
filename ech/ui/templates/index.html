@@ -1241,6 +1241,16 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
         <option value="1">Elevated+</option>
         <option value="2">Emergency</option>
       </select>
+      <select id="hops-filter" onchange="applyFilter()" title="Hide channel messages that came in over more relay hops than this (cuts distant/ducting traffic). DMs and your own messages always show.">
+        <option value="">Any hops</option>
+        <option value="0">Direct only</option>
+        <option value="1">≤ 1 hop</option>
+        <option value="2">≤ 2 hops</option>
+        <option value="3">≤ 3 hops</option>
+        <option value="4">≤ 4 hops</option>
+        <option value="5">≤ 5 hops</option>
+        <option value="6">≤ 6 hops</option>
+      </select>
       <button onclick="clearMessageDisplay()" style="font-family:var(--mono);font-size:10px;padding:4px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--dim);cursor:pointer" title="Clear this browser's display only">🗑 Clear</button>
       <button onclick="clearHistory()" style="font-family:var(--mono);font-size:10px;padding:4px 8px;border-radius:3px;border:1px solid var(--red);background:var(--bg);color:var(--red);cursor:pointer" title="Delete all messages from server database">🗑 Clear History</button>
       <span class="msg-count" id="msg-count">0 messages</span>
@@ -1486,6 +1496,9 @@ function msgPassesFilter(msg) {
   if (chan !== 'all' && msg.source_channel !== chan) return false;
   if (type !== 'all' && msgTypePrefix(msg.body) !== type) return false;
   if (f.priority && msg.priority < parseInt(f.priority)) return false;
+  // Hop filter hides far-relayed channel chatter (e.g. ducting); DMs and our own always show
+  if (f.maxHops && msgHops(msg) != null && msgHops(msg) > parseInt(f.maxHops)
+      && msg.source_channel !== 'DM' && msg.from_id !== 'local' && msg.source_channel !== 'outbound') return false;
   if (f.search && !`${msg.from_display} ${msg.from_id} ${msg.body} ${msg.source_channel||''}`.toLowerCase().includes(f.search.toLowerCase())) return false;
   return true;
 }
@@ -1566,10 +1579,13 @@ function buildMsgEl(msg) {
   const wasDecrypted = !isEncrypted && (msg._raw || {}).decrypted_with;
   const bodyClass = msg.priority === 2 ? 'msg-body priority-2' : isEncrypted ? 'msg-body encrypted' : 'msg-body';
   const decryptBadge = wasDecrypted ? `<span title="Auto-decrypted with key: ${escHtml((msg._raw||{}).decrypted_with)}" style="font-size:9px;color:var(--green);margin-left:4px;cursor:help">🔓</span>` : '';
+  const viaObs = (msg._raw || {}).via_observer;
+  const observerBadge = viaObs ? `<span title="Our radio missed this — heard only by observer ${escHtml(viaObs)}" style="font-family:var(--mono);font-size:9px;color:var(--muted);padding:0 4px;border:1px dashed var(--border);border-radius:3px;cursor:help">via ${escHtml(viaObs)}</span>` : '';
 
   // Path / routing badge
   let pathBadge = '';
-  const hasHop  = msg.hop_count != null && !isNaN(msg.hop_count);
+  const hops    = msgHops(msg);
+  const hasHop  = hops != null;
   const hasPath = msg.path && msg.path.trim();
   const isMqtt  = msg.via_mqtt;
   const raw     = msg._raw || {};
@@ -1579,11 +1595,11 @@ function buildMsgEl(msg) {
     const detailId = `pathd-${msg.id}`;
     let label = '';
     if (isMqtt)         label = 'MQTT';
-    else if (hasHop)    label = `${msg.hop_count} hop${msg.hop_count !== 1 ? 's' : ''}`;
+    else if (hasHop)    label = `${hops} hop${hops !== 1 ? 's' : ''}`;
     else                label = '↗?';
     const mqttCls = isMqtt ? ' via-mqtt' : '';
     let detail = '';
-    if (hasHop)  detail += `hops: ${msg.hop_count}${msg.hop_start != null ? ' / '+msg.hop_start : ''}\n`;
+    if (hasHop)  detail += `hops: ${hops}${msg.hop_start != null ? ' / '+msg.hop_start : ''}\n`;
     if (isMqtt)  detail += `via: MQTT gateway\n`;
     if (hasPath) detail += `path: ${msg.path}\n`;
     const _snr = msg.snr != null ? msg.snr : raw.snr;
@@ -1600,7 +1616,7 @@ function buildMsgEl(msg) {
     const isMeshCoreMsg = (msg.source_adapter || '').toLowerCase().includes('meshcore');
     const hopTip = (isMeshCoreMsg && hasPath)
       ? 'Click to show routing detail (resolves relay hashes to node names)'
-      : (isMeshCoreMsg && hasHop && msg.hop_count > 0 && msg.from_id !== 'local')
+      : (isMeshCoreMsg && hasHop && hops > 0 && msg.from_id !== 'local')
       ? 'Click for detail — relay hashes weren\'t captured for this message; open message detail to traceroute'
       : 'Click to show routing detail';
     const resolveArgs = isMeshCoreMsg && hasPath
@@ -1644,6 +1660,7 @@ function buildMsgEl(msg) {
         ${pathBadge}
         ${sigBadge}
         ${decryptBadge}
+        ${observerBadge}
         ${deliveryHTML}
         ${(msg.from_id !== 'local' && msg.source_channel !== 'outbound') ? `<span onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Reply — fills the To: field and selects the right adapter" style="font-family:var(--mono);font-size:10px;color:var(--blue);cursor:pointer;padding:1px 5px;border:1px solid var(--border);border-radius:3px;white-space:nowrap">↩ Reply</span>` : ''}
         <span class="msg-detail-btn" onclick="openMsgDetail('${escHtml(msg.id)}')" title="Message detail">⋯</span>
@@ -1833,14 +1850,22 @@ function buildMsgDetailHTML(msg) {
   rows.push(['Adapter', escHtml(msg.source_adapter || '')]);
   rows.push(['Channel', escHtml(msg.source_channel || '')]);
   if (msg.priority > 0) rows.push(['Priority', msg.priority === 2 ? '🚨 EMERGENCY' : '⚠ Elevated']);
-  if (msg.hop_count != null) {
+  const _dh = msgHops(msg);
+  if (_dh != null) {
     const isMeshCore = (msg.source_adapter || '').toLowerCase().includes('meshcore');
-    const hopNote = (isMeshCore && msg.hop_count > 0 && msg.from_id !== 'local')
+    const hopNote = (isMeshCore && _dh > 0 && msg.from_id !== 'local' && !msg.path)
       ? ` <span style="color:var(--muted);font-size:10px">(relay node IDs not available in received channel msgs — use Traceroute below)</span>`
       : '';
-    rows.push(['Hops', `${msg.hop_count}${hopNote}`]);
+    rows.push(['Hops', `${_dh}${hopNote}`]);
   }
   if (msg.path) rows.push(['Path', escHtml(msg.path)]);
+  if (raw.via_observer) rows.push(['Heard by', `observer ${escHtml(raw.via_observer)} <span style="color:var(--muted);font-size:10px">(our radio missed it; hops/path are as the observer heard it)</span>`]);
+  if (raw.region != null) {
+    const rg = raw.region;
+    rows.push(['Region', rg === '' ? 'none <span style="color:var(--muted);font-size:10px">(unscoped flood — any repeater may forward it)</span>'
+      : rg.startsWith('?') ? `scoped, unknown region <span style="color:var(--muted);font-size:10px">(code ${escHtml(rg.slice(1))} — add its name under Settings → Region to identify)</span>`
+      : `#${escHtml(rg)}`]);
+  }
   if (status) {
     const {icon, label} = deliveryStatusInfo(status);
     const detail = msg._status_detail ? ` — ${escHtml(msg._status_detail)}` : '';
@@ -2057,6 +2082,11 @@ function restoreSidebarSections() {
   });
 }
 restoreSidebarSections();
+try {
+  const _mh = localStorage.getItem('ech_msg_max_hops') || '';
+  document.getElementById('hops-filter').value = _mh;
+  state.filter.maxHops = _mh;
+} catch (e) {}
 
 // ── Filters ──────────────────────────────────────────────────────────────
 // Remembers each adapter's own channel/type filter selection across
@@ -2185,9 +2215,20 @@ function buildTypeSubBar() {
   ].join('');
 }
 
+// Hop count, falling back to the relay path's length for MeshCore messages
+// stored before v1.1.13 (a >16-hop count used to be discarded as "garbage").
+function msgHops(msg) {
+  if (msg.hop_count != null && !isNaN(msg.hop_count)) return msg.hop_count;
+  const isMc = (msg.source_adapter || '').toLowerCase().includes('meshcore');
+  const p = msg.path || ((msg._raw || {}).rf_path || []).join(',');
+  return isMc && p && p.trim() ? p.split(',').filter(Boolean).length : null;
+}
+
 function applyFilter() {
   state.filter.search = document.getElementById('search').value;
   state.filter.priority = document.getElementById('priority-filter').value;
+  state.filter.maxHops = document.getElementById('hops-filter').value;
+  try { localStorage.setItem('ech_msg_max_hops', state.filter.maxHops); } catch (e) {}
   renderAll();
 }
 

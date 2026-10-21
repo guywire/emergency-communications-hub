@@ -2698,6 +2698,11 @@ async function loadAdapterLive() {
       const hwStr = isMeshCore && a.detail && a.detail.hardware ? ` <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">${esc(a.detail.hardware)}</span>` : '';
       const fwStr = isMeshCore && a.detail && a.detail.firmware  ? ` <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">${esc(a.detail.firmware)}</span>` : '';
       const curMaxHops = a.detail && a.detail.max_hops != null ? a.detail.max_hops : 0;
+      const curRegion = (a.detail && a.detail.region) || '';
+      const curKnownRegions = ((a.detail && a.detail.known_regions) || []).join(', ');
+      const curScopeTx = !!(a.detail && a.detail.region_scope_tx);
+      const regionSeen = Object.entries((a.detail && a.detail.region_seen) || {})
+        .sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k}:${v}`).join(' ');
       const chList = a.detail && a.detail.channels_list ? a.detail.channels_list : [];
       const chOpts = chList.length
         ? chList.map(c => `<option value="${c.idx}">${c.idx}: ${esc(c.name)}</option>`).join('')
@@ -2712,7 +2717,7 @@ async function loadAdapterLive() {
         ${chInput}
         <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="switchChannel('${aEsc}')">Switch TX ch</button>
         <button id="disc-${aEsc}" class="btn btn-blue" style="padding:3px 8px;font-size:10px" title="Solicit node advertisements now${esc(discoverInt)}" onclick="discoverNodes('${aEsc}')">Discover</button>
-        <span style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:4px">Hops:</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:4px" title="How far OUR messages may travel: repeaters stop relaying them after this many hops. (To hide far-away incoming messages, use the hop filter on the Messages page.)">Send hop limit:</span>
         <select id="hops-${aEsc}" style="font-family:var(--mono);font-size:10px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px" title="Max hops for outgoing messages">
           <option value="0" ${curMaxHops===0?'selected':''}>default</option>
           <option value="1" ${curMaxHops===1?'selected':''}>1</option>
@@ -2720,6 +2725,17 @@ async function loadAdapterLive() {
           <option value="3" ${curMaxHops===3?'selected':''}>3</option>
         </select>
         <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="setMaxHops('${aEsc}')">Set hops</button>
+        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted)" title="Your MeshCore region (repeater 'region' name, # optional). Used to label which region each heard message was scoped to.">Region:</span>
+          <input id="region-${aEsc}" type="text" value="${esc(curRegion)}" placeholder="e.g. RKD" style="width:80px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted)" title="Other region names to recognise, comma-separated. A scoped message can only be named if its region is listed here.">Also recognise:</span>
+          <input id="kregions-${aEsc}" type="text" value="${esc(curKnownRegions)}" placeholder="comma-separated" style="width:150px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+          <label style="font-family:var(--mono);font-size:10px;color:var(--muted)" title="Tag OUR outgoing floods with this region. Repeaters that don't have the region configured will NOT forward them (fw 1.10+).">
+            <input id="rscope-${aEsc}" type="checkbox" ${curScopeTx ? 'checked' : ''}> scope my TX
+          </label>
+          <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="setRegion('${aEsc}')">Set region</button>
+          ${regionSeen ? `<span style="font-family:var(--mono);font-size:10px;color:var(--dim)" title="Heard message packets per region since start">${esc(regionSeen)}</span>` : ''}
+        </div>
         <button id="scan-${aEsc}" class="btn btn-blue" style="padding:3px 8px;font-size:10px" title="Query device for all channel slots (0–255) via CMD_GET_CHANNEL 0x1F — takes ~13s" onclick="scanChannels('${aEsc}')">Scan channels</button>` : '';
       // Meshtastic controls
       const isMeshtastic = a.adapter.includes('meshtastic') && !a.adapter.includes('mock');
@@ -3052,6 +3068,23 @@ async function setMaxHops(adapterName) {
     toast(`${adapterName}: max hops → ${d.max_hops === 0 ? 'device default' : d.max_hops}`, 'ok');
   } else {
     toast(`Set hops failed: ${d.detail}`, 'err');
+  }
+}
+
+async function setRegion(adapterName) {
+  const region = (document.getElementById(`region-${adapterName}`)?.value || '').trim();
+  const known = (document.getElementById(`kregions-${adapterName}`)?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const scopeTx = !!document.getElementById(`rscope-${adapterName}`)?.checked;
+  if (scopeTx && !region) { toast('Set a region name before scoping TX', 'err'); return; }
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/region`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({region, known_regions: known, region_scope_tx: scopeTx}),
+  });
+  const d = await r.json();
+  if (d.status === 'ok') {
+    toast(`${adapterName}: region ${d.region || '(none)'}${d.region_scope_tx ? ', TX scoped' : ''}${d.saved ? '' : ' (live only — not saved)'}`, 'ok');
+  } else {
+    toast(`Set region failed: ${d.detail}`, 'err');
   }
 }
 

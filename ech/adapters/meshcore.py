@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import hashlib
+import hmac
 import logging
 import math
 import struct
@@ -46,6 +48,29 @@ from ech.adapters.base import Adapter
 from ech.core.models import ChannelHealth, MeshNode, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
+
+
+def region_key(name: str) -> bytes:
+    """MeshCore hashtag-region transport key: SHA256("#"+name)[:16]
+    (firmware TransportKeyStore::getAutoKeyFor; the '#' is implicit in names)."""
+    return hashlib.sha256(("#" + name.lstrip("#")).encode()).digest()[:16]
+
+
+def region_transport_code(key: bytes, payload_type: int, payload: bytes) -> int:
+    """transport_codes[0] a scoped flood carries: HMAC-SHA256(key, type||payload)
+    truncated to a uint16 (LE on the wire), with 0000/FFFF reserved."""
+    d = hmac.new(key, bytes([payload_type]) + payload, hashlib.sha256).digest()
+    code = int.from_bytes(d[:2], "little")
+    return 1 if code == 0 else 0xFFFE if code == 0xFFFF else code
+
+
+def _hop_count(path_len_raw: int) -> "int | None":
+    """Hop count from a received message's path_len byte: bits 0-5 = hops,
+    bits 6-7 = hash size - 1. A path holds at most 64 bytes (MAX_PATH_SIZE), so
+    1-byte hashes allow 63 hops and 2-byte 32; 0xFF (= unknown/direct) fails
+    that check. The old "> 16 is garbage" cap hid real 17-25 hop ducting floods."""
+    hops, size = path_len_raw & 0x3F, (path_len_raw >> 6) + 1
+    return hops if hops * size <= 64 else None
 
 # ── Protocol constants ────────────────────────────────────────────────────
 CMD_APP_START           = 0x01
@@ -72,6 +97,7 @@ CMD_SET_CHANNEL         = 0x20   # set channel slot; format: idx(1)+name(32)+sec
 CMD_SIGN_START          = 0x21   # begin a device-side Ed25519 signing session → PACKET_SIGN_START
 CMD_SIGN_DATA           = 0x22   # append up to 8KB of data to sign; each call → PACKET_OK/PACKET_ERROR
 CMD_SIGN_FINISH         = 0x23   # finalize; device signs the accumulated buffer with its own identity
+CMD_SET_FLOOD_SCOPE_KEY = 0x36   # [0x36, 0, key:16] = scope our floods to a region; [0x36, 0] = reset (fw ver 8+)
                                   # key (never leaves the device) → PACKET_SIGNATURE with the 64-byte sig
 
 PACKET_OK               = 0x00
@@ -372,6 +398,33 @@ class MeshCoreAdapter(Adapter):
         # Max hops for outgoing channel messages (second byte of CMD_SEND_CHANNEL_MSG).
         # 0 = device default. Set to 3 for typical local mesh (reduces network load).
         self._max_hops           = int(config.get("max_hops", 0))
+        # Inbound filter: drop CHANNEL messages that arrived over more than this
+        # many relay hops (0 = off). Tropospheric ducting periodically lets us
+        # hear far-off repeaters, which floods the hub with distant chatter; a
+        # hop cap keeps the local mesh. DMs are never filtered - they're for us.
+        # Region scoping can't do this job: companions receive every scope.
+        self._rx_max_hops        = int(config.get("rx_max_hops", 0))
+        self._rx_hop_filtered    = 0
+        # Region (MeshCore transport-code scope). Repeaters use regions to decide
+        # what to forward; we use the names to LABEL what we hear (a scoped
+        # packet's code can only be matched against region names we know) and,
+        # if region_scope_tx, to scope our own floods. Off by default: since fw
+        # 1.10 a repeater that doesn't know the region won't forward it at all.
+        self._region             = str(config.get("region", "") or "").strip().lstrip("#")
+        self._known_regions      = [str(r).strip().lstrip("#") for r in (config.get("known_regions") or []) if str(r).strip()]
+        self._region_scope_tx    = bool(config.get("region_scope_tx", False))
+        self._region_keys: dict  = {}
+        self._region_seen        = collections.Counter()   # heard msg packets per region label
+        self._rebuild_region_keys()
+        # Channel messages an observer (LAN packet-capture node / broker) heard
+        # but our weak-RX radio missed: decrypted with our channel keys and shown
+        # in Messages, after observer_msg_delay_sec, unless by then our radio
+        # heard the same packet (packet hash) or the same sender+text arrived.
+        self._observer_msgs      = bool(config.get("observer_messages", True))
+        self._observer_msg_delay = float(config.get("observer_msg_delay_sec", 20))
+        self._observer_msg_seen: "collections.OrderedDict[str, float]" = collections.OrderedDict()
+        self._recent_rx_text: collections.deque = collections.deque(maxlen=200)  # (sender, body, mono)
+        self._observer_msg_count = 0
         self._contacts_refresh_pending = False   # set when new nodes need name resolution
         self._contacts_last_refresh = 0.0        # monotonic timestamp of last GET_CONTACTS
         self._contacts_min_interval = 600.0      # min seconds between triggered refreshes (10 min)
@@ -516,6 +569,178 @@ class MeshCoreAdapter(Adapter):
     _RF_PAYLOAD_NAMES = ("REQ", "RESPONSE", "TEXT_MSG", "ACK", "ADVERT", "GRP_TXT",
                          "GRP_DATA", "ANON_REQ", "PATH", "TRACE", "MULTIPART", "CONTROL")
 
+    def _rebuild_region_keys(self) -> None:
+        """name -> [keys]. Region names are case-sensitive in the hash, so each
+        name also tries its lower/upper-case spelling when labelling RX."""
+        self._region_keys = {}
+        for name in ([self._region] if self._region else []) + self._known_regions:
+            if name and name not in self._region_keys:
+                self._region_keys[name] = [region_key(v) for v in dict.fromkeys((name, name.lower(), name.upper()))]
+
+    def _packet_region(self, route_type: int, payload_type: int, code0: int, payload: bytes) -> str:
+        """Region label for a raw packet: '' = unscoped (legacy flood / direct
+        without a code), a known region name, or '?XXXX' for a scoped packet
+        whose region we don't know."""
+        if route_type not in (0, 3) or code0 == 0:
+            return ""
+        for name, keys in self._region_keys.items():
+            if any(region_transport_code(k, payload_type, payload) == code0 for k in keys):
+                return name
+        return f"?{code0:04X}"
+
+    _ADVERT_TYPES = ("NONE", "CLI", "REP", "ROOM", "SENS")
+
+    def learn_advert(self, pkt: bytes, source: str = "rf") -> "str | None":
+        """Learn a node's name/type/position from a raw ADVERT packet - one our
+        radio heard (0x88 log) or one an observer reported over MQTT. Our own
+        companion contact list is capped and only holds nodes WE heard advert,
+        so relays seen in paths were often unnamed even though a nearby
+        observer had heard their adverts. Signature-checked (Ed25519 over
+        pubkey+timestamp+app_data) so a forged advert can't rename a node.
+        Returns the node_id learned, or None."""
+        if len(pkt) < 2 or (pkt[0] >> 2) & 0x0F != 0x04:
+            return None
+        off = 1 + (4 if pkt[0] & 0x03 in (0, 3) else 0)
+        if off >= len(pkt):
+            return None
+        hs, pl = (pkt[off] >> 6) + 1, pkt[off] & 0x3F
+        p = pkt[off + 1 + hs * pl:]
+        if len(p) < 101:
+            return None
+        pub, ts, sig, app = p[:32], p[32:36], p[36:100], p[100:]
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+            Ed25519PublicKey.from_public_bytes(pub).verify(sig, pub + ts + app)
+        except Exception:
+            return None
+        flags, o = app[0], 1
+        lat = lon = None
+        if flags & 0x10 and len(app) >= o + 8:
+            la, lo = struct.unpack("<ii", app[o:o + 8])
+            if (la, lo) != (0, 0):
+                lat, lon = la / 1e6, lo / 1e6
+            o += 8
+        o += (2 if flags & 0x20 else 0) + (2 if flags & 0x40 else 0)
+        name = app[o:].split(b"\x00")[0].decode("utf-8", errors="replace").strip() if flags & 0x80 else ""
+        ntype = self._ADVERT_TYPES[flags & 0x0F] if (flags & 0x0F) < len(self._ADVERT_TYPES) else ""
+        node_id = pub[:6].hex().upper()
+        now = datetime.now(timezone.utc)
+        n = self._nodes.get(node_id)
+        if n is None:
+            if not name:
+                return None
+            n = self._nodes[node_id] = MeshNode(node_id=node_id, display_name=name, first_seen=now,
+                                                last_heard=now, name_source="advert", lat=lat, lon=lon)
+            log.info("MeshCore %s: learned %s %r (%s) from %s advert", self.name, ntype, name, node_id, source)
+        else:
+            if name and n.name_source not in ("self_info", "contact") and n.display_name != name:
+                n.display_name, n.name_source = name, "advert"
+            if lat is not None and n.lat is None:
+                n.lat, n.lon = lat, lon
+            n.last_heard = now
+        if name:
+            self._drop_placeholder(name)
+        n.meta.setdefault("pubkey", pub.hex().upper())
+        if ntype and not n.meta.get("node_type"):
+            n.meta["node_type"] = ntype
+        if source != "rf":
+            n.meta["advert_via"] = source
+        return node_id
+
+    def note_observer_packet(self, pkt: bytes, observer: str, pkt_hash: str) -> None:
+        """A GRP_TXT an observer heard. Decided after a delay - see __init__."""
+        if not self._observer_msgs or not pkt_hash or len(pkt) < 2 or (pkt[0] >> 2) & 0x0F != 0x05:
+            return
+        if pkt_hash in self._observer_msg_seen:     # same packet via another relay/observer
+            return
+        self._observer_msg_seen[pkt_hash] = time.monotonic()
+        while len(self._observer_msg_seen) > 500:
+            self._observer_msg_seen.popitem(last=False)
+        asyncio.ensure_future(self._observer_msg_later(pkt, observer, pkt_hash))
+
+    async def _observer_msg_later(self, pkt: bytes, observer: str, pkt_hash: str) -> None:
+        await asyncio.sleep(self._observer_msg_delay)
+        try:
+            from ech.core.packet_compare import registry as _pkt_cmp
+            if _pkt_cmp.heard_locally(pkt_hash):
+                return                              # our radio has it - normal path shows it
+        except Exception:
+            pass
+        await self._observer_msg_now(pkt, observer, pkt_hash)
+
+    async def _observer_msg_now(self, pkt: bytes, observer: str, pkt_hash: str) -> None:
+        route_type, payload_type = pkt[0] & 0x03, (pkt[0] >> 2) & 0x0F
+        off, code0 = 1, 0
+        if route_type in (0, 3):
+            if len(pkt) < 5:
+                return
+            code0 = int.from_bytes(pkt[1:3], "little")
+            off = 5
+        if off >= len(pkt):
+            return
+        hs, hops = (pkt[off] >> 6) + 1, pkt[off] & 0x3F
+        off += 1
+        hashes = [pkt[off + i * hs: off + (i + 1) * hs].hex() for i in range(hops)]
+        payload = pkt[off + hops * hs:]
+        if len(payload) < 19:
+            return
+        plain, ch_idx = None, None
+        for idx, secret in self._channel_keys.items():    # payload = [ch_hash:1][mac:2][aes...]
+            plain = self._try_decrypt_with_key(payload[1:], secret)
+            if plain is not None:
+                ch_idx = idx
+                break
+        if plain is None:
+            return                                  # not one of our channels
+        sender, body = _extract_msg_sender(plain.decode("utf-8", errors="replace"))
+        display = sender or "unknown"
+        echo = self._recent_sent.get(body)
+        if echo is not None:                        # our own message, relayed out to the observer
+            echo[2] += 1
+            if self._router_notify:
+                await self._router_notify(self.name, echo[0], f"heard_{echo[2]}",
+                                          f"heard by observer {observer} ({hops} hop(s))", [])
+            return
+        now_mono = time.monotonic()
+        if any(s == display and b == body and now_mono - t < 300 for s, b, t in self._recent_rx_text):
+            return                                  # radio got it (different packet hash, e.g. resend)
+        if self._rx_max_hops and hops > self._rx_max_hops:
+            self._rx_hop_filtered += 1
+            return
+        named = self._channels.get(ch_idx)
+        ch_name = f"ch{ch_idx}:{named}" if named else f"ch{ch_idx}"
+        raw_data = {"channel_idx": ch_idx, "via_observer": observer, "packet_hash": pkt_hash,
+                    "region": self._packet_region(route_type, payload_type, code0, payload)}
+        if hashes:
+            raw_data["rf_path"] = [h.lower() for h in hashes]
+        self._observer_msg_count += 1
+        self._recent_rx_text.append((display, body, now_mono))
+        await self._enqueue(NormalizedMessage(
+            source_adapter=self.name, source_channel=ch_name,
+            from_id=self._resolve_sender_node_id(display), from_display=display, body=body,
+            timestamp=datetime.now(timezone.utc), hop_count=hops,
+            path=",".join(h.lower() for h in hashes) if hashes else None, raw=raw_data,
+        ))
+        log.info("MeshCore %s: %s msg from %r heard only by observer %s (%d hops)",
+                 self.name, ch_name, display, observer, hops)
+
+    async def apply_region_scope(self) -> None:
+        """Push (or clear) the TX flood scope on the device. Session-only on the
+        radio, so this runs on every connect."""
+        if not self._connected:
+            return
+        if self._region_scope_tx and self._region:
+            await self._send_cmd(bytes([CMD_SET_FLOOD_SCOPE_KEY, 0]) + region_key(self._region))
+            log.info("MeshCore %s: TX flood scope → #%s", self.name, self._region)
+        else:
+            await self._send_cmd(bytes([CMD_SET_FLOOD_SCOPE_KEY, 0]))
+
+    def set_region(self, region: str, known_regions: list, scope_tx: bool) -> None:
+        self._region = (region or "").strip().lstrip("#")
+        self._known_regions = [r.strip().lstrip("#") for r in known_regions if r and r.strip()]
+        self._region_scope_tx = bool(scope_tx)
+        self._rebuild_region_keys()
+
     def _emit_rf_traffic(self, pkt: bytes, snr: float, rssi: int) -> None:
         """Parse a raw OTA packet from LOG_DATA (0x88) and push an 'rf_traffic'
         WS event for the map's live-traffic overlay.
@@ -534,7 +759,10 @@ class MeshCoreAdapter(Adapter):
         route_type = header & 0x03
         payload_type = (header & 0x3C) >> 2
         off = 1
+        code0 = 0
         if route_type in (0, 3):        # TC_* routes carry a 4-byte transport code
+            if len(pkt) >= 5:
+                code0 = int.from_bytes(pkt[1:3], "little")   # [0] = the sender's scope
             off += 4
         if off >= len(pkt):
             return
@@ -552,6 +780,7 @@ class MeshCoreAdapter(Adapter):
         origin_id = None
         if payload_type == 0x04 and len(payload) >= 36:    # ADVERT: pubkey(32)+ts(4)+…
             origin_id = payload[:6].hex().upper()
+            self.learn_advert(pkt, "rf")
 
         # Passive topology learning happens on EVERY heard path — before the
         # WS rate gate, which only limits what browsers see.
@@ -586,6 +815,10 @@ class MeshCoreAdapter(Adapter):
         if self._recent_log_data:
             self._recent_log_data[-1]["path"] = [h.lower() for h in hashes]
             self._recent_log_data[-1]["ptype"] = payload_type
+            if payload_type in (0x02, 0x05):       # TEXT_MSG / GRP_TXT: label its region
+                region = self._packet_region(route_type, payload_type, code0, payload)
+                self._recent_log_data[-1]["region"] = region
+                self._region_seen[region or "none"] += 1
 
         # Nothing the map could draw → don't spam the WS. Rate-cap the rest so
         # a busy mesh can't flood browser clients (worst case ~5 events/sec).
@@ -1202,6 +1435,11 @@ class MeshCoreAdapter(Adapter):
         # so self._connected was still False and couldn't push it at the time).
         if self._base_lat is not None and self._base_lon is not None:
             await self.push_advert_location(self._base_lat, self._base_lon)
+            await asyncio.sleep(0.1)
+
+        # 3.6 Region scope for our own floods (session-only on the radio)
+        if self._region_scope_tx and self._region:
+            await self.apply_region_scope()
             await asyncio.sleep(0.1)
 
         # 4. Fetch channel 0-7 info
@@ -2797,9 +3035,7 @@ class MeshCoreAdapter(Adapter):
             # bytes here shifted txt_type/timestamp/text for any relayed (hop>0)
             # message, truncating the start of the text. txt_type always starts at
             # byte 5, per the documented fixed layout above.
-            sane_hops = (path_len_raw & 0x3F) if path_len_raw != 255 else None
-            if sane_hops is not None and sane_hops > 16:
-                sane_hops = None
+            sane_hops = _hop_count(path_len_raw)
             off = 5          # txt_type byte — fixed, no relay-hash bytes to skip
             if len(data) < off + 5:
                 log.debug("MeshCore %s: 0x11 too short after path (%d)", self.name, len(data))
@@ -2815,9 +3051,7 @@ class MeshCoreAdapter(Adapter):
             path_len_raw = data[1]
             # See note in the V3 branch above: no relay-hash bytes are present in
             # this polled/decrypted payload, so txt_type is always at a fixed offset.
-            sane_hops = (path_len_raw & 0x3F) if path_len_raw != 255 else None
-            if sane_hops is not None and sane_hops > 16:
-                sane_hops = None
+            sane_hops = _hop_count(path_len_raw)
             off = 2          # txt_type byte — fixed, no relay-hash bytes to skip
             if len(data) < off + 5:
                 log.debug("MeshCore %s: 0x08 too short after path (%d)", self.name, len(data))
@@ -2894,6 +3128,7 @@ class MeshCoreAdapter(Adapter):
         # OTA packet, so we use SNR proximity (±0.5 dB) to find the right RSSI sample.
         rssi: int | None = None
         rf_path: list | None = None
+        region: str | None = None
         if snr is not None:
             for entry in reversed(self._recent_log_data):
                 if abs(entry["snr"] - snr) < 0.5:
@@ -2904,6 +3139,8 @@ class MeshCoreAdapter(Adapter):
                     ep = entry.get("path")
                     if ep is not None and (sane_hops is None or len(ep) == sane_hops):
                         rf_path = ep
+                        if entry.get("ptype") == 0x05:
+                            region = entry.get("region")
                     break
 
         raw_data: dict = {"channel_idx": ch_idx}
@@ -2915,6 +3152,8 @@ class MeshCoreAdapter(Adapter):
             raw_data["rssi"] = rssi
         if rf_path:
             raw_data["rf_path"] = rf_path
+        if region is not None:
+            raw_data["region"] = region          # '' = unscoped
         if decrypted_ok and decrypt_key_label:
             raw_data["decrypted_with"] = decrypt_key_label
 
@@ -2953,6 +3192,14 @@ class MeshCoreAdapter(Adapter):
                 )
             # Don't also surface the echo as a new inbound message — it's our own
             # text coming back, not a fresh message from someone else.
+            return
+
+        # Remember it even if filtered below, so an observer's copy isn't shown instead
+        self._recent_rx_text.append((display, body_text, time.monotonic()))
+        if self._rx_max_hops and sane_hops is not None and sane_hops > self._rx_max_hops:
+            self._rx_hop_filtered += 1
+            log.debug("MeshCore %s: dropped ch%d msg from %r — %d hops > rx_max_hops %d",
+                      self.name, ch_idx, display, sane_hops, self._rx_max_hops)
             return
 
         msg = NormalizedMessage(
@@ -3007,9 +3254,7 @@ class MeshCoreAdapter(Adapter):
             ts_raw = struct.unpack("<I", data[8:12])[0]
             text = data[12:].decode("utf-8", errors="replace")
 
-        sane_hops = (path_len_raw & 0x3F) if path_len_raw != 255 else None
-        if sane_hops is not None and sane_hops > 16:
-            sane_hops = None
+        sane_hops = _hop_count(path_len_raw)
 
         now = datetime.now(timezone.utc)
         extracted_name, body_text = _extract_msg_sender(text)
@@ -3255,6 +3500,12 @@ class MeshCoreAdapter(Adapter):
             ],
             "node_count": len(self._nodes),
             "max_hops": self._max_hops,
+            "rx_max_hops": self._rx_max_hops,
+            "rx_hop_filtered": self._rx_hop_filtered,
+            "region": self._region,
+            "known_regions": self._known_regions,
+            "region_scope_tx": self._region_scope_tx,
+            "region_seen": dict(self._region_seen),
             "discovery_interval": self._discovery_interval,
             "advert_interval": self._advert_interval,
             "last_discovery_ago": round(time.monotonic() - self._last_discovery_ts) if self._last_discovery_ts else None,

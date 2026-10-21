@@ -57,6 +57,7 @@ input:focus,select:focus{outline:none;border-color:var(--blue)}
 .empty{color:var(--dim);padding:18px 8px}
 #toast{position:fixed;bottom:16px;right:16px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:11px;display:none;z-index:10;max-width:420px}
 .spark{vertical-align:middle}
+.maplink{text-decoration:none;margin-left:4px;font-size:12px;opacity:.75}.maplink:hover{opacity:1}
 #pane-objects.active{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
 #obj-side{position:sticky;top:0}
 #obj-side .form{grid-template-columns:1fr;max-width:none;margin-bottom:0}
@@ -286,13 +287,20 @@ async function loadMessages() {
     || '<tr><td colspan="4" class="empty">No APRS messages yet.</td></tr>';
 }
 
+// "show on map" links: the map draws the item wherever it is (not limited to
+// the map's APRS area), objects with their multiline polygon if they have one.
+function mapLink(href, title) { return `<a class="maplink" href="${href}" target="_blank" rel="noopener" title="${esc(title)}">🗺</a>`; }
+function pinHref(lat, lon, label, info) {
+  return '/map?' + new URLSearchParams({lat, lon, zoom: 12, label, ...(info ? {info} : {})});
+}
+
 // ── bulletins
 async function loadBulletins() {
   const d = await api('/api/aprs/bulletins');
   o('bl-list').innerHTML = (d.bulletins || []).map(b => `<tr><td>${hhmm(b.ts)}</td><td>${esc(b.from)}</td><td>${esc(b.id)}</td><td>${esc(b.text)}</td><td class="dim">${esc(b.adapter)}</td></tr>`).join('')
     || '<tr><td colspan="5" class="empty">No BLN bulletins heard (APRS-IS only passes bulletins from stations your filter covers).</td></tr>';
   o('nws-list').innerHTML = (d.nws || []).map(b => `<tr><td>${esc((b.received || '').slice(11, 19))}Z</td><td><span class="pill ${b.kind === 'WARN' ? 'bad' : b.kind === 'WATCH' ? 'warn' : ''}">${esc(b.kind)}</span></td>
-    <td>${esc(b.event)}</td><td>${esc(b.office)}</td><td class="muted">${esc(b.ugcs.join(' '))}</td><td>${b.expires ? esc(new Date(b.expires).toLocaleString()) : ''}</td></tr>`).join('')
+    <td>${esc(b.event)} ${b.ugcs.length ? mapLink('/map?nws=' + encodeURIComponent(b.id), 'Show the affected zones on the map') : ''}</td><td>${esc(b.office)}</td><td class="muted">${esc(b.ugcs.join(' '))}</td><td>${b.expires ? esc(new Date(b.expires).toLocaleString()) : ''}</td></tr>`).join('')
     || '<tr><td colspan="6" class="empty">No NWS bulletins yet.</td></tr>';
 }
 
@@ -335,7 +343,7 @@ async function loadObjects() {
     const res = ob.last_result || {};
     const via = ob.adapters.map(n => `<span class="pill ${res[n] === false ? 'bad' : (_adapters.find(a => a.name === n) || {}).kind || ''}">${esc(n)}</span>`).join(' ');
     return `<tr><td>${symHtml(ob.symbol)}</td><td>${esc(ob.name)}${ob.follow ? ' <span class="pill" title="follows node position">follow</span>' : ''}</td>
-      <td>${fmtPos(ob.lat, ob.lon)}</td><td>${esc(ob.comment)}</td><td>${ob.interval_min}m</td><td>${via}</td><td>${ago(ob.last_sent)} ago</td>
+      <td>${fmtPos(ob.lat, ob.lon)} ${ob.lat != null ? mapLink(pinHref(ob.lat, ob.lon, ob.name, ob.comment), 'Show on map') : ''}</td><td>${esc(ob.comment)}</td><td>${ob.interval_min}m</td><td>${via}</td><td>${ago(ob.last_sent)} ago</td>
       <td style="white-space:nowrap"><button onclick="editObject('${esc(ob.name).replace(/'/g, "\\'")}')">Edit</button> <button class="danger" onclick="killObject('${esc(ob.name).replace(/'/g, "\\'")}')">Kill</button></td></tr>`;
   }).join('') || '<tr><td colspan="8" class="empty">You have no active objects.</td></tr>';
   o('own-count').textContent = _own.length ? `(${_own.length})` : '';
@@ -352,7 +360,8 @@ function renderHeard() {
   o('h-stat').innerHTML = `<b>${live}</b> live · <b>${killed}</b> killed · <b>${_own.length}</b> mine` + (rows.length !== _heard.length ? ` · showing <b>${rows.length}</b>` : '');
   o('obj-list').innerHTML = rows.map(ob => `<tr><td>${symHtml(ob.symbol)}</td><td>${esc(ob.name)} <span class="dim">${ob.kind === 'item' ? 'item' : ''}</span>${ob.mine ? ' <span class="pill ok">mine</span>' : ''}</td>
     <td>${esc(ob.owner)}</td><td>${ob.alive ? '<span class="pill ok">LIVE</span>' : '<span class="pill">killed</span>'}</td>
-    <td>${fmtPos(ob.lat, ob.lon)}</td><td>${esc(ob.comment)}</td><td>${ago(ob.ts)} ago</td></tr>`).join('')
+    <td>${fmtPos(ob.lat, ob.lon)} ${ob.lat != null ? mapLink('/map?aprs_obj=' + encodeURIComponent(ob.name), ob.shape ? 'Show its area on the map' : 'Show on map') : ''}</td>
+    <td>${ob.shape ? `<span class="pill" style="border-color:${esc(ob.shape.color)};color:${esc(ob.shape.color)}" title="Multiline object — draws a ${ob.shape.geometry.type === 'Polygon' ? 'polygon' : 'line'} on the map">${ob.shape.geometry.type === 'Polygon' ? '⬠ area' : '⟋ line'}${ob.shape.label ? ' · ' + esc(ob.shape.label) : ''}</span> ` : ''}${esc(ob.comment)}</td><td>${ago(ob.ts)} ago</td></tr>`).join('')
     || '<tr><td colspan="7" class="empty">' + (_heard.length ? 'No objects match.' : 'No objects heard in the last 6 hours.') + '</td></tr>';
 }
 
@@ -451,7 +460,8 @@ async function loadWeather() {
   o('wx-list').innerHTML = (d.stations || []).map(s => {
     const w = s.wx || {};
     const dir = w.wind_direction != null ? COMPASS[Math.round(w.wind_direction / 22.5) % 16] : '';
-    return `<tr><td>${esc(s.call)}</td><td><b>${f1(cToF(w.temperature))}°F</b> <span class="dim">${f1(w.temperature, 1)}°C</span></td><td>${spark(s.history || [])}</td>
+    const info = [w.temperature != null ? f1(cToF(w.temperature)) + '°F' : '', w.humidity != null ? w.humidity + '% RH' : '', dir ? `wind ${dir} ${f1(msToMph(w.wind_speed))} mph` : ''].filter(Boolean).join(' · ');
+    return `<tr><td>${esc(s.call)} ${s.lat != null ? mapLink(pinHref(s.lat, s.lon, s.call + ' (APRS weather)', info), 'Show station on map') : ''}</td><td><b>${f1(cToF(w.temperature))}°F</b> <span class="dim">${f1(w.temperature, 1)}°C</span></td><td>${spark(s.history || [])}</td>
       <td>${w.humidity != null ? w.humidity + '%' : '—'}</td><td>${dir} ${f1(msToMph(w.wind_speed))} mph</td><td>${f1(msToMph(w.wind_gust))} mph</td>
       <td>${w.pressure != null ? (w.pressure * 0.02953).toFixed(2) + ' inHg <span class="dim">' + f1(w.pressure, 1) + ' hPa</span>' : '—'}</td>
       <td>${f1(w.rain_1h != null ? w.rain_1h / 25.4 : null, 2)} / ${f1(w.rain_24h != null ? w.rain_24h / 25.4 : null, 2)} in</td><td>${ago(s.ts)} ago</td></tr>`;

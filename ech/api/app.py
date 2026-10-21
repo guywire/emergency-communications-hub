@@ -1337,6 +1337,93 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         log.info("MeshCore %s: max_hops set to %d", adapter_name, hops)
         return {"status": "ok", "max_hops": hops}
 
+    @app.post("/api/adapters/{adapter_name}/rx_max_hops")
+    async def set_rx_max_hops(adapter_name: str, request: Request):
+        """Drop inbound MeshCore channel messages relayed over more than N hops
+        (0 = off). Applied live and saved to config.yaml so it survives restarts."""
+        data = await request.json()
+        adapter = router._adapters.get(adapter_name)
+        if not adapter:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Adapter '{adapter_name}' not found")
+        if not hasattr(adapter, '_rx_max_hops'):
+            return {"status": "error", "detail": "Adapter does not support rx_max_hops"}
+        try:
+            hops = int(data.get("rx_max_hops", 0))
+        except (ValueError, TypeError):
+            return {"status": "error", "detail": "rx_max_hops must be an integer"}
+        if not 0 <= hops <= 16:
+            return {"status": "error", "detail": "rx_max_hops must be 0–16"}
+        adapter._rx_max_hops = hops
+        log.info("MeshCore %s: rx_max_hops set to %d", adapter_name, hops)
+
+        import yaml
+        cfg_path = Path("/etc/ech/config.yaml")
+        if not cfg_path.exists():
+            cfg_path = Path("config.yaml")
+        saved = False
+        try:
+            with open(cfg_path, encoding="utf-8") as f:
+                full_cfg = yaml.safe_load(f) or {}
+            adapter_cfg = next((a for a in full_cfg.get("adapters", []) if a.get("name") == adapter_name), None)
+            if adapter_cfg is not None:
+                adapter_cfg["rx_max_hops"] = hops
+                atomic_write_yaml(cfg_path, full_cfg)
+                saved = True
+        except (OSError, yaml.YAMLError) as exc:
+            log.warning("rx_max_hops %s: not saved to %s: %s", adapter_name, cfg_path, exc)
+        return {"status": "ok", "rx_max_hops": hops, "saved": saved}
+
+    @app.post("/api/adapters/{adapter_name}/region")
+    async def set_region(adapter_name: str, request: Request):
+        """MeshCore region: our home region (labels heard packets, optionally
+        scopes our TX floods) + other region names to recognise. Applied live
+        and saved to config.yaml."""
+        import re
+        data = await request.json()
+        adapter = router._adapters.get(adapter_name)
+        if not adapter:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Adapter '{adapter_name}' not found")
+        if not hasattr(adapter, 'set_region'):
+            return {"status": "error", "detail": "Adapter does not support regions"}
+        name_ok = re.compile(r"^#?[A-Za-z0-9\-_.$]{1,29}$")
+        region = str(data.get("region", "") or "").strip()
+        known = data.get("known_regions", [])
+        if isinstance(known, str):
+            known = known.split(",")
+        known = [str(k).strip() for k in known if str(k).strip()]
+        for n in ([region] if region else []) + known:
+            if not name_ok.match(n):
+                return {"status": "error", "detail": f"bad region name {n!r} (letters, digits, - _ . only, max 29)"}
+        scope_tx = bool(data.get("region_scope_tx", False))
+        adapter.set_region(region, known, scope_tx)
+        try:
+            await adapter.apply_region_scope()
+        except Exception as exc:
+            log.warning("set_region %s: scope push failed: %s", adapter_name, exc)
+        log.info("MeshCore %s: region=%r known=%r scope_tx=%s", adapter_name, region, known, scope_tx)
+
+        import yaml
+        cfg_path = Path("/etc/ech/config.yaml")
+        if not cfg_path.exists():
+            cfg_path = Path("config.yaml")
+        saved = False
+        try:
+            with open(cfg_path, encoding="utf-8") as f:
+                full_cfg = yaml.safe_load(f) or {}
+            adapter_cfg = next((a for a in full_cfg.get("adapters", []) if a.get("name") == adapter_name), None)
+            if adapter_cfg is not None:
+                adapter_cfg["region"] = adapter._region
+                adapter_cfg["known_regions"] = adapter._known_regions
+                adapter_cfg["region_scope_tx"] = scope_tx
+                atomic_write_yaml(cfg_path, full_cfg)
+                saved = True
+        except (OSError, yaml.YAMLError) as exc:
+            log.warning("region %s: not saved to %s: %s", adapter_name, cfg_path, exc)
+        return {"status": "ok", "region": adapter._region, "known_regions": adapter._known_regions,
+                "region_scope_tx": scope_tx, "saved": saved}
+
     # ── Channels ──────────────────────────────────────────────────────────
 
     @app.get("/api/channels")
@@ -2779,6 +2866,32 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         from ech.core import aprs_wx
         return {"bulletins": sorted(hub.bulletins.values(), key=lambda b: -b["ts"]),
                 "nws": aprs_wx.store.active()}
+
+    @app.get("/api/aprs/nws_shape")
+    async def aprs_nws_shape(id: str = ""):
+        """Outline of one APRS NWS bulletin (by its id) for the map's "show on
+        map" link — anywhere in the country, not just the hub's area: missing
+        zone shapes are fetched from api.weather.gov now (and cached)."""
+        from ech.core import aprs_wx
+        b = next((x for x in aprs_wx.store.active() if x["id"] == id), None)
+        if b is None:
+            return {"status": "error", "detail": "bulletin not found (expired?)"}
+        if wx_service and wx_service._client:
+            try:
+                await wx_service.zones.ensure(b["ugcs"], wx_service._client, max_fetch=40)
+            except Exception as exc:
+                log.debug("aprs_nws_shape: zone fetch failed: %s", exc)
+        polys, missing = [], []
+        for u in b["ugcs"]:
+            g = wx_service.zones.get(u) if wx_service else None
+            if not g:
+                missing.append(u)
+            elif g.get("type") == "Polygon":
+                polys.append(g["coordinates"])
+            elif g.get("type") == "MultiPolygon":
+                polys.extend(g["coordinates"])
+        return {"status": "ok", "bulletin": b, "missing": missing,
+                "geometry": {"type": "MultiPolygon", "coordinates": polys} if polys else None}
 
     @app.get("/api/aprs/messages")
     async def aprs_messages(limit: int = Query(200, le=1000)):

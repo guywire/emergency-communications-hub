@@ -87,6 +87,11 @@ class LetsMeshCompareAdapter(MQTTAdapter):
         self._packets_compared = 0
         self._paths_merged = 0
         self._parse_errors = 0
+        # Learn relay names from observer-heard adverts. Default on for a local
+        # observer broker; turn off for a wide LetsMesh feed, where far-away
+        # nodes would add 1-byte hash collisions to path resolution.
+        self._learn_adverts = bool(config.get("learn_adverts", True))
+        self._adverts_learned = 0
         # origin hash-prefix -> last-seen monotonic time; a rolling window of
         # distinct transmitting nodes LetsMesh has reported hearing.
         self._seen_origins: dict[str, float] = {}
@@ -137,6 +142,30 @@ class LetsMeshCompareAdapter(MQTTAdapter):
                 except ValueError:
                     pass
 
+        # Adverts this observer heard name relays our own radio never heard
+        # advertise — the unresolved hashes in message paths.
+        if self._learn_adverts and str(data.get("packet_type")) == "4" and data.get("raw"):
+            target = self._target_adapter()
+            if target is not None and hasattr(target, "learn_advert"):
+                try:
+                    if target.learn_advert(bytes.fromhex(str(data["raw"])), f"observer:{data.get('origin') or '?'}"):
+                        self._adverts_learned += 1
+                except ValueError:
+                    pass
+
+        # Channel messages this observer heard -> Messages pane, if our radio missed them
+        if str(data.get("packet_type")) == "5" and data.get("raw"):
+            target = self._target_adapter()
+            if target is not None and hasattr(target, "note_observer_packet"):
+                try:
+                    from ech.core.meshcore_packet import packet_hash
+                    from ech.core.packet_compare import registry as _pkt_cmp
+                    if not _pkt_cmp.is_own(str(data.get("origin_id") or "")):
+                        raw = bytes.fromhex(str(data["raw"]))
+                        target.note_observer_packet(raw, str(data.get("origin") or "observer"), packet_hash(raw))
+                except ValueError:
+                    pass
+
         path = data.get("path")
         if path:
             # meshcore-packet-capture joins hops with "," (format_packet_data);
@@ -169,10 +198,10 @@ class LetsMeshCompareAdapter(MQTTAdapter):
             known = getattr(target, "_direct_hashes", set()) | set(getattr(target, "_rf_adjacency", {}))
             unknown = recent_origins - known
         log.info(
-            "Observer compare %s: %d packet(s) processed (%d path(s) merged into %s's topology), "
+            "Observer compare %s: %d packet(s) processed (%d path(s) merged into %s's topology, %d advert name(s) learned), "
             "%d distinct node(s) reported by observers in the last %ds, %d not yet in local topology",
             self.name, self._packets_seen, self._paths_merged,
-            self._target_name or "?", len(recent_origins), self._window_sec, len(unknown),
+            self._target_name or "?", self._adverts_learned, len(recent_origins), self._window_sec, len(unknown),
         )
 
     def _health_detail(self) -> dict:
@@ -182,6 +211,7 @@ class LetsMeshCompareAdapter(MQTTAdapter):
             "packets_seen": self._packets_seen,
             "packets_compared": self._packets_compared,
             "paths_merged": self._paths_merged,
+            "adverts_learned": self._adverts_learned,
             "parse_errors": self._parse_errors,
             "distinct_origins_seen": len(self._seen_origins),
             "mode": "letsmesh-compare (no messages added to feed)",

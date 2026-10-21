@@ -212,6 +212,11 @@ adapters:
 #     # (2026-08-02): zero response to any ASCII CLI command over serial to this
 #     # companion, even right after a hardware power cycle.
 #     max_hops: 0              # outgoing message hop limit (0 = device default; 3 = local mesh).
+#     rx_max_hops: 0           # server-side DROP of inbound channel msgs over N hops - also stops bot/bridges seeing them
+#                              #   (0 = off; DMs pass). For just hiding them, use the Messages page hop filter instead.
+#     region: ""               # home MeshCore region, e.g. RKD (labels heard msgs; the '#' is implicit).
+#     known_regions: []        # other region names to recognise on heard msgs (scoped packets only match known names).
+#     region_scope_tx: false   # scope OUR floods to `region` — repeaters without that region won't forward them.
 #     channel_keys:            # optional: per-channel PSKs for decrypting received messages.
 #       - idx: 0               #   channel index (0 = Public)
 #         key: "AQ=="          #   base64 OR 32-hex-char key. "AQ==" is the MeshCore/Meshtastic default PSK.

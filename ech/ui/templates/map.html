@@ -183,14 +183,66 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   if (!isNaN(lat) && !isNaN(lon)) {
     const zoom = parseInt(p.get('zoom') || '14', 10);
     map.setView([lat, lon], zoom);
-    // Temporary pulsing pin that fades after 8 s
+    const label = p.get('label');
     const pin = L.circleMarker([lat, lon], {
       radius: 10, color: '#f0883e', fillColor: '#f0883e',
       fillOpacity: 0.5, weight: 2,
     }).addTo(map);
-    setTimeout(() => map.removeLayer(pin), 8000);
+    if (label) {
+      // Labelled pin (APRS page "show on map") stays until clicked closed
+      pin.bindPopup(`<div class="node-popup"><div class="node-name">${esc(label)}</div>${p.get('info') ? `<div class="node-stat">${esc(p.get('info'))}</div>` : ''}<div class="node-stat" style="color:var(--muted)">${lat.toFixed(4)}, ${lon.toFixed(4)}</div></div>`).openPopup();
+      pin.on('popupclose', () => map.removeLayer(pin));
+    } else {
+      setTimeout(() => map.removeLayer(pin), 8000);   // temporary pulsing pin
+    }
   }
+  if (p.get('aprs_obj')) _showAprsObject(p.get('aprs_obj'));
+  if (p.get('nws')) _showAprsNws(p.get('nws'));
 })();
+
+// APRS page "show on map": one heard object (its multiline polygon if it has
+// one, else a pin), wherever it is - the APRS-IS filter area doesn't matter.
+async function _showAprsObject(name) {
+  try {
+    const d = await fetch('/api/aprs/objects').then(r => r.json());
+    const ob = [...(d.objects || []), ...(d.own || [])].find(x => x.name === name);
+    if (!ob || ob.lat == null) { toast(`APRS object ${name} not found (expired?)`); return; }
+    const popup = `<div class="node-popup"><div class="node-name">📍 ${esc(ob.name)}</div>
+      ${ob.owner ? `<div class="node-stat">set by ${esc(ob.owner)}${ob.alive === false ? ' · killed' : ''}</div>` : ''}
+      ${ob.shape && ob.shape.label ? `<div class="node-stat" style="color:${ob.shape.color}">${esc(ob.shape.label)}</div>` : ''}
+      ${ob.comment ? `<div class="node-stat">${esc(ob.comment)}</div>` : ''}</div>`;
+    const pin = L.circleMarker([ob.lat, ob.lon], {radius: 8, color: '#f0883e', fillColor: '#f0883e', fillOpacity: 0.5, weight: 2})
+      .bindPopup(popup).addTo(map);
+    if (ob.shape && ob.shape.geometry) {
+      const c = ob.shape.color || '#b083f0';
+      const shp = L.geoJSON(ob.shape.geometry, {style: {color: c, weight: 2, dashArray: ob.shape.dash || null,
+        fillColor: c, fillOpacity: ob.shape.geometry.type === 'Polygon' ? 0.12 : 0}}).bindPopup(popup).addTo(map);
+      map.fitBounds(shp.getBounds().extend([ob.lat, ob.lon]), {padding: [40, 40]});
+    } else {
+      map.setView([ob.lat, ob.lon], 13);
+    }
+    pin.openPopup();
+  } catch (e) { toast('Could not load APRS object: ' + e.message); }
+}
+
+// APRS page "show on map" for an NWS bulletin: its zone outlines.
+async function _showAprsNws(id) {
+  try {
+    const d = await fetch('/api/aprs/nws_shape?id=' + encodeURIComponent(id)).then(r => r.json());
+    if (d.status !== 'ok') { toast(d.detail || 'Bulletin not found'); return; }
+    const b = d.bulletin;
+    if (!d.geometry) { toast(`No outline available for ${b.ugcs.join(' ')} (zone shapes couldn't be fetched)`); return; }
+    const layer = L.geoJSON(d.geometry, {style: {color: '#b083f0', weight: 2, dashArray: '2 5', fillColor: '#b083f0', fillOpacity: 0.12}})
+      .bindPopup(`<div class="node-popup"><div class="node-name">⛈ ${esc(b.event)} (${esc(b.kind)})</div>
+        <div class="node-stat">${esc(b.office)} · from ${esc(b.from)}</div>
+        <div class="node-stat">${esc(b.ugcs.join(' '))}</div>
+        ${b.expires ? `<div class="node-stat">Expires: ${esc(new Date(b.expires).toLocaleString())}</div>` : ''}
+        ${d.missing.length ? `<div class="node-stat" style="color:var(--muted)">no outline for ${esc(d.missing.join(' '))}</div>` : ''}</div>`)
+      .addTo(map);
+    map.fitBounds(layer.getBounds(), {padding: [40, 40]});
+    layer.openPopup();
+  } catch (e) { toast('Could not load bulletin outline: ' + e.message); }
+}
 
 // ── Layers dropdown (replaces the old always-visible row of filter buttons) ──
 function toggleLayersMenu(evt) {

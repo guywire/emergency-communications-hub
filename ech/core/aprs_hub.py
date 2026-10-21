@@ -122,6 +122,46 @@ def parse_item(info: str) -> dict | None:
             "symbol_table": table, "symbol": code, "comment": comment.strip()}
 
 
+# APRS multiline objects (aprs-is.net/WX/MultilineProtocol.aspx): WXSVR /
+# SPCSVR draw warning and watch boxes as an object whose comment ends in
+# " }" + line type + shape + scale + lat/lon offset pairs [+ "{seq"].
+# Offsets are relative to the object position, north and WEST positive.
+_MULTILINE_RE = re.compile(r"\s?\}([a-l])([01])([!-z])((?:[!-z][!-z])+)(\{[0-9A-Za-z]{0,5})?\s*$")
+_LINE_TYPES = {
+    "a": ("#f85149", "", "Tornado Warning"), "b": ("#f85149", "6 4", "Tornado Watch"),
+    "c": ("#f85149", "2 4", ""), "d": ("#e3b341", "", "Severe Thunderstorm Warning"),
+    "e": ("#e3b341", "6 4", "Severe Thunderstorm Watch"), "f": ("#e3b341", "2 4", ""),
+    "g": ("#58a6ff", "", "Test Warning"), "h": ("#58a6ff", "6 4", "Test Watch"),
+    "i": ("#58a6ff", "2 4", ""), "j": ("#3fb950", "", ""),
+    "k": ("#3fb950", "6 4", "Mesoscale Discussion"), "l": ("#3fb950", "2 4", ""),
+}
+
+
+def parse_multiline(comment: str, lat: float | None, lon: float | None) -> tuple[dict | None, str]:
+    """(GeoJSON-ish shape or None, comment with the multiline part removed)."""
+    m = _MULTILINE_RE.search(comment or "")
+    if not m or lat is None or lon is None:
+        return None, comment
+    line, shape, scale_c, pairs = m.group(1), m.group(2), m.group(3), m.group(4)
+    scale = 10 ** ((ord(scale_c) - 33) / 20) * 0.0001
+    pts = []
+    for i in range(0, len(pairs), 2):
+        la = lat + (ord(pairs[i]) - 78) * scale
+        lo = lon - (ord(pairs[i + 1]) - 78) * scale
+        if not (-90 <= la <= 90 and -180 <= lo <= 180):
+            return None, comment
+        pts.append([round(lo, 5), round(la, 5)])
+    if len(pts) < 2:
+        return None, comment
+    color, dash, label = _LINE_TYPES[line]
+    if shape == "0":
+        geom = {"type": "Polygon", "coordinates": [pts + [pts[0]]]}
+    else:
+        geom = {"type": "LineString", "coordinates": pts}
+    return ({"geometry": geom, "line": line, "color": color, "dash": dash, "label": label},
+            comment[:m.start()].rstrip())
+
+
 def _summary(p: dict) -> str:
     fmt = p.get("format", "")
     if fmt == "message":
@@ -238,12 +278,15 @@ class AprsHub:
             return
         alive = p.get("alive", True)
         prev = self.objects.get(name)
+        lat = p.get("latitude", prev and prev.get("lat"))
+        lon = p.get("longitude", prev and prev.get("lon"))
+        shape, comment = parse_multiline((p.get("comment") or "").strip(), lat, lon)
         self.objects[name] = {
             "name": name, "kind": kind, "owner": src, "alive": alive,
-            "lat": p.get("latitude", prev and prev.get("lat")),
-            "lon": p.get("longitude", prev and prev.get("lon")),
+            "lat": lat, "lon": lon,
             "symbol": (p.get("symbol_table") or "/")[:1] + (p.get("symbol") or ".")[:1],
-            "comment": (p.get("comment") or "").strip()[:80],
+            "comment": comment[:80],
+            "shape": shape or (prev and prev.get("shape")),
             "ts": now, "adapter": adapter, "mine": name in self.own_objects,
         }
 
