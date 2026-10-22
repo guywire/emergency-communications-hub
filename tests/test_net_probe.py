@@ -55,12 +55,31 @@ def test_hop_location(host, expected):
     assert hop_location(host) == expected
 
 
-def test_path_signature_changes_with_route():
+def test_path_signature_ignores_ecmp_but_not_city_changes():
     a = parse_traceroute(BOSTON)
-    b = [dict(h) for h in a]
-    b[3]["ip"] = "38.104.52.42"
-    assert path_signature(a) and path_signature(a) != path_signature(b)
+    ecmp = [dict(h) for h in a]
+    ecmp[3]["ip"] = "38.104.52.42"           # load-balanced sibling router
+    assert path_signature(a) == path_signature(ecmp)
+    via_mtl = [dict(h) for h in a]
+    via_mtl.insert(4, {"n": 5, "host": "be2090.rcr21.ymq02.atlas.cogentco.com", "ip": "154.54.45.118",
+                       "rtt": 15.1, "city": "Montreal", "country": "CA"})
+    assert path_signature(a) != path_signature(via_mtl)
+    assert path_signature(a, "yul") != path_signature(a, "iad")   # Google site is part of it
     assert path_signature([]) == ""
+
+
+def test_google_dns_site_lookup():
+    from ech.core.net_probe import google_site_for, parse_google_locations, site_city
+    # Shape of `dig +short TXT locations.publicdns.goog` (live 2026-10-21)
+    txt = '"34.64.0.0/24 icn" "172.217.43.0/26 yul" "172.217.45.0/25 yul" "172.253.238.128/25 yul" ' \
+          '"172.253.8.0/25 iad" "2607:f8b0:4020::/48 yul"'
+    nets = parse_google_locations(txt)
+    assert len(nets) == 6
+    assert google_site_for(["172.217.45.17", "172.253.238.157", "172.217.43.27"], nets) == "yul"
+    assert google_site_for(["172.253.8.9"], nets) == "iad"
+    assert google_site_for(["10.0.0.1", "nonsense"], nets) == ""
+    assert site_city("yul") == ("Montreal", "CA") and site_city("BOS") == ("Boston", "US")
+    assert site_city("cmh") == ("", "")
 
 
 def test_expects_canada_default():
@@ -105,7 +124,8 @@ def test_netprobe_api_sends_hops_only_for_latest_and_changes(tmp_path):
 
     a = parse_traceroute(BOSTON)
     b = [dict(h) for h in a]
-    b[3]["ip"] = "38.104.52.42"
+    b.insert(4, {"n": 5, "host": "be2090.rcr21.ymq02.atlas.cogentco.com", "ip": "154.54.45.118",
+                 "rtt": 15.1, "city": "Montreal", "country": "CA"})
     mk = lambda ts, hops: {"ts": ts, "target": "Boston", "kind": "traceroute",
                            "hops_json": json.dumps(hops), "path_sig": path_signature(hops)}
     rows = [mk("2026-10-21T10:00:00+00:00", a), mk("2026-10-21T10:15:00+00:00", a),
@@ -132,7 +152,12 @@ def test_validate_config():
                                       {"label": "Montreal", "server_id": 16045, "expect_canada": True}]})
     assert ok == {"enabled": True, "interval_min": 30.0, "speedtest_interval_min": 0.0,
                   "targets": [{"label": "Boston", "server_id": 1774},
-                              {"label": "Montreal", "server_id": 16045, "expect_canada": True}]}
+                              {"label": "Montreal", "server_id": 16045, "expect_canada": True}],
+                  "web_checks": []}
+    g = validate_config({"interval_min": 30, "targets": [{"label": "Google DNS", "trace_host": "8.8.8.8", "server_id": ""}],
+                         "web_checks": [{"label": "Maine Archives", "url": "https://digitalarchives.maine.gov/view/288672/sunlit-forest?offset=0&limit=10"}]})
+    assert g["targets"] == [{"label": "Google DNS", "server_id": None, "trace_host": "8.8.8.8"}]
+    assert g["web_checks"][0]["label"] == "Maine Archives"
     bad = [
         {"interval_min": 2, "targets": [{"label": "B", "server_id": 1}]},
         {"interval_min": 30, "speedtest_interval_min": 5, "targets": [{"label": "B", "server_id": 1}]},
@@ -140,6 +165,10 @@ def test_validate_config():
         {"interval_min": 30, "targets": [{"label": "<b>", "server_id": 1}]},
         {"interval_min": 30, "targets": [{"label": "B", "server_id": "x"}]},
         {"interval_min": 30, "targets": [{"label": "B", "server_id": 1}, {"label": "b", "server_id": 2}]},
+        {"interval_min": 30, "targets": [{"label": "B", "trace_host": "-oFoo"}]},      # option injection
+        {"interval_min": 30, "targets": [{"label": "B", "trace_host": "a b"}]},
+        {"interval_min": 30, "targets": [{"label": "B"}], "web_checks": [{"label": "W", "url": "file:///etc/passwd"}]},
+        {"interval_min": 30, "targets": [{"label": "B"}], "web_checks": [{"label": "b", "url": "https://x.org"}]},
     ]
     for b in bad:
         with pytest.raises(ValueError):
@@ -187,3 +216,32 @@ def test_netprobe_config_endpoint_saves_yaml(tmp_path, monkeypatch):
     saved = yaml.safe_load(cfg.read_text())
     assert saved["logging"] == {"level": "INFO"}
     assert saved["network_probe"]["interval_min"] == 45 and saved["network_probe"]["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_web_check_records_timings_and_cloudflare_colo(monkeypatch):
+    svc = NetProbeService({"network_probe": {"web_checks": [{"label": "Archives", "url": "https://example.org/p?x=1"}]}})
+    svc.curl_bin = __file__          # any existing file: _run is stubbed below
+    calls, saved = [], []
+
+    async def fake_run(argv, timeout):
+        calls.append(argv)
+        if argv[-1].endswith("/cdn-cgi/trace"):
+            return 0, "fl=1\nh=example.org\ncolo=YUL\nloc=US\n", ""
+        return 0, json.dumps({"time_namelookup": 0.0145, "time_connect": 0.0201, "time_appconnect": 0.2422,
+                              "time_starttransfer": 0.2542, "time_total": 0.2552, "http_code": 403,
+                              "size_download": 5628}), ""
+
+    class DB:
+        async def insert_net_probe(self, row): saved.append(row)
+
+    monkeypatch.setattr(svc, "_run", fake_run)
+    svc._db = DB()
+    await svc._web_check(svc.web_checks[0])
+    row = saved[0]
+    assert row["kind"] == "web" and row["final_rtt_ms"] == 255.2 and row["ping_ms"] == 254.2
+    assert row["server"] == "Cloudflare YUL (Montreal)" and row["via_canada"] == 1
+    d = json.loads(row["hops_json"])
+    assert d["code"] == 403 and d["dns"] == 14.5 and d["colo"] == "YUL"
+    assert calls[0][-2:] == ["--", "https://example.org/p?x=1"]          # URL never parsed as an option
+    assert calls[1][-1] == "https://example.org/cdn-cgi/trace"

@@ -89,9 +89,18 @@ network_probe:
   interval_min: 30              # traceroute cadence
   speedtest_interval_min: 30    # speed-test cadence (0 = never)
   # speedtest_bin: /opt/ech/bin/speedtest
+  # Each target: traceroute to trace_host (blank = the speed-test server) and a
+  # speed test to server_id (blank = Ookla picks the nearest). Tracing 8.8.8.8
+  # also asks Google which of its DNS sites answered (YUL = Montreal).
   targets:
-    - {label: Boston, server_id: 1774}      # Comcast, Boston MA
-    - {label: Montreal, server_id: 16045}   # Beanfield, Montreal QC (expect_canada: true by default)
+    - {label: Google DNS, trace_host: 8.8.8.8}
+    # - {label: Boston, server_id: 1774}      # Comcast, Boston MA
+    # - {label: Montreal, server_id: 16045}   # Beanfield, Montreal QC (expect_canada: true by default)
+  # Pages timed every run (DNS / connect / TLS / first byte / total). Only the
+  # page itself is fetched; Cloudflare-fronted sites also report which data
+  # centre served them (colo), flagged if Canadian.
+  web_checks: []
+  #  - {label: Maine Archives, url: "https://digitalarchives.maine.gov/view/288672/sunlit-forest?offset=0&limit=10"}
 
 operator:
   callsign: "N0CALL"          # replace with your callsign on the server

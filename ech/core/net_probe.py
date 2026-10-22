@@ -154,12 +154,77 @@ def parse_traceroute(text: str) -> list[dict]:
     return hops
 
 
-def path_signature(hops: list[dict]) -> str:
-    ips = [h["ip"] for h in hops if h["ip"]]
-    return hashlib.sha1(" ".join(ips).encode()).hexdigest()[:12] if ips else ""
+def route_cities(hops: list[dict]) -> list[str]:
+    out: list[str] = []
+    for h in hops:
+        if h["city"] and (not out or out[-1] != h["city"]):
+            out.append(h["city"])
+    return out
+
+
+def path_signature(hops: list[dict], extra: str = "") -> str:
+    """Route identity for change detection. Built from the cities the path
+    passes through, not router IPs: load balancing (ECMP) picks a different
+    sibling router (..52.78 vs ..52.42) from run to run, which isn't a route
+    change. Paths with no named hops fall back to /16 prefixes."""
+    parts = route_cities(hops) or sorted({".".join(h["ip"].split(".")[:2]) for h in hops if h["ip"]})
+    if extra:
+        parts = parts + [extra]
+    return hashlib.sha1(" ".join(parts).encode()).hexdigest()[:12] if parts else ""
+
+
+# ── Google Public DNS site (O170) ─────────────────────────────────────────
+# o-o.myaddr.l.google.com TXT returns the egress IP of the Google resolver
+# that served us; locations.publicdns.goog TXT lists every egress range with
+# its site's airport code (yul = Montreal, iad = Ashburn, ...). Together
+# they say which Google site answers 8.8.8.8 for this connection.
+GOOGLE_DNS_IPS = {"8.8.8.8", "8.8.4.4"}
+
+
+def parse_google_locations(txt: str) -> list[tuple]:
+    import ipaddress
+    tok = txt.replace('"', " ").split()
+    nets = []
+    for i in range(0, len(tok) - 1):
+        if "/" in tok[i] and re.fullmatch(r"[a-z]{3}", tok[i + 1]):
+            try:
+                nets.append((ipaddress.ip_network(tok[i], strict=False), tok[i + 1]))
+            except ValueError:
+                pass
+    return nets
+
+
+def google_site_for(ips: list[str], nets: list[tuple]) -> str:
+    """Most common site code among the resolver egress IPs ('' if unknown)."""
+    import ipaddress
+    from collections import Counter
+    seen = Counter()
+    for ip in ips:
+        try:
+            a = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        for n, code in nets:
+            if a.version == n.version and a in n:
+                seen[code] += 1
+                break
+    return seen.most_common(1)[0][0] if seen else ""
+
+
+def site_city(code: str) -> tuple[str, str]:
+    """(city, country) for an airport-style site code (Google / Cloudflare)."""
+    c = (code or "").lower()
+    if c in _CANADA_CODES:
+        return _CANADA_CODES[c], "CA"
+    if c in _US_CODES:
+        return _US_CODES[c], "US"
+    return "", ""
 
 
 _LABEL_RE = re.compile(r"^[\w .\-]{1,24}$")
+# Must not start with "-": the host is passed to traceroute as an argument
+_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-:]{0,252}$")
+_URL_RE = re.compile(r"^https?://[^\s\"'<>]{1,490}$")
 
 
 def validate_config(data: dict) -> dict:
@@ -176,20 +241,41 @@ def validate_config(data: dict) -> dict:
         label = str(t.get("label", "")).strip()
         if not _LABEL_RE.match(label):
             raise ValueError(f"bad target name {label!r} (letters, digits, space . - only, max 24)")
-        try:
-            sid = int(t.get("server_id"))
-        except (TypeError, ValueError):
-            raise ValueError(f"{label}: server ID must be a number") from None
+        sid = t.get("server_id")
+        if sid in (None, "", "auto"):
+            sid = None
+        else:
+            try:
+                sid = int(sid)
+            except (TypeError, ValueError):
+                raise ValueError(f"{label}: server ID must be a number (or blank for automatic)") from None
         row = {"label": label, "server_id": sid}
+        host = str(t.get("trace_host") or "").strip()
+        if host:
+            if not _HOST_RE.match(host):
+                raise ValueError(f"{label}: trace host must be a hostname or IP address")
+            row["trace_host"] = host
         if "expect_canada" in t:
             row["expect_canada"] = bool(t["expect_canada"])
         targets.append(row)
     if not 1 <= len(targets) <= 6:
         raise ValueError("configure 1–6 targets")
-    if len({t["label"].lower() for t in targets}) != len(targets):
-        raise ValueError("target names must be unique")
+    web = []
+    for w in data.get("web_checks") or []:
+        label = str(w.get("label", "")).strip()
+        url = str(w.get("url", "")).strip()
+        if not _LABEL_RE.match(label):
+            raise ValueError(f"bad web check name {label!r} (letters, digits, space . - only, max 24)")
+        if not _URL_RE.match(url):
+            raise ValueError(f"{label}: URL must start with http:// or https:// (max 500 characters)")
+        web.append({"label": label, "url": url})
+    if len(web) > 4:
+        raise ValueError("configure at most 4 web page checks")
+    labels = [t["label"].lower() for t in targets + web]
+    if len(set(labels)) != len(labels):
+        raise ValueError("target and web check names must be unique")
     return {"enabled": bool(data.get("enabled", False)), "interval_min": interval,
-            "speedtest_interval_min": speed, "targets": targets}
+            "speedtest_interval_min": speed, "targets": targets, "web_checks": web}
 
 
 class NetProbeService:
@@ -202,6 +288,11 @@ class NetProbeService:
         self.traceroute_bin = cfg.get("traceroute_bin") or shutil.which("traceroute") or "/usr/sbin/traceroute"
         self.max_hops = int(cfg.get("max_hops", 24))
         self.targets = [dict(t) for t in (cfg.get("targets") or DEFAULT_TARGETS)]
+        self.web_checks = [dict(w) for w in (cfg.get("web_checks") or [])]
+        self.curl_bin = cfg.get("curl_bin") or shutil.which("curl") or "/usr/bin/curl"
+        self.dig_bin = cfg.get("dig_bin") or shutil.which("dig") or "/usr/bin/dig"
+        self._google_nets: list[tuple] = []
+        self._google_nets_at = 0.0
         self._db = db
         self._task: asyncio.Task | None = None
         self._wake = asyncio.Event()
@@ -221,7 +312,7 @@ class NetProbeService:
         log.info("NetProbe: every %.0f min (speed test every %s) to %s",
                  self.interval_min,
                  f"{self.speedtest_interval_min:.0f} min" if self.speedtest_interval_min > 0 else "never",
-                 ", ".join(t["label"] for t in self.targets))
+                 ", ".join([t["label"] for t in self.targets] + [w["label"] for w in self.web_checks]))
 
     async def stop(self) -> None:
         if self._task:
@@ -239,9 +330,10 @@ class NetProbeService:
         self.speedtest_interval_min = cfg["speedtest_interval_min"]
         old_ids = {t["label"]: t.get("server_id") for t in self.targets}
         self.targets = [dict(t) for t in cfg["targets"]]
+        self.web_checks = [dict(w) for w in cfg.get("web_checks", [])]
         # A new or re-pointed target has a different host to trace
         for t in self.targets:
-            if old_ids.get(t["label"]) != t["server_id"]:
+            if old_ids.get(t["label"]) != t.get("server_id"):
                 self._hosts.pop(t["label"], None)
         self.enabled = cfg["enabled"]
         if self.enabled:
@@ -254,7 +346,8 @@ class NetProbeService:
     def config(self) -> dict:
         return {"enabled": self.enabled, "interval_min": self.interval_min,
                 "speedtest_interval_min": self.speedtest_interval_min,
-                "targets": [dict(t) for t in self.targets]}
+                "targets": [dict(t) for t in self.targets],
+                "web_checks": [dict(w) for w in self.web_checks]}
 
     async def _sleep(self, seconds: float) -> None:
         """Sleep, but wake early when apply_config() changes the schedule."""
@@ -291,6 +384,7 @@ class NetProbeService:
             "traceroute_available": os.path.isfile(self.traceroute_bin),
             "targets": [{"label": t["label"], "expect_canada": self._expects_canada(t)}
                         for t in self.targets],
+            "web_checks": [{"label": w["label"], "url": w["url"]} for w in self.web_checks],
         }
 
     # ── one probe cycle ───────────────────────────────────────────────────
@@ -313,6 +407,8 @@ class NetProbeService:
                     if not self._host_for(t) and do_speed:
                         continue  # learn the host from the speed test, trace after
                     await self._trace(t)
+                for w in self.web_checks:
+                    await self._web_check(w)
                 if do_speed:
                     self._last_speed = time.monotonic()
                     for t in self.targets:
@@ -348,9 +444,10 @@ class NetProbeService:
     async def _speedtest(self, t: dict) -> None:
         now = datetime.now(timezone.utc).isoformat()
         row = {"ts": now, "target": t["label"], "kind": "speedtest"}
-        rc, out, err = await self._run(
-            [self.speedtest_bin, "--accept-license", "--accept-gdpr",
-             "-s", str(t["server_id"]), "-f", "json"], timeout=120)
+        argv = [self.speedtest_bin, "--accept-license", "--accept-gdpr", "-f", "json"]
+        if t.get("server_id"):
+            argv += ["-s", str(t["server_id"])]   # else Ookla picks the nearest server
+        rc, out, err = await self._run(argv, timeout=120)
         res = None
         for line in out.splitlines():
             line = line.strip()
@@ -399,19 +496,24 @@ class NetProbeService:
         else:
             replied = [h for h in hops if h["rtt"] is not None]
             canada = [h for h in hops if h["country"] == "CA"]
+            site = await self._google_site() if host in GOOGLE_DNS_IPS else ""
+            site_c, site_cc = site_city(site)
+            if site:
+                row["server"] = f"Google DNS site {site.upper()}" + (f" ({site_c})" if site_c else "")
+                if site_cc == "CA":
+                    canada = canada or [{"city": site_c}]
             row.update(
                 hops_json=json.dumps(hops),
                 hop_count=len(hops),
                 final_rtt_ms=replied[-1]["rtt"] if replied else None,
                 via_canada=1 if canada else 0,
-                path_sig=path_signature(hops),
+                path_sig=path_signature(hops, site),
             )
             prev = await self._db.last_net_probe(t["label"], "traceroute") if self._db else None
             changed = bool(prev and prev.get("path_sig") and prev["path_sig"] != row["path_sig"])
-            cities = []
-            for h in hops:
-                if h["city"] and (not cities or cities[-1] != h["city"]):
-                    cities.append(h["city"])
+            cities = route_cities(hops)
+            if site:
+                cities.append(row["server"])
             msg = "NetProbe: %s traceroute %d hops, %.1f ms, route %s%s%s"
             args = (t["label"], len(hops), row["final_rtt_ms"] or 0,
                     " → ".join(cities) or "?",
@@ -420,5 +522,78 @@ class NetProbeService:
                 log.warning(msg, *args)
             else:
                 log.info(msg, *args)
+        if self._db:
+            await self._db.insert_net_probe(row)
+
+    async def _google_site(self) -> str:
+        """Airport code of the Google Public DNS site serving us ('' if dig
+        is missing or the lookup fails). The location list is cached a day."""
+        if not os.path.isfile(self.dig_bin):
+            return ""
+        if not self._google_nets or time.monotonic() - self._google_nets_at > 86400:
+            rc, out, _ = await self._run(
+                [self.dig_bin, "+short", "+time=3", "TXT", "locations.publicdns.goog", "@8.8.8.8"], timeout=15)
+            nets = parse_google_locations(out) if rc == 0 else []
+            if nets:
+                self._google_nets, self._google_nets_at = nets, time.monotonic()
+        if not self._google_nets:
+            return ""
+        ips = []
+        for _ in range(3):  # several queries: one site fronts several resolvers
+            rc, out, _ = await self._run(
+                [self.dig_bin, "+short", "+time=3", "TXT", "o-o.myaddr.l.google.com", "@8.8.8.8"], timeout=15)
+            ips += [tok for tok in out.replace('"', " ").split() if re.fullmatch(r"[0-9.]+|[0-9a-fA-F:]*:[0-9a-fA-F:]*", tok)]
+        return google_site_for(ips, self._google_nets)
+
+    async def _web_check(self, w: dict) -> None:
+        """Time one page fetch with curl's phase timers (DNS, connect, TLS,
+        first byte, total). Sites behind Cloudflare also report which edge
+        data centre served us (/cdn-cgi/trace colo=), the routing signal.
+        Only the page document is fetched: a picture a browser loads after a
+        bot check (e.g. Cloudflare "Just a moment...") can't be timed without
+        driving a real browser through that check, which this deliberately
+        doesn't do."""
+        if not os.path.isfile(self.curl_bin):
+            return
+        from urllib.parse import urlsplit
+        now = datetime.now(timezone.utc).isoformat()
+        parts = urlsplit(w["url"])
+        row = {"ts": now, "target": w["label"], "kind": "web", "server_host": parts.hostname or ""}
+        rc, out, err = await self._run(
+            [self.curl_bin, "-s", "-L", "--max-time", "30", "-o", os.devnull,
+             "-A", "Mozilla/5.0 (X11; Linux x86_64) ECH-netprobe",
+             "-w", "%{json}", "--", w["url"]], timeout=40)
+        try:
+            m = json.loads(out[out.index("{"):]) if "{" in out else {}
+        except ValueError:
+            m = {}
+        if not m or not m.get("time_total"):
+            row["error"] = (err.strip() or m.get("errormsg") or f"curl exit {rc}")[-300:]
+            log.warning("NetProbe: %s page check failed: %s", w["label"], row["error"])
+        else:
+            def ms(k):
+                return round(float(m.get(k) or 0) * 1000, 1)
+            detail = {"dns": ms("time_namelookup"), "connect": ms("time_connect"),
+                      "tls": ms("time_appconnect"), "ttfb": ms("time_starttransfer"),
+                      "total": ms("time_total"), "code": m.get("http_code"),
+                      "bytes": m.get("size_download"), "url": w["url"]}
+            colo = ""
+            rc2, out2, _ = await self._run(
+                [self.curl_bin, "-s", "--max-time", "10", "--",
+                 f"{parts.scheme}://{parts.netloc}/cdn-cgi/trace"], timeout=15)
+            cm = re.search(r"^colo=([A-Z]{3})$", out2, re.M) if rc2 == 0 else None
+            if cm:
+                colo = detail["colo"] = cm.group(1)
+            city, cc = site_city(colo)
+            row.update(
+                ping_ms=detail["ttfb"], final_rtt_ms=detail["total"],
+                hops_json=json.dumps(detail), via_canada=1 if cc == "CA" else 0,
+                server=(f"Cloudflare {colo}" + (f" ({city})" if city else "")) if colo else "",
+            )
+            msg = "NetProbe: %s page HTTP %s in %.0f ms (DNS %.0f, connect %.0f, TLS %.0f, first byte %.0f)%s%s"
+            args = (w["label"], detail["code"], detail["total"], detail["dns"], detail["connect"],
+                    detail["tls"], detail["ttfb"], f", served from {row['server']}" if colo else "",
+                    " — VIA CANADA" if cc == "CA" else "")
+            (log.warning if cc == "CA" and not self._expects_canada(w) else log.info)(msg, *args)
         if self._db:
             await self._db.insert_net_probe(row)

@@ -540,11 +540,25 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
         <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;margin-top:4px">
           <thead><tr style="color:var(--dim);text-align:left">
             <th style="font-weight:500;padding:3px 4px">Name</th>
-            <th style="font-weight:500;padding:3px 4px">Server ID</th>
+            <th style="font-weight:500;padding:3px 4px">Trace host <span style="color:var(--dim)">(blank = speed-test server)</span></th>
+            <th style="font-weight:500;padding:3px 4px">Speed-test server ID <span style="color:var(--dim)">(blank = nearest)</span></th>
             <th style="font-weight:500;padding:3px 4px">Canada expected</th><th></th></tr></thead>
           <tbody id="netprobe-targets"></tbody>
         </table>
         <button class="btn" style="margin-top:6px;padding:3px 10px;font-size:10px" onclick="addNetProbeTarget()">+ Add target</button>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px">
+          Tracing 8.8.8.8 or 8.8.4.4 also asks Google which of its DNS sites answered (e.g. YUL = Montreal) and flags a Canadian one.
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <label>Web page checks <span style="color:var(--dim)">(timed every run: DNS, connect, TLS, first byte, total; Cloudflare sites also report which data centre served them)</span></label>
+        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;margin-top:4px">
+          <thead><tr style="color:var(--dim);text-align:left">
+            <th style="font-weight:500;padding:3px 4px;width:160px">Name</th>
+            <th style="font-weight:500;padding:3px 4px">URL</th><th></th></tr></thead>
+          <tbody id="netprobe-web"></tbody>
+        </table>
+        <button class="btn" style="margin-top:6px;padding:3px 10px;font-size:10px" onclick="addNetProbeWeb()">+ Add page</button>
       </div>
       <button class="btn btn-green" style="margin-top:16px" onclick="saveNetProbeConfig()">Save probe settings</button>
       <button class="btn" style="margin-top:16px;margin-left:8px" onclick="runNetProbeNow()">Run now</button>
@@ -1749,16 +1763,30 @@ async function savePotaConfig() {
 function netProbeRow(t) {
   const tr = document.createElement('tr');
   tr.innerHTML = `<td style="padding:2px 4px"><input type="text" class="np-label" maxlength="24" style="font-family:var(--mono);font-size:11px"></td>
-    <td style="padding:2px 4px"><input type="number" class="np-id" min="1" style="font-family:var(--mono);font-size:11px;width:100px"></td>
+    <td style="padding:2px 4px"><input type="text" class="np-host" maxlength="253" placeholder="e.g. 8.8.8.8" style="font-family:var(--mono);font-size:11px"></td>
+    <td style="padding:2px 4px"><input type="number" class="np-id" min="1" placeholder="nearest" style="font-family:var(--mono);font-size:11px;width:100px"></td>
     <td style="padding:2px 4px"><input type="checkbox" class="np-ca" style="width:auto"></td>
     <td style="padding:2px 4px"><button class="btn" style="padding:2px 8px;font-size:10px" onclick="this.closest('tr').remove()" title="Remove">✕</button></td>`;
   tr.querySelector('.np-label').value = t.label || '';
+  tr.querySelector('.np-host').value = t.trace_host || '';
   tr.querySelector('.np-id').value = t.server_id || '';
   tr.querySelector('.np-ca').checked = t.expect_canada != null ? !!t.expect_canada : /montreal/i.test(t.label || '');
   return tr;
 }
 function addNetProbeTarget() {
   document.getElementById('netprobe-targets').appendChild(netProbeRow({}));
+}
+function netProbeWebRow(w) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td style="padding:2px 4px"><input type="text" class="npw-label" maxlength="24" style="font-family:var(--mono);font-size:11px"></td>
+    <td style="padding:2px 4px"><input type="text" class="npw-url" maxlength="500" placeholder="https://…" style="font-family:var(--mono);font-size:11px"></td>
+    <td style="padding:2px 4px"><button class="btn" style="padding:2px 8px;font-size:10px" onclick="this.closest('tr').remove()" title="Remove">✕</button></td>`;
+  tr.querySelector('.npw-label').value = w.label || '';
+  tr.querySelector('.npw-url').value = w.url || '';
+  return tr;
+}
+function addNetProbeWeb() {
+  document.getElementById('netprobe-web').appendChild(netProbeWebRow({}));
 }
 async function loadNetProbeConfig() {
   const st = document.getElementById('netprobe-status');
@@ -1770,6 +1798,9 @@ async function loadNetProbeConfig() {
   const body = document.getElementById('netprobe-targets');
   body.innerHTML = '';
   (c.targets || []).forEach(t => body.appendChild(netProbeRow(t)));
+  const web = document.getElementById('netprobe-web');
+  web.innerHTML = '';
+  (c.web_checks || []).forEach(w => web.appendChild(netProbeWebRow(w)));
   const parts = [c.enabled ? (c.running ? 'Running now' : 'On') : 'Off'];
   if (c.last_run) parts.push('last run ' + new Date(c.last_run).toLocaleString());
   if (c.speedtest_available === false) parts.push('Ookla speedtest CLI not installed — traceroutes only');
@@ -1779,14 +1810,19 @@ async function loadNetProbeConfig() {
 async function saveNetProbeConfig() {
   const targets = [...document.querySelectorAll('#netprobe-targets tr')].map(tr => ({
     label: tr.querySelector('.np-label').value.trim(),
+    trace_host: tr.querySelector('.np-host').value.trim(),
     server_id: tr.querySelector('.np-id').value.trim(),
     expect_canada: tr.querySelector('.np-ca').checked,
-  })).filter(t => t.label || t.server_id);
+  })).filter(t => t.label || t.server_id || t.trace_host);
+  const web_checks = [...document.querySelectorAll('#netprobe-web tr')].map(tr => ({
+    label: tr.querySelector('.npw-label').value.trim(),
+    url: tr.querySelector('.npw-url').value.trim(),
+  })).filter(w => w.label || w.url);
   const cfg = {
     enabled: document.getElementById('netprobe-enabled').checked,
     interval_min: parseFloat(document.getElementById('netprobe-interval').value) || 30,
     speedtest_interval_min: parseFloat(document.getElementById('netprobe-speed-interval').value) || 0,
-    targets,
+    targets, web_checks,
   };
   const r = await fetch('/api/analytics/netprobe/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)})
     .then(r => r.json()).catch(e => ({status:'error', detail:String(e)}));

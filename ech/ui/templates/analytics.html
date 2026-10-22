@@ -142,7 +142,7 @@ table.hops tr.silent td{color:var(--dim)}
     <div class="net-sub-head">Throughput (Mbps) — solid = download, dashed = upload</div>
     <div class="chart-wrap"><canvas id="net-speed-chart"></canvas></div>
     <div class="legend" id="net-speed-legend"></div>
-    <div class="net-sub-head">Latency (ms) — solid = speed-test ping, dashed = traceroute to the same server</div>
+    <div class="net-sub-head">Latency (ms) — speed-test ping, traceroute end-to-end, and web page load / first byte</div>
     <div class="chart-wrap"><canvas id="net-lat-chart"></canvas></div>
     <div class="legend" id="net-lat-legend"></div>
     <div class="net-sub-head">Latest traceroute</div>
@@ -319,6 +319,9 @@ function renderNetProbe() {
 
   const speeds = rows.filter(r => r.kind === 'speedtest');
   const traces = rows.filter(r => r.kind === 'traceroute');
+  const webs = rows.filter(r => r.kind === 'web');
+  const webChecks = (st.web_checks && st.web_checks.length) ? st.web_checks
+    : [...new Set(webs.map(r => r.target))].map(l => ({label: l, url: ((webs.find(r => r.target === l) || {}).detail || {}).url || ''}));
 
   // Cards: latest result per target
   document.getElementById('net-cards').innerHTML = targets.map(t => {
@@ -336,7 +339,24 @@ function renderNetProbe() {
               <div>${esc(sp.server || '')}${sp.result_url ? ` · <a href="${esc(sp.result_url)}" target="_blank" rel="noopener" style="color:var(--blue)">result</a>` : ''}</div>`
            : '<div>No speed test yet</div>'}
       ${tr ? `<div>Route: ${esc(routeCities(tr.hops) || '?')} · ${tr.hop_count} hops · ${tr.final_rtt_ms != null ? (+tr.final_rtt_ms).toFixed(1) + ' ms' : '—'}</div>` : ''}
+      ${tr && tr.server ? `<div>${tr.via_canada ? '<span style="color:var(--red)">' + esc(tr.server) + '</span>' : esc(tr.server)}</div>` : ''}
       ${ok.length && !expectCA[t.label] ? `<div>Via Canada in ${caCount} of ${ok.length} traceroutes this range</div>` : ''}
+    </div>`;
+  }).join('') + webChecks.map((w, wi) => {
+    const pts = webs.filter(r => r.target === w.label);
+    const last = pts.filter(r => !r.error).slice(-1)[0];
+    const failed = pts.length && pts[pts.length - 1].error;
+    const d = (last && last.detail) || {};
+    const caCount = pts.filter(r => r.via_canada).length;
+    const badge = !last ? '' : `<span class="badge ${last.via_canada ? 'bad' : 'ok'}">${last.via_canada ? 'VIA CANADA' : (last.server ? 'served in US' : 'page check')}</span>`;
+    return `<div class="net-card${last && last.via_canada ? ' alarm' : ''}">
+      <div class="nc-title"><span class="legend-swatch" style="background:${netColor(targets.length + wi)}"></span>${esc(w.label)} ${badge}</div>
+      ${last ? `<div class="nc-big">${Math.round(d.total)} ms page load · first byte ${Math.round(d.ttfb)} ms</div>
+        <div>DNS ${Math.round(d.dns)} · connect ${Math.round(d.connect)} · TLS ${Math.round(d.tls)} ms · HTTP ${esc(d.code)}${d.code == 403 ? ' (bot check — page only, picture not loaded)' : ''}</div>
+        ${last.server ? `<div>Served from ${esc(last.server)}</div>` : ''}
+        ${pts.length > 1 ? `<div>Via Canada in ${caCount} of ${pts.length} checks this range</div>` : ''}`
+        : `<div>${failed ? 'Last check failed: ' + esc(failed) : 'No check yet'}</div>`}
+      <div style="word-break:break-all"><a href="${esc(w.url)}" target="_blank" rel="noopener" style="color:var(--blue)">${esc(w.url)}</a></div>
     </div>`;
   }).join('') || '<div class="empty-state">No probe results yet</div>';
 
@@ -350,6 +370,14 @@ function renderNetProbe() {
       points: sp.filter(r => r.ping_ms != null).map(r => [Date.parse(r.ts), r.ping_ms])});
     latSeries.push({name: `${t.label} trace`, color: netColor(i, true), dash: true,
       points: traces.filter(r => r.target === t.label && r.final_rtt_ms != null).map(r => [Date.parse(r.ts), r.final_rtt_ms])});
+  });
+  webChecks.forEach((w, wi) => {
+    const pts = webs.filter(r => r.target === w.label && !r.error);
+    const c = targets.length + wi;
+    latSeries.push({name: `${w.label} page load`, color: netColor(c),
+      points: pts.filter(r => r.final_rtt_ms != null).map(r => [Date.parse(r.ts), r.final_rtt_ms])});
+    latSeries.push({name: `${w.label} first byte`, color: netColor(c, true), dash: true,
+      points: pts.filter(r => r.ping_ms != null).map(r => [Date.parse(r.ts), r.ping_ms])});
   });
   drawNetChart('net-speed-chart', 'net-speed-legend', 'netspd', spdSeries, ' Mbps');
   drawNetChart('net-lat-chart', 'net-lat-legend', 'netlat', latSeries, ' ms');
@@ -420,7 +448,14 @@ function drawNetChart(canvasId, legendId, key, series, unit) {
     c.onmousemove = c.onmouseleave = null;
     return;
   }
-  const t1 = Date.now(), t0 = t1 - rangeHours * 3600e3;
+  // Time axis: the selected range, but zoomed in to the data while there's
+  // less of it than the range (otherwise a fresh probe's first few samples
+  // are a sliver at the right edge of a 48 h axis).
+  const t1 = Date.now();
+  const first = Math.min(...visible.map(s => s.points[0][0]));
+  const pad = Math.max((t1 - first) * 0.05, 10 * 60e3);
+  const t0 = Math.max(t1 - rangeHours * 3600e3, first - pad);
+  const spanH = (t1 - t0) / 3600e3;
   const chartH = h - padBottom - padTop, chartW = w - padLeft - padRight;
   const maxVal = niceMax(Math.max(...visible.flatMap(s => s.points.map(p => p[1] || 0)), 1));
   const xAt = t => padLeft + ((t - t0) / (t1 - t0)) * chartW;
@@ -439,12 +474,12 @@ function drawNetChart(canvasId, legendId, key, series, unit) {
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = s.color;
-    s.points.forEach(([t, v]) => { ctx.beginPath(); ctx.arc(xAt(t), yAt(v), 1.8, 0, Math.PI * 2); ctx.fill(); });
+    s.points.forEach(([t, v]) => { ctx.beginPath(); ctx.arc(xAt(t), yAt(v), 3, 0, Math.PI * 2); ctx.fill(); });
   });
   ctx.fillStyle = '#8b949e'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
   for (let i = 0; i <= 8; i++) {
     const t = t0 + (t1 - t0) * i / 8, d = new Date(t);
-    const lbl = rangeHours > 48 ? d.toLocaleDateString([], {month:'short', day:'numeric'})
+    const lbl = spanH > 36 ? d.toLocaleDateString([], {month:'short', day:'numeric'})
                                 : d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
     ctx.fillText(lbl, Math.min(Math.max(xAt(t), padLeft + 20), w - 24), h - padBottom + 12);
   }
