@@ -255,8 +255,14 @@ else
   echo "sounddevice package OK"
 fi
 
-# Ookla speedtest CLI (network_probe, O168) — static binary, no apt repo
-if [ ! -x /opt/ech/bin/speedtest ] && [ "$(uname -m)" = "x86_64" -o "$(uname -m)" = "aarch64" ]; then
+# Ookla speedtest CLI (network_probe, O168) — static binary, no apt repo.
+# Only when this hub has speed tests turned on (O180: opt-in, high data use).
+_st_wanted=$(sudo /opt/ech/.venv/bin/python3 -c "
+import yaml
+n = (yaml.safe_load(open('/etc/ech/config.yaml')) or {}).get('network_probe') or {}
+print('yes' if n.get('enabled') and float(n.get('speedtest_interval_min', 30) or 0) > 0 else 'no')
+" 2>/dev/null || echo no)
+if [ "$_st_wanted" = "yes" ] && [ ! -x /opt/ech/bin/speedtest ] && [ "$(uname -m)" = "x86_64" -o "$(uname -m)" = "aarch64" ]; then
   echo "Installing Ookla speedtest CLI ..."
   _st_arch=$(uname -m)
   _st_tmp=$(mktemp -d)

@@ -233,7 +233,8 @@ async def test_audit_log_endpoint_returns_entries_for_admin(tmp_path):
         # password also invalidates the just-used session (SEC-06), so
         # log in again with the new password afterward.
         await client.post("/api/auth/change-password",
-                           json={"new_password": "a-new-admin-password", "confirm_password": "a-new-admin-password"})
+                           json={"new_password": "a-new-admin-password", "confirm_password": "a-new-admin-password",
+                                 "accept_legal": True})
         await client.post("/api/auth/login", json={"username": "admin", "password": "a-new-admin-password"})
 
         r = await client.get("/api/system/audit-log")
@@ -246,5 +247,55 @@ async def test_audit_log_endpoint_returns_entries_for_admin(tmp_path):
         assert v.status_code == 200
         assert v.json()["intact"] is True
 
+    await router.stop()
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_first_run_requires_legal_agreement(tmp_path):
+    """O180: the forced first password change also takes the legal agreement
+    (once), unless the installer already recorded it in config."""
+    from httpx import AsyncClient, ASGITransport
+    app, router, db, auth = await _make_app(tmp_path)
+    pw = {"new_password": "a-new-admin-password", "confirm_password": "a-new-admin-password"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+        page = await client.get("/change-password")
+        assert 'data-legal="1"' in page.text and 'name="accept_legal"' in page.text
+        r = await client.post("/api/auth/change-password", json=pw)
+        assert r.status_code == 400 and "legal" in r.json()["detail"]
+        assert not await db.get_kv("legal_accepted")
+        r = await client.post("/api/auth/change-password", json={**pw, "accept_legal": True})
+        assert r.status_code == 200
+        assert "by admin" in await db.get_kv("legal_accepted")
+
+    await router.stop()
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_installer_legal_acceptance_skips_web_prompt(tmp_path):
+    from httpx import AsyncClient, ASGITransport
+    from ech.core.database import Database
+    from ech.core.router import Router
+    from ech.core.anomaly import AnomalyEngine
+    from ech.core.auth import AuthManager
+    from ech.api.app import create_app
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text('operator: {callsign: N0CALL}\nlegal_accepted: "2026-10-22T12:00:00Z (installer)"\n')
+    db = Database(":memory:")
+    await db.connect()
+    router = Router(db, anomaly_engine=AnomalyEngine({}))
+    await router.start()
+    auth = AuthManager(db)
+    await auth.init()
+    app = create_app(router, db, auth=auth, config_path=str(cfg))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+        assert 'data-legal="0"' in (await client.get("/change-password")).text
+        r = await client.post("/api/auth/change-password",
+                              json={"new_password": "a-new-admin-password", "confirm_password": "a-new-admin-password"})
+        assert r.status_code == 200
     await router.stop()
     await db.close()

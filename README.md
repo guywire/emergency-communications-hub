@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.1.27** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
+**Version 1.1.28** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -26,7 +26,7 @@ SignalMatrix is a Python/FastAPI application that bridges multiple emergency-com
 | **Simulation mode** | Built-in mock adapters let you train operators without live hardware |
 | **Mesh bot** | 25 on-mesh commands — weather/alerts/METAR/tides/solar, aircraft & ship tracking, satellite passes, FCC/DXCC lookups, SKYWARN spotter report intake, SHARES Region 1 strip-report intake, trivia with scoreboards, text-adventure games (see [Mesh Bot](#mesh-bot)) |
 | **SKYWARN & strip reports** | Guided report intake over the mesh (DM the bot `skywarn` or `strip`), auto-prefilled from the sending node's known position/callsign/temperature when available; combined `/reports` review page with map plotting, edit/complete/delete, and `net`/`inws`/`winlink` output formats for relaying to NWS |
-| **Analytics** | `/analytics` — messages per hour per adapter, bot command usage, anomaly trends (24h/48h/7d/30d), with per-series show/hide toggles on the time charts |
+| **Analytics** | `/analytics` — messages per hour per adapter, round-trip pings to the nearest MeshCore/Meshtastic repeaters, bot command usage, anomaly trends (24h/48h/7d/30d), and optional ISP speed tests + traceroutes (high data use, off by default), with per-series show/hide toggles on the time charts |
 | **Winlink templates** | ICS-213, ICS-214A Individual Log, ARRL Radiogram, SITREP, Local Weather Report and SHARES Region 1 strips (SKYWARN, SITREP, Hurricane, WXOBS — byte-compatible with the Response Creator), On-the-Air spot/hunter report, Winlink AI Query and Catalog Request — every field validated (callsigns, times, frequencies, MGRS, enumerated answers) with errors shown per field |
 | **GPS time sync** | Optional NMEA receiver auto-sets system clock and base position |
 | **Storage guard** | Warns when disk free falls below 1 GB or 5%; automatic message retention purge (configurable per adapter family) |
@@ -99,6 +99,39 @@ ech --config /etc/ech/config.yaml
 ```
 
 Open a browser to `http://<server-ip>:8765`. That is the dashboard.
+
+On first sign-in (default `admin` / `admin`) you must choose a new password and agree to the
+[legal, licensing and interference terms](#legal-licensing-and-interference---read-before-you-transmit).
+
+### Or: one-step server install (Debian 12 / Ubuntu 22.04+)
+
+```bash
+git clone https://github.com/guywire/emergency-communications-hub.git
+cd emergency-communications-hub
+sudo bash scripts/install.sh
+```
+
+The installer first shows the legal, licensing and interference terms and asks you to type
+`I AGREE`; nothing is installed until you do. It then asks whether to set up ISP speed tests
+(below). It installs to `/opt/ech`, creates the `ech` service user, a systemd service and
+`/etc/ech/config.yaml`. Options:
+
+| Option | What it does |
+|---|---|
+| `--accept-legal` | Agree to the legal terms without the prompt (required when there is no terminal, e.g. automation) |
+| `--with-speedtest` / `--no-speedtest` | Set up ISP speed tests, or skip them, without asking |
+| `--with-mdns` | Advertise the hub as `<hostname>.local` |
+| `--with-prometheus` | Install a local Prometheus scraping `/metrics` |
+| `--backup-disk DEVICE\|DIR` | Nightly backup of the database + config |
+| `--no-systemd` | Don't install the systemd service |
+
+**ISP speed tests — high data use.** Optional, off unless you choose them. SignalMatrix runs the
+official Ookla speed test plus traceroutes on a schedule and graphs them on the Analytics page,
+to catch ISP slowdowns and routing changes. One test moves about **1.5 GB** on a gigabit line;
+at the default of every 30 minutes that is about **70 GB a day, 2 TB a month** — enough to
+exceed a data cap or run up overage charges on metered, cellular or satellite connections.
+Using it accepts Ookla's licence (personal, non-commercial use). Change the interval or turn it
+off in **Settings → Network path probe**; traceroutes alone use almost no data.
 
 To run a simulation-only demo with no hardware (uses the bundled `config-sim.yaml`):
 

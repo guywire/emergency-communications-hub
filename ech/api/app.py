@@ -179,10 +179,12 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # root_path configured. Normalized to "" (no prefix) or "/xxx" (leading
     # slash, no trailing slash).
     _base_path = ""
+    _legal_in_config = ""   # set by scripts/install.sh when the installer's terms were accepted
     if config_path:
         try:
             import yaml as _yaml
             _cfg = _yaml.safe_load(open(config_path, encoding="utf-8"))
+            _legal_in_config = str(_cfg.get("legal_accepted") or "")
             _op_callsign  = (_cfg.get("operator", {}) or {}).get("callsign", "N0CALL")
             _psk_default_callsign = _op_callsign.split("-")[0]  # strip SSID
             # Outbound identity for every third-party service (identity.py):
@@ -2353,10 +2355,26 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         content = _render_template("login.html") if (UI_DIR / "templates" / "login.html").exists() else "<h1>Login</h1>"
         return HTMLResponse(content=content, headers=_NO_CACHE)
 
+    async def _legal_accepted() -> bool:
+        """O180: the legal / licensing / interference terms were agreed to,
+        by the installer (config legal_accepted) or at first sign-in (db)."""
+        if _legal_in_config:
+            return True
+        try:
+            return bool(await db.get_kv("legal_accepted"))
+        except Exception:
+            return False
+
     @app.get("/change-password", response_class=HTMLResponse)
-    async def change_password_page():
+    async def change_password_page(request: Request):
         content = (_render_template("change_password.html")
                    if (UI_DIR / "templates" / "change_password.html").exists() else "<h1>Change Password</h1>")
+        # First-run setup (the forced change of the default password) also
+        # asks for the legal agreement, unless the installer already got it.
+        from ech.core.auth import SESSION_COOKIE
+        session = await auth.get_session(request.cookies.get(SESSION_COOKIE, "")) if auth else None
+        if session and session.get("must_change_pw") and not await _legal_accepted():
+            content = content.replace('data-legal="0"', 'data-legal="1"', 1)
         return HTMLResponse(content=content, headers=_NO_CACHE)
 
     @app.post("/api/auth/change-password")
@@ -2372,12 +2390,19 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             form = await request.form()
             new_password = form.get("new_password", "")
             confirm = form.get("confirm_password", "")
+            accept_legal = form.get("accept_legal") in ("1", "on", "true")
             use_redirect = True
         else:
             data = await request.json()
             new_password = data.get("new_password", "")
             confirm = data.get("confirm_password", "")
+            accept_legal = data.get("accept_legal") is True
             use_redirect = False
+        need_legal = bool(session.get("must_change_pw")) and not await _legal_accepted()
+        if need_legal and not accept_legal:
+            if use_redirect:
+                return RedirectResponse(url="/change-password?error=legal", status_code=303)
+            raise HTTPException(status_code=400, detail="Agree to the legal, licensing and interference terms to continue")
         if not new_password or len(new_password) < 8:
             if use_redirect:
                 return RedirectResponse(url="/change-password?error=short", status_code=303)
@@ -2389,6 +2414,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if auth:
             await auth.change_password(session["username"], new_password)
         log.info("AUTH: %s changed password via forced change flow", session["username"])
+        if need_legal:
+            from datetime import datetime as _dt, timezone as _tz
+            await db.set_kv("legal_accepted", f"{_dt.now(_tz.utc).isoformat(timespec='seconds')} by {session['username']}")
+            log.info("AUTH: %s accepted the legal, licensing and interference terms", session["username"])
         from ech.core.audit import record as _audit_record
         await _audit_record(db, request, session["username"], session.get("role", ""), "password_change")
         if use_redirect:
