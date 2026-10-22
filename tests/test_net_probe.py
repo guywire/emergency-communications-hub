@@ -150,7 +150,7 @@ def test_validate_config():
     ok = validate_config({"enabled": True, "interval_min": "30", "speedtest_interval_min": 0,
                           "targets": [{"label": "Boston", "server_id": "1774"},
                                       {"label": "Montreal", "server_id": 16045, "expect_canada": True}]})
-    assert ok == {"enabled": True, "interval_min": 30.0, "speedtest_interval_min": 0.0,
+    assert ok == {"enabled": True, "interval_min": 30.0, "speedtest_interval_min": 0.0, "jitter_min": 0.0,
                   "targets": [{"label": "Boston", "server_id": 1774},
                               {"label": "Montreal", "server_id": 16045, "expect_canada": True}],
                   "web_checks": [],
@@ -424,3 +424,16 @@ async def test_meshcore_quiet_trace_no_reply_stays_out_of_feed(monkeypatch):
     assert posted == [] and 1 not in a._quiet_tags and 1 not in a._pending_trace_tags
     await a._expire_pending_tag(2, 30.0)
     assert len(posted) == 1 and "no reply" in posted[0].body
+
+
+def test_jitter_validation_and_early_run_still_speed_tests():
+    """O177: runs vary by +/- jitter_min; a run that lands early still gets
+    its speed test."""
+    from ech.core.net_probe import validate_config
+    cfg = validate_config({"interval_min": 20, "speedtest_interval_min": 20, "jitter_min": 3,
+                           "targets": [{"label": "GoNetspeed", "server_id": 43546, "trace_host": "1.1.1.1"}]})
+    assert cfg["jitter_min"] == 3 and cfg["targets"][0]["server_id"] == 43546
+    with pytest.raises(ValueError):
+        validate_config({"interval_min": 20, "jitter_min": 11, "targets": [{"label": "A"}]})
+    svc = NetProbeService({"network_probe": cfg})
+    assert svc.config()["jitter_min"] == 3 and svc.status()["jitter_min"] == 3

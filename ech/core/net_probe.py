@@ -24,6 +24,8 @@ Config (config.yaml):
     enabled: false
     interval_min: 30              # traceroute cadence
     speedtest_interval_min: 30    # speed test cadence (0 = traceroute only)
+    jitter_min: 0                 # each run lands at a random +/- this many minutes,
+                                  # so tests don't always hit the same minute of the hour
     speedtest_bin: /opt/ech/bin/speedtest
     targets:
       - {label: Boston,   server_id: 1774}    # Comcast, Boston MA
@@ -39,6 +41,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import time
@@ -278,6 +281,9 @@ def validate_config(data: dict) -> dict:
     speed = float(data.get("speedtest_interval_min", interval))
     if speed != 0 and not 15 <= speed <= 10080:
         raise ValueError("speed-test interval must be 0 (off) or 15–10080 minutes")
+    jitter = float(data.get("jitter_min") or 0)
+    if not 0 <= jitter <= interval / 2:
+        raise ValueError("timing variation must be 0 to half the traceroute interval")
     targets = []
     for t in data.get("targets") or []:
         label = str(t.get("label", "")).strip()
@@ -333,8 +339,8 @@ def validate_config(data: dict) -> dict:
     mesh = {"enabled": bool(m.get("enabled", False)), "interval_min": mesh_interval,
             "count": mesh_count, "max_age_hours": max_age}
     return {"enabled": bool(data.get("enabled", False)), "interval_min": interval,
-            "speedtest_interval_min": speed, "targets": targets, "web_checks": web,
-            "mesh": mesh}
+            "speedtest_interval_min": speed, "jitter_min": jitter, "targets": targets,
+            "web_checks": web, "mesh": mesh}
 
 
 class NetProbeService:
@@ -352,6 +358,7 @@ class NetProbeService:
         self.enabled = bool(cfg.get("enabled", False))
         self.interval_min = max(float(cfg.get("interval_min", 30)), 1.0)
         self.speedtest_interval_min = float(cfg.get("speedtest_interval_min", self.interval_min))
+        self.jitter_min = float(cfg.get("jitter_min") or 0)
         self.speedtest_bin = cfg.get("speedtest_bin") or "/opt/ech/bin/speedtest"
         self.traceroute_bin = cfg.get("traceroute_bin") or shutil.which("traceroute") or "/usr/sbin/traceroute"
         self.max_hops = int(cfg.get("max_hops", 24))
@@ -402,6 +409,7 @@ class NetProbeService:
         stops the loop and re-arms the timer for a changed interval."""
         self.interval_min = cfg["interval_min"]
         self.speedtest_interval_min = cfg["speedtest_interval_min"]
+        self.jitter_min = cfg.get("jitter_min", 0)
         old_ids = {t["label"]: t.get("server_id") for t in self.targets}
         self.targets = [dict(t) for t in cfg["targets"]]
         self.web_checks = [dict(w) for w in cfg.get("web_checks", [])]
@@ -428,6 +436,7 @@ class NetProbeService:
     def config(self) -> dict:
         return {"enabled": self.enabled, "interval_min": self.interval_min,
                 "speedtest_interval_min": self.speedtest_interval_min,
+                "jitter_min": self.jitter_min,
                 "targets": [dict(t) for t in self.targets],
                 "web_checks": [dict(w) for w in self.web_checks],
                 "mesh": {"enabled": self.mesh_enabled, "interval_min": self.mesh_interval_min,
@@ -444,8 +453,9 @@ class NetProbeService:
     async def _loop(self) -> None:
         await asyncio.sleep(90)  # let adapters settle before saturating the link
         last = 0.0
+        offset = 0.0   # this cycle's random shift, as a fraction of jitter_min
         while True:
-            due = last + self.interval_min * 60 - time.monotonic()
+            due = last + (self.interval_min + offset * self.jitter_min) * 60 - time.monotonic()
             if due > 0:
                 await self._sleep(due)
                 continue  # re-check: the interval may have changed while asleep
@@ -456,6 +466,7 @@ class NetProbeService:
             except Exception as exc:
                 log.warning("NetProbe: run failed: %s", exc)
             last = time.monotonic()
+            offset = random.uniform(-1.0, 1.0)
 
     def status(self) -> dict:
         return {
@@ -464,6 +475,7 @@ class NetProbeService:
             "last_run": self._last_run,
             "interval_min": self.interval_min,
             "speedtest_interval_min": self.speedtest_interval_min,
+            "jitter_min": self.jitter_min,
             "speedtest_available": os.path.isfile(self.speedtest_bin),
             "traceroute_available": os.path.isfile(self.traceroute_bin),
             "targets": [{"label": t["label"], "expect_canada": self._expects_canada(t),
@@ -483,7 +495,8 @@ class NetProbeService:
             try:
                 do_speed = os.path.isfile(self.speedtest_bin) and (
                     force_speed or (self.speedtest_interval_min > 0 and
-                                    time.monotonic() - self._last_speed >= self.speedtest_interval_min * 60 - 30))
+                                    time.monotonic() - self._last_speed
+                                    >= (self.speedtest_interval_min - self.jitter_min) * 60 - 30))
                 # Traceroutes first, while the link is idle, then speed tests
                 # one at a time so they don't compete for bandwidth.
                 for t in self.targets:

@@ -88,6 +88,7 @@ network_probe:
   enabled: false
   interval_min: 30              # traceroute cadence
   speedtest_interval_min: 30    # speed-test cadence (0 = never)
+  jitter_min: 0                 # each run lands at a random +/- this many minutes
   # speedtest_bin: /opt/ech/bin/speedtest
   # Each target: traceroute to trace_host (blank = the speed-test server) and a
   # speed test to server_id (blank = Ookla picks the nearest). Tracing 1.1.1.1
