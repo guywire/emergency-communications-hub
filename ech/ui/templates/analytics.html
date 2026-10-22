@@ -330,16 +330,23 @@ function renderNetProbe() {
     const ok = traces.filter(r => r.target === t.label && !r.error);
     const caCount = ok.filter(r => r.via_canada).length;
     const alarm = !expectCA[t.label] && tr && tr.via_canada;
+    // via_canada is set by a Canadian router on the path OR by the far end
+    // reporting a Canadian site (Google DNS YUL) — say which, since in the
+    // second case every named router can be in the US.
+    const hopCA = tr && (tr.hops || []).some(h => h.country === 'CA');
+    const caWhy = !tr || !tr.via_canada ? ''
+      : hopCA ? 'a router on the path is in Canada'
+      : `every named router is in the US, but the destination answered from ${tr.server || 'a Canadian site'}`;
     const badge = !tr ? '' : expectCA[t.label]
       ? `<span class="badge exp">${tr.via_canada ? 'via Canada (expected)' : 'no Canadian hop'}</span>`
-      : `<span class="badge ${tr.via_canada ? 'bad' : 'ok'}">${tr.via_canada ? 'VIA CANADA' : 'stays in US'}</span>`;
+      : `<span class="badge ${tr.via_canada ? 'bad' : 'ok'}">${!tr.via_canada ? 'stays in US' : hopCA ? 'VIA CANADA' : 'ANSWERED FROM CANADA'}</span>`;
     return `<div class="net-card${alarm ? ' alarm' : ''}">
       <div class="nc-title"><span class="legend-swatch" style="background:${netColor(tIdx[t.label])}"></span>${esc(t.label)} ${badge}</div>
       ${sp ? `<div class="nc-big">${Math.round(sp.down_mbps)}↓ / ${Math.round(sp.up_mbps)}↑ Mbps · ${(+sp.ping_ms).toFixed(1)} ms</div>
               <div>${esc(sp.server || '')}${sp.result_url ? ` · <a href="${esc(sp.result_url)}" target="_blank" rel="noopener" style="color:var(--blue)">result</a>` : ''}</div>`
            : '<div>No speed test yet</div>'}
-      ${tr ? `<div>Route: ${esc(routeCities(tr.hops) || '?')} · ${tr.hop_count} hops · ${tr.final_rtt_ms != null ? (+tr.final_rtt_ms).toFixed(1) + ' ms' : '—'}</div>` : ''}
-      ${tr && tr.server ? `<div>${tr.via_canada ? '<span style="color:var(--red)">' + esc(tr.server) + '</span>' : esc(tr.server)}</div>` : ''}
+      ${tr ? `<div>Route: ${esc(routeCities(tr.hops) || '?')}${tr.server ? ' → ' + esc(tr.server) : ''} · ${tr.hop_count} hops · ${tr.final_rtt_ms != null ? (+tr.final_rtt_ms).toFixed(1) + ' ms' : '—'}</div>` : ''}
+      ${caWhy && !expectCA[t.label] ? `<div style="color:var(--red)">Canada flag: ${esc(caWhy)}</div>` : ''}
       ${ok.length && !expectCA[t.label] ? `<div>Via Canada in ${caCount} of ${ok.length} traceroutes this range</div>` : ''}
     </div>`;
   }).join('') + webChecks.map((w, wi) => {
@@ -385,14 +392,14 @@ function renderNetProbe() {
   document.getElementById('net-traces').innerHTML = targets.map(t => {
     const tr = traces.filter(r => r.target === t.label && r.hops).slice(-1)[0];
     if (!tr) return `<div><div class="panel-sub">${esc(t.label)}: no traceroute yet</div></div>`;
-    return `<div><div class="panel-sub" style="margin-bottom:4px">${esc(t.label)} → ${esc(tr.server_host || '')} · ${fmtWhen(tr.ts)}</div>${hopTable(tr.hops)}</div>`;
+    return `<div><div class="panel-sub" style="margin-bottom:4px">${esc(t.label)} → ${esc(tr.server_host || '')} · ${fmtWhen(tr.ts)}</div>${hopTable(tr.hops, tr.server)}</div>`;
   }).join('');
 
   const hist = traces.filter(r => r.hops && (r.route_changed || r.first_seen)).reverse();
   document.getElementById('net-history').innerHTML = hist.length ? `<table class="hops">
     <tr><th>When</th><th>Target</th><th>Route</th><th>Hops</th><th>RTT</th><th></th></tr>
     ${hist.map(r => `<tr class="${r.via_canada && !expectCA[r.target] ? 'ca' : ''}">
-      <td>${fmtWhen(r.ts)}</td><td>${esc(r.target)}</td><td>${esc(routeCities(r.hops) || '?')}</td><td>${r.hop_count}</td>
+      <td>${fmtWhen(r.ts)}</td><td>${esc(r.target)}</td><td>${esc(routeCities(r.hops) || '?')}${r.server ? ' → ' + esc(r.server) : ''}</td><td>${r.hop_count}</td>
       <td>${r.final_rtt_ms != null ? (+r.final_rtt_ms).toFixed(1) : '—'}</td>
       <td>${r.route_changed ? 'changed' : 'first seen'}${r.via_canada ? ' · via Canada' : ''}</td></tr>`).join('')}
   </table>` : '<div class="panel-sub">No traceroutes in this range</div>';
@@ -405,11 +412,16 @@ function routeCities(hops) {
   });
   return out.join(' → ');
 }
-function hopTable(hops) {
+const CA_SITE_RE = /\((Montreal|Toronto|Ottawa|Quebec City|Halifax|Vancouver|Winnipeg|Calgary)\)/;
+function hopTable(hops, site) {
+  // site: where the far end says it answered from (Google DNS site), shown
+  // as a closing row since Google's own routers carry no location names
   return `<table class="hops"><tr><th>#</th><th>Router</th><th>IP</th><th>ms</th><th>Location</th></tr>
     ${(hops || []).map(h => `<tr class="${h.country === 'CA' ? 'ca' : (h.ip ? '' : 'silent')}">
       <td>${h.n}</td><td>${h.ip ? esc(h.host) : '* no reply'}</td><td>${h.ip && h.ip !== h.host ? esc(h.ip) : ''}</td>
       <td>${h.rtt != null ? h.rtt.toFixed(1) : ''}</td><td>${esc(h.city || '')}${h.country ? ' (' + h.country + ')' : ''}</td></tr>`).join('')}
+    ${site ? `<tr class="${CA_SITE_RE.test(site) ? 'ca' : ''}"><td>→</td><td colspan="3">Answered by ${esc(site)} (reported by the destination, not a router name)</td>
+      <td>${esc((site.match(/\(([^)]+)\)/) || [])[1] || '')}${CA_SITE_RE.test(site) ? ' (CA)' : ''}</td></tr>` : ''}
   </table>`;
 }
 async function runNetProbe() {
