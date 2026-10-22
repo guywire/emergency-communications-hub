@@ -118,6 +118,15 @@ table.hops tr.silent td{color:var(--dim)}
     <div class="legend" id="msg-legend"></div>
   </div>
 
+  <div class="panel" id="mesh-panel">
+    <div class="panel-title">Mesh repeater pings — MeshCore &amp; Meshtastic</div>
+    <div class="panel-sub" id="mesh-sub"></div>
+    <div id="mesh-table"></div>
+    <div class="net-sub-head">Round trip (seconds) — only pings that got a reply are plotted; see "Replies" above for misses</div>
+    <div class="chart-wrap"><canvas id="mesh-chart"></canvas></div>
+    <div class="legend" id="mesh-legend"></div>
+  </div>
+
   <div class="panel">
     <div class="panel-title">Bot command usage</div>
     <div class="panel-sub">Commands run by the mesh bot, this range</div>
@@ -151,14 +160,6 @@ table.hops tr.silent td{color:var(--dim)}
     <div id="net-history"></div>
   </div>
 
-  <div class="panel" id="mesh-panel">
-    <div class="panel-title">Mesh repeater pings — MeshCore &amp; Meshtastic</div>
-    <div class="panel-sub" id="mesh-sub"></div>
-    <div id="mesh-table"></div>
-    <div class="net-sub-head">Round trip (seconds) — only pings that got a reply are plotted; see "Replies" above for misses</div>
-    <div class="chart-wrap"><canvas id="mesh-chart"></canvas></div>
-    <div class="legend" id="mesh-legend"></div>
-  </div>
 </div>
 
 <script>

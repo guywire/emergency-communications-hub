@@ -96,7 +96,8 @@ network_probe:
   # asks Google which DNS site answered (YUL = Montreal).
   # speedtest: false makes a target traceroute-only (no ~1.5 GB test).
   targets:
-    - {label: Cloudflare DNS, trace_host: 1.1.1.1}
+    - {label: Cloudflare DNS, trace_host: 1.1.1.1, speedtest: false}
+    - {label: GoNetspeed, trace_host: oak-speedtest.otelco.com, server_id: 43546}  # Portland ME
     - {label: Google DNS, trace_host: 8.8.8.8, speedtest: false}
     # - {label: Boston, server_id: 1774}      # Comcast, Boston MA
     # - {label: Montreal, server_id: 16045}   # Beanfield, Montreal QC (expect_canada: true by default)

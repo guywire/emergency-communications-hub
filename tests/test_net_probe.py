@@ -437,3 +437,27 @@ def test_jitter_validation_and_early_run_still_speed_tests():
         validate_config({"interval_min": 20, "jitter_min": 11, "targets": [{"label": "A"}]})
     svc = NetProbeService({"network_probe": cfg})
     assert svc.config()["jitter_min"] == 3 and svc.status()["jitter_min"] == 3
+
+
+@pytest.mark.asyncio
+async def test_speed_test_runs_on_the_cycle_nearest_due(monkeypatch, tmp_path):
+    """O179: traces every 15 +/-3 min, speed test every 30 - two early runs
+    (24 min) still test; a single run (18 min) does not."""
+    import ech.core.net_probe as np_mod
+    fake_bin = tmp_path / "speedtest"; fake_bin.write_text("")
+    svc = NetProbeService({"network_probe": {"interval_min": 15, "speedtest_interval_min": 30, "jitter_min": 3,
+                                             "speedtest_bin": str(fake_bin),
+                                             "targets": [{"label": "GoNetspeed", "server_id": 43546}]}})
+    ran = []
+    async def fake_speed(t): ran.append(t["label"]); return {}
+    async def nothing(*a, **k): return None
+    monkeypatch.setattr(svc, "_speedtest", fake_speed)
+    monkeypatch.setattr(svc, "_trace", nothing)
+    now = [10_000.0]
+    monkeypatch.setattr(np_mod.time, "monotonic", lambda: now[0])
+    svc._last_speed = now[0] - 24 * 60
+    await svc.run_once()
+    assert ran == ["GoNetspeed"]
+    svc._last_speed = now[0] - 18 * 60
+    await svc.run_once()
+    assert ran == ["GoNetspeed"]

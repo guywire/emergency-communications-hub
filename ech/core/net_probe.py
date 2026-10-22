@@ -496,7 +496,9 @@ class NetProbeService:
                 do_speed = os.path.isfile(self.speedtest_bin) and (
                     force_speed or (self.speedtest_interval_min > 0 and
                                     time.monotonic() - self._last_speed
-                                    >= (self.speedtest_interval_min - self.jitter_min) * 60 - 30))
+                                    # due on whichever run lands nearest the speed-test
+                                    # interval, however the +/- jitter falls
+                                    >= (self.speedtest_interval_min - self.interval_min / 2) * 60))
                 # Traceroutes first, while the link is idle, then speed tests
                 # one at a time so they don't compete for bandwidth.
                 for t in self.targets:
