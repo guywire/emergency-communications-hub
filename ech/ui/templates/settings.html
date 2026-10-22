@@ -502,6 +502,55 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     </div>
   </div>
 
+  <!-- ── Network path probe (O168) ──────────────────────────── -->
+  <div class="section">
+    <div class="section-header" onclick="toggle('netprobe-body')">
+      <span class="section-title">NETWORK PATH PROBE (speed test + traceroute)</span>
+    </div>
+    <div id="netprobe-body" class="section-body">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:10px">
+        Runs a traceroute and an Ookla speed test to each target below and graphs them at the bottom of
+        <a href="/analytics" style="color:var(--blue)">Analytics</a>, flagging any target whose route
+        passes through a Canadian router (unless "Canada expected" is ticked). Each speed test on a
+        gigabit line moves ~1.5 GB — set the speed-test interval to 0 for traceroutes only.
+        Changes apply immediately, no restart.
+      </div>
+      <div id="netprobe-status" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px">Loading…</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <label style="margin:0;display:inline">Enable probe</label>
+        <label class="toggle">
+          <input type="checkbox" id="netprobe-enabled">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="row3">
+        <div>
+          <label>Traceroute every (minutes)</label>
+          <input type="number" id="netprobe-interval" value="30" min="5" max="1440">
+        </div>
+        <div>
+          <label>Speed test every (minutes, 0 = off)</label>
+          <input type="number" id="netprobe-speed-interval" value="30" min="0" max="10080">
+        </div>
+        <div></div>
+      </div>
+      <div style="margin-top:12px">
+        <label>Targets <span style="color:var(--dim)">(Ookla server ID — find one at
+          <a href="https://www.speedtest.net/api/js/servers?engine=js&search=Boston" target="_blank" rel="noopener" style="color:var(--blue)">speedtest.net/api/js/servers?search=CITY</a>)</span></label>
+        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;margin-top:4px">
+          <thead><tr style="color:var(--dim);text-align:left">
+            <th style="font-weight:500;padding:3px 4px">Name</th>
+            <th style="font-weight:500;padding:3px 4px">Server ID</th>
+            <th style="font-weight:500;padding:3px 4px">Canada expected</th><th></th></tr></thead>
+          <tbody id="netprobe-targets"></tbody>
+        </table>
+        <button class="btn" style="margin-top:6px;padding:3px 10px;font-size:10px" onclick="addNetProbeTarget()">+ Add target</button>
+      </div>
+      <button class="btn btn-green" style="margin-top:16px" onclick="saveNetProbeConfig()">Save probe settings</button>
+      <button class="btn" style="margin-top:16px;margin-left:8px" onclick="runNetProbeNow()">Run now</button>
+    </div>
+  </div>
+
   <!-- ── Named water bodies ─────────────────────────────────── -->
   <div class="section">
     <div class="section-header" onclick="toggle('wb-body')">
@@ -1477,6 +1526,7 @@ async function init() {
     if (el) el.textContent = 'v' + d.version;
   }).catch(() => {});
   loadPBXDirectory();
+  loadNetProbeConfig();
   loadAuditLog();
   loadLiveStats();
   setInterval(loadLiveStats, 5000);
@@ -1693,6 +1743,61 @@ async function savePotaConfig() {
   };
   await fetch('/api/pota/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
   toast('POTA alert config saved — takes effect immediately');
+}
+
+// ── Network path probe (O168) ─────────────────────────────────────────
+function netProbeRow(t) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td style="padding:2px 4px"><input type="text" class="np-label" maxlength="24" style="font-family:var(--mono);font-size:11px"></td>
+    <td style="padding:2px 4px"><input type="number" class="np-id" min="1" style="font-family:var(--mono);font-size:11px;width:100px"></td>
+    <td style="padding:2px 4px"><input type="checkbox" class="np-ca" style="width:auto"></td>
+    <td style="padding:2px 4px"><button class="btn" style="padding:2px 8px;font-size:10px" onclick="this.closest('tr').remove()" title="Remove">✕</button></td>`;
+  tr.querySelector('.np-label').value = t.label || '';
+  tr.querySelector('.np-id').value = t.server_id || '';
+  tr.querySelector('.np-ca').checked = t.expect_canada != null ? !!t.expect_canada : /montreal/i.test(t.label || '');
+  return tr;
+}
+function addNetProbeTarget() {
+  document.getElementById('netprobe-targets').appendChild(netProbeRow({}));
+}
+async function loadNetProbeConfig() {
+  const st = document.getElementById('netprobe-status');
+  const c = await fetch('/api/analytics/netprobe/config').then(r => r.json()).catch(() => null);
+  if (!c) { st.textContent = 'Could not load probe settings'; return; }
+  document.getElementById('netprobe-enabled').checked = !!c.enabled;
+  if (c.interval_min != null) document.getElementById('netprobe-interval').value = c.interval_min;
+  if (c.speedtest_interval_min != null) document.getElementById('netprobe-speed-interval').value = c.speedtest_interval_min;
+  const body = document.getElementById('netprobe-targets');
+  body.innerHTML = '';
+  (c.targets || []).forEach(t => body.appendChild(netProbeRow(t)));
+  const parts = [c.enabled ? (c.running ? 'Running now' : 'On') : 'Off'];
+  if (c.last_run) parts.push('last run ' + new Date(c.last_run).toLocaleString());
+  if (c.speedtest_available === false) parts.push('Ookla speedtest CLI not installed — traceroutes only');
+  if (c.traceroute_available === false) parts.push('traceroute not installed');
+  st.textContent = parts.join(' · ');
+}
+async function saveNetProbeConfig() {
+  const targets = [...document.querySelectorAll('#netprobe-targets tr')].map(tr => ({
+    label: tr.querySelector('.np-label').value.trim(),
+    server_id: tr.querySelector('.np-id').value.trim(),
+    expect_canada: tr.querySelector('.np-ca').checked,
+  })).filter(t => t.label || t.server_id);
+  const cfg = {
+    enabled: document.getElementById('netprobe-enabled').checked,
+    interval_min: parseFloat(document.getElementById('netprobe-interval').value) || 30,
+    speedtest_interval_min: parseFloat(document.getElementById('netprobe-speed-interval').value) || 0,
+    targets,
+  };
+  const r = await fetch('/api/analytics/netprobe/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)})
+    .then(r => r.json()).catch(e => ({status:'error', detail:String(e)}));
+  if (r.status !== 'ok') { toast(r.detail || 'Save failed', 'err'); return; }
+  toast(r.saved ? `Probe ${cfg.enabled ? 'enabled' : 'disabled'} — saved` : r.detail, r.saved ? undefined : 'err');
+  loadNetProbeConfig();
+}
+async function runNetProbeNow() {
+  const r = await fetch('/api/analytics/netprobe/run', {method:'POST'}).then(r => r.json()).catch(() => null);
+  toast(r && r.ok ? (r.detail || 'Probe started') : ((r && r.detail) || 'Probe run failed'), r && r.ok ? undefined : 'err');
+  setTimeout(loadNetProbeConfig, 1500);
 }
 
 async function pollPotaNow() {

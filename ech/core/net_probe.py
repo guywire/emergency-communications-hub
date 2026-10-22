@@ -22,8 +22,8 @@ the cheap traceroute (interval_min).
 Config (config.yaml):
   network_probe:
     enabled: false
-    interval_min: 15              # traceroute cadence
-    speedtest_interval_min: 15    # speed test cadence (0 = traceroute only)
+    interval_min: 30              # traceroute cadence
+    speedtest_interval_min: 30    # speed test cadence (0 = traceroute only)
     speedtest_bin: /opt/ech/bin/speedtest
     targets:
       - {label: Boston,   server_id: 1774}    # Comcast, Boston MA
@@ -159,11 +159,44 @@ def path_signature(hops: list[dict]) -> str:
     return hashlib.sha1(" ".join(ips).encode()).hexdigest()[:12] if ips else ""
 
 
+_LABEL_RE = re.compile(r"^[\w .\-]{1,24}$")
+
+
+def validate_config(data: dict) -> dict:
+    """Normalise a Settings-page network_probe payload; raises ValueError with
+    a user-facing message on bad input."""
+    interval = float(data.get("interval_min", 30))
+    if not 5 <= interval <= 1440:
+        raise ValueError("traceroute interval must be 5–1440 minutes")
+    speed = float(data.get("speedtest_interval_min", interval))
+    if speed != 0 and not 15 <= speed <= 10080:
+        raise ValueError("speed-test interval must be 0 (off) or 15–10080 minutes")
+    targets = []
+    for t in data.get("targets") or []:
+        label = str(t.get("label", "")).strip()
+        if not _LABEL_RE.match(label):
+            raise ValueError(f"bad target name {label!r} (letters, digits, space . - only, max 24)")
+        try:
+            sid = int(t.get("server_id"))
+        except (TypeError, ValueError):
+            raise ValueError(f"{label}: server ID must be a number") from None
+        row = {"label": label, "server_id": sid}
+        if "expect_canada" in t:
+            row["expect_canada"] = bool(t["expect_canada"])
+        targets.append(row)
+    if not 1 <= len(targets) <= 6:
+        raise ValueError("configure 1–6 targets")
+    if len({t["label"].lower() for t in targets}) != len(targets):
+        raise ValueError("target names must be unique")
+    return {"enabled": bool(data.get("enabled", False)), "interval_min": interval,
+            "speedtest_interval_min": speed, "targets": targets}
+
+
 class NetProbeService:
     def __init__(self, config: dict, db=None):
         cfg = config.get("network_probe") or {}
         self.enabled = bool(cfg.get("enabled", False))
-        self.interval_min = max(float(cfg.get("interval_min", 15)), 1.0)
+        self.interval_min = max(float(cfg.get("interval_min", 30)), 1.0)
         self.speedtest_interval_min = float(cfg.get("speedtest_interval_min", self.interval_min))
         self.speedtest_bin = cfg.get("speedtest_bin") or "/opt/ech/bin/speedtest"
         self.traceroute_bin = cfg.get("traceroute_bin") or shutil.which("traceroute") or "/usr/sbin/traceroute"
@@ -171,6 +204,7 @@ class NetProbeService:
         self.targets = [dict(t) for t in (cfg.get("targets") or DEFAULT_TARGETS)]
         self._db = db
         self._task: asyncio.Task | None = None
+        self._wake = asyncio.Event()
         self._lock = asyncio.Lock()
         self._last_speed = 0.0
         self._last_run: str | None = None
@@ -181,7 +215,7 @@ class NetProbeService:
 
     # ── lifecycle ─────────────────────────────────────────────────────────
     async def start(self) -> None:
-        if not self.enabled:
+        if not self.enabled or (self._task and not self._task.done()):
             return
         self._task = asyncio.create_task(self._loop(), name="net-probe")
         log.info("NetProbe: every %.0f min (speed test every %s) to %s",
@@ -196,17 +230,55 @@ class NetProbeService:
                 await self._task
             except (asyncio.CancelledError, Exception):
                 pass
+            self._task = None
+
+    async def apply_config(self, cfg: dict) -> None:
+        """Apply a validate_config() result live (Settings page): starts or
+        stops the loop and re-arms the timer for a changed interval."""
+        self.interval_min = cfg["interval_min"]
+        self.speedtest_interval_min = cfg["speedtest_interval_min"]
+        old_ids = {t["label"]: t.get("server_id") for t in self.targets}
+        self.targets = [dict(t) for t in cfg["targets"]]
+        # A new or re-pointed target has a different host to trace
+        for t in self.targets:
+            if old_ids.get(t["label"]) != t["server_id"]:
+                self._hosts.pop(t["label"], None)
+        self.enabled = cfg["enabled"]
+        if self.enabled:
+            await self.start()
+            self._wake.set()
+        else:
+            await self.stop()
+        log.info("NetProbe: settings updated — %s", "enabled" if self.enabled else "disabled")
+
+    def config(self) -> dict:
+        return {"enabled": self.enabled, "interval_min": self.interval_min,
+                "speedtest_interval_min": self.speedtest_interval_min,
+                "targets": [dict(t) for t in self.targets]}
+
+    async def _sleep(self, seconds: float) -> None:
+        """Sleep, but wake early when apply_config() changes the schedule."""
+        self._wake.clear()
+        try:
+            await asyncio.wait_for(self._wake.wait(), seconds)
+        except asyncio.TimeoutError:
+            pass
 
     async def _loop(self) -> None:
         await asyncio.sleep(90)  # let adapters settle before saturating the link
+        last = 0.0
         while True:
+            due = last + self.interval_min * 60 - time.monotonic()
+            if due > 0:
+                await self._sleep(due)
+                continue  # re-check: the interval may have changed while asleep
             try:
                 await self.run_once()
             except asyncio.CancelledError:
                 return
             except Exception as exc:
                 log.warning("NetProbe: run failed: %s", exc)
-            await asyncio.sleep(self.interval_min * 60)
+            last = time.monotonic()
 
     def status(self) -> dict:
         return {

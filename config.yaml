@@ -80,13 +80,14 @@ logging:
 # Needs the official Ookla CLI at speedtest_bin (install.sh fetches it); using
 # it accepts Ookla's EULA (personal, non-commercial use).
 # BANDWIDTH: one test on gigabit fibre moves ~1.5 GB, so 2 targets every
-# 15 min is ~300 GB/day. Raise speedtest_interval_min (or 0 = traceroute only)
-# if that matters; traceroutes are tiny.
+# 30 min is ~150 GB/day. Raise speedtest_interval_min (or 0 = traceroute only)
+# if that matters; traceroutes are tiny. All of this is also editable live
+# in Settings -> Network path probe (saved back here).
 # Find server IDs: https://www.speedtest.net/api/js/servers?engine=js&search=Boston
 network_probe:
   enabled: false
-  interval_min: 15              # traceroute cadence
-  speedtest_interval_min: 15    # speed-test cadence (0 = never)
+  interval_min: 30              # traceroute cadence
+  speedtest_interval_min: 30    # speed-test cadence (0 = never)
   # speedtest_bin: /opt/ech/bin/speedtest
   targets:
     - {label: Boston, server_id: 1774}      # Comcast, Boston MA

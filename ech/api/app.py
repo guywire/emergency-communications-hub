@@ -2132,11 +2132,49 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         return {"hours": hours, "status": net_probe.status() if net_probe else {"enabled": False},
                 "results": rows}
 
+    @app.get("/api/analytics/netprobe/config")
+    async def analytics_netprobe_config():
+        if not net_probe:
+            return {"enabled": False, "available": False}
+        return {**net_probe.config(), **{k: v for k, v in net_probe.status().items()
+                                        if k in ("speedtest_available", "traceroute_available",
+                                                 "running", "last_run")}}
+
+    @app.post("/api/analytics/netprobe/config")
+    async def analytics_netprobe_set_config(request: Request):
+        """Settings page: enable/disable, intervals, targets. Applied live and
+        saved to config.yaml (network_probe section)."""
+        await _admin_required(request)
+        if not net_probe:
+            raise HTTPException(status_code=400, detail="Network probe service not loaded")
+        from ech.core.net_probe import validate_config
+        try:
+            cfg = validate_config(await request.json())
+        except ValueError as exc:
+            return {"status": "error", "detail": str(exc)}
+        await net_probe.apply_config(cfg)
+        import yaml
+        cfg_path = Path("/etc/ech/config.yaml")
+        if not cfg_path.exists():
+            cfg_path = Path(config_path or "config.yaml")
+        try:
+            with open(cfg_path, encoding="utf-8") as f:
+                full_cfg = yaml.safe_load(f) or {}
+            section = full_cfg.get("network_probe") or {}
+            section.update(cfg)
+            full_cfg["network_probe"] = section
+            atomic_write_yaml(cfg_path, full_cfg)
+        except Exception as exc:
+            log.warning("netprobe config save failed: %s", exc)
+            return {"status": "ok", "saved": False,
+                    "detail": f"Applied, but not saved to {cfg_path}: {exc}"}
+        return {"status": "ok", "saved": True}
+
     @app.post("/api/analytics/netprobe/run")
     async def analytics_netprobe_run(request: Request, speedtest: bool = Query(True)):
         await _admin_required(request)
         if not net_probe or not net_probe.enabled:
-            raise HTTPException(status_code=400, detail="network_probe is not enabled in config.yaml")
+            raise HTTPException(status_code=400, detail="Network path probe is off — enable it in Settings")
         if net_probe.status()["running"]:
             return {"ok": True, "detail": "A probe is already running"}
         asyncio.create_task(net_probe.run_once(force_speed=speedtest), name="net-probe-manual")

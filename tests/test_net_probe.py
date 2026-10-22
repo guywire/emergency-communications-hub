@@ -123,3 +123,67 @@ def test_netprobe_api_sends_hops_only_for_latest_and_changes(tmp_path):
     assert [("hops" in r) for r in res] == [True, False, True, False, True]  # first, change, latest
     assert [r["route_changed"] for r in res] == [False, False, True, False, False]
     assert all("hops_json" not in r for r in res)
+
+
+def test_validate_config():
+    from ech.core.net_probe import validate_config
+    ok = validate_config({"enabled": True, "interval_min": "30", "speedtest_interval_min": 0,
+                          "targets": [{"label": "Boston", "server_id": "1774"},
+                                      {"label": "Montreal", "server_id": 16045, "expect_canada": True}]})
+    assert ok == {"enabled": True, "interval_min": 30.0, "speedtest_interval_min": 0.0,
+                  "targets": [{"label": "Boston", "server_id": 1774},
+                              {"label": "Montreal", "server_id": 16045, "expect_canada": True}]}
+    bad = [
+        {"interval_min": 2, "targets": [{"label": "B", "server_id": 1}]},
+        {"interval_min": 30, "speedtest_interval_min": 5, "targets": [{"label": "B", "server_id": 1}]},
+        {"interval_min": 30, "targets": []},
+        {"interval_min": 30, "targets": [{"label": "<b>", "server_id": 1}]},
+        {"interval_min": 30, "targets": [{"label": "B", "server_id": "x"}]},
+        {"interval_min": 30, "targets": [{"label": "B", "server_id": 1}, {"label": "b", "server_id": 2}]},
+    ]
+    for b in bad:
+        with pytest.raises(ValueError):
+            validate_config(b)
+
+
+@pytest.mark.asyncio
+async def test_apply_config_starts_and_stops_loop():
+    from ech.core.net_probe import validate_config
+    svc = NetProbeService({})
+    assert svc.interval_min == 30 and svc._task is None
+    cfg = validate_config({"enabled": True, "interval_min": 60, "speedtest_interval_min": 0,
+                           "targets": [{"label": "Boston", "server_id": 1774}]})
+    svc._hosts["Boston"] = "old.host"
+    await svc.apply_config(cfg)
+    assert svc._task is not None and not svc._task.done()
+    assert svc._hosts == {"Boston": "old.host"}          # same server ID keeps its host
+    await svc.apply_config({**cfg, "targets": [{"label": "Boston", "server_id": 99}]})
+    assert "Boston" not in svc._hosts                     # re-pointed target re-learns it
+    await svc.apply_config({**cfg, "enabled": False})
+    assert svc._task is None and not svc.enabled
+
+
+def test_netprobe_config_endpoint_saves_yaml(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    import yaml
+    from starlette.testclient import TestClient
+    from ech.api import app as app_mod
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"logging": {"level": "INFO"}}))
+    monkeypatch.setattr(app_mod.Path, "exists",
+                        lambda self: False if str(self).replace("\\", "/") == "/etc/ech/config.yaml"
+                        else __import__("os").path.exists(self))
+    probe = NetProbeService({})
+    app = app_mod.create_app(MagicMock(), MagicMock(), net_probe=probe, config_path=str(cfg))
+    body = {"enabled": False, "interval_min": 45, "speedtest_interval_min": 0,
+            "targets": [{"label": "Boston", "server_id": 1774, "expect_canada": False}]}
+    with TestClient(app) as c:
+        assert c.post("/api/analytics/netprobe/config", json=body).json() == {"status": "ok", "saved": True}
+        got = c.get("/api/analytics/netprobe/config").json()
+        bad = c.post("/api/analytics/netprobe/config", json={**body, "interval_min": 1}).json()
+    assert got["interval_min"] == 45 and got["targets"][0]["server_id"] == 1774
+    assert bad["status"] == "error"
+    saved = yaml.safe_load(cfg.read_text())
+    assert saved["logging"] == {"level": "INFO"}
+    assert saved["network_probe"]["interval_min"] == 45 and saved["network_probe"]["enabled"] is False

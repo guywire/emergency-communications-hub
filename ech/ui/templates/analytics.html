@@ -111,26 +111,6 @@ table.hops tr.silent td{color:var(--dim)}
 <div id="content">
   <div class="summary-row" id="summary-row"></div>
 
-  <div class="panel" id="net-panel">
-    <div style="display:flex;align-items:center;gap:10px">
-      <div class="panel-title" style="margin:0">ISP routing — speed tests &amp; traceroutes</div>
-      <div class="spacer"></div>
-      <button class="action-btn" id="net-run-btn" onclick="runNetProbe()">▶ Run now</button>
-    </div>
-    <div class="panel-sub" id="net-sub" style="margin-top:4px"></div>
-    <div class="net-cards" id="net-cards"></div>
-    <div class="net-sub-head">Throughput (Mbps) — solid = download, dashed = upload</div>
-    <div class="chart-wrap"><canvas id="net-speed-chart"></canvas></div>
-    <div class="legend" id="net-speed-legend"></div>
-    <div class="net-sub-head">Latency (ms) — solid = speed-test ping, dashed = traceroute to the same server</div>
-    <div class="chart-wrap"><canvas id="net-lat-chart"></canvas></div>
-    <div class="legend" id="net-lat-legend"></div>
-    <div class="net-sub-head">Latest traceroute</div>
-    <div class="trace-grid" id="net-traces"></div>
-    <div class="net-sub-head">Route history — first path seen and every change, this range</div>
-    <div id="net-history"></div>
-  </div>
-
   <div class="panel">
     <div class="panel-title">Messages per hour, by adapter</div>
     <div class="panel-sub" id="msg-chart-sub"></div>
@@ -149,6 +129,26 @@ table.hops tr.silent td{color:var(--dim)}
     <div class="panel-sub" id="anom-chart-sub"></div>
     <div class="chart-wrap"><canvas id="anom-chart"></canvas></div>
     <div class="legend" id="anom-legend"></div>
+  </div>
+
+  <div class="panel" id="net-panel">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="panel-title" style="margin:0">ISP routing — speed tests &amp; traceroutes</div>
+      <div class="spacer"></div>
+      <button class="action-btn" id="net-run-btn" onclick="runNetProbe()">▶ Run now</button>
+    </div>
+    <div class="panel-sub" id="net-sub" style="margin-top:4px"></div>
+    <div class="net-cards" id="net-cards"></div>
+    <div class="net-sub-head">Throughput (Mbps) — solid = download, dashed = upload</div>
+    <div class="chart-wrap"><canvas id="net-speed-chart"></canvas></div>
+    <div class="legend" id="net-speed-legend"></div>
+    <div class="net-sub-head">Latency (ms) — solid = speed-test ping, dashed = traceroute to the same server</div>
+    <div class="chart-wrap"><canvas id="net-lat-chart"></canvas></div>
+    <div class="legend" id="net-lat-legend"></div>
+    <div class="net-sub-head">Latest traceroute</div>
+    <div class="trace-grid" id="net-traces"></div>
+    <div class="net-sub-head">Route history — first path seen and every change, this range</div>
+    <div id="net-history"></div>
   </div>
 </div>
 
@@ -309,7 +309,7 @@ function renderNetProbe() {
   btn.disabled = !st.enabled || !!st.running;
   btn.textContent = st.running ? '… running' : '▶ Run now';
   if (!st.enabled) {
-    sub.innerHTML = 'Probe is off — set <code>network_probe.enabled: true</code> in config.yaml.';
+    sub.innerHTML = 'Probe is off — turn it on in <a href="/settings#netprobe-body" style="color:var(--blue)">Settings → Network path probe</a>.';
   } else {
     const spd = st.speedtest_interval_min > 0 ? `speed test every ${st.speedtest_interval_min} min` : 'no speed tests';
     sub.textContent = `Traceroute every ${st.interval_min} min, ${spd}`
