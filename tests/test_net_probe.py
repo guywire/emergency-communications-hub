@@ -347,7 +347,8 @@ async def test_run_mesh_once_pings_both_radios(monkeypatch):
     class MC:   # MeshCore-like
         _connected, _base_lat, _base_lon, _self_node_id = True, 43.66, -70.26, "self"
         _nodes = {n.node_id: n for n in [_node("rptA", "REP", 43.70, -70.30), _node("rptB", "REP", 43.9, -70.1)]}
-        async def ping_and_wait(self, nid, timeout):
+        async def ping_and_wait(self, nid, timeout, quiet=False):
+            assert quiet, "analytics pings must stay out of the message feed"
             if nid == "rptB":
                 return {"status": "timeout", "detail": "no TRACE_DATA reply within 30s"}
             return {"status": "ok", "hops": 1, "named": ["RPTA"], "snrs": [7.25, 5.0]}
@@ -370,7 +371,7 @@ async def test_run_mesh_once_pings_both_radios(monkeypatch):
     a = by["meshcore-usb: RPTA"]
     assert a["kind"] == "mesh" and a["hop_count"] == 1 and "error" not in a
     assert json.loads(a["hops_json"])["snrs"] == [7.25, 5.0]
-    assert by["meshcore-usb: RPTB"]["error"].startswith("no TRACE_DATA")
+    assert by["meshcore-usb: RPTB"]["error"] == "no reply"
     assert by["meshtastic1: !R1"]["final_rtt_ms"] == 4200
     assert svc.status()["mesh"]["last_run"]
 
@@ -388,13 +389,38 @@ async def test_meshtastic_traceroute_and_wait_collects_route():
         await MeshtasticAdapter._handle_traceroute(a, {}, {"traceroute": {"route": [0x1234], "snrTowards": [24, -128, 10]}}, nid)
         return {"status": "sent", "node_id": nid}
 
-    async def fake_enqueue(msg): pass
+    posted = []
+    async def fake_enqueue(msg): posted.append(msg)
     a.ping, a._enqueue = fake_ping, fake_enqueue
     res = await MeshtasticAdapter.traceroute_and_wait(a, "!abcd")
     assert res["status"] == "ok" and res["hops"] == 1 and res["snrs"] == [6.0, 2.5]
     assert a._traceroute_waiters == {}
+    assert posted == []   # an analytics ping's reply is not a feed message
+    # an operator traceroute (nobody waiting) still shows in the feed
+    await MeshtasticAdapter._handle_traceroute(a, {}, {"traceroute": {"route": []}}, "!other")
+    assert len(posted) == 1
 
     async def timeout_ping(nid, via=None):
         return {"status": "error", "detail": "Timed out waiting for traceroute"}
     a.ping = timeout_ping
     assert (await MeshtasticAdapter.traceroute_and_wait(a, "!abcd"))["status"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_meshcore_quiet_trace_no_reply_stays_out_of_feed(monkeypatch):
+    """O176: an analytics repeater ping that times out must not post the
+    'TRACE: no reply' message; an operator trace still does."""
+    import ech.adapters.meshcore as mc
+    a = mc.MeshCoreAdapter.__new__(mc.MeshCoreAdapter)
+    a.name, a._device_name = "mc", "mc"
+    a._trace_ctx, a._pending_trace_tags, a._quiet_tags = {}, {1, 2}, {1}
+    a._one_way_hint = lambda h: ""
+    posted = []
+    async def fake_enqueue(msg): posted.append(msg)
+    async def no_sleep(_): pass
+    a._enqueue = fake_enqueue
+    monkeypatch.setattr(mc.asyncio, "sleep", no_sleep)
+    await a._expire_pending_tag(1, 30.0)
+    assert posted == [] and 1 not in a._quiet_tags and 1 not in a._pending_trace_tags
+    await a._expire_pending_tag(2, 30.0)
+    assert len(posted) == 1 and "no reply" in posted[0].body

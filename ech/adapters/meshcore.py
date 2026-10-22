@@ -1725,9 +1725,13 @@ class MeshCoreAdapter(Adapter):
     async def _expire_pending_tag(self, tag: int, after: float) -> None:
         await asyncio.sleep(after)
         ctx = self._trace_ctx.pop(tag, None)
+        quiet = tag in self._quiet_tags
+        self._quiet_tags.discard(tag)
         if tag not in self._pending_trace_tags:
             return                                   # a reply arrived
         self._pending_trace_tags.discard(tag)
+        if quiet:
+            return                                   # the caller records the result itself
         # No reply: say so in the feed instead of expiring silently, with the
         # evidence we actually had for the route we tried.
         ctx = ctx or {}
@@ -1796,7 +1800,7 @@ class MeshCoreAdapter(Adapter):
         n.meta["expected_hops"] = len(hashes)
         return hashes
 
-    async def ping(self, node_id: str, via: "list[str] | None" = None) -> dict:
+    async def ping(self, node_id: str, via: "list[str] | None" = None, quiet: bool = False) -> dict:
         """Send CMD_SEND_TRACE_PATH (0x24) — broadcasts a trace packet onto the mesh.
         Results arrive as TRACE_DATA (0x89) and appear in the message feed.
 
@@ -1932,6 +1936,8 @@ class MeshCoreAdapter(Adapter):
                         for hp in hop_prefixes]
         route_names = " → ".join(p["name"] for p in route_points)
         try:
+            if quiet:
+                self._quiet_tags.add(tag)        # no feed message for the reply / no-reply
             await self._send_cmd(payload)
             self._pending_trace_tags.add(tag)
             tgt_hash = (hop_prefixes[len(hop_prefixes) // 2] if hop_prefixes else "")[:2].lower()
@@ -2153,12 +2159,13 @@ class MeshCoreAdapter(Adapter):
             self._trace_futures.pop(tag, None)
 
     async def ping_and_wait(self, node_id: str, via: "list[str] | None" = None,
-                             timeout: float = 25.0) -> dict:
+                             timeout: float = 25.0, quiet: bool = False) -> dict:
         """Directed variant of trace_and_wait() — probe a specific node_id and
         await its TRACE_DATA reply synchronously, for callers (e.g. the mesh
         bot's 'trace <node>' command) that want an inline result instead of
-        watching the message feed."""
-        res = await self.ping(node_id, via=via)
+        watching the message feed. quiet=True keeps the result out of the
+        feed entirely (the analytics repeater pings record it themselves)."""
+        res = await self.ping(node_id, via=via, quiet=quiet)
         if res.get("status") != "sent":
             return {"status": "error", "detail": res.get("detail", "trace send failed")}
         tag = res["tag"]

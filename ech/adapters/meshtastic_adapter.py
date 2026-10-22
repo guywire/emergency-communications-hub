@@ -778,6 +778,15 @@ class MeshtasticAdapter(Adapter):
         node = self._nodes.get(from_id)
         display = node.display_name if node else from_id
         body = f"TRACEROUTE {display}: {path_str} ({hops} hop{'s' if hops != 1 else ''})"
+        log.info("Meshtastic %s: traceroute from %s: %s", self.name, from_id, path_str)
+        fut = self._traceroute_waiters.get(from_id)
+        if fut is not None and not fut.done():
+            # An analytics repeater ping is waiting for this: it records the
+            # result itself, so it stays out of the message feed.
+            # snrTowards is in quarter-dB; -128 means unknown
+            snrs = [s / 4 for s in (tr.get("snrTowards") or []) if s != -128]
+            fut.set_result({"hops": hops, "route": [str(n) for n in route], "snrs": snrs})
+            return
         msg = NormalizedMessage(
             source_adapter=self.name,
             source_channel="traceroute",
@@ -788,12 +797,6 @@ class MeshtasticAdapter(Adapter):
             path=path_str,
         )
         await self._enqueue(msg)
-        log.info("Meshtastic %s: traceroute from %s: %s", self.name, from_id, path_str)
-        fut = self._traceroute_waiters.get(from_id)
-        if fut is not None and not fut.done():
-            # snrTowards is in quarter-dB; -128 means unknown
-            snrs = [s / 4 for s in (tr.get("snrTowards") or []) if s != -128]
-            fut.set_result({"hops": hops, "route": [str(n) for n in route], "snrs": snrs})
 
     async def _handle_neighborinfo(self, decoded, from_id) -> None:
         """Decode NEIGHBORINFO_APP — update mesh topology and emit a WS event."""

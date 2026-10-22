@@ -765,7 +765,7 @@ class NetProbeService:
         t0 = time.monotonic()
         try:
             if kind == "meshcore":
-                res = await adapter.ping_and_wait(node.node_id, timeout=30.0)
+                res = await adapter.ping_and_wait(node.node_id, timeout=30.0, quiet=True)
             else:
                 res = await adapter.traceroute_and_wait(node.node_id, timeout=90.0)
         except Exception as exc:
@@ -780,7 +780,8 @@ class NetProbeService:
             log.info("NetProbe: %s ping %s (%s km): reply in %.1f s, %s hop(s)", name, label,
                      dist if dist is not None else "?", rtt / 1000, res.get("hops"))
         else:
-            row["error"] = (res.get("detail") or res.get("status") or "no reply")[:300]
+            row["error"] = ("no reply" if res.get("status") == "timeout"
+                            else (res.get("detail") or res.get("status") or "no reply"))[:300]
             log.info("NetProbe: %s ping %s: no reply (%s)", name, label, row["error"])
         row["hops_json"] = json.dumps(detail)
         if self._db:

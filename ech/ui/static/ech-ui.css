@@ -98,6 +98,13 @@ body { background:var(--bg); }
 
 @media (max-width:1380px) { #ech-topnav .nv .lbl, #ech-topnav .grp > button .lbl { display:none; } #ech-topnav .nv, #ech-topnav .grp > button { padding:0 9px; } }
 @media (max-width:900px)  { #sm-brand .wm, #sm-brand .pg, #sm-links { display:none !important; } }
+/* Phones: page headers scroll sideways (overflow-x:auto), which would clip an
+   absolutely-positioned dropdown - pin the menus under the header instead. */
+@media (max-width:768px) {
+  #ech-topnav .menu { position:fixed; top:48px; left:8px; right:8px; min-width:0; border-radius:var(--radius); }
+  #ech-topnav .nv, #ech-topnav .grp > button { padding:0 10px; }
+  #ech-topnav .ico { width:18px; height:18px; }
+}
 
 /* ── Sub-tab bars (APRS, Settings, Ham Log...) ─────────────────────── */
 .tabs, #tabs, .tab-bar, .subnav { background:var(--bg2); border-bottom:1px solid var(--border); }

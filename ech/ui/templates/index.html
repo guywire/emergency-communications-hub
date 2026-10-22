@@ -978,7 +978,7 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
   /* Hide SVG radio graphic and some secondary header items to save space —
      the icon nav is the priority; everything else here is secondary chrome
      that can go first so the nav reliably fits without its own scrollbar. */
-  #header svg        { display: none; }
+  #header > svg      { display: none; }   /* the old logo only - nav icons stay */
   #header .spacer    { min-width: 0; }
   #ws-status         { display: none; }
   #mode-indicator    { display: none; }
