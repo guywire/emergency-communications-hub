@@ -344,7 +344,7 @@ function renderNetProbe() {
       <div class="nc-title"><span class="legend-swatch" style="background:${netColor(tIdx[t.label])}"></span>${esc(t.label)} ${badge}</div>
       ${sp ? `<div class="nc-big">${Math.round(sp.down_mbps)}↓ / ${Math.round(sp.up_mbps)}↑ Mbps · ${(+sp.ping_ms).toFixed(1)} ms</div>
               <div>${esc(sp.server || '')}${sp.result_url ? ` · <a href="${esc(sp.result_url)}" target="_blank" rel="noopener" style="color:var(--blue)">result</a>` : ''}</div>`
-           : '<div>No speed test yet</div>'}
+           : t.speedtest === false ? '' : '<div>No speed test yet</div>'}
       ${tr ? `<div>Route: ${esc(routeCities(tr.hops) || '?')}${tr.server ? ' → ' + esc(tr.server) : ''} · ${tr.hop_count} hops · ${tr.final_rtt_ms != null ? (+tr.final_rtt_ms).toFixed(1) + ' ms' : '—'}</div>` : ''}
       ${caWhy && !expectCA[t.label] ? `<div style="color:var(--red)">Canada flag: ${esc(caWhy)}</div>` : ''}
       ${ok.length && !expectCA[t.label] ? `<div>Via Canada in ${caCount} of ${ok.length} traceroutes this range</div>` : ''}

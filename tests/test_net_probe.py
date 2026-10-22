@@ -245,3 +245,59 @@ async def test_web_check_records_timings_and_cloudflare_colo(monkeypatch):
     assert d["code"] == 403 and d["dns"] == 14.5 and d["colo"] == "YUL"
     assert calls[0][-2:] == ["--", "https://example.org/p?x=1"]          # URL never parsed as an option
     assert calls[1][-1] == "https://example.org/cdn-cgi/trace"
+
+
+@pytest.mark.asyncio
+async def test_trace_to_1111_reports_cloudflare_colo(monkeypatch):
+    svc = NetProbeService({"network_probe": {"targets": [{"label": "Cloudflare DNS", "trace_host": "1.1.1.1"}]}})
+    svc.traceroute_bin = svc.curl_bin = __file__
+    saved = []
+    trace = """traceroute to 1.1.1.1 (1.1.1.1), 16 hops max, 60 byte packets
+ 1  OpenWrt.lan (192.168.6.1)  0.206 ms  0.172 ms
+ 3  7.l.burlvtma97w.vt.consolidated.net (64.222.213.131)  2.821 ms  2.815 ms
+ 6  172.68.52.15 (172.68.52.15)  5.997 ms 172.68.52.17 (172.68.52.17)  5.283 ms
+ 7  one.one.one.one (1.1.1.1)  5.240 ms  5.331 ms
+"""
+
+    async def fake_run(argv, timeout):
+        if argv[-1] == "https://1.1.1.1/cdn-cgi/trace":
+            return 0, "fl=1\ncolo=BOS\nloc=US\n", ""
+        return 0, trace, ""
+
+    class DB:
+        async def insert_net_probe(self, row): saved.append(row)
+        async def last_net_probe(self, *a): return None
+
+    monkeypatch.setattr(svc, "_run", fake_run)
+    svc._db = DB()
+    await svc._trace(svc.targets[0])
+    row = saved[0]
+    assert row["server"] == "Cloudflare BOS (Boston)"
+    assert row["via_canada"] == 0 and row["final_rtt_ms"] == 5.24
+
+
+def test_traceroute_only_targets():
+    from ech.core.net_probe import validate_config
+    cfg = validate_config({"interval_min": 30, "targets": [
+        {"label": "Cloudflare DNS", "trace_host": "1.1.1.1", "speedtest": True},
+        {"label": "Google DNS", "trace_host": "8.8.8.8", "speedtest": False}]})
+    assert cfg["targets"][0] == {"label": "Cloudflare DNS", "server_id": None, "trace_host": "1.1.1.1"}
+    assert cfg["targets"][1]["speedtest"] is False
+    with pytest.raises(ValueError):   # nothing to trace without a speed test to learn the host from
+        validate_config({"interval_min": 30, "targets": [{"label": "X", "speedtest": False}]})
+
+
+@pytest.mark.asyncio
+async def test_run_once_skips_speedtest_for_trace_only(monkeypatch):
+    svc = NetProbeService({"network_probe": {"targets": [
+        {"label": "Cloudflare DNS", "trace_host": "1.1.1.1"},
+        {"label": "Google DNS", "trace_host": "8.8.8.8", "speedtest": False}]}})
+    svc.speedtest_bin = __file__
+    traced, tested = [], []
+
+    async def fake_trace(t): traced.append(t["label"])
+    async def fake_speed(t): tested.append(t["label"])
+    monkeypatch.setattr(svc, "_trace", fake_trace)
+    monkeypatch.setattr(svc, "_speedtest", fake_speed)
+    await svc.run_once(force_speed=True)
+    assert traced == ["Cloudflare DNS", "Google DNS"] and tested == ["Cloudflare DNS"]

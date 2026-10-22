@@ -90,10 +90,13 @@ network_probe:
   speedtest_interval_min: 30    # speed-test cadence (0 = never)
   # speedtest_bin: /opt/ech/bin/speedtest
   # Each target: traceroute to trace_host (blank = the speed-test server) and a
-  # speed test to server_id (blank = Ookla picks the nearest). Tracing 8.8.8.8
-  # also asks Google which of its DNS sites answered (YUL = Montreal).
+  # speed test to server_id (blank = Ookla picks the nearest). Tracing 1.1.1.1
+  # asks Cloudflare which data centre answered (BOS = Boston); tracing 8.8.8.8
+  # asks Google which DNS site answered (YUL = Montreal).
+  # speedtest: false makes a target traceroute-only (no ~1.5 GB test).
   targets:
-    - {label: Google DNS, trace_host: 8.8.8.8}
+    - {label: Cloudflare DNS, trace_host: 1.1.1.1}
+    - {label: Google DNS, trace_host: 8.8.8.8, speedtest: false}
     # - {label: Boston, server_id: 1774}      # Comcast, Boston MA
     # - {label: Montreal, server_id: 16045}   # Beanfield, Montreal QC (expect_canada: true by default)
   # Pages timed every run (DNS / connect / TLS / first byte / total). Only the

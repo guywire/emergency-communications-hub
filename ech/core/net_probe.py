@@ -179,6 +179,9 @@ def path_signature(hops: list[dict], extra: str = "") -> str:
 # its site's airport code (yul = Montreal, iad = Ashburn, ...). Together
 # they say which Google site answers 8.8.8.8 for this connection.
 GOOGLE_DNS_IPS = {"8.8.8.8", "8.8.4.4"}
+# Cloudflare's resolver reports its data centre at https://1.1.1.1/cdn-cgi/trace
+# (colo=BOS), the same endpoint every Cloudflare-fronted site has.
+CLOUDFLARE_DNS_IPS = {"1.1.1.1", "1.0.0.1"}
 
 
 def parse_google_locations(txt: str) -> list[tuple]:
@@ -255,6 +258,10 @@ def validate_config(data: dict) -> dict:
             if not _HOST_RE.match(host):
                 raise ValueError(f"{label}: trace host must be a hostname or IP address")
             row["trace_host"] = host
+        if t.get("speedtest") is False:
+            if not host:
+                raise ValueError(f"{label}: a traceroute-only target needs a trace host")
+            row["speedtest"] = False
         if "expect_canada" in t:
             row["expect_canada"] = bool(t["expect_canada"])
         targets.append(row)
@@ -382,8 +389,8 @@ class NetProbeService:
             "speedtest_interval_min": self.speedtest_interval_min,
             "speedtest_available": os.path.isfile(self.speedtest_bin),
             "traceroute_available": os.path.isfile(self.traceroute_bin),
-            "targets": [{"label": t["label"], "expect_canada": self._expects_canada(t)}
-                        for t in self.targets],
+            "targets": [{"label": t["label"], "expect_canada": self._expects_canada(t),
+                         "speedtest": t.get("speedtest", True)} for t in self.targets],
             "web_checks": [{"label": w["label"], "url": w["url"]} for w in self.web_checks],
         }
 
@@ -404,7 +411,7 @@ class NetProbeService:
                         last = await self._db.last_net_probe(t["label"], "speedtest")
                         if last and last.get("server_host"):
                             self._hosts[t["label"]] = last["server_host"]
-                    if not self._host_for(t) and do_speed:
+                    if not self._host_for(t) and do_speed and t.get("speedtest", True):
                         continue  # learn the host from the speed test, trace after
                     await self._trace(t)
                 for w in self.web_checks:
@@ -412,6 +419,8 @@ class NetProbeService:
                 if do_speed:
                     self._last_speed = time.monotonic()
                     for t in self.targets:
+                        if not t.get("speedtest", True):
+                            continue  # traceroute-only target
                         traced = bool(self._host_for(t))
                         await self._speedtest(t)
                         if not traced and self._host_for(t):
@@ -496,10 +505,15 @@ class NetProbeService:
         else:
             replied = [h for h in hops if h["rtt"] is not None]
             canada = [h for h in hops if h["country"] == "CA"]
-            site = await self._google_site() if host in GOOGLE_DNS_IPS else ""
+            if host in GOOGLE_DNS_IPS:
+                site, owner = await self._google_site(), "Google DNS site"
+            elif host in CLOUDFLARE_DNS_IPS:
+                site, owner = await self._cloudflare_colo(f"https://{host}"), "Cloudflare"
+            else:
+                site, owner = "", ""
             site_c, site_cc = site_city(site)
             if site:
-                row["server"] = f"Google DNS site {site.upper()}" + (f" ({site_c})" if site_c else "")
+                row["server"] = f"{owner} {site.upper()}" + (f" ({site_c})" if site_c else "")
                 if site_cc == "CA":
                     canada = canada or [{"city": site_c}]
             row.update(
@@ -545,6 +559,16 @@ class NetProbeService:
             ips += [tok for tok in out.replace('"', " ").split() if re.fullmatch(r"[0-9.]+|[0-9a-fA-F:]*:[0-9a-fA-F:]*", tok)]
         return google_site_for(ips, self._google_nets)
 
+    async def _cloudflare_colo(self, base_url: str) -> str:
+        """Cloudflare data-centre code (e.g. 'BOS') serving base_url, from its
+        /cdn-cgi/trace endpoint; '' if not Cloudflare or unreachable."""
+        if not os.path.isfile(self.curl_bin):
+            return ""
+        rc, out, _ = await self._run(
+            [self.curl_bin, "-s", "--max-time", "10", "--", f"{base_url}/cdn-cgi/trace"], timeout=15)
+        m = re.search(r"^colo=([A-Z]{3})$", out, re.M) if rc == 0 else None
+        return m.group(1) if m else ""
+
     async def _web_check(self, w: dict) -> None:
         """Time one page fetch with curl's phase timers (DNS, connect, TLS,
         first byte, total). Sites behind Cloudflare also report which edge
@@ -577,13 +601,9 @@ class NetProbeService:
                       "tls": ms("time_appconnect"), "ttfb": ms("time_starttransfer"),
                       "total": ms("time_total"), "code": m.get("http_code"),
                       "bytes": m.get("size_download"), "url": w["url"]}
-            colo = ""
-            rc2, out2, _ = await self._run(
-                [self.curl_bin, "-s", "--max-time", "10", "--",
-                 f"{parts.scheme}://{parts.netloc}/cdn-cgi/trace"], timeout=15)
-            cm = re.search(r"^colo=([A-Z]{3})$", out2, re.M) if rc2 == 0 else None
-            if cm:
-                colo = detail["colo"] = cm.group(1)
+            colo = await self._cloudflare_colo(f"{parts.scheme}://{parts.netloc}")
+            if colo:
+                detail["colo"] = colo
             city, cc = site_city(colo)
             row.update(
                 ping_ms=detail["ttfb"], final_rtt_ms=detail["total"],

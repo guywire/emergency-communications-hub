@@ -542,12 +542,13 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
             <th style="font-weight:500;padding:3px 4px">Name</th>
             <th style="font-weight:500;padding:3px 4px">Trace host <span style="color:var(--dim)">(blank = speed-test server)</span></th>
             <th style="font-weight:500;padding:3px 4px">Speed-test server ID <span style="color:var(--dim)">(blank = nearest)</span></th>
+            <th style="font-weight:500;padding:3px 4px">Speed test</th>
             <th style="font-weight:500;padding:3px 4px">Canada expected</th><th></th></tr></thead>
           <tbody id="netprobe-targets"></tbody>
         </table>
         <button class="btn" style="margin-top:6px;padding:3px 10px;font-size:10px" onclick="addNetProbeTarget()">+ Add target</button>
         <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px">
-          Tracing 8.8.8.8 or 8.8.4.4 also asks Google which of its DNS sites answered (e.g. YUL = Montreal) and flags a Canadian one.
+          Tracing 1.1.1.1 / 1.0.0.1 asks Cloudflare which data centre answered (e.g. BOS = Boston); tracing 8.8.8.8 / 8.8.4.4 asks Google (e.g. YUL = Montreal). A Canadian site is flagged.
         </div>
       </div>
       <div style="margin-top:12px">
@@ -1765,11 +1766,13 @@ function netProbeRow(t) {
   tr.innerHTML = `<td style="padding:2px 4px"><input type="text" class="np-label" maxlength="24" style="font-family:var(--mono);font-size:11px"></td>
     <td style="padding:2px 4px"><input type="text" class="np-host" maxlength="253" placeholder="e.g. 8.8.8.8" style="font-family:var(--mono);font-size:11px"></td>
     <td style="padding:2px 4px"><input type="number" class="np-id" min="1" placeholder="nearest" style="font-family:var(--mono);font-size:11px;width:100px"></td>
+    <td style="padding:2px 4px"><input type="checkbox" class="np-st" style="width:auto" title="Untick for traceroute only (saves ~1.5 GB per run)"></td>
     <td style="padding:2px 4px"><input type="checkbox" class="np-ca" style="width:auto"></td>
     <td style="padding:2px 4px"><button class="btn" style="padding:2px 8px;font-size:10px" onclick="this.closest('tr').remove()" title="Remove">✕</button></td>`;
   tr.querySelector('.np-label').value = t.label || '';
   tr.querySelector('.np-host').value = t.trace_host || '';
   tr.querySelector('.np-id').value = t.server_id || '';
+  tr.querySelector('.np-st').checked = t.speedtest !== false;
   tr.querySelector('.np-ca').checked = t.expect_canada != null ? !!t.expect_canada : /montreal/i.test(t.label || '');
   return tr;
 }
@@ -1812,6 +1815,7 @@ async function saveNetProbeConfig() {
     label: tr.querySelector('.np-label').value.trim(),
     trace_host: tr.querySelector('.np-host').value.trim(),
     server_id: tr.querySelector('.np-id').value.trim(),
+    speedtest: tr.querySelector('.np-st').checked,
     expect_canada: tr.querySelector('.np-ca').checked,
   })).filter(t => t.label || t.server_id || t.trace_host);
   const web_checks = [...document.querySelectorAll('#netprobe-web tr')].map(tr => ({
