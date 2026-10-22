@@ -103,7 +103,14 @@ network_probe:
   # page itself is fetched; Cloudflare-fronted sites also report which data
   # centre served them (colo), flagged if Canadian.
   web_checks: []
-  #  - {label: Maine Archives, url: "https://digitalarchives.maine.gov/view/288672/sunlit-forest?offset=0&limit=10"}
+  #  - {label: Maine Archives image, url: "https://digitalarchives.maine.gov//iiif/3/1395300/full/%5E1000,/0/default.jpg?download=true&filename=G547-342271-A57661.jpg"}
+  # Ping the most local MeshCore / Meshtastic repeaters (nearest to the base
+  # location; repeaters without a position fill in by SNR), one at a time.
+  mesh:
+    enabled: false
+    interval_min: 120
+    count: 3              # repeaters per radio
+    max_age_hours: 72     # only repeaters heard this recently
 
 operator:
   callsign: "N0CALL"          # replace with your callsign on the server

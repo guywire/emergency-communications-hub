@@ -142,13 +142,22 @@ table.hops tr.silent td{color:var(--dim)}
     <div class="net-sub-head">Throughput (Mbps) — solid = download, dashed = upload</div>
     <div class="chart-wrap"><canvas id="net-speed-chart"></canvas></div>
     <div class="legend" id="net-speed-legend"></div>
-    <div class="net-sub-head">Latency (ms) — speed-test ping, traceroute end-to-end, and web page load / first byte</div>
+    <div class="net-sub-head">Latency (ms) — speed-test ping, traceroute end-to-end, and web check total / first byte</div>
     <div class="chart-wrap"><canvas id="net-lat-chart"></canvas></div>
     <div class="legend" id="net-lat-legend"></div>
     <div class="net-sub-head">Latest traceroute</div>
     <div class="trace-grid" id="net-traces"></div>
     <div class="net-sub-head">Route history — first path seen and every change, this range</div>
     <div id="net-history"></div>
+  </div>
+
+  <div class="panel" id="mesh-panel">
+    <div class="panel-title">Mesh repeater pings — MeshCore &amp; Meshtastic</div>
+    <div class="panel-sub" id="mesh-sub"></div>
+    <div id="mesh-table"></div>
+    <div class="net-sub-head">Round trip (seconds) — only pings that got a reply are plotted; see "Replies" above for misses</div>
+    <div class="chart-wrap"><canvas id="mesh-chart"></canvas></div>
+    <div class="legend" id="mesh-legend"></div>
   </div>
 </div>
 
@@ -169,7 +178,7 @@ function colorForAdapter(name) {
 // the message chart doesn't affect an unrelated series elsewhere. Persists
 // across refreshes/resizes (not across a full page reload) since it's set
 // state the operator is actively steering, not server data.
-const hiddenSeries = { msg: new Set(), anom: new Set(), netspd: new Set(), netlat: new Set() };
+const hiddenSeries = { msg: new Set(), anom: new Set(), netspd: new Set(), netlat: new Set(), mesh: new Set() };
 function toggleSeries(chartKey, name, reloadFn) {
   const set = hiddenSeries[chartKey];
   if (set.has(name)) set.delete(name); else set.add(name);
@@ -358,8 +367,8 @@ function renderNetProbe() {
     const badge = !last ? '' : `<span class="badge ${last.via_canada ? 'bad' : 'ok'}">${last.via_canada ? 'VIA CANADA' : (last.server ? 'served in US' : 'page check')}</span>`;
     return `<div class="net-card${last && last.via_canada ? ' alarm' : ''}">
       <div class="nc-title"><span class="legend-swatch" style="background:${netColor(targets.length + wi)}"></span>${esc(w.label)} ${badge}</div>
-      ${last ? `<div class="nc-big">${Math.round(d.total)} ms page load · first byte ${Math.round(d.ttfb)} ms</div>
-        <div>DNS ${Math.round(d.dns)} · connect ${Math.round(d.connect)} · TLS ${Math.round(d.tls)} ms · HTTP ${esc(d.code)}${d.code == 403 ? ' (bot check — page only, picture not loaded)' : ''}</div>
+      ${last ? `<div class="nc-big">${Math.round(d.total)} ms total · first byte ${Math.round(d.ttfb)} ms</div>
+        <div>DNS ${Math.round(d.dns)} · connect ${Math.round(d.connect)} · TLS ${Math.round(d.tls)} ms · HTTP ${esc(d.code)}${d.code == 403 ? ' (blocked by bot check)' : ''}${d.bytes ? ` · ${esc(d.content_type || '')} ${(d.bytes / 1024).toFixed(0)} KB` : ''}</div>
         ${last.server ? `<div>Served from ${esc(last.server)}</div>` : ''}
         ${pts.length > 1 ? `<div>Via Canada in ${caCount} of ${pts.length} checks this range</div>` : ''}`
         : `<div>${failed ? 'Last check failed: ' + esc(failed) : 'No check yet'}</div>`}
@@ -381,7 +390,7 @@ function renderNetProbe() {
   webChecks.forEach((w, wi) => {
     const pts = webs.filter(r => r.target === w.label && !r.error);
     const c = targets.length + wi;
-    latSeries.push({name: `${w.label} page load`, color: netColor(c),
+    latSeries.push({name: `${w.label} total`, color: netColor(c),
       points: pts.filter(r => r.final_rtt_ms != null).map(r => [Date.parse(r.ts), r.final_rtt_ms])});
     latSeries.push({name: `${w.label} first byte`, color: netColor(c, true), dash: true,
       points: pts.filter(r => r.ping_ms != null).map(r => [Date.parse(r.ts), r.ping_ms])});
@@ -403,6 +412,42 @@ function renderNetProbe() {
       <td>${r.final_rtt_ms != null ? (+r.final_rtt_ms).toFixed(1) : '—'}</td>
       <td>${r.route_changed ? 'changed' : 'first seen'}${r.via_canada ? ' · via Canada' : ''}</td></tr>`).join('')}
   </table>` : '<div class="panel-sub">No traceroutes in this range</div>';
+
+  renderMeshPings(rows, st.mesh || {});
+}
+
+// ── Mesh repeater pings (O174) ──────────────────────────────────────────
+// The few most local repeaters on each MeshCore / Meshtastic radio, pinged
+// every couple of hours: reply rate, round trip, hops and per-hop SNR.
+function renderMeshPings(rows, ms) {
+  const pings = rows.filter(r => r.kind === 'mesh');
+  const sub = document.getElementById('mesh-sub');
+  sub.textContent = !ms.enabled
+    ? 'Off — turn on in Settings → Network path probe → Mesh repeater pings.'
+    : `The ${ms.count} most local repeaters per radio, every ${ms.interval_min} min`
+      + (ms.running ? ' · running now' : ms.last_run ? ` · last run ${fmtWhen(ms.last_run)}` : ' · first run ~3 min after startup');
+  const byTarget = {};
+  pings.forEach(r => (byTarget[r.target] = byTarget[r.target] || []).push(r));
+  const names = Object.keys(byTarget).sort();
+  document.getElementById('mesh-table').innerHTML = names.length ? `<table class="hops">
+    <tr><th>Radio</th><th>Repeater</th><th>km</th><th>Last ping</th><th>Round trip</th><th>Hops</th><th>SNR per hop (dB)</th><th>Replies this range</th></tr>
+    ${names.map(n => {
+      const list = byTarget[n], last = list[list.length - 1], d = last.detail || {};
+      const ok = list.filter(r => !r.error).length;
+      return `<tr class="${last.error ? 'ca' : ''}">
+        <td>${esc(d.adapter || '')}</td><td>${esc(last.server || n)}</td>
+        <td>${d.distance_km != null ? d.distance_km : '—'}</td><td>${fmtWhen(last.ts)}</td>
+        <td>${last.error ? 'no reply' : (last.final_rtt_ms / 1000).toFixed(1) + ' s'}</td>
+        <td>${last.error ? '' : (last.hop_count ?? '')}</td>
+        <td>${last.error ? esc(last.error) : esc((d.snrs || []).map(s => (+s).toFixed(1)).join(' → '))}</td>
+        <td>${ok} of ${list.length} (${Math.round(100 * ok / list.length)}%)</td></tr>`;
+    }).join('')}
+  </table>` : '<div class="panel-sub">No repeater pings in this range yet</div>';
+  const series = names.map((n, i) => ({
+    name: (byTarget[n][0].server || n), color: netColor(i),
+    points: byTarget[n].filter(r => !r.error && r.final_rtt_ms != null).map(r => [Date.parse(r.ts), r.final_rtt_ms / 1000]),
+  }));
+  drawNetChart('mesh-chart', 'mesh-legend', 'mesh', series, ' s', ms.interval_min || 120);
 }
 function routeCities(hops) {
   const out = [];
@@ -444,7 +489,7 @@ async function runNetProbe() {
 
 // Time-proportional line chart (probe samples aren't hourly buckets). Gaps
 // longer than 3x the probe interval break the line so outages show as gaps.
-function drawNetChart(canvasId, legendId, key, series, unit) {
+function drawNetChart(canvasId, legendId, key, series, unit, intervalMin) {
   const hidden = hiddenSeries[key];
   const withData = series.filter(s => s.points.length);
   const visible = withData.filter(s => !hidden.has(s.name));
@@ -474,7 +519,7 @@ function drawNetChart(canvasId, legendId, key, series, unit) {
   const yAt = v => padTop + chartH - (v / maxVal) * chartH;
   drawYAxis(ctx, w, h, padLeft, padTop, chartH, maxVal);
   const st = (_netData && _netData.status) || {};
-  const gapMs = 3 * 60e3 * Math.max(st.interval_min || 15, st.speedtest_interval_min || 15);
+  const gapMs = 3 * 60e3 * (intervalMin || Math.max(st.interval_min || 15, st.speedtest_interval_min || 15));
   visible.forEach(s => {
     ctx.strokeStyle = s.color; ctx.lineWidth = 1.75;
     ctx.setLineDash(s.dash ? [4, 3] : []);

@@ -153,7 +153,8 @@ def test_validate_config():
     assert ok == {"enabled": True, "interval_min": 30.0, "speedtest_interval_min": 0.0,
                   "targets": [{"label": "Boston", "server_id": 1774},
                               {"label": "Montreal", "server_id": 16045, "expect_canada": True}],
-                  "web_checks": []}
+                  "web_checks": [],
+                  "mesh": {"enabled": False, "interval_min": 120.0, "count": 3, "max_age_hours": 72.0}}
     g = validate_config({"interval_min": 30, "targets": [{"label": "Google DNS", "trace_host": "8.8.8.8", "server_id": ""}],
                          "web_checks": [{"label": "Maine Archives", "url": "https://digitalarchives.maine.gov/view/288672/sunlit-forest?offset=0&limit=10"}]})
     assert g["targets"] == [{"label": "Google DNS", "server_id": None, "trace_host": "8.8.8.8"}]
@@ -301,3 +302,99 @@ async def test_run_once_skips_speedtest_for_trace_only(monkeypatch):
     monkeypatch.setattr(svc, "_speedtest", fake_speed)
     await svc.run_once(force_speed=True)
     assert traced == ["Cloudflare DNS", "Google DNS"] and tested == ["Cloudflare DNS"]
+
+
+# ── Mesh repeater pings (O174) ───────────────────────────────────────────
+def _node(nid, role, lat=None, lon=None, snr=None, age_h=1):
+    from datetime import datetime, timedelta, timezone
+    from ech.core.models import MeshNode
+    n = MeshNode(node_id=nid, display_name=nid.upper(), lat=lat, lon=lon, snr=snr,
+                 last_heard=datetime.now(timezone.utc) - timedelta(hours=age_h))
+    n.meta["node_type"] = role
+    return n
+
+
+def test_pick_local_repeaters():
+    from ech.core.net_probe import pick_local_repeaters
+    base = (43.66, -70.26)   # Portland ME
+    nodes = [
+        _node("far", "REP", 44.80, -68.77),                 # Bangor ~165 km
+        _node("near", "REP", 43.70, -70.30),                # ~5 km
+        _node("mid", "ROUTER", 43.90, -70.10),              # ~30 km
+        _node("client", "CLI", 43.66, -70.26),              # not a repeater
+        _node("stale", "REP", 43.67, -70.27, age_h=200),    # not heard recently
+        _node("nopos_strong", "REPEATER", snr=9.5),
+        _node("nopos_weak", "REP", snr=-12.0),
+        _node("me", "ROUTER", 43.66, -70.26),               # our own radio
+    ]
+    picks = pick_local_repeaters(nodes, base, 3, 72, exclude={"me"})
+    assert [n.node_id for n, _ in picks] == ["near", "mid", "far"]
+    assert picks[0][1] < 10 and 20 < picks[1][1] < 40
+    picks = pick_local_repeaters(nodes, base, 5, 72, exclude={"me"})
+    assert [n.node_id for n, _ in picks][3:] == ["nopos_strong", "nopos_weak"]   # fill by SNR
+    assert pick_local_repeaters(nodes, None, 2, 72, exclude={"me"})[0][1] is None
+
+
+@pytest.mark.asyncio
+async def test_run_mesh_once_pings_both_radios(monkeypatch):
+    import ech.core.net_probe as np_mod
+    saved = []
+
+    class DB:
+        async def insert_net_probe(self, row): saved.append(row)
+        async def get_kv(self, k): return None
+
+    class MC:   # MeshCore-like
+        _connected, _base_lat, _base_lon, _self_node_id = True, 43.66, -70.26, "self"
+        _nodes = {n.node_id: n for n in [_node("rptA", "REP", 43.70, -70.30), _node("rptB", "REP", 43.9, -70.1)]}
+        async def ping_and_wait(self, nid, timeout):
+            if nid == "rptB":
+                return {"status": "timeout", "detail": "no TRACE_DATA reply within 30s"}
+            return {"status": "ok", "hops": 1, "named": ["RPTA"], "snrs": [7.25, 5.0]}
+
+    class MT:   # Meshtastic-like
+        _connected, _base_lat, _base_lon, _my_node_id = True, 43.66, -70.26, "!me"
+        _nodes = {"!r1": _node("!r1", "ROUTER", 43.70, -70.30)}
+        async def traceroute_and_wait(self, nid, timeout):
+            return {"status": "ok", "rtt_ms": 4200, "hops": 0, "route": [], "snrs": [6.0]}
+
+    class Router:
+        _adapters = {"meshcore-usb": MC(), "meshtastic1": MT(), "aprs": object()}
+
+    async def no_sleep(_): pass
+    monkeypatch.setattr(np_mod.asyncio, "sleep", no_sleep)
+    svc = NetProbeService({"network_probe": {"mesh": {"enabled": True}}}, db=DB(), router=Router())
+    await svc.run_mesh_once()
+    by = {r["target"]: r for r in saved}
+    assert set(by) == {"meshcore-usb: RPTA", "meshcore-usb: RPTB", "meshtastic1: !R1"}
+    a = by["meshcore-usb: RPTA"]
+    assert a["kind"] == "mesh" and a["hop_count"] == 1 and "error" not in a
+    assert json.loads(a["hops_json"])["snrs"] == [7.25, 5.0]
+    assert by["meshcore-usb: RPTB"]["error"].startswith("no TRACE_DATA")
+    assert by["meshtastic1: !R1"]["final_rtt_ms"] == 4200
+    assert svc.status()["mesh"]["last_run"]
+
+
+@pytest.mark.asyncio
+async def test_meshtastic_traceroute_and_wait_collects_route():
+    from ech.adapters.meshtastic_adapter import MeshtasticAdapter
+    a = MeshtasticAdapter.__new__(MeshtasticAdapter)
+    a._traceroute_waiters = {}
+    a.name = "mt"
+    a._nodes = {}
+
+    async def fake_ping(nid, via=None):
+        # reply arrives (pubsub) before the blocking library call returns
+        await MeshtasticAdapter._handle_traceroute(a, {}, {"traceroute": {"route": [0x1234], "snrTowards": [24, -128, 10]}}, nid)
+        return {"status": "sent", "node_id": nid}
+
+    async def fake_enqueue(msg): pass
+    a.ping, a._enqueue = fake_ping, fake_enqueue
+    res = await MeshtasticAdapter.traceroute_and_wait(a, "!abcd")
+    assert res["status"] == "ok" and res["hops"] == 1 and res["snrs"] == [6.0, 2.5]
+    assert a._traceroute_waiters == {}
+
+    async def timeout_ping(nid, via=None):
+        return {"status": "error", "detail": "Timed out waiting for traceroute"}
+    a.ping = timeout_ping
+    assert (await MeshtasticAdapter.traceroute_and_wait(a, "!abcd"))["status"] == "timeout"

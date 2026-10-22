@@ -2124,9 +2124,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         keep = set(newest.values())
         for i, r in enumerate(rows):
             hj = r.pop("hops_json", None)
-            if hj and r["kind"] == "web":
+            if hj and r["kind"] in ("web", "mesh"):
                 try:
-                    r["detail"] = json.loads(hj)   # small: phase timings + Cloudflare colo
+                    r["detail"] = json.loads(hj)   # small: timings / colo, or mesh hop SNRs
                 except ValueError:
                     pass
             elif hj and (i in keep or r.get("route_changed") or r.get("first_seen")):

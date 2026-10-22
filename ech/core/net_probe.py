@@ -224,6 +224,45 @@ def site_city(code: str) -> tuple[str, str]:
     return "", ""
 
 
+# ── Mesh repeater pings (O174) ────────────────────────────────────────────
+# Repeater-class roles: MeshCore contact type REP; Meshtastic device roles.
+MESH_REPEATER_ROLES = {"REP", "ROUTER", "REPEATER", "ROUTER_LATE", "ROUTER_CLIENT"}
+
+
+def _haversine_km(lat1, lon1, lat2, lon2) -> float:
+    import math
+    r = math.radians
+    a = (math.sin(r(lat2 - lat1) / 2) ** 2
+         + math.cos(r(lat1)) * math.cos(r(lat2)) * math.sin(r(lon2 - lon1) / 2) ** 2)
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
+def pick_local_repeaters(nodes, base: tuple | None, count: int, max_age_hours: float,
+                         exclude: set | None = None, now=None) -> list[tuple]:
+    """The `count` most local repeaters heard within max_age_hours, as
+    [(node, distance_km | None)]. Repeaters with a position rank by distance
+    from the hub; any shortfall is filled by the strongest-SNR repeaters
+    without one (still local: we hear them well)."""
+    now = now or datetime.now(timezone.utc)
+    exclude = exclude or set()
+    fresh = []
+    for n in nodes:
+        if n.node_id in exclude or (n.meta or {}).get("node_type") not in MESH_REPEATER_ROLES:
+            continue
+        if not n.last_heard or (now - n.last_heard).total_seconds() > max_age_hours * 3600:
+            continue
+        fresh.append(n)
+    placed, unplaced = [], []
+    for n in fresh:
+        if base and n.lat and n.lon:
+            placed.append((n, round(_haversine_km(base[0], base[1], n.lat, n.lon), 1)))
+        else:
+            unplaced.append((n, None))
+    placed.sort(key=lambda x: x[1])
+    unplaced.sort(key=lambda x: -(x[0].snr if x[0].snr is not None else -99))
+    return (placed + unplaced)[:count]
+
+
 _LABEL_RE = re.compile(r"^[\w .\-]{1,24}$")
 # Must not start with "-": the host is passed to traceroute as an argument
 _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-:]{0,252}$")
@@ -281,13 +320,35 @@ def validate_config(data: dict) -> dict:
     labels = [t["label"].lower() for t in targets + web]
     if len(set(labels)) != len(labels):
         raise ValueError("target and web check names must be unique")
+    m = data.get("mesh") or {}
+    mesh_interval = float(m.get("interval_min", 120))
+    if not 30 <= mesh_interval <= 1440:
+        raise ValueError("mesh repeater ping interval must be 30–1440 minutes")
+    mesh_count = int(m.get("count", 3))
+    if not 1 <= mesh_count <= 5:
+        raise ValueError("ping 1–5 repeaters per mesh")
+    max_age = float(m.get("max_age_hours", 72))
+    if not 1 <= max_age <= 720:
+        raise ValueError("'heard within' must be 1–720 hours")
+    mesh = {"enabled": bool(m.get("enabled", False)), "interval_min": mesh_interval,
+            "count": mesh_count, "max_age_hours": max_age}
     return {"enabled": bool(data.get("enabled", False)), "interval_min": interval,
-            "speedtest_interval_min": speed, "targets": targets, "web_checks": web}
+            "speedtest_interval_min": speed, "targets": targets, "web_checks": web,
+            "mesh": mesh}
 
 
 class NetProbeService:
-    def __init__(self, config: dict, db=None):
+    def __init__(self, config: dict, db=None, router=None):
         cfg = config.get("network_probe") or {}
+        m = cfg.get("mesh") or {}
+        self.mesh_enabled = bool(m.get("enabled", False))
+        self.mesh_interval_min = max(float(m.get("interval_min", 120)), 5.0)
+        self.mesh_count = int(m.get("count", 3))
+        self.mesh_max_age_hours = float(m.get("max_age_hours", 72))
+        self._router = router
+        self._mesh_task: asyncio.Task | None = None
+        self._mesh_lock = asyncio.Lock()
+        self._mesh_last_run: str | None = None
         self.enabled = bool(cfg.get("enabled", False))
         self.interval_min = max(float(cfg.get("interval_min", 30)), 1.0)
         self.speedtest_interval_min = float(cfg.get("speedtest_interval_min", self.interval_min))
@@ -313,6 +374,10 @@ class NetProbeService:
 
     # ── lifecycle ─────────────────────────────────────────────────────────
     async def start(self) -> None:
+        if self.mesh_enabled and not (self._mesh_task and not self._mesh_task.done()):
+            self._mesh_task = asyncio.create_task(self._mesh_loop(), name="net-probe-mesh")
+            log.info("NetProbe: pinging the %d most local MeshCore/Meshtastic repeaters every %.0f min",
+                     self.mesh_count, self.mesh_interval_min)
         if not self.enabled or (self._task and not self._task.done()):
             return
         self._task = asyncio.create_task(self._loop(), name="net-probe")
@@ -321,14 +386,16 @@ class NetProbeService:
                  f"{self.speedtest_interval_min:.0f} min" if self.speedtest_interval_min > 0 else "never",
                  ", ".join([t["label"] for t in self.targets] + [w["label"] for w in self.web_checks]))
 
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except (asyncio.CancelledError, Exception):
-                pass
-            self._task = None
+    async def stop(self, mesh: bool = True) -> None:
+        tasks = [("_task", self._task)] + ([("_mesh_task", self._mesh_task)] if mesh else [])
+        for attr, task in tasks:
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                setattr(self, attr, None)
 
     async def apply_config(self, cfg: dict) -> None:
         """Apply a validate_config() result live (Settings page): starts or
@@ -343,18 +410,28 @@ class NetProbeService:
             if old_ids.get(t["label"]) != t.get("server_id"):
                 self._hosts.pop(t["label"], None)
         self.enabled = cfg["enabled"]
-        if self.enabled:
-            await self.start()
-            self._wake.set()
-        else:
-            await self.stop()
+        m = cfg.get("mesh") or {}
+        mesh_was = self.mesh_enabled
+        self.mesh_enabled = bool(m.get("enabled", self.mesh_enabled))
+        self.mesh_interval_min = m.get("interval_min", self.mesh_interval_min)
+        self.mesh_count = m.get("count", self.mesh_count)
+        self.mesh_max_age_hours = m.get("max_age_hours", self.mesh_max_age_hours)
+        if mesh_was and not self.mesh_enabled and self._mesh_task:
+            self._mesh_task.cancel()
+            self._mesh_task = None
+        if not self.enabled:
+            await self.stop(mesh=False)
+        await self.start()
+        self._wake.set()
         log.info("NetProbe: settings updated — %s", "enabled" if self.enabled else "disabled")
 
     def config(self) -> dict:
         return {"enabled": self.enabled, "interval_min": self.interval_min,
                 "speedtest_interval_min": self.speedtest_interval_min,
                 "targets": [dict(t) for t in self.targets],
-                "web_checks": [dict(w) for w in self.web_checks]}
+                "web_checks": [dict(w) for w in self.web_checks],
+                "mesh": {"enabled": self.mesh_enabled, "interval_min": self.mesh_interval_min,
+                         "count": self.mesh_count, "max_age_hours": self.mesh_max_age_hours}}
 
     async def _sleep(self, seconds: float) -> None:
         """Sleep, but wake early when apply_config() changes the schedule."""
@@ -392,6 +469,9 @@ class NetProbeService:
             "targets": [{"label": t["label"], "expect_canada": self._expects_canada(t),
                          "speedtest": t.get("speedtest", True)} for t in self.targets],
             "web_checks": [{"label": w["label"], "url": w["url"]} for w in self.web_checks],
+            "mesh": {"enabled": self.mesh_enabled, "interval_min": self.mesh_interval_min,
+                     "count": self.mesh_count, "running": self._mesh_lock.locked(),
+                     "last_run": self._mesh_last_run},
         }
 
     # ── one probe cycle ───────────────────────────────────────────────────
@@ -600,7 +680,8 @@ class NetProbeService:
             detail = {"dns": ms("time_namelookup"), "connect": ms("time_connect"),
                       "tls": ms("time_appconnect"), "ttfb": ms("time_starttransfer"),
                       "total": ms("time_total"), "code": m.get("http_code"),
-                      "bytes": m.get("size_download"), "url": w["url"]}
+                      "bytes": m.get("size_download"), "url": w["url"],
+                      "content_type": (m.get("content_type") or "").split(";")[0]}
             colo = await self._cloudflare_colo(f"{parts.scheme}://{parts.netloc}")
             if colo:
                 detail["colo"] = colo
@@ -615,5 +696,92 @@ class NetProbeService:
                     detail["tls"], detail["ttfb"], f", served from {row['server']}" if colo else "",
                     " — VIA CANADA" if cc == "CA" else "")
             (log.warning if cc == "CA" and not self._expects_canada(w) else log.info)(msg, *args)
+        if self._db:
+            await self._db.insert_net_probe(row)
+
+    # ── Mesh repeater pings (O174) ────────────────────────────────────────
+    async def _mesh_loop(self) -> None:
+        await asyncio.sleep(180)  # radios need a few minutes to load contacts
+        last = 0.0
+        while True:
+            due = last + self.mesh_interval_min * 60 - time.monotonic()
+            if due > 0:
+                await self._sleep(due)
+                continue
+            try:
+                await self.run_mesh_once()
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                log.warning("NetProbe: mesh ping run failed: %s", exc)
+            last = time.monotonic()
+
+    async def _base_location(self, adapter) -> tuple | None:
+        lat, lon = getattr(adapter, "_base_lat", None), getattr(adapter, "_base_lon", None)
+        if lat is None and self._db and hasattr(self._db, "get_kv"):
+            try:
+                lat = float(await self._db.get_kv("base_lat") or "nan")
+                lon = float(await self._db.get_kv("base_lon") or "nan")
+            except (TypeError, ValueError):
+                return None
+            if lat != lat or lon != lon:  # NaN: not set
+                return None
+        return (lat, lon) if lat is not None and lon is not None else None
+
+    async def run_mesh_once(self) -> None:
+        """Ping the most local repeaters on every connected MeshCore and
+        Meshtastic radio, one probe at a time with a gap between them so the
+        run never floods the channel."""
+        if self._mesh_lock.locked() or not self._router:
+            return
+        async with self._mesh_lock:
+            for name, adapter in list(getattr(self._router, "_adapters", {}).items()):
+                if not getattr(adapter, "_connected", False):
+                    continue
+                if hasattr(adapter, "ping_and_wait"):
+                    kind = "meshcore"
+                elif hasattr(adapter, "traceroute_and_wait"):
+                    kind = "meshtastic"
+                else:
+                    continue
+                nodes = list(getattr(adapter, "_nodes", {}).values())
+                own = {getattr(adapter, "_self_node_id", ""), getattr(adapter, "_my_node_id", "")} - {""}
+                picks = pick_local_repeaters(nodes, await self._base_location(adapter),
+                                             self.mesh_count, self.mesh_max_age_hours, own)
+                if not picks:
+                    log.info("NetProbe: %s has no repeaters heard in the last %.0f h to ping",
+                             name, self.mesh_max_age_hours)
+                for i, (node, dist) in enumerate(picks):
+                    if i:
+                        await asyncio.sleep(15)
+                    await self._mesh_ping(name, kind, adapter, node, dist)
+            self._mesh_last_run = datetime.now(timezone.utc).isoformat()
+
+    async def _mesh_ping(self, name: str, kind: str, adapter, node, dist) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        label = node.display_name or node.node_id
+        row = {"ts": now, "target": f"{name}: {label}"[:80], "kind": "mesh",
+               "server": label, "server_host": node.node_id}
+        t0 = time.monotonic()
+        try:
+            if kind == "meshcore":
+                res = await adapter.ping_and_wait(node.node_id, timeout=30.0)
+            else:
+                res = await adapter.traceroute_and_wait(node.node_id, timeout=90.0)
+        except Exception as exc:
+            res = {"status": "error", "detail": str(exc)}
+        rtt = res.get("rtt_ms") or round((time.monotonic() - t0) * 1000)
+        detail = {"adapter": name, "mesh": kind, "node_id": node.node_id, "distance_km": dist,
+                  "snr_heard": node.snr}
+        if res.get("status") == "ok":
+            detail.update(snrs=res.get("snrs") or [],
+                          path=res.get("named") or res.get("route") or [])
+            row.update(ping_ms=rtt, final_rtt_ms=rtt, hop_count=res.get("hops"))
+            log.info("NetProbe: %s ping %s (%s km): reply in %.1f s, %s hop(s)", name, label,
+                     dist if dist is not None else "?", rtt / 1000, res.get("hops"))
+        else:
+            row["error"] = (res.get("detail") or res.get("status") or "no reply")[:300]
+            log.info("NetProbe: %s ping %s: no reply (%s)", name, label, row["error"])
+        row["hops_json"] = json.dumps(detail)
         if self._db:
             await self._db.insert_net_probe(row)

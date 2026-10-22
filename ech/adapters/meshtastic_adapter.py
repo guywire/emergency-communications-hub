@@ -189,6 +189,7 @@ class MeshtasticAdapter(Adapter):
         self._connect_error: Exception | None = None
         self._packet_count = 0
         self._pending_acks: dict[int, str] = {}   # meshtastic packet_id → ECH msg UUID
+        self._traceroute_waiters: dict[str, asyncio.Future] = {}   # node_id → traceroute_and_wait()
         self._gps_position: dict | None = None    # lat/lon/alt from own node GPS
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
@@ -406,6 +407,31 @@ class MeshtasticAdapter(Adapter):
         except Exception as exc:
             log.error("Meshtastic %s: ping error: %s", self.name, exc)
             return {"status": "error", "detail": str(exc)}
+
+    async def traceroute_and_wait(self, node_id: str, timeout: float = 90.0) -> dict:
+        """Traceroute node_id and return the result inline (network probe,
+        O174). The library's sendTraceRoute() itself blocks until the reply
+        or its own timeout, so the elapsed time is the round trip; the route
+        and SNRs come from _handle_traceroute() via a waiter."""
+        fut = asyncio.get_running_loop().create_future()
+        self._traceroute_waiters[node_id] = fut
+        t0 = time.monotonic()
+        try:
+            try:
+                res = await asyncio.wait_for(self.ping(node_id), timeout)
+            except asyncio.TimeoutError:
+                return {"status": "timeout", "detail": f"no traceroute reply within {timeout:.0f}s"}
+            if res.get("status") != "sent":
+                detail = res.get("detail", "traceroute failed")
+                return {"status": "timeout" if "timed out" in detail.lower() else "error", "detail": detail}
+            rtt_ms = (time.monotonic() - t0) * 1000
+            try:
+                data = await asyncio.wait_for(asyncio.shield(fut), 5)
+            except asyncio.TimeoutError:
+                data = {}
+            return {"status": "ok", "rtt_ms": round(rtt_ms), **data}
+        finally:
+            self._traceroute_waiters.pop(node_id, None)
 
     # ── Pubsub callbacks (called from meshtastic's internal thread) ───────
 
@@ -763,6 +789,11 @@ class MeshtasticAdapter(Adapter):
         )
         await self._enqueue(msg)
         log.info("Meshtastic %s: traceroute from %s: %s", self.name, from_id, path_str)
+        fut = self._traceroute_waiters.get(from_id)
+        if fut is not None and not fut.done():
+            # snrTowards is in quarter-dB; -128 means unknown
+            snrs = [s / 4 for s in (tr.get("snrTowards") or []) if s != -128]
+            fut.set_result({"hops": hops, "route": [str(n) for n in route], "snrs": snrs})
 
     async def _handle_neighborinfo(self, decoded, from_id) -> None:
         """Decode NEIGHBORINFO_APP — update mesh topology and emit a WS event."""

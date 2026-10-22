@@ -327,7 +327,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
 
     # Network path probe (O168) — speed tests + traceroutes to Boston/Montreal
     from ech.core.net_probe import NetProbeService
-    net_probe = NetProbeService(config, db=db)
+    net_probe = NetProbeService(config, db=db, router=router)
 
     # POTA proximity alerts (new nearby activator -> mesh channel, e.g. "pota")
     from ech.core.pota_service import PotaService
