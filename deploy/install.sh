@@ -255,6 +255,20 @@ else
   echo "sounddevice package OK"
 fi
 
+# Ookla speedtest CLI (network_probe, O168) — static binary, no apt repo
+if [ ! -x /opt/ech/bin/speedtest ] && [ "$(uname -m)" = "x86_64" -o "$(uname -m)" = "aarch64" ]; then
+  echo "Installing Ookla speedtest CLI ..."
+  _st_arch=$(uname -m)
+  _st_tmp=$(mktemp -d)
+  if curl -sSfL -o "$_st_tmp/st.tgz" "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${_st_arch}.tgz"      && tar xzf "$_st_tmp/st.tgz" -C "$_st_tmp" speedtest; then
+    sudo mkdir -p /opt/ech/bin
+    sudo install -o root -g root -m 0755 "$_st_tmp/speedtest" /opt/ech/bin/speedtest
+  else
+    echo "  WARNING: speedtest CLI download failed — network_probe will run traceroutes only"
+  fi
+  rm -rf "$_st_tmp"
+fi
+
 # Text-to-speech (Asterisk adapter's speak() — offline, no API key needed).
 # sox resamples espeak-ng's native output to the 8kHz/16-bit/mono Asterisk's
 # WAV player requires — without it, Playback() silently can't recognize the

@@ -65,6 +65,27 @@ canvas{display:block}
 .legend-toggle-all span{cursor:pointer;color:var(--blue)}
 .legend-toggle-all span:hover{text-decoration:underline}
 
+/* Network path probe (O168) */
+.net-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:14px}
+.net-card{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.5}
+.net-card.alarm{border-color:var(--red)}
+.net-card .nc-title{color:var(--text);font-weight:600;font-size:12px;margin-bottom:4px;display:flex;gap:8px;align-items:center}
+.net-card .nc-big{font-size:16px;color:var(--text)}
+.badge{font-family:var(--mono);font-size:10px;padding:1px 6px;border-radius:3px;border:1px solid var(--border2)}
+.badge.ok{color:var(--green);border-color:var(--green)}
+.badge.bad{color:var(--red);border-color:var(--red)}
+.badge.exp{color:var(--muted)}
+.net-sub-head{font-family:var(--mono);font-size:11px;color:var(--text);font-weight:600;margin:14px 0 6px}
+table.hops{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}
+table.hops th{text-align:left;color:var(--dim);font-weight:500;padding:3px 6px;border-bottom:1px solid var(--border)}
+table.hops td{padding:3px 6px;border-bottom:1px solid #21262d;color:var(--muted);word-break:break-all}
+table.hops td:nth-child(n+3){white-space:nowrap}
+table.hops tr.ca td{color:var(--red)}
+table.hops tr.silent td{color:var(--dim)}
+.trace-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}
+@media (max-width:520px){.trace-grid{grid-template-columns:1fr}}
+.action-btn:disabled{opacity:.5;cursor:default}
+
 .empty-state{text-align:center;padding:40px 20px;font-family:var(--mono);
   font-size:12px;color:var(--dim)}
 </style>
@@ -89,6 +110,26 @@ canvas{display:block}
 
 <div id="content">
   <div class="summary-row" id="summary-row"></div>
+
+  <div class="panel" id="net-panel">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="panel-title" style="margin:0">ISP routing — speed tests &amp; traceroutes</div>
+      <div class="spacer"></div>
+      <button class="action-btn" id="net-run-btn" onclick="runNetProbe()">▶ Run now</button>
+    </div>
+    <div class="panel-sub" id="net-sub" style="margin-top:4px"></div>
+    <div class="net-cards" id="net-cards"></div>
+    <div class="net-sub-head">Throughput (Mbps) — solid = download, dashed = upload</div>
+    <div class="chart-wrap"><canvas id="net-speed-chart"></canvas></div>
+    <div class="legend" id="net-speed-legend"></div>
+    <div class="net-sub-head">Latency (ms) — solid = speed-test ping, dashed = traceroute to the same server</div>
+    <div class="chart-wrap"><canvas id="net-lat-chart"></canvas></div>
+    <div class="legend" id="net-lat-legend"></div>
+    <div class="net-sub-head">Latest traceroute</div>
+    <div class="trace-grid" id="net-traces"></div>
+    <div class="net-sub-head">Route history — first path seen and every change, this range</div>
+    <div id="net-history"></div>
+  </div>
 
   <div class="panel">
     <div class="panel-title">Messages per hour, by adapter</div>
@@ -128,7 +169,7 @@ function colorForAdapter(name) {
 // the message chart doesn't affect an unrelated series elsewhere. Persists
 // across refreshes/resizes (not across a full page reload) since it's set
 // state the operator is actively steering, not server data.
-const hiddenSeries = { msg: new Set(), anom: new Set() };
+const hiddenSeries = { msg: new Set(), anom: new Set(), netspd: new Set(), netlat: new Set() };
 function toggleSeries(chartKey, name, reloadFn) {
   const set = hiddenSeries[chartKey];
   if (set.has(name)) set.delete(name); else set.add(name);
@@ -156,7 +197,7 @@ function setRange(hours, el) {
 }
 
 async function loadAll() {
-  await Promise.all([loadMessages(), loadCommands(), loadAnomalies(), loadSummary()]);
+  await Promise.all([loadMessages(), loadCommands(), loadAnomalies(), loadSummary(), loadNetProbe()]);
 }
 
 function bucketLabel(iso, hours) {
@@ -235,6 +276,198 @@ async function loadAnomalies() {
 let _anomSevList = [];
 function selectAllAnom()  { hiddenSeries.anom.clear(); loadAnomalies(); }
 function selectNoneAnom() { _anomSevList.forEach(s => hiddenSeries.anom.add(s)); loadAnomalies(); }
+
+// ── Network path probe (O168) ───────────────────────────────────────────
+// Speed tests and traceroutes to fixed targets (default Boston + Montreal),
+// to show whether the ISP routes in-region traffic through Canada. A
+// Canadian hop on a non-Canadian target's path is the alarm signal.
+const NET_COLORS = ['#3fb950','#388bfd','#d29922','#c792ea','#56d4dd','#f85149'];
+let _netData = null;
+function netColor(idx, faded) {
+  const base = NET_COLORS[(idx || 0) % NET_COLORS.length];
+  return faded ? base + '99' : base;
+}
+function fmtWhen(iso) {
+  return new Date(iso).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+async function loadNetProbe() {
+  try { _netData = await (await fetch(`/api/analytics/netprobe?hours=${rangeHours}`)).json(); }
+  catch (e) { document.getElementById('net-sub').textContent = 'Could not load probe data'; return; }
+  renderNetProbe();
+}
+function renderNetProbe() {
+  const d = _netData; if (!d) return;
+  const st = d.status || {};
+  const rows = d.results || [];
+  const targets = (st.targets && st.targets.length) ? st.targets
+    : [...new Set(rows.map(r => r.target))].map(l => ({label: l, expect_canada: /montreal/i.test(l)}));
+  const tIdx = Object.fromEntries(targets.map((t, i) => [t.label, i]));
+  const expectCA = Object.fromEntries(targets.map(t => [t.label, !!t.expect_canada]));
+
+  const sub = document.getElementById('net-sub');
+  const btn = document.getElementById('net-run-btn');
+  btn.disabled = !st.enabled || !!st.running;
+  btn.textContent = st.running ? '… running' : '▶ Run now';
+  if (!st.enabled) {
+    sub.innerHTML = 'Probe is off — set <code>network_probe.enabled: true</code> in config.yaml.';
+  } else {
+    const spd = st.speedtest_interval_min > 0 ? `speed test every ${st.speedtest_interval_min} min` : 'no speed tests';
+    sub.textContent = `Traceroute every ${st.interval_min} min, ${spd}`
+      + (st.running ? ' · running now' : st.last_run ? ` · last run ${fmtWhen(st.last_run)}` : ' · first run ~90 s after startup')
+      + (st.speedtest_available ? '' : ' · speedtest CLI not installed');
+  }
+
+  const speeds = rows.filter(r => r.kind === 'speedtest');
+  const traces = rows.filter(r => r.kind === 'traceroute');
+
+  // Cards: latest result per target
+  document.getElementById('net-cards').innerHTML = targets.map(t => {
+    const sp = speeds.filter(r => r.target === t.label && !r.error).slice(-1)[0];
+    const tr = traces.filter(r => r.target === t.label && !r.error).slice(-1)[0];
+    const ok = traces.filter(r => r.target === t.label && !r.error);
+    const caCount = ok.filter(r => r.via_canada).length;
+    const alarm = !expectCA[t.label] && tr && tr.via_canada;
+    const badge = !tr ? '' : expectCA[t.label]
+      ? `<span class="badge exp">${tr.via_canada ? 'via Canada (expected)' : 'no Canadian hop'}</span>`
+      : `<span class="badge ${tr.via_canada ? 'bad' : 'ok'}">${tr.via_canada ? 'VIA CANADA' : 'stays in US'}</span>`;
+    return `<div class="net-card${alarm ? ' alarm' : ''}">
+      <div class="nc-title"><span class="legend-swatch" style="background:${netColor(tIdx[t.label])}"></span>${esc(t.label)} ${badge}</div>
+      ${sp ? `<div class="nc-big">${Math.round(sp.down_mbps)}↓ / ${Math.round(sp.up_mbps)}↑ Mbps · ${(+sp.ping_ms).toFixed(1)} ms</div>
+              <div>${esc(sp.server || '')}${sp.result_url ? ` · <a href="${esc(sp.result_url)}" target="_blank" rel="noopener" style="color:var(--blue)">result</a>` : ''}</div>`
+           : '<div>No speed test yet</div>'}
+      ${tr ? `<div>Route: ${esc(routeCities(tr.hops) || '?')} · ${tr.hop_count} hops · ${tr.final_rtt_ms != null ? (+tr.final_rtt_ms).toFixed(1) + ' ms' : '—'}</div>` : ''}
+      ${ok.length && !expectCA[t.label] ? `<div>Via Canada in ${caCount} of ${ok.length} traceroutes this range</div>` : ''}
+    </div>`;
+  }).join('') || '<div class="empty-state">No probe results yet</div>';
+
+  const spdSeries = [], latSeries = [];
+  targets.forEach(t => {
+    const i = tIdx[t.label];
+    const sp = speeds.filter(r => r.target === t.label && !r.error);
+    spdSeries.push({name: `${t.label} ↓`, color: netColor(i), points: sp.map(r => [Date.parse(r.ts), r.down_mbps])});
+    spdSeries.push({name: `${t.label} ↑`, color: netColor(i, true), dash: true, points: sp.map(r => [Date.parse(r.ts), r.up_mbps])});
+    latSeries.push({name: `${t.label} ping`, color: netColor(i),
+      points: sp.filter(r => r.ping_ms != null).map(r => [Date.parse(r.ts), r.ping_ms])});
+    latSeries.push({name: `${t.label} trace`, color: netColor(i, true), dash: true,
+      points: traces.filter(r => r.target === t.label && r.final_rtt_ms != null).map(r => [Date.parse(r.ts), r.final_rtt_ms])});
+  });
+  drawNetChart('net-speed-chart', 'net-speed-legend', 'netspd', spdSeries, ' Mbps');
+  drawNetChart('net-lat-chart', 'net-lat-legend', 'netlat', latSeries, ' ms');
+
+  document.getElementById('net-traces').innerHTML = targets.map(t => {
+    const tr = traces.filter(r => r.target === t.label && r.hops).slice(-1)[0];
+    if (!tr) return `<div><div class="panel-sub">${esc(t.label)}: no traceroute yet</div></div>`;
+    return `<div><div class="panel-sub" style="margin-bottom:4px">${esc(t.label)} → ${esc(tr.server_host || '')} · ${fmtWhen(tr.ts)}</div>${hopTable(tr.hops)}</div>`;
+  }).join('');
+
+  const hist = traces.filter(r => r.hops && (r.route_changed || r.first_seen)).reverse();
+  document.getElementById('net-history').innerHTML = hist.length ? `<table class="hops">
+    <tr><th>When</th><th>Target</th><th>Route</th><th>Hops</th><th>RTT</th><th></th></tr>
+    ${hist.map(r => `<tr class="${r.via_canada && !expectCA[r.target] ? 'ca' : ''}">
+      <td>${fmtWhen(r.ts)}</td><td>${esc(r.target)}</td><td>${esc(routeCities(r.hops) || '?')}</td><td>${r.hop_count}</td>
+      <td>${r.final_rtt_ms != null ? (+r.final_rtt_ms).toFixed(1) : '—'}</td>
+      <td>${r.route_changed ? 'changed' : 'first seen'}${r.via_canada ? ' · via Canada' : ''}</td></tr>`).join('')}
+  </table>` : '<div class="panel-sub">No traceroutes in this range</div>';
+}
+function routeCities(hops) {
+  const out = [];
+  (hops || []).forEach(h => {
+    const c = h.city ? h.city + (h.country === 'CA' ? ' 🇨🇦' : '') : '';
+    if (c && out[out.length - 1] !== c) out.push(c);
+  });
+  return out.join(' → ');
+}
+function hopTable(hops) {
+  return `<table class="hops"><tr><th>#</th><th>Router</th><th>IP</th><th>ms</th><th>Location</th></tr>
+    ${(hops || []).map(h => `<tr class="${h.country === 'CA' ? 'ca' : (h.ip ? '' : 'silent')}">
+      <td>${h.n}</td><td>${h.ip ? esc(h.host) : '* no reply'}</td><td>${h.ip && h.ip !== h.host ? esc(h.ip) : ''}</td>
+      <td>${h.rtt != null ? h.rtt.toFixed(1) : ''}</td><td>${esc(h.city || '')}${h.country ? ' (' + h.country + ')' : ''}</td></tr>`).join('')}
+  </table>`;
+}
+async function runNetProbe() {
+  const btn = document.getElementById('net-run-btn');
+  const sub = document.getElementById('net-sub');
+  btn.disabled = true; btn.textContent = '… starting';
+  try {
+    const r = await fetch('/api/analytics/netprobe/run', {method: 'POST'});
+    const j = await r.json().catch(() => ({}));
+    sub.textContent = r.ok ? j.detail : ('Run failed: ' + (j.detail || r.status));
+    if (!r.ok) { btn.disabled = false; btn.textContent = '▶ Run now'; return; }
+  } catch (e) { sub.textContent = 'Run failed: ' + e; btn.disabled = false; btn.textContent = '▶ Run now'; return; }
+  // Poll until the run finishes (~2 min with speed tests)
+  const t0 = Date.now();
+  const poll = setInterval(async () => {
+    await loadNetProbe();
+    if ((_netData && _netData.status && !_netData.status.running) || Date.now() - t0 > 300000) clearInterval(poll);
+  }, 10000);
+}
+
+// Time-proportional line chart (probe samples aren't hourly buckets). Gaps
+// longer than 3x the probe interval break the line so outages show as gaps.
+function drawNetChart(canvasId, legendId, key, series, unit) {
+  const hidden = hiddenSeries[key];
+  const withData = series.filter(s => s.points.length);
+  const visible = withData.filter(s => !hidden.has(s.name));
+  document.getElementById(legendId).innerHTML = withData
+    .map(s => legendItem(key, s.name, s.color, renderNetProbe)).join('');
+  const padBottom = 24, padTop = 8, padLeft = 44, padRight = 10;
+  const {ctx, w, h} = setupCanvas(canvasId, 300);
+  ctx.clearRect(0, 0, w, h);
+  const c = document.getElementById(canvasId);
+  if (!visible.length) {
+    ctx.fillStyle = '#484f58'; ctx.font = '12px monospace';
+    ctx.fillText(withData.length ? 'All series hidden — click a legend item' : 'No data in this range', 10, h / 2);
+    c.onmousemove = c.onmouseleave = null;
+    return;
+  }
+  const t1 = Date.now(), t0 = t1 - rangeHours * 3600e3;
+  const chartH = h - padBottom - padTop, chartW = w - padLeft - padRight;
+  const maxVal = niceMax(Math.max(...visible.flatMap(s => s.points.map(p => p[1] || 0)), 1));
+  const xAt = t => padLeft + ((t - t0) / (t1 - t0)) * chartW;
+  const yAt = v => padTop + chartH - (v / maxVal) * chartH;
+  drawYAxis(ctx, w, h, padLeft, padTop, chartH, maxVal);
+  const st = (_netData && _netData.status) || {};
+  const gapMs = 3 * 60e3 * Math.max(st.interval_min || 15, st.speedtest_interval_min || 15);
+  visible.forEach(s => {
+    ctx.strokeStyle = s.color; ctx.lineWidth = 1.75;
+    ctx.setLineDash(s.dash ? [4, 3] : []);
+    ctx.beginPath();
+    s.points.forEach(([t, v], i) => {
+      const x = xAt(t), y = yAt(v);
+      if (i === 0 || t - s.points[i - 1][0] > gapMs) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = s.color;
+    s.points.forEach(([t, v]) => { ctx.beginPath(); ctx.arc(xAt(t), yAt(v), 1.8, 0, Math.PI * 2); ctx.fill(); });
+  });
+  ctx.fillStyle = '#8b949e'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+  for (let i = 0; i <= 8; i++) {
+    const t = t0 + (t1 - t0) * i / 8, d = new Date(t);
+    const lbl = rangeHours > 48 ? d.toLocaleDateString([], {month:'short', day:'numeric'})
+                                : d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    ctx.fillText(lbl, Math.min(Math.max(xAt(t), padLeft + 20), w - 24), h - padBottom + 12);
+  }
+  ctx.textAlign = 'left';
+  // Tooltip: nearest sample in time, then each visible series' sample within 10 min of it
+  const all = visible.flatMap(s => s.points.map(p => p[0]));
+  attachTooltip(canvasId,
+    px => {
+      const t = t0 + ((px - padLeft) / chartW) * (t1 - t0);
+      let best = null, bd = Infinity;
+      all.forEach(pt => { const dd = Math.abs(pt - t); if (dd < bd) { bd = dd; best = pt; } });
+      return best != null && Math.abs(xAt(best) - px) < 30 ? best : null;
+    },
+    tAt => {
+      const rows = visible.map(s => {
+        let near = null, nd = Infinity;
+        s.points.forEach(p => { const dd = Math.abs(p[0] - tAt); if (dd < nd) { nd = dd; near = p; } });
+        return near && nd < 10 * 60e3
+          ? `<span class="tip-swatch" style="background:${s.color}"></span>${esc(s.name)}: <b>${(+near[1]).toFixed(1)}${unit}</b>` : null;
+      }).filter(Boolean);
+      return rows.length ? `<div class="tip-title">${fmtWhen(tAt)}</div>${rows.join('<br>')}` : null;
+    });
+}
 
 // ── Summary stat cards ───────────────────────────────────────────────────
 async function loadSummary() {

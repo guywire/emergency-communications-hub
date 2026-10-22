@@ -320,6 +320,35 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_username ON audit_log (username);
+
+-- Network path probe (O168): periodic Ookla speed tests + traceroutes to fixed
+-- targets (Boston / Montreal by default) to catch the ISP backhauling local
+-- traffic through Canada. kind = 'speedtest' | 'traceroute'; hops_json is the
+-- parsed traceroute [{n, host, ip, rtt, city, country}], path_sig a hash of
+-- the responding hop IPs so route changes show up as a changed signature.
+CREATE TABLE IF NOT EXISTS net_probe (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT NOT NULL,
+    target       TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    ping_ms      REAL,
+    jitter_ms    REAL,
+    down_mbps    REAL,
+    up_mbps      REAL,
+    loss_pct     REAL,
+    server       TEXT,
+    server_host  TEXT,
+    external_ip  TEXT,
+    isp          TEXT,
+    result_url   TEXT,
+    hops_json    TEXT,
+    hop_count    INTEGER,
+    final_rtt_ms REAL,
+    via_canada   INTEGER,
+    path_sig     TEXT,
+    error        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_net_probe_ts ON net_probe (ts);
 """
 
 
@@ -1064,6 +1093,35 @@ class Database:
         """Dated archive files available to restore, newest first."""
         return sorted((p.stem for p in self._archive_dir().glob("*.jsonl")), reverse=True)
 
+    _NET_PROBE_COLS = ("ts", "target", "kind", "ping_ms", "jitter_ms", "down_mbps", "up_mbps",
+                       "loss_pct", "server", "server_host", "external_ip", "isp", "result_url",
+                       "hops_json", "hop_count", "final_rtt_ms", "via_canada", "path_sig", "error")
+
+    async def insert_net_probe(self, row: dict) -> None:
+        cols = [c for c in self._NET_PROBE_COLS if c in row]
+        await self._db.execute(
+            f"INSERT INTO net_probe ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
+            [row[c] for c in cols],
+        )
+        await self._db.commit()
+
+    async def get_net_probe(self, hours: int = 48) -> list[dict]:
+        from datetime import datetime, timedelta, timezone
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        async with self._db.execute(
+            "SELECT * FROM net_probe WHERE ts >= ? ORDER BY ts ASC", (since,)
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def last_net_probe(self, target: str, kind: str) -> dict | None:
+        async with self._db.execute(
+            "SELECT * FROM net_probe WHERE target = ? AND kind = ? ORDER BY ts DESC LIMIT 1",
+            (target, kind),
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
     async def purge_old_stats(self, days: int = 90) -> int:
         """Trim message_stats_hourly beyond `days`. Independent of (and much
         longer-lived than) per-adapter message retention — one row per
@@ -1071,6 +1129,7 @@ class Database:
         the raw message bodies it summarizes."""
         from datetime import datetime, timezone, timedelta
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:00:00Z")
+        await self._db.execute("DELETE FROM net_probe WHERE ts < ?", (cutoff,))
         cur = await self._db.execute(
             "DELETE FROM message_stats_hourly WHERE bucket < ?", (cutoff,)
         )

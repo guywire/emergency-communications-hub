@@ -325,6 +325,10 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     mm_coverage_service = MeshMapperCoverageService(config, router=router)
     anomaly_engine.set_coverage_service(mm_coverage_service)
 
+    # Network path probe (O168) — speed tests + traceroutes to Boston/Montreal
+    from ech.core.net_probe import NetProbeService
+    net_probe = NetProbeService(config, db=db)
+
     # POTA proximity alerts (new nearby activator -> mesh channel, e.g. "pota")
     from ech.core.pota_service import PotaService
     pota_service = PotaService(config, router=router)
@@ -378,6 +382,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     await wb_service.start()
     await mm_coverage_service.start()
     await pota_service.start()
+    await net_probe.start()
     await mc_hub_compare.start()
     await goes_service.start()
     from ech.core.track_history import TrackHistory
@@ -437,6 +442,7 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
                      pota_service=pota_service if 'pota_service' in dir() else None,
                      mc_hub_compare=mc_hub_compare if 'mc_hub_compare' in dir() else None,
                      goes_service=goes_service if 'goes_service' in dir() else None,
+                     net_probe=net_probe if 'net_probe' in dir() else None,
                      auth=auth, ech_state=state, mc_bridge=mc_bridge,
                      gps_reader=gps_reader, secure_cookies=secure_cookies,
                      cat_ctrl=cat_ctrl if 'cat_ctrl' in dir() else None,
@@ -490,6 +496,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
             await track_history.stop()
         if 'aq_service' in dir():
             await aq_service.stop()
+        if 'net_probe' in dir():
+            await net_probe.stop()
         if 'wb_service' in dir():
             await wb_service.stop()
         if 'mm_coverage_service' in dir():

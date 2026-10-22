@@ -166,7 +166,7 @@ def base_path_patch_script(base_path: str) -> str:
     )
 
 
-def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, pota_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None, mc_hub_compare=None, goes_service=None) -> FastAPI:
+def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None, wb_service=None, mm_coverage_service=None, pota_service=None, auth=None, ech_state=None, mc_bridge=None, gps_reader=None, secure_cookies: bool = False, cat_ctrl=None, ca_cert_pem: bytes | None = None, config_path: str | None = None, mc_hub_compare=None, goes_service=None, net_probe=None) -> FastAPI:
     global _psk_default_callsign
     _op_callsign = "N0CALL"   # injected into pages as window.ECH_CALLSIGN
     # Build PSKReporter User-Agent from config: PSKReporter TOS requires a real
@@ -2103,6 +2103,44 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     async def analytics_anomalies(hours: int = Query(48, le=24 * 30)):
         buckets = await db.get_anomaly_time_buckets(hours=hours)
         return {"hours": hours, "buckets": buckets}
+
+    # Network path probe (O168): speed tests + traceroutes. Hops are only sent
+    # for the newest traceroute per target and for each route change, so a
+    # 30-day range stays small (one row every 15 min x targets otherwise).
+    @app.get("/api/analytics/netprobe")
+    async def analytics_netprobe(hours: int = Query(48, le=24 * 90)):
+        rows = await db.get_net_probe(hours=hours)
+        last_sig: dict[str, str] = {}
+        newest: dict[str, int] = {}
+        for i, r in enumerate(rows):
+            if r["kind"] != "traceroute":
+                continue
+            newest[r["target"]] = i
+            sig = r.get("path_sig") or ""
+            r["route_changed"] = bool(sig) and r["target"] in last_sig and last_sig[r["target"]] != sig
+            r["first_seen"] = bool(sig) and r["target"] not in last_sig
+            if sig:
+                last_sig[r["target"]] = sig
+        keep = set(newest.values())
+        for i, r in enumerate(rows):
+            hj = r.pop("hops_json", None)
+            if hj and (i in keep or r.get("route_changed") or r.get("first_seen")):
+                try:
+                    r["hops"] = json.loads(hj)
+                except ValueError:
+                    pass
+        return {"hours": hours, "status": net_probe.status() if net_probe else {"enabled": False},
+                "results": rows}
+
+    @app.post("/api/analytics/netprobe/run")
+    async def analytics_netprobe_run(request: Request, speedtest: bool = Query(True)):
+        await _admin_required(request)
+        if not net_probe or not net_probe.enabled:
+            raise HTTPException(status_code=400, detail="network_probe is not enabled in config.yaml")
+        if net_probe.status()["running"]:
+            return {"ok": True, "detail": "A probe is already running"}
+        asyncio.create_task(net_probe.run_once(force_speed=speedtest), name="net-probe-manual")
+        return {"ok": True, "detail": "Probe started — results in about 2 minutes"}
 
     @app.get("/analytics", response_class=HTMLResponse)
     async def analytics_page():
