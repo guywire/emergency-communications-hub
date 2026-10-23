@@ -658,7 +658,10 @@ function attachTooltip(canvasId, getIndexAt, buildRows) {
     const flip = e.offsetX > wrap.clientWidth - 170;
     tip.style.left = flip ? '' : (e.offsetX - wrap.scrollLeft + 14) + 'px';
     tip.style.right = flip ? (wrap.clientWidth - e.offsetX + wrap.scrollLeft + 14) + 'px' : '';
-    tip.style.top = Math.max(e.offsetY - 10, 4) + 'px';
+    // ...and above the cursor near the bottom, where the wrap would clip it
+    let top = e.offsetY - 10;
+    if (top + tip.offsetHeight > wrap.clientHeight - 4) top = e.offsetY - tip.offsetHeight - 10;
+    tip.style.top = Math.max(top, 4) + 'px';
   };
   canvas.onmouseleave = () => { tip.style.display = 'none'; };
 }
