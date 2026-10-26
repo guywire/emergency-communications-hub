@@ -45,10 +45,10 @@ rechecked again against a later, more mature release).
 
 REST-ish CGI API (extracted from source, Aug 2026 —
   https://github.com/kn6plv/meshchat/blob/master/src/data/www/cgi-bin/meshchat
-  — NOT live-tested: no AREDN mesh with a reachable MeshChat instance was
-  available at implementation time. Verify against a real node before relying
-  on this in production; the exact GET-vs-POST convention in particular is
-  inferred, not confirmed, from the source):
+  — LIVE-CHECKED 2026-10-25 over the AREDN mesh (ECH on VLAN 11): action=config
+  answered on 4 real instances (MeshChat 1.02 and 2.18), and action=messages
+  returned a JSON list whose items have exactly the keys below. send_message
+  (POST) is still unverified — nothing was posted to a public mesh chat):
   GET  {base_url}?action=config
     Returns {"version", "protocol_verison", "node", "zone", "default_channel", "debug"}
     — used as a cheap connectivity check.
