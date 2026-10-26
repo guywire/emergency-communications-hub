@@ -16,6 +16,7 @@ FastAPI application. Exposes:
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import re
@@ -180,6 +181,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # slash, no trailing slash).
     _base_path = ""
     _legal_in_config = ""   # set by scripts/install.sh when the installer's terms were accepted
+    # server.admin_networks (O182): source networks allowed to reach admin pages/APIs
+    # at all, whatever the account's role — e.g. home LAN yes, wider AREDN mesh no.
+    # Empty/unset = no network restriction (previous behavior).
+    _admin_networks: list = []
     if config_path:
         try:
             import yaml as _yaml
@@ -197,6 +202,11 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             _raw_base_path = str((_cfg.get("server", {}) or {}).get("base_path", "") or "").strip()
             if _raw_base_path:
                 _base_path = "/" + _raw_base_path.strip("/")
+            for _net in (_cfg.get("server", {}) or {}).get("admin_networks") or []:
+                try:
+                    _admin_networks.append(ipaddress.ip_network(str(_net), strict=False))
+                except ValueError:
+                    log.warning("server.admin_networks: ignoring invalid network %r", _net)
         except Exception:
             pass
 
@@ -210,8 +220,22 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     from fastapi import HTTPException
     from fastapi.responses import RedirectResponse as _Redir
 
+    def _admin_network_ok(request) -> bool:
+        """True if the client's address may reach admin paths (server.admin_networks)."""
+        if not _admin_networks:
+            return True
+        try:
+            addr = ipaddress.ip_address(request.client.host)
+        except (AttributeError, TypeError, ValueError):
+            return False
+        if addr.version == 6 and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        return any(addr in net for net in _admin_networks)
+
     async def _admin_required(request: Request):
         """Raise 403 if the caller is not an admin. No-op when auth is disabled."""
+        if not _admin_network_ok(request):
+            raise HTTPException(status_code=403, detail="Admin access is not allowed from this network")
         if not auth:
             return
         from ech.core.auth import SESSION_COOKIE
@@ -246,6 +270,22 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     async def auth_middleware(request, call_next):
         path = request.url.path
         method = request.method
+        # Network gate for admin paths (server.admin_networks) — applies before, and
+        # regardless of, login/role, so a mesh client can't use even an admin account.
+        is_admin_path = (
+            path in ADMIN_PATHS or
+            any(path.startswith(p) for p in ADMIN_PREFIXES)
+        )
+        # Read-only adapter GETs (health, node list, packet log) are allowed for operators
+        is_readonly_adapter = (
+            path.startswith("/api/adapters/") and method == "GET"
+        )
+        if is_admin_path and not is_readonly_adapter and not _admin_network_ok(request):
+            from fastapi.responses import RedirectResponse, JSONResponse
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "Admin access is not allowed from this network"},
+                                    status_code=403)
+            return RedirectResponse(url="/?access=denied", status_code=302)
         # Allow public paths and static files
         if not auth:
             return await call_next(request)
@@ -274,14 +314,6 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return RedirectResponse(url="/change-password", status_code=302)
 
         # Admin-only enforcement: page GETs redirect, API calls get 403
-        is_admin_path = (
-            path in ADMIN_PATHS or
-            any(path.startswith(p) for p in ADMIN_PREFIXES)
-        )
-        # Read-only adapter GETs (health, node list, packet log) are allowed for operators
-        is_readonly_adapter = (
-            path.startswith("/api/adapters/") and method == "GET"
-        )
         if is_admin_path and not is_readonly_adapter and session.get("role") != "admin":
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "Admin access required"}, status_code=403)

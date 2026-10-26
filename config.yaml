@@ -18,6 +18,10 @@ server:
                              # breaks the moment the app isn't actually living at the proxy's
                              # root. Leading slash, no trailing slash. Leave unset/empty for
                              # the normal dedicated-host/port setup.
+  # admin_networks:          # source networks allowed to reach Settings / admin APIs at all,
+  #   - "127.0.0.0/8"        # whatever the account's role. Other networks (e.g. an AREDN mesh
+  #   - "192.168.1.0/24"     # reaching the web UI) keep the normal pages but get "access denied"
+                             # for admin ones. Unset/empty = no network restriction.
 
 database:
   path: "ech.db"
