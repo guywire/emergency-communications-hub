@@ -83,6 +83,18 @@ $bashTar     = To-BashPath $TAR
 $bashInstall = To-BashPath "$SRC\deploy\install.sh"
 
 # ── Build tarball (includes VERSION) ─────────────────────────────────────────
+# Shell scripts and mosquitto config run on Linux as shipped - a CRLF one fails
+# there ($'\r': command not found). .gitattributes keeps them LF; this stops a
+# deploy if an editor or script slipped one through anyway.
+$lfOnly = @(Get-ChildItem -Path "$SRC\deploy\install.sh", "$SRC\scripts\*.sh", "$SRC\deploy\mosquitto\*" -File -ErrorAction SilentlyContinue)
+$crlf = @($lfOnly | Where-Object { [System.IO.File]::ReadAllText($_.FullName).Contains("`r") })
+if ($crlf.Count -gt 0) {
+    Write-Host "Refusing to deploy - CRLF line endings in:" -ForegroundColor Red
+    $crlf | ForEach-Object { Write-Host "  $($_.FullName.Substring($SRC.Length + 1))" -ForegroundColor Red }
+    Write-Host "Fix: git checkout -- <file>   (or convert it to LF)" -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "Building tarball..." -ForegroundColor Gray
 & $gitBash -c "cd '$bashSrc' && tar -czf '$bashTar' ech/ config.yaml deploy/install.sh deploy/ech.service deploy/ech-sim.service deploy/mosquitto scripts/observer_broker.sh VERSION"
 

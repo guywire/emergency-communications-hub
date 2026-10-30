@@ -1,2 +1,16 @@
-*.sh text eol=lf
-deploy/mosquitto/* text eol=lf
+# Every text file is LF in the working tree as well as in the repo, whatever
+# core.autocrlf the machine has (Git for Windows defaults it to true). The
+# deploy ships working-tree files as-is, and a CRLF shell script fails on the
+# server ($'\r': command not found) - that broke deploy/install.sh at rc270.
+# Nothing here needs CRLF: PowerShell 5.1 runs LF .ps1 files fine.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.gz binary
+*.tar binary
+*.db binary
