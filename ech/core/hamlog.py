@@ -338,7 +338,8 @@ _CSV_COL_MAP: dict[str, str] = {
 
 def parse_csv_file(text: str) -> list[dict]:
     """Parse a CSV log file with auto-detected column mapping. Returns raw row dicts."""
-    import csv, io
+    import csv
+    import io
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
         return []
@@ -541,7 +542,7 @@ def format_cabrillo(qsos: list[dict], config: dict, bonuses: dict | None = None)
         "CATEGORY-STATION: FIXED",
         f"OPERATORS: {ops}",
         f"CLAIMED-SCORE: {qso_pts}",
-        f"SOAPBOX: Logged with SignalMatrix",
+        "SOAPBOX: Logged with SignalMatrix",
     ]
     if grid:
         lines.append(f"GRID-LOCATOR: {grid}")
@@ -735,7 +736,6 @@ async def upload_sota(qsos: list[dict], config: dict) -> dict:
     username  = config.get("sota_username", "")
     password  = config.get("sota_password", "")
     sota_ref  = config.get("sota_ref", "")
-    callsign  = config.get("callsign", "")
     if not username or not password:
         return {"status": "error", "detail": "sota_username / sota_password not configured"}
     if not sota_ref:

@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 
 from ech.adapters.base import Adapter
 from ech.core.aredn_utils import classify_mesh_address, is_mesh_typical
@@ -342,7 +341,9 @@ class AREDNAMIAdapter(Adapter):
         if not self._screen_url:
             return False
         try:
-            import urllib.request, urllib.parse, base64
+            import urllib.request
+            import urllib.parse
+            import base64
             xml  = f"<YealinkIPPhoneTextScreen><Title>ECH</Title><Text>{text[:100]}</Text></YealinkIPPhoneTextScreen>"
             data = f"XML={urllib.parse.quote(xml)}".encode()
             req  = urllib.request.Request(self._screen_url, data=data, method="POST")

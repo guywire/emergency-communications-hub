@@ -49,7 +49,7 @@ def test_meshtastic_health_detail():
 @pytest.mark.asyncio
 async def test_meshtastic_priority_keywords():
     """Priority assessment via emergency keyword detection in packet handler."""
-    a = MeshtasticAdapter({"transport": "serial"})
+    MeshtasticAdapter({"transport": "serial"})
     # Simulate what _handle_text would do with a priority-keywords message
     # We test the keyword logic directly through a packet dispatch simulation
     ltext = "mayday vessel in distress".lower()
@@ -141,7 +141,7 @@ def test_js8call_speed_names():
 
 
 def test_js8call_build_frame():
-    a = JS8CallAdapter({"callsign": "W1ABC"})
+    JS8CallAdapter({"callsign": "W1ABC"})
     # _send builds JSON — we just check it would serialize correctly
     import json
     frame_str = json.dumps({

@@ -72,6 +72,55 @@ async def test_purge_archives_before_delete(file_db):
 
 
 @pytest.mark.asyncio
+async def test_restored_day_survives_next_purge(file_db):
+    """A restored day older than the retention window must not be purged
+    (and re-archived) again by the very next hourly sweep."""
+    await file_db.save_message(_msg("meshcore-usb", hours_old=300, body="old mesh"))
+    assert await file_db.purge_old_messages({"meshcore": 240}) == 1
+    [date] = await file_db.list_archive_dates()
+    archive = file_db._archive_dir() / f"{date}.jsonl"
+    lines_before = archive.read_text().count("\n")
+
+    assert await file_db.restore_archived_messages(date) == 1
+    assert await file_db.purge_old_messages({"meshcore": 240}) == 0
+
+    cur = await file_db._db.execute("SELECT body FROM messages")
+    assert [r[0] for r in await cur.fetchall()] == ["old mesh"]
+    assert archive.read_text().count("\n") == lines_before
+
+
+@pytest.mark.asyncio
+async def test_restored_rows_expire_after_window_from_restore(file_db):
+    """Once the retention window has passed since the restore, the row goes —
+    without another copy being appended to the archive file."""
+    await file_db.save_message(_msg("meshcore-usb", hours_old=300))
+    await file_db.purge_old_messages({"meshcore": 240})
+    [date] = await file_db.list_archive_dates()
+    archive = file_db._archive_dir() / f"{date}.jsonl"
+    lines_before = archive.read_text().count("\n")
+    await file_db.restore_archived_messages(date)
+
+    long_ago = (datetime.now(timezone.utc) - timedelta(hours=241)).isoformat()
+    await file_db._db.execute("UPDATE messages SET restored_at = ?", (long_ago,))
+    assert await file_db.purge_old_messages({"meshcore": 240}) == 1
+    assert archive.read_text().count("\n") == lines_before
+
+
+@pytest.mark.asyncio
+async def test_get_messages_before_pages_back_to_restored_day(file_db):
+    """The feed's "Load older" pages with before=<oldest shown>; a restored
+    day well past the feed's 24h window must come back that way."""
+    await file_db.save_message(_msg("meshcore-usb", hours_old=1, body="recent"))
+    await file_db.save_message(_msg("meshcore-usb", hours_old=400, body="restored day"))
+    await file_db.save_message(_msg("aprs-internet", hours_old=300, body="aprs"))
+
+    recent = await file_db.get_messages(limit=500, adapter="meshcore-usb")
+    oldest_shown = recent[0]["timestamp"]
+    older = await file_db.get_messages(limit=500, adapter="meshcore-usb", before=oldest_shown)
+    assert [m["body"] for m in older] == ["restored day"]
+
+
+@pytest.mark.asyncio
 async def test_purge_without_archive_flag_skips_archive(file_db):
     await file_db.save_message(_msg("aprs", hours_old=40))
     await file_db.purge_old_messages({"aprs": 12}, archive=False)

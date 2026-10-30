@@ -22,6 +22,7 @@ import logging
 import re
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, File, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
@@ -31,6 +32,9 @@ from pydantic import BaseModel
 from ech.core.models import Priority
 from ech import __version__ as ECH_VERSION
 from ech.core import identity
+
+if TYPE_CHECKING:
+    from ech.core.cat_rigctld import CATController
 
 log = logging.getLogger(__name__)
 
@@ -218,7 +222,6 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     # ── Role helpers ──────────────────────────────────────────────────────
     from fastapi import HTTPException
-    from fastapi.responses import RedirectResponse as _Redir
 
     def _admin_network_ok(request) -> bool:
         """True if the client's address may reach admin paths (server.admin_networks)."""
@@ -682,6 +685,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         priority_min: int | None = None,
         from_id: str | None = None,
         per_adapter_limit: int | None = Query(None, le=2000),
+        before: str | None = None,
     ):
         msgs = await db.get_messages(
             limit=limit, offset=offset,
@@ -689,6 +693,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             priority_min=priority_min,
             from_id=from_id,
             per_adapter_limit=per_adapter_limit,
+            before=before,
         )
         total = await db.message_count()
         return {"total": total, "messages": msgs}
@@ -1640,7 +1645,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         format: str = Query("auto", description="vcf | csv | auto"),
     ):
         """Import contacts from a vCard (.vcf) or CSV file upload."""
-        import tempfile, os
+        import tempfile
+        import os
         from ech.adapters.sms import import_vcf, import_csv
 
         suffix = Path(file.filename or "contacts.vcf").suffix.lower()
@@ -2732,7 +2738,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     @app.post("/api/config/channels")
     async def save_channel_key(request: Request):
         """Add/update a channel PSK in config.yaml. Requires ECH restart to decrypt messages."""
-        import yaml, re
+        import yaml
+        import re
         from pathlib import Path
         from fastapi import HTTPException
         data = await request.json()
@@ -3312,7 +3319,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     @app.get("/api/config")
     async def get_config_file():
         """Return the parsed config.yaml as JSON (secrets like passwords redacted)."""
-        import copy, yaml
+        import copy
+        import yaml
         path = app.state.config_path
         if not path:
             return {"error": "config_path not set"}
@@ -3870,7 +3878,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     @app.get("/api/system/stats")
     async def system_stats():
         try:
-            import psutil, time
+            import psutil
             cpu   = psutil.cpu_percent(interval=None)
             mem   = psutil.virtual_memory()
             net   = psutil.net_io_counters()
@@ -5482,7 +5490,6 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
     @app.get("/api/dx/spots")
     async def get_dx_spots(band: str | None = None, limit: int = 75):
         import httpx as _hx
-        from datetime import datetime as _dt
         url = f"https://www.dxsummit.fi/api/v1/spots?limit={min(limit,200)}"
         if band:
             url += f"&band={band.lower().replace('m','m')}"
@@ -5490,7 +5497,7 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
             async with _hx.AsyncClient(timeout=10) as client:
                 r = await client.get(url, headers={"User-Agent": identity.user_agent()})
             remote = r.json() if r.status_code == 200 else []
-        except Exception as e:
+        except Exception:
             remote = []
         # Prepend our locally submitted spots (newest first)
         band_filter = (band or "").lower().replace("m", "m")
@@ -5501,7 +5508,6 @@ The Ham Log page will show a <strong>🔌 Connect Radio</strong> button when Web
 
     @app.post("/api/dx/spots")
     async def submit_dx_spot(request: Request):
-        import re
         from datetime import datetime as _dt, timezone as _tz
         body = await request.json()
         dx   = (body.get("dx") or "").upper().strip()

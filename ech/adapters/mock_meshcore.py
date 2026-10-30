@@ -14,7 +14,7 @@ import random
 from datetime import datetime, timezone
 
 from ech.adapters.base import Adapter
-from ech.core.models import ChannelHealth, MeshNode, NormalizedMessage, Priority
+from ech.core.models import MeshNode, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
 

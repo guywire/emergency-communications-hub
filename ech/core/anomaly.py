@@ -346,8 +346,8 @@ class AnomalyEngine:
         if msg.via_mqtt and lat is not None:
             f = self._make_finding(
                 msg, "mqtt_injection", Severity.ALERT,
-                f"Node position arrived via MQTT gateway (viaMqtt flag set) — "
-                f"not a direct RF contact",
+                "Node position arrived via MQTT gateway (viaMqtt flag set) — "
+                "not a direct RF contact",
                 {"via_mqtt": True, "lat": lat, "lon": lon, "snr": snr},
             )
             new_findings.append(f)
@@ -356,8 +356,8 @@ class AnomalyEngine:
             if len(hop_hist) <= 1:
                 f = self._make_finding(
                     msg, "mqtt_injection", Severity.WARN,
-                    f"Node appeared at hop_count=0 with position on first contact — "
-                    f"possible MQTT injection rather than direct RF",
+                    "Node appeared at hop_count=0 with position on first contact — "
+                    "possible MQTT injection rather than direct RF",
                     {"hop_count": hop_count, "lat": lat, "lon": lon, "snr": snr},
                 )
                 new_findings.append(f)

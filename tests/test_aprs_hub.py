@@ -10,7 +10,6 @@ destination/path, message framing, RX loop surviving a quiet channel).
 
 import asyncio
 import json
-import time
 from datetime import datetime, timezone
 
 import aprslib

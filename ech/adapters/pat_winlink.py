@@ -595,8 +595,8 @@ class PatWinlinkAdapter(Adapter):
           ~/.local/share/pat/mailbox/{CALLSIGN}/out/
         We write a minimal Winlink message file that Pat will pick up.
         """
-        import os, uuid
-        from pathlib import Path
+        import os
+        import uuid
 
         callsign = self._callsign.upper()
         # Try common Pat mailbox locations

@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import datetime, timezone
 
 from ech.adapters.base import Adapter
 from ech.core.models import NormalizedMessage, Priority

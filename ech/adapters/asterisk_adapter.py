@@ -697,7 +697,7 @@ class AsteriskAdapter(Adapter):
             # Use Asterisk Page application directly
             await self._send_action({
                 "Action":      "Originate",
-                "Channel":     f"Local/s@default",
+                "Channel":     "Local/s@default",
                 "Application": "Page",
                 "Data":        dest,
                 "CallerID":    self._caller_id,
@@ -768,7 +768,9 @@ class AsteriskAdapter(Adapter):
         if not self._screen_url:
             return False
         try:
-            import urllib.request, urllib.parse, base64
+            import urllib.request
+            import urllib.parse
+            import base64
             xml = f"<YealinkIPPhoneTextScreen><Title>ECH</Title><Text>{text[:100]}</Text></YealinkIPPhoneTextScreen>"
             data = f"XML={urllib.parse.quote(xml)}".encode()
             req  = urllib.request.Request(self._screen_url, data=data, method="POST")

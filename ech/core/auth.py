@@ -18,12 +18,9 @@ No OAuth, no LDAP - offline-first emergency system.
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import os
 import secrets
 from datetime import datetime, timezone, timedelta
-from functools import wraps
 from typing import Optional
 
 log = logging.getLogger(__name__)

@@ -17,7 +17,6 @@ import asyncio
 import logging
 import re
 import signal
-import sys
 from pathlib import Path
 
 import uvicorn

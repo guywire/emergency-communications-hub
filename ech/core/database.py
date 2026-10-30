@@ -464,6 +464,14 @@ class Database:
         except Exception:
             pass  # column already exists
 
+        # When a message was brought back from the archive — retention counts
+        # from here instead of the original timestamp (see purge_old_messages)
+        try:
+            await self._db.execute("ALTER TABLE messages ADD COLUMN restored_at TEXT")
+            await self._db.commit()
+        except Exception:
+            pass  # column already exists
+
         # Prune expired sessions on startup
         await self.prune_expired_sessions()
 
@@ -533,6 +541,7 @@ class Database:
         priority_min: int | None = None,
         from_id: str | None = None,
         per_adapter_limit: int | None = None,
+        before: str | None = None,
     ) -> list[dict]:
         clauses, params = [], []
         if adapter:
@@ -541,6 +550,9 @@ class Database:
         if since:
             clauses.append("timestamp >= ?")
             params.append(since)
+        if before:
+            clauses.append("timestamp < ?")
+            params.append(before)
         if priority_min is not None:
             clauses.append("priority >= ?")
             params.append(priority_min)
@@ -982,10 +994,12 @@ class Database:
         the UTC date each message was sent, so later archive-retention purge
         can drop whole files by date without parsing every line's timestamp."""
         import json
+        # Restored rows are skipped: they're still in their date's archive file,
+        # and writing them again would duplicate every line on each restore.
         cur = await self._db.execute(
             "SELECT id, source_adapter, source_channel, from_id, from_display, to_id, "
             "body, timestamp, priority, lat, lon, raw_json FROM messages "
-            "WHERE LOWER(source_adapter) LIKE ? AND timestamp < ?",
+            "WHERE LOWER(source_adapter) LIKE ? AND timestamp < ? AND restored_at IS NULL",
             (f"{pattern.lower()}%", cutoff),
         )
         rows = await cur.fetchall()
@@ -1016,6 +1030,9 @@ class Database:
         restored later (see restore_archived_messages()). The archive files
         themselves are purged separately by purge_old_archive(), on a much
         longer retention window.
+        A restored row's window runs from its restored_at, not its original
+        timestamp — otherwise restoring any day older than the window would
+        be undone by the next hourly purge.
         Returns total rows deleted.
         """
         from datetime import datetime, timezone, timedelta
@@ -1028,8 +1045,9 @@ class Database:
                 except OSError as exc:
                     log.warning("Database: could not archive %s messages before purge: %s", pattern, exc)
             cur = await self._db.execute(
-                "DELETE FROM messages WHERE LOWER(source_adapter) LIKE ? AND timestamp < ?",
-                (f"{pattern.lower()}%", cutoff),
+                "DELETE FROM messages WHERE LOWER(source_adapter) LIKE ? AND timestamp < ? "
+                "AND (restored_at IS NULL OR restored_at < ?)",
+                (f"{pattern.lower()}%", cutoff, cutoff),
             )
             if cur.rowcount:
                 log.info("Database: purged %d messages from %s* (>%dh)", cur.rowcount, pattern, hours)
@@ -1062,12 +1080,15 @@ class Database:
     async def restore_archived_messages(self, date: str) -> int:
         """Re-insert every message from the archive file for `date`
         (YYYY-MM-DD) back into the live messages table. Rows that already
-        exist (same id) are left untouched via INSERT OR IGNORE. Returns
-        the number of rows restored."""
+        exist (same id) are left untouched via INSERT OR IGNORE. Restored
+        rows are stamped restored_at=now so they get a full retention window
+        from the restore. Returns the number of rows restored."""
         import json
+        from datetime import datetime, timezone
         fpath = self._archive_dir() / f"{date}.jsonl"
         if not fpath.exists():
             return 0
+        restored_at = datetime.now(timezone.utc).isoformat()
         restored = 0
         with open(fpath, encoding="utf-8") as f:
             for line in f:
@@ -1078,11 +1099,12 @@ class Database:
                 cur = await self._db.execute(
                     "INSERT OR IGNORE INTO messages "
                     "(id, source_adapter, source_channel, from_id, from_display, to_id, "
-                    "body, timestamp, priority, lat, lon, raw_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "body, timestamp, priority, lat, lon, raw_json, restored_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (rec["id"], rec["source_adapter"], rec["source_channel"], rec["from_id"],
                      rec["from_display"], rec.get("to_id"), rec["body"], rec["timestamp"],
-                     rec.get("priority", 0), rec.get("lat"), rec.get("lon"), rec.get("raw_json")),
+                     rec.get("priority", 0), rec.get("lat"), rec.get("lon"), rec.get("raw_json"),
+                     restored_at),
                 )
                 restored += cur.rowcount
         if restored:
@@ -1197,7 +1219,8 @@ class Database:
         return [dict(r) for r in rows]
 
     async def upsert_sim_node(self, node: dict) -> None:
-        import uuid, json as _json
+        import uuid
+        import json as _json
         node.setdefault("id", str(uuid.uuid4()))
         node["config_json"] = _json.dumps(node.get("config_json", {}))
         await self._db.execute(

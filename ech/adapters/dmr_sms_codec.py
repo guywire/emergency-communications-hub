@@ -57,7 +57,7 @@ import struct
 import libscrc
 from bitarray import bitarray
 from dmr_utils3 import bptc as _bptc
-from dmr_utils3.utils import bytes_3, bytes_4
+from dmr_utils3.utils import bytes_3
 
 # ── Constants ────────────────────────────────────────────────────────────
 

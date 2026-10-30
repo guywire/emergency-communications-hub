@@ -10,7 +10,7 @@ APRS packet body formatting) work as expected.
 import pytest
 from ech.adapters.meshcore import MeshCoreAdapter
 from ech.adapters.aprs_is import APRSISAdapter
-from ech.adapters.aprs_kiss import APRSKISSAdapter, kiss_encode, kiss_decode, ax25_to_aprs_string
+from ech.adapters.aprs_kiss import APRSKISSAdapter, kiss_encode, kiss_decode
 
 
 # ── MeshCore ──────────────────────────────────────────────────────────────

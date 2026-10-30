@@ -54,7 +54,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from datetime import datetime, timezone
 
 from ech.adapters.base import Adapter
@@ -422,7 +421,7 @@ class JS8CallAdapter(Adapter):
             return
         nm = NormalizedMessage(
             source_adapter=self.name,
-            source_channel=f"HF activity",
+            source_channel="HF activity",
             from_id=params.get("FROM", "?"),
             from_display=params.get("FROM", "?"),
             body=value[:120],

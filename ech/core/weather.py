@@ -22,7 +22,6 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any
 
 import httpx
 
@@ -316,7 +315,6 @@ class WeatherService:
                 headline  = props.get("headline", "")
                 desc      = props.get("description", "")
                 area_desc = props.get("areaDesc", "")
-                effective = props.get("effective", "")
                 expires   = props.get("expires", "")
 
                 # NWS test/exercise traffic (weekly/monthly required tests, drill

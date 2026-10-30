@@ -115,7 +115,7 @@ import httpx
 from ech.core import identity
 from ech.core.models import NormalizedMessage, Priority
 from ech.core.strip_templates import (
-    STRIP_TEMPLATES, TEMPLATE_ALIASES, build_response_strip, guided_fields,
+    TEMPLATE_ALIASES, build_response_strip, guided_fields,
     identify_strip, latlon_to_mgrs, mgrs_to_latlon, parse_response_strip, resolve_mgrs_answer,
 )
 
@@ -989,7 +989,7 @@ class MeshBot:
         if not path:
             if hop_count == 0:
                 return "Path: direct — I heard you with no relays (0 hops)."
-            return (f"Path: no relay data captured for your message"
+            return ("Path: no relay data captured for your message"
                     + (f" ({hop_count} hops)" if hop_count else "")
                     + " — send 'path' again; the next packet usually correlates.")
         adapter = None
@@ -1363,7 +1363,6 @@ class MeshBot:
         except json.JSONDecodeError:
             return "overhead: invalid aircraft.json"
 
-        now_ts = data.get("now", time.time())
         aircraft = data.get("aircraft", [])
         nearby: list[tuple[float, dict]] = []
 
@@ -3180,7 +3179,6 @@ class MeshBot:
             typ = "H" if p.get("type", "").upper() == "H" else "L"
             # Convert "HH:MM" to 12h AM/PM
             try:
-                import datetime as _dt
                 hh, mm = int(raw_t[-5:-3]), int(raw_t[-2:])
                 ampm = "am" if hh < 12 else "pm"
                 hr12 = hh % 12 or 12
@@ -3302,7 +3300,6 @@ class MeshBot:
             local_tz = datetime.now().astimezone().tzinfo
             def _fmt(iso: str) -> str:
                 try:
-                    from datetime import timezone as _tz
                     dt_utc = datetime.fromisoformat(iso.replace("Z", "+00:00"))
                     dt_loc = dt_utc.astimezone(local_tz)
                     return dt_loc.strftime("%-I:%M%p").lower()

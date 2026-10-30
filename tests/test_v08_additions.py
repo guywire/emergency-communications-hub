@@ -15,7 +15,7 @@ from ech.core.auth import AuthManager
 from ech.core.state import ECHState
 from ech.adapters.mqtt_adapter import MockMQTTAdapter, MQTTAdapter, _priority
 from ech.adapters.aredn_ami import MockAREDNAMIAdapter
-from ech.core.models import NormalizedMessage, Priority
+from ech.core.models import Priority
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────

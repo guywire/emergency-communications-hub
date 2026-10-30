@@ -1,5 +1,4 @@
 """Satellite layer: TLE parsing, catalog matching, SGP4 positions, Starlink train detection."""
-import asyncio
 from datetime import datetime, timezone
 
 from ech.core import satellites as sat

@@ -30,7 +30,7 @@ import aprslib
 
 from ech.adapters.base import Adapter
 from ech.core import aprs_wx
-from ech.core.aprs_hub import build_ack_info, build_message_info, build_position_info, hub as aprs_hub
+from ech.core.aprs_hub import build_ack_info, build_message_info, hub as aprs_hub
 from ech.core.models import MeshNode, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
@@ -526,7 +526,6 @@ class APRSISAdapter(Adapter):
         elif fmt == "telemetry-message":
             # Parameter/unit/eqns/bits configuration frames — log as status
             parm = packet.get("parm", {})
-            unit = packet.get("unit", {})
             if parm:
                 labels = ",".join(str(v) for v in list(parm.values())[:5])
                 return f"TELEM-CFG {from_id}: params={labels}"

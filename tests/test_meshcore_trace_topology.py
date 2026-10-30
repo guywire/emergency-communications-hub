@@ -13,7 +13,6 @@ import collections
 import json
 import time
 
-import pytest
 
 from ech.adapters.meshcore import MeshCoreAdapter
 
@@ -248,7 +247,6 @@ def test_mixed_width_hashes_are_one_repeater():
     a._learn_topology(["c2", "6b"])
     assert a._direct_hashes == {"15", "6b"}               # last hop of each chain
     assert a._rf_adjacency["6b"] == {"15", "c2"}
-    saved = {}
 
     class DB:
         async def get_kv(self, k):

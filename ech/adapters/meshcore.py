@@ -42,10 +42,9 @@ import math
 import struct
 import time
 from datetime import datetime, timezone
-from typing import Callable
 
 from ech.adapters.base import Adapter
-from ech.core.models import ChannelHealth, MeshNode, NormalizedMessage, Priority
+from ech.core.models import MeshNode, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
 
@@ -1279,7 +1278,8 @@ class MeshCoreAdapter(Adapter):
         ciphertext = payload[2:]
         if len(ciphertext) % 16 != 0:
             return None
-        import hmac as _hmac, hashlib
+        import hmac as _hmac
+        import hashlib
         if _hmac.new(secret, ciphertext, hashlib.sha256).digest()[:2] != mac_recv:
             return None
         try:
@@ -2830,11 +2830,11 @@ class MeshCoreAdapter(Adapter):
             if len(data) < 10:
                 log.warning("MeshCore %s: TRACE_DATA too short (%d bytes)", self.name, len(data))
             else:
-                reserved = data[0]
+                _reserved = data[0]
                 path_len_raw = data[1]
                 flags = data[2]
                 tag = int.from_bytes(data[3:7], 'little')
-                auth_code = int.from_bytes(data[7:11], 'little')
+                _auth_code = int.from_bytes(data[7:11], 'little')
                 hash_size = 1 << (flags & 3)
                 path_len = path_len_raw // hash_size if hash_size else 0
                 offset = 11
@@ -3023,7 +3023,6 @@ class MeshCoreAdapter(Adapter):
         Note: PUSH_CHANNEL_MSG (0x88) is LOG_DATA (raw radio RX log) and is handled
         separately in _dispatch_frame — it is NOT routed here.
         """
-        now = datetime.now(timezone.utc)
         snr: float | None = None
 
         if pkt_type == PACKET_CHANNEL_MSG_V3:
@@ -3283,7 +3282,6 @@ class MeshCoreAdapter(Adapter):
         dm_decrypt_label = ""
         if _is_likely_encrypted(body_text):
             # Try all known channel keys + common defaults — DMs share the channel key in some configs
-            dm_raw = body_text.encode("utf-8", errors="replace") if isinstance(body_text, str) else body_text
             # body_text at this point is the raw decode of the payload; re-derive raw bytes
             # The DM payload comes from _handle_contact_msg which already decoded the text portion.
             # We need raw_payload — use the encoded bytes if they look like binary

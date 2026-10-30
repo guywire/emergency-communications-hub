@@ -7,7 +7,6 @@ No physical modem or SIM required.
 """
 
 import asyncio
-import io
 import tempfile
 from pathlib import Path
 
@@ -22,7 +21,7 @@ from ech.adapters.sms import (
     import_csv,
 )
 from ech.adapters.mock_sms import MockSMSAdapter
-from ech.adapters.at_engine import ATEngine, _is_final
+from ech.adapters.at_engine import _is_final
 from ech.core.models import NormalizedMessage, Priority
 
 

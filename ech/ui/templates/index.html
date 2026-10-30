@@ -303,6 +303,13 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 #messages::-webkit-scrollbar { width: 4px; }
 #messages::-webkit-scrollbar-track { background: transparent; }
 #messages::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+.load-older { text-align: center; padding: 10px 14px 4px; }
+.load-older button {
+  background: var(--bg3); color: var(--muted); border: 1px solid var(--border);
+  border-radius: 4px; padding: 5px 14px; font-size: 12px; cursor: pointer;
+}
+.load-older button:hover:not(:disabled) { color: var(--text); border-color: var(--border2); }
+.load-older button:disabled { opacity: .6; cursor: default; }
 
 .msg {
   display: grid;
@@ -329,6 +336,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
   line-height: 1.3;
   grid-row: 1 / 3;
 }
+.msg-date { display: block; font-size: 9px; color: var(--dim); opacity: .85; white-space: nowrap; }
 .msg-header {
   display: flex;
   align-items: center;
@@ -1324,6 +1332,8 @@ const state = {
   pendingStatus: {},     // msg_id → {status, detail, path} buffered before outbound echo
   nodeNames: {},         // node_id → display_name cache for delivery path resolution
   adapterChannels: {},   // adapter_name → tx_channel string (populated from health data)
+  historyExtra: 0,       // rows added by "Load older" — raise the in-memory cap so new traffic doesn't trim them
+  noOlder: null,         // adapter filter ('all' or a name) for which the DB had nothing older
 };
 
 // ── Timezone toggle (declared early — tick() reads it) ────────────────────
@@ -1453,8 +1463,13 @@ function handleInbound(msg) {
   if (msg.raw_json && typeof msg.raw_json === 'string') {
     try { msg._raw = JSON.parse(msg.raw_json); } catch(e) { msg._raw = {}; }
   } else { msg._raw = msg.raw_json || {}; }
+  // A late arrival (e.g. an outbound echo stamped before newer traffic) goes in
+  // its date-time slot rather than on top; the feed then re-renders in order.
+  const outOfOrder = state.messages.length && msgTime(msg) < msgTime(state.messages[0]);
   state.messages.unshift(msg);
-  if (state.messages.length > 2000) state.messages.length = 2000;
+  if (outOfOrder) sortMessages();
+  const cap = 2000 + state.historyExtra;
+  if (state.messages.length > cap) state.messages.length = cap;
 
   // Unread badge
   const a = msg.source_adapter;
@@ -1467,8 +1482,8 @@ function handleInbound(msg) {
 
   // Insert into DOM if passes filter
   if (msgPassesFilter(msg)) {
-    prependMsgDOM(msg);
-    updateCount();
+    if (outOfOrder) renderAll();
+    else { prependMsgDOM(msg); updateCount(); }
   }
   if (msg.source_adapter === state.filter.adapter) { buildChanSubBar(); buildTypeSubBar(); }
 
@@ -1539,6 +1554,7 @@ function buildMsgEl(msg) {
   // Use receive time (our clock) for display; raw.packet_timestamp is the device clock
   const ts = new Date(msg.timestamp);
   const timeStr = formatMsgTime(msg.timestamp).replace(/ UTC$/, '');
+  const dateStr = formatMsgDate(msg.timestamp);
 
   const adapterTag = adapterTagHTML(msg.source_adapter);
   const channelTag = channelTagHTML(msg.source_channel, msg.source_adapter);
@@ -1650,7 +1666,7 @@ function buildMsgEl(msg) {
   if (isOutbound) div.classList.add('outbound');
 
   div.innerHTML = `
-    <div class="msg-ts">${timeStr}</div>
+    <div class="msg-ts">${timeStr}<span class="msg-date">${dateStr}</span></div>
     <div>
       <div class="msg-header">
         <span class="msg-from" onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Click to reply — fills the To: field and selects the right adapter">${escHtml(msg.from_display||msg.from_id)}</span>
@@ -2025,20 +2041,7 @@ async function loadHistory() {
       return;
     }
     const data = await r.json();
-    const existingIds = new Set(state.messages.map(m => m.id));
-    let added = 0;
-    (data.messages || []).forEach(m => {
-      if (existingIds.has(m.id)) return;
-      if (m.raw_json && typeof m.raw_json === 'string') {
-        try { m._raw = JSON.parse(m.raw_json); } catch(e) { m._raw = {}; }
-      } else { m._raw = m.raw_json || {}; }
-      // Skip non-text messages saved before the text-only DB filter was active
-      if (m._raw._msg_type && m._raw._msg_type !== 'text') return;
-      if (m.delivery_status) { m._status = m.delivery_status; }
-      if (m.delivery_path)   { m._delivery_path = m.delivery_path; }
-      state.messages.push(m);
-      added++;
-    });
+    const added = appendHistoryRows(data.messages);
     renderAll();
     if (added === 0 && (data.total || 0) === 0) {
       console.info('loadHistory: database is empty');
@@ -2049,13 +2052,80 @@ async function loadHistory() {
   }
 }
 
+// Append DB rows (newest first) to the end of state.messages; returns how many were new.
+function appendHistoryRows(rows) {
+  const existingIds = new Set(state.messages.map(m => m.id));
+  let added = 0;
+  (rows || []).forEach(m => {
+    if (existingIds.has(m.id)) return;
+    if (m.raw_json && typeof m.raw_json === 'string') {
+      try { m._raw = JSON.parse(m.raw_json); } catch(e) { m._raw = {}; }
+    } else { m._raw = m.raw_json || {}; }
+    // Skip non-text messages saved before the text-only DB filter was active
+    if (m._raw._msg_type && m._raw._msg_type !== 'text') return;
+    if (m.delivery_status) { m._status = m.delivery_status; }
+    if (m.delivery_path)   { m._delivery_path = m.delivery_path; }
+    state.messages.push(m);
+    added++;
+  });
+  return added;
+}
+
+// The feed only loads the last 24h on open; this pages further back (older
+// days, restored archive days) from before the oldest message in the current
+// view. A single-adapter view pages just that adapter so a busy one (APRS-IS)
+// doesn't eat every page.
+async function loadOlder() {
+  const btn = document.getElementById('load-older-btn');
+  const visible = state.messages.filter(msgPassesFilter);
+  const pool = visible.length ? visible : state.messages;
+  const before = pool.length
+    ? pool.reduce((a, m) => (msgTime(m) < msgTime(a) ? m : a)).timestamp
+    : new Date().toISOString();
+  const params = new URLSearchParams({limit: '500', before});
+  if (state.filter.adapter !== 'all') params.set('adapter', state.filter.adapter);
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+  try {
+    const r = await fetch(`/api/messages?${params}`);
+    if (!r.ok) { toast(`Loading older messages failed (HTTP ${r.status})`, 'err'); return; }
+    const data = await r.json();
+    const rows = data.messages || [];
+    const added = appendHistoryRows(rows);
+    state.historyExtra += added;
+    if (!rows.length) state.noOlder = state.filter.adapter;
+    renderAll();
+    if (!rows.length) toast('No older messages in the database');
+  } catch(e) {
+    console.error('loadOlder failed:', e);
+    toast('Failed to load older messages — see console', 'err');
+  } finally {
+    const b = document.getElementById('load-older-btn');
+    if (b) { b.disabled = false; b.textContent = 'Load older messages'; }
+  }
+}
+
+function msgTime(m) { return Date.parse(m.timestamp) || 0; }
+
+// Newest first by actual date-time (parsed, so a differently formatted or
+// offset timestamp can't sort out of place the way a string compare would).
+function sortMessages() {
+  state.messages.sort((a, b) => msgTime(b) - msgTime(a));
+}
+
 function renderAll() {
+  sortMessages();
   const container = document.getElementById('messages');
   container.innerHTML = '';
   const filtered = state.messages.filter(msgPassesFilter);
   filtered.forEach(m => {
     container.appendChild(buildMsgEl(m));
   });
+  if (state.noOlder !== state.filter.adapter) {
+    const more = document.createElement('div');
+    more.className = 'load-older';
+    more.innerHTML = '<button id="load-older-btn" onclick="loadOlder()">Load older messages</button>';
+    container.appendChild(more);
+  }
   updateCount();
 }
 
@@ -3544,6 +3614,19 @@ function formatMsgTime(isoStr) {
     return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
   }
   return d.toUTCString().slice(17, 25) + ' UTC';
+}
+
+// Short date under the time ("Oct 28"; "Oct 28 '25" outside the current
+// year), in the same Local/UTC mode as the time so they never disagree.
+function formatMsgDate(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d)) return '';
+  const opts = {month: 'short', day: 'numeric'};
+  if (!(_tzMode === 'local' || _tzMode === 'both')) opts.timeZone = 'UTC';
+  const yr = new Intl.DateTimeFormat('en', {year: 'numeric', timeZone: opts.timeZone}).format(d);
+  const s = d.toLocaleDateString([], opts);
+  return yr === String(new Date().getFullYear()) ? s : `${s} '${yr.slice(2)}`;
 }
 
 // ── Clear message display ─────────────────────────────────────────────────

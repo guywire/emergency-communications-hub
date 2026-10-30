@@ -162,7 +162,6 @@ async def test_send_then_receive_full_loopback():
     await sender.send(msg)
 
     received = []
-    orig_enqueue = receiver._enqueue
     async def capture(m):
         received.append(m)
     receiver._enqueue = capture

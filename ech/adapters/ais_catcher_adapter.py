@@ -193,7 +193,6 @@ class AISCatcherAdapter(Adapter):
             callsign  = (v.get("callsign") or "").strip()
             speed     = v.get("speed") or v.get("sog")
             course    = v.get("course") or v.get("cog")
-            heading   = v.get("heading") or v.get("hdg")
             status    = v.get("status") or v.get("nav_status")
             ship_type = v.get("shiptype") or v.get("ship_type")
             dest      = (v.get("destination") or "").strip()

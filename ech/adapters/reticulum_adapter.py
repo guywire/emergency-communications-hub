@@ -31,7 +31,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -232,7 +231,8 @@ class ReticulumAdapter(Adapter):
             return False
 
         try:
-            import RNS, LXMF
+            import RNS
+            import LXMF
             dest_hash = bytes.fromhex(message.to_id)
 
             if not RNS.Transport.has_path(dest_hash):

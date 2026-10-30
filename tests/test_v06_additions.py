@@ -11,7 +11,6 @@ Tests for v0.6 additions:
 
 import asyncio
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
@@ -178,7 +177,6 @@ async def test_aprs_path_change_detected(engine):
 
 
 def test_acknowledge_finding(engine):
-    import asyncio
     from ech.core.anomaly import AnomalyFinding
     f = AnomalyFinding(
         id="F000001", adapter="meshtastic-mock", node_id="!test",

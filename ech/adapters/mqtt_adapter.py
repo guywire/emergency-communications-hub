@@ -82,9 +82,7 @@ import base64
 import json
 import logging
 import time
-from datetime import datetime, timezone
 
-from ech import __version__ as ECH_VERSION
 from ech.adapters.base import Adapter
 from ech.core.models import NormalizedMessage, Priority
 
@@ -452,7 +450,7 @@ class MQTTAdapter(Adapter):
                 body += f" alt {alt}m"
             return NormalizedMessage(
                 source_adapter=self.name,
-                source_channel=f"mqtt:position",
+                source_channel="mqtt:position",
                 from_id=from_id,
                 from_display=from_id,
                 body=body,

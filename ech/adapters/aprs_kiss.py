@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import struct
 import time
 from datetime import datetime, timezone
 
@@ -42,7 +41,7 @@ from ech.adapters.base import Adapter
 from ech.core import aprs_wx
 from ech.core.aprs_hub import (MIN_BEACON_INTERVAL_SEC, build_ack_info, build_message_info,
                                build_position_info, hub as aprs_hub)
-from ech.core.models import MeshNode, NormalizedMessage, Priority
+from ech.core.models import MeshNode, NormalizedMessage
 
 log = logging.getLogger(__name__)
 
@@ -377,7 +376,7 @@ class APRSKISSAdapter(Adapter):
                 import aprslib
                 packet = aprslib.parse(aprs_str)
                 await self._process_packet(packet, aprs_str)
-            except ImportError as exc:
+            except ImportError:
                 log.warning("APRS-KISS: aprslib not installed — pip install aprslib")
                 return
             except Exception as exc:
@@ -428,7 +427,7 @@ class APRSKISSAdapter(Adapter):
 
         msg = NormalizedMessage(
             source_adapter=self.name,
-            source_channel=f"144.390 (KISS)",
+            source_channel="144.390 (KISS)",
             from_id=from_id,
             from_display=from_id,
             body=body,

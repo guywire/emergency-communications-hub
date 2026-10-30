@@ -46,7 +46,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ech.adapters.base import Adapter
-from ech.core.models import ChannelHealth, MeshNode, NormalizedMessage, Priority
+from ech.core.models import MeshNode, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
 
@@ -817,7 +817,6 @@ class MeshtasticAdapter(Adapter):
             # Auto-register unknown neighbors so they appear in the node list
             if nb_id not in self._nodes:
                 from ech.core.models import MeshNode
-                from datetime import datetime, timezone
                 self._nodes[nb_id] = MeshNode(
                     node_id=nb_id,
                     display_name=nb_id,
@@ -1032,10 +1031,10 @@ class MeshtasticAdapter(Adapter):
 
         def _do():
             try:
-                from meshtastic.protobuf import config_pb2
+                from meshtastic.protobuf import config_pb2  # noqa: F401 — availability probe
             except ImportError:
                 try:
-                    from meshtastic import config_pb2
+                    from meshtastic import config_pb2  # noqa: F401
                 except ImportError:
                     return {"status": "error", "detail": "meshtastic protobuf unavailable"}
             try:

@@ -192,7 +192,6 @@ class SatelliteService:
         return np.degrees(np.arcsin((rng @ np.array(up)) / np.maximum(dist, 1e-9)))
 
     def _build(self, hub, include_starlink: bool, now: datetime) -> dict:
-        import numpy as np
         tracked = []
         pool: dict[str, tuple] = {}
         for g in GROUPS:
