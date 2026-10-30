@@ -71,6 +71,7 @@ body { background:var(--bg); }
 #ech-topnav .menu a:hover { background:var(--bg4); }
 #ech-topnav .menu a.active { background:var(--accent-soft); box-shadow:inset 2px 0 0 var(--accent); }
 #ech-topnav .icon-only { padding:0 9px; }
+#ech-topnav .icon-only.warn { color:#f85149; }
 #ech-topnav .badge-dot { width:7px; height:7px; border-radius:50%; background:#f0883e; margin-left:-4px; align-self:flex-start; margin-top:14px; }
 
 #sm-links {

@@ -533,6 +533,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
   </div>
   <a class="nv icon-only" href="/simulation" data-p="/simulation" data-t="Simulation" id="ech-topnav-sim" title="Simulation"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 2h4M7 2v4l-4 7.5h10L9 6V2" stroke-linejoin="round"/></svg></a>
   <a class="nv icon-only" href="/settings#selfupdate" id="ech-topnav-update" title="Update available" style="display:none"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 11V7a4 4 0 018 0v4l1 1.5H3z M6.5 14h3" stroke-linejoin="round"/></svg><i class="badge-dot"></i></a>
+  <a class="nv icon-only warn" href="/settings#retention" id="ech-topnav-backup" title="Backup problem" style="display:none"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2l6.5 11.5h-13z" stroke-linejoin="round"/><path d="M8 6.5v3.2M8 11.6v.1" stroke-linecap="round"/></svg></a>
   <a class="nv icon-only" href="/settings" data-p="/settings" data-t="Settings" id="ech-topnav-settings" title="Settings"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke-linecap="round"/></svg></a>
 </nav>
 <a id="sm-links" href="/settings#adapters" title="Network links">
@@ -609,6 +610,20 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
   }
   checkUpdate();
   setInterval(checkUpdate, 3600000);
+  // Backup warning: same admin-only gating; shown only when the nightly
+  // backup can't run (drive unmounted, last run failed, or stale).
+  function checkBackup(){
+    fetch('/api/system/backup-status').then(function(r){ return r.ok ? r.json() : null; }).then(function(b){
+      var a = document.getElementById('ech-topnav-backup');
+      if (!a || !b) return;
+      if (b.configured && !b.ok) {
+        a.style.display = '';
+        a.title = 'Backup problem: ' + b.problems.join('; ');
+      } else { a.style.display = 'none'; }
+    }).catch(function(){});
+  }
+  checkBackup();
+  setInterval(checkBackup, 3600000);
   fetch('/api/auth/me').then(function(r){ return r.ok ? r.json() : {authenticated:false}; }).then(function(d){
     var isAdmin = !d.authenticated || d.role === 'admin';
     settingsA.style.display = isAdmin ? '' : 'none';
@@ -3717,6 +3732,13 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         notification icon. Admin-only like the rest of /api/system/."""
         from ech.core import self_update
         return await self_update.update_available(ECH_VERSION, force=refresh)
+
+    @app.get("/api/system/backup-status")
+    async def get_backup_status(refresh: bool = False):
+        """Nightly backup health (drive mounted, last run OK and recent) for
+        the nav warning icon. Admin-only like the rest of /api/system/."""
+        from ech.core import backup_status
+        return await backup_status.backup_status(force=refresh)
 
     @app.post("/api/system/selfupdate")
     async def selfupdate_start(request: Request):

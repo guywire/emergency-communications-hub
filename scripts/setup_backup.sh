@@ -69,7 +69,9 @@ BACKUP_DIR="$BACKUP_DIR"
 BACKUP_MOUNT="$BACKUP_MOUNT"
 BACKUP_KEEP=$KEEP
 EOF
-chmod 600 /etc/ech/backup.conf
+# Paths only, no secrets - world-readable so ECH (user ech) can show a nav
+# warning when the backup drive isn't mounted (ech/core/backup_status.py)
+chmod 644 /etc/ech/backup.conf
 
 if command -v systemctl >/dev/null 2>&1; then
   cat > /etc/systemd/system/ech-backup.service <<'EOF'
