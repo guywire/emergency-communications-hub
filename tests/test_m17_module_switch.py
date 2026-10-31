@@ -12,7 +12,7 @@ from ech.adapters.m17_reflector import M17ReflectorAdapter, encode_callsign
 
 
 class _Transport:
-    """Fake reflector: ACKNs CONN for allowed modules, echoes DISC."""
+    """Fake reflector: ACKNs CONN/LSTN for allowed modules, echoes DISC."""
 
     def __init__(self, adapter, allowed):
         self.a, self.allowed, self.sent = adapter, allowed, []
@@ -22,7 +22,7 @@ class _Transport:
         loop = asyncio.get_running_loop()
         if pkt[:4] == b"DISC":
             loop.call_soon(self.a._on_datagram, b"DISC" + pkt[4:10])
-        elif pkt[:4] == b"CONN" and chr(pkt[10]) in self.allowed:
+        elif pkt[:4] in (b"CONN", b"LSTN") and chr(pkt[10]) in self.allowed:
             loop.call_soon(self.a._on_datagram, b"ACKN")
 
     def close(self):
@@ -93,3 +93,25 @@ def test_api_switch_is_saved_to_config(tmp_path, monkeypatch):
     assert d == {"status": "ok", "module": "B"}
     saved = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
     assert saved["adapters"][0]["module"] == "B"
+
+
+def test_listen_only_links_with_lstn_and_never_sends():
+    """O185: a second, listen-only M17 link watches another reflector's text
+    traffic. It joins with LSTN (confirmed in mrefd's protocol.cpp), refuses
+    to send (mrefd would drop it anyway), and says so in its health detail so
+    the UI leaves it out of the compose toggles."""
+    from ech.core.models import NormalizedMessage
+
+    async def go():
+        a = M17ReflectorAdapter({"name": "m17-mon", "reflector_host": "r.example", "module": "A",
+                                 "callsign": "KN0O", "listen_only": True})
+        a._connected = True
+        a._transport = _Transport(a, allowed="AB")
+        assert a._health_detail()["listen_only"] is True
+        msg = NormalizedMessage(source_adapter="ui", source_channel="", from_id="KN0O", body="hi")
+        assert await a.send(msg) is False
+        assert a._transport.sent == []
+        assert await a.set_module("B") == "B"              # relinks with LSTN, not CONN
+        assert a._transport.sent[-1] == b"LSTN" + encode_callsign("KN0O") + b"B"
+        assert not any(p[:4] in (b"CONN", b"M17P") for p in a._transport.sent)
+    asyncio.run(go())

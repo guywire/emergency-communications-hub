@@ -109,7 +109,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row on" id="panel-moon-btn" onclick="togglePanel('moon')" title="Show or hide the moon phase panel">🌙 Moon status</button>
     <button class="ctrl-btn layer-row on" id="panel-key-btn"  onclick="togglePanel('key')"  title="Show or hide the map key (legend)">🗝 Map key</button>
     <div class="layer-group-title">Movement tracks</div>
-    <button class="ctrl-btn layer-row on" id="track-btn" onclick="toggleTracks()" title="Draw a trail in the adapter colour behind anything that moves (APRS, MeshCore, Meshtastic, aircraft, vessels). Click a dot on a trail to see what was reported at that point. The moving marker glows by speed: cyan walking, green/yellow vehicle, orange highway, red/magenta aircraft. Recorded on the server for up to 7 days.">〰 Movement tracks</button>
+    <button class="ctrl-btn layer-row on" id="track-btn" onclick="toggleTracks()" title="Draw a trail in the adapter colour behind anything that moves (APRS, MeshCore, Meshtastic, aircraft, vessels). Click a dot on a trail to see what was reported at that point. The moving marker glows by speed (colours listed in the Map key while tracks are on). Recorded on the server for up to 7 days.">〰 Movement tracks</button>
     <label style="display:flex;align-items:center;gap:6px;margin:2px 4px;font-size:11px;color:var(--muted)">Keep
       <select id="track-len" onchange="setTrackMinutes(this.value)" style="flex:1;background:var(--panel,#161b22);color:inherit;border:1px solid var(--border,#30363d);border-radius:4px;padding:2px 4px">
         <option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option>
@@ -165,6 +165,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
   <div class="legend-item"><span id="legend-dot-ais" style="color:#56d3c8;font-size:13px;line-height:1;margin-right:6px">⚓</span>AIS Vessels</div>
   <div id="legend-spots" style="display:none;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><div style="font-weight:500;margin-bottom:4px;font-size:11px">Spot layers</div><div id="legend-spots-items"></div></div>
   <div class="legend-item" id="legend-hamlog" style="display:none"><div class="legend-dot" style="background:#ffd700;border:1px solid #997a00"></div>Ham Log QSO</div>
+  <div id="legend-speed" style="display:none;margin-top:6px;border-top:1px solid var(--border);padding-top:6px" title="Moving markers glow by ground speed, worked out from their trail (distance over the last few minutes). The trail line itself stays the adapter colour."><div style="font-weight:500;margin-bottom:4px;font-size:11px">Speed glow</div><div id="legend-speed-items"></div></div>
 </div>
 
 <script src="/static/leaflet/leaflet.js"></script>
@@ -979,6 +980,7 @@ function _trackSyncUI() {
   if (b) b.classList.toggle('on', _trackEnabled);
   const sel = document.getElementById('track-len');
   if (sel) { sel.value = String(_trackMinutes); sel.disabled = !_trackEnabled; }
+  _speedLegendRender();
 }
 
 function toggleTracks() {
@@ -1055,14 +1057,33 @@ function _trackSpeedKmh(h) {
 // Marker glow colour by speed: walking -> cyan, vehicle -> green/yellow,
 // highway -> orange, aircraft-class -> red/magenta. The track line itself is
 // always the adapter colour so a trail is identifiable at a glance.
+// [upper bound km/h, colour, label]; below 2 km/h there is no glow. The map
+// key is built from this table so the two can't drift apart.
+const _SPEED_BANDS = [
+  [8,        '#39d0ff', 'walking'],
+  [40,       '#3fb950', 'slow vehicle'],
+  [90,       '#f2cc60', 'vehicle'],
+  [200,      '#f0883e', 'highway'],
+  [600,      '#f85149', 'light aircraft'],
+  [Infinity, '#d946ef', 'jet'],
+];
 function _speedColor(kmh) {
-  if (kmh < 2)   return null;
-  if (kmh < 8)   return '#39d0ff';
-  if (kmh < 40)  return '#3fb950';
-  if (kmh < 90)  return '#f2cc60';
-  if (kmh < 200) return '#f0883e';
-  if (kmh < 600) return '#f85149';
-  return '#d946ef';
+  if (kmh < 2) return null;
+  return _SPEED_BANDS.find(b => kmh < b[0])[1];
+}
+
+function _speedLegendRender() {
+  const box = document.getElementById('legend-speed');
+  if (!box) return;
+  box.style.display = _trackEnabled ? '' : 'none';
+  const mph = k => Math.round(k * 0.621371);
+  let lo = 2;
+  document.getElementById('legend-speed-items').innerHTML = _SPEED_BANDS.map(([hi, c, label]) => {
+    const range = hi === Infinity ? `${mph(lo)}+ mph` : `${mph(lo)}–${mph(hi)} mph`;
+    const title = hi === Infinity ? `${lo}+ km/h` : `${lo}–${hi} km/h`;
+    lo = hi;
+    return `<div class="legend-item" title="${title}"><div class="legend-dot" style="background:${c};box-shadow:0 0 5px ${c}"></div>${range} <span style="color:var(--muted);margin-left:3px">${label}</span></div>`;
+  }).join('');
 }
 
 const _TRACK_INFO_LABELS = {

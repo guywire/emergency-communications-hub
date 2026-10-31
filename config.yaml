@@ -618,12 +618,8 @@ adapters:
 
 # ── M17 reflector (real) ──────────────────────────────────────────────────────
 #   Software-only text messaging over an M17 reflector's UDP "Internet
-#   Interface" — no radio hardware needed. NOTE: implemented from protocol
-#   docs + reference reflector source (Aug 2026), NOT yet live-tested against
-#   a real reflector — verify before relying on it; see the "Known unverified
-#   assumptions" list in ech/adapters/m17_reflector.py's module docstring
-#   (BROADCAST address convention, TYPE field bits, and the exact wire
-#   encoding of listen-only mode are all best-effort, not confirmed).
+#   Interface" — no radio hardware needed. Live-tested against
+#   m17.openquad.net (sending, receiving, #PARROT echo, listen-only).
 #   - type: m17_reflector
 #     name: m17
 #     reflector_host: m17.example.net   # pick a reflector: m17.hblink.network, etc.
@@ -631,6 +627,16 @@ adapters:
 #     module: "M"                      # single letter A-Z — the "room" to join
 #     callsign: N0CALL
 #     listen_only: false
+#   Watch another reflector's text traffic too (O185): add a second entry with
+#   its own name and listen_only: true. It receives into the feed but never
+#   sends, so it has no compose toggle.
+#   - type: m17_reflector
+#     name: m17-177
+#     reflector_host: k2hzem17.duckdns.org
+#     reflector_port: 17000
+#     module: "A"
+#     callsign: N0CALL
+#     listen_only: true
 
 # ── DMR / BrandMeister (real) ──────────────────────────────────────────────────
 #   Homebrew/DMRplus Repeater Protocol over UDP — no radio hardware needed,

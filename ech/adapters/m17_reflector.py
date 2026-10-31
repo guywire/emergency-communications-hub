@@ -74,7 +74,9 @@ Config keys:
                           compose bar); the API writes the new letter back here, so the
                           choice is remembered until changed (O152).
   callsign          str   your callsign, used to identify this connection (REQUIRED)
-  listen_only       bool  join as a listen-only client (LSTRN, never transmits) (default: False)
+  listen_only       bool  join as a listen-only client (LSTN, never transmits) (default: False).
+                          A second adapter with this set watches another reflector's text
+                          traffic without a second transmit path (O185).
 """
 
 from __future__ import annotations
@@ -245,12 +247,10 @@ class M17ReflectorAdapter(Adapter):
             remote_addr=(self._host, self._port),
         )
 
-        # LSTRN is named as 5 chars in mrefd's own doc but every other magic
-        # is exactly 4 bytes and LSTRN's packet size (11 bytes) is described
-        # as "identical" to CONN's — so the actual 4-byte wire magic is
-        # probably "LSTN", but this is a genuine ambiguity in the source
-        # doc, not confirmed. If wrong, the reflector will just NACK or
-        # silently ignore it and connect() below will time out.
+        # LSTN: confirmed 2026-10-30 against mrefd's protocol.cpp - same 11-byte
+        # layout as CONN, callsign must match ^[0-9]?[A-Z][A-Z0-9]{2,8}$, and
+        # listen-only clients are sent packet (SMS) data from local clients
+        # and peered reflectors alike. Anything they send is dropped.
         magic = b"LSTN" if self._listen_only else b"CONN"
         pkt = magic + self._own_addr + self._module.encode("ascii")
         self._transport.sendto(pkt)
@@ -340,6 +340,10 @@ class M17ReflectorAdapter(Adapter):
         callsign; otherwise broadcasts to everyone linked to the module.
         """
         if not self._transport or not self._connected:
+            return False
+        if self._listen_only:
+            # mrefd drops (and logs) anything a listen-only client sends.
+            log.warning("M17 %s: listen-only link, not sending", self.name)
             return False
 
         try:
@@ -479,6 +483,7 @@ class M17ReflectorAdapter(Adapter):
             "reflector": f"{self._host}:{self._port}",
             "module": self._module,
             "callsign": self._callsign,
+            "listen_only": self._listen_only,
             "rx_count": self._rx_count,
             "tx_count": self._tx_count,
             "last_error": self._last_error,

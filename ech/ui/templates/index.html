@@ -3497,8 +3497,15 @@ async function buildDynamicUI() {
     // Data-input-only adapters (ADS-B, AIS, AISHub, OpenSky, passive compare)
     // feed the map and node list, not the message pane: no channel entry. They
     // stay in knownAdapters for health dots and Settings.
+    // Listen-only links (an M17 reflector watched for text, O185) receive but
+    // never send: no compose toggle, and the sidebar says where they listen.
+    const _listenOnly = name => { const c = data.channels.find(x => x.adapter === name); return !!(c && c.detail && c.detail.listen_only); };
     sidebar.innerHTML = knownAdapters.filter(name => !adapterMeta(name).noChannel).map(name => {
-      const m = adapterMeta(name);
+      const m = {...adapterMeta(name)};
+      if (_listenOnly(name)) {
+        const d = data.channels.find(x => x.adapter === name).detail;
+        m.label += ` <span style="font-size:9px;color:var(--dim)" title="Listen-only: ${escHtml(d.reflector || '')} module ${escHtml(d.module || '')}">listen ${escHtml(String(d.reflector || '').split(/[.:]/)[0])} ${escHtml(d.module || '')}</span>`;
+      }
       const iconStyle = m.cls ? '' : 'background:var(--bg3);color:var(--muted)';
       const isMuted = state.mutedAdapters.has(name);
       return `<div class="channel-item" data-adapter="${name}" onclick="filterAdapter('${name}', this)">
@@ -3519,7 +3526,7 @@ async function buildDynamicUI() {
     // Several radios of the same protocol (e.g. a local MeshCore + one plugged
     // into an operator's browser) get ONE toggle that sends through all of
     // them — the router merges what they hear back into single messages.
-    const sendable = knownAdapters.filter(name => !adapterMeta(name).rxOnly);
+    const sendable = knownAdapters.filter(name => !adapterMeta(name).rxOnly && !_listenOnly(name));
     const groups = [];
     const seenCls = {};
     sendable.forEach(name => {
