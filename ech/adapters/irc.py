@@ -379,7 +379,10 @@ class IRCAdapter(Adapter):
         if not text:
             return
         is_channel = target[:1] in _CHAN_PREFIXES
-        if cmd == "NOTICE" and not is_channel and sender.lower() in ("nickserv", "chanserv"):
+        # Network services (NickServ, ChanServ, SaslServ "Last login from" ...) are
+        # account chatter, not traffic — log them, keep them out of the feed.
+        if cmd == "NOTICE" and not is_channel and (
+                sender.lower().endswith("serv") or prefix.split("@", 1)[-1].startswith("services.")):
             log.info("IRC %s: %s: %s", self.name, sender, text)
             return
         self._rx_count += 1

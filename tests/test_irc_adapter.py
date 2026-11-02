@@ -144,6 +144,8 @@ async def test_register_join_ping_and_receive():
         srv.say(":carol!~c@h PRIVMSG KN0O :private note")
         srv.say(":dave!~d@h PRIVMSG #ech :\x01ACTION waves\x01")
         srv.say(":irc.example.net NOTICE * :*** Looking up your hostname")
+        srv.say(":SaslServ!SaslServ@services.libera.chat NOTICE KN0O :Last login from: ~k@1.2.3.4")
+        srv.say(":NickServ!NickServ@services.libera.chat NOTICE KN0O :You are now identified")
         await srv.writer.drain()
         msgs = [await asyncio.wait_for(a._rx_queue.get(), 2) for _ in range(3)]
         assert (msgs[0].from_id, msgs[0].source_channel, msgs[0].body) == ("bob", "#ech", "mayday at the shelter")
