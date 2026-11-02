@@ -64,6 +64,7 @@ _DEFAULT_MAX_LEN = (
     ("Meshtastic", 200),
     ("M17", 200),
     ("DAPNET", 80),
+    ("IRC", 400),          # 512-byte line minus prefix; adapter splits anyway
 )
 _CALLSIGN_RE = re.compile(r"\b[A-Z]{1,2}\d[A-Z]{1,3}\b|\b\d[A-Z]\d[A-Z]{1,3}\b", re.I)
 

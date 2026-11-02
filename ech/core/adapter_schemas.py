@@ -193,6 +193,29 @@ ADAPTER_SCHEMAS: dict[str, dict] = {
         ],
     },
 
+    "irc": {
+        "fields": [
+            {"key": "server", "kind": "string", "required": True, "default": "",
+             "help": "IRC server hostname, e.g. irc.libera.chat"},
+            {"key": "port", "kind": "number", "required": False, "default": 6697,
+             "help": "6697 for TLS, 6667 plain"},
+            {"key": "tls", "kind": "boolean", "required": False, "default": True,
+             "help": "Connect with TLS"},
+            {"key": "nick", "kind": "string", "required": True, "default": "",
+             "help": "Nickname, e.g. your callsign"},
+            {"key": "channels", "kind": "list", "required": True, "default": [],
+             "help": "Channels to join, e.g. [\"#ech-test\"]"},
+            {"key": "default_channel", "kind": "string", "required": False, "default": "",
+             "help": "Where untargeted messages go - blank = first channel"},
+            {"key": "sasl_password", "kind": "string", "required": False, "default": "",
+             "help": "Registered-nick password (SASL PLAIN) - live-server config only, never commit"},
+            {"key": "nickserv_password", "kind": "string", "required": False, "default": "",
+             "help": "Fallback NickServ IDENTIFY password if the server lacks SASL - never commit"},
+            {"key": "password", "kind": "string", "required": False, "default": "",
+             "help": "Server password (PASS), rarely needed - never commit"},
+        ],
+    },
+
     "mqtt": {
         "fields": [
             {"key": "host", "kind": "string", "required": True, "default": "",

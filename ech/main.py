@@ -127,6 +127,7 @@ REAL_ADAPTER_TYPES = {
     "dapnet":      ("ech.adapters.dapnet",            "DAPNETAdapter",     "httpx"),
     "aredn_meshchat": ("ech.adapters.aredn_meshchat", "AREDNMeshChatAdapter", "httpx"),
     "m17_reflector": ("ech.adapters.m17_reflector", "M17ReflectorAdapter", None),
+    "irc":         ("ech.adapters.irc",              "IRCAdapter",        None),
     "dmr_brandmeister": ("ech.adapters.dmr_brandmeister", "DMRBrandmeisterAdapter",
                          "dmr_utils3, bitarray, libscrc"),
 }

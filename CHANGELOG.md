@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.37 (2026-11-01)
+
+### Added
+- IRC adapter (`type: irc`): joins channels on one IRC server over TLS, logs in with SASL or
+  NickServ, shows channel and private messages in the feed, and sends to a channel or a nick.
+  Long messages are split to fit IRC's line limit and paced to avoid flood kicks.
+
 ## v1.1.10 (2026-10-16)
 
 ### Fixed
