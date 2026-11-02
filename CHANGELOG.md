@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.39 (2026-11-01)
+
+### Fixed
+- Logging in on the plain-HTTP port (8766) now works. With HTTPS enabled the login cookie was
+  always marked secure-only, so browsers threw it away on the HTTP port and sent you back to the
+  login page. It is now secure-only on the HTTPS port only.
+
 ## v1.1.37 (2026-11-01)
 
 ### Added

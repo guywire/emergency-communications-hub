@@ -355,7 +355,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         # depth for any client that doesn't honor CSP.
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        if secure_cookies:
+        # HSTS only means something over HTTPS; the plain-HTTP port (the AREDN
+        # mesh can't carry encrypted traffic) must not be told to upgrade.
+        if secure_cookies and request.url.scheme == "https":
             response.headers.setdefault(
                 "Strict-Transport-Security",
                 "max-age=63072000; includeSubDomains"
@@ -2547,7 +2549,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             max_age=SESSION_EXPIRE_HOURS * 3600,
             httponly=True,
             samesite="lax",
-            secure=secure_cookies,
+            # Secure on the HTTPS port only: browsers drop Secure cookies over
+            # plain HTTP, which made logins on the HTTP port bounce straight
+            # back to /login.
+            secure=secure_cookies and request.url.scheme == "https",
             path="/",
         )
         return resp
