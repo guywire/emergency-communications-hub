@@ -8,6 +8,15 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.41 (2026-11-02)
+
+### Changed
+- The PBX adapter's call records no longer fill the message feed by default. Selecting the PBX
+  adapter shows **All types / CALL / MSG** filter pills; it starts on MSG (texts, voicemail), so
+  calls are hidden everywhere until you pick CALL or All types - the same way APRS starts on MSG.
+  Calls are still saved and still listed in the Calls panel.
+- Unread badges no longer count entries an adapter's type filter is hiding.
+
 ## v1.1.40 (2026-11-02)
 
 ### Added

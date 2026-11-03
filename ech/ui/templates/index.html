@@ -1471,11 +1471,16 @@ function handleInbound(msg) {
   const cap = 2000 + state.historyExtra;
   if (state.messages.length > cap) state.messages.length = cap;
 
-  // Unread badge
+  // Unread badge — not for traffic the adapter's type filter hides (PBX
+  // call records, APRS OBJ/POS while MSG-only), or the badge counts
+  // entries the operator can't see.
   const a = msg.source_adapter;
-  state.unread[a] = (state.unread[a] || 0) + 1;
+  const _tf = state.filter.adapter === a ? state.filter.msgType
+    : ((_adapterFilterMemory[a] || {}).msgType || 'all');
+  const _hiddenType = _tf !== 'all' && msgTypePrefix(msg) !== _tf;
+  if (!_hiddenType) state.unread[a] = (state.unread[a] || 0) + 1;
   const badge = document.getElementById(`badge-${a}`);
-  if (badge) {
+  if (badge && !_hiddenType) {
     badge.textContent = state.unread[a];
     badge.classList.add('has-msgs');
   }
@@ -1509,7 +1514,7 @@ function msgPassesFilter(msg) {
   const chan = live ? f.channel   : (remembered ? remembered.channel : 'all');
   const type = live ? f.msgType   : (remembered ? remembered.msgType : 'all');
   if (chan !== 'all' && msg.source_channel !== chan) return false;
-  if (type !== 'all' && msgTypePrefix(msg.body) !== type) return false;
+  if (type !== 'all' && msgTypePrefix(msg) !== type) return false;
   if (f.priority && msg.priority < parseInt(f.priority)) return false;
   // Hop filter hides far-relayed channel chatter (e.g. ducting); DMs and our own always show
   if (f.maxHops && msgHops(msg) != null && msgHops(msg) > parseInt(f.maxHops)
@@ -1523,7 +1528,15 @@ function msgPassesFilter(msg) {
 // rebroadcast by a gate), POS for position beacons, STATUS for status text.
 // Non-APRS traffic (Meshtastic/MeshCore/etc.) has none of these and is
 // treated as its own implicit "text" type, unaffected by this filter.
-function msgTypePrefix(body) {
+// PBX adapters (adapterMeta .voice) split into CALL (call records: the
+// asterisk adapter's "voice" channel, the AREDN AMI adapter's call events)
+// and MSG (SIP texts, voicemail, bot replies) — so the feed can default to
+// MSG and keep the PBX's call log out of the way, same as APRS.
+function msgTypePrefix(msg) {
+  if (!msg) return null;
+  if (adapterMeta(msg.source_adapter || '').voice)
+    return (msg.source_channel === 'voice' || msg.source_channel === 'AREDN PBX') ? 'CALL' : 'MSG';
+  const body = msg.body;
   if (!body) return null;
   for (const p of ['MSG ', 'OBJ ', 'POS ', 'STATUS ']) {
     if (body.startsWith(p)) return p.trim();
@@ -2179,9 +2192,13 @@ let _didSelectDefaultFilter = false;
 async function selectDefaultFilter() {
   if (_didSelectDefaultFilter) return;
   _didSelectDefaultFilter = true;
-  const el = document.querySelector('.channel-item[data-adapter*="aprs"]');
-  if (!el) return;   // no APRS adapter configured — nothing to seed
-  _adapterFilterMemory[el.dataset.adapter] = {channel: 'all', msgType: 'MSG'};
+  // APRS and PBX adapters both start MSG-only (PBX: call records hidden
+  // until the operator picks CALL or "All types" on that adapter).
+  const els = [...document.querySelectorAll('.channel-item[data-adapter]')]
+    .filter(el => el.dataset.adapter !== 'all' &&
+      (el.dataset.adapter.includes('aprs') || adapterMeta(el.dataset.adapter).voice));
+  if (!els.length) return;   // neither configured — nothing to seed
+  els.forEach(el => { _adapterFilterMemory[el.dataset.adapter] = {channel: 'all', msgType: 'MSG'}; });
   renderAll();   // loadHistory() already rendered once before this filter was seeded
 }
 
@@ -2260,7 +2277,7 @@ function buildTypeSubBar() {
   }
   const types = [...new Set(
     state.messages.filter(m => m.source_adapter === adapter)
-      .map(m => msgTypePrefix(m.body))
+      .map(m => msgTypePrefix(m))
       .filter(Boolean)
   )].sort();
   // Always keep the currently-selected type in the list even if no message
