@@ -8,6 +8,14 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.43 (2026-11-02)
+
+### Changed
+- Live-update connections now follow your login: they are refused from other websites, close
+  when you log out or your session ends (a page left open past its session shows as disconnected
+  until you log in again), and wait until a required password change is done.
+- Viewer accounts can no longer connect a browser hardware bridge on the Remote Hardware page.
+
 ## v1.1.42 (2026-11-02)
 
 ### Added

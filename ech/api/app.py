@@ -77,6 +77,9 @@ _UPDATE_LOG_MAX_LINES = 500
 
 UI_DIR = Path(__file__).parent.parent / "ui"
 
+# How often an open WebSocket re-checks that its login session still exists.
+WS_SESSION_RECHECK_SEC = 60
+
 # O100: ECH reverse-proxied under a sub-path (e.g. https://host/ech/ behind
 # Caddy's `handle_path /ech/*`, which strips the prefix before forwarding)
 # instead of a dedicated host/port at "/". Every template hardcodes absolute
@@ -414,27 +417,62 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     # ── WebSocket ─────────────────────────────────────────────────────────
 
+    # ── WebSocket admission ──────────────────────────────────────────────
+    # WebSockets bypass the HTTP middleware's Origin check and role rules, so
+    # each endpoint admits callers here: same-site Origin, a live session,
+    # no pending forced password change, and (optionally) not a viewer.
+    async def _ws_admit(ws: WebSocket, allow_viewer: bool = True):
+        """Return the session token ("" when auth is off) or None after closing."""
+        if _cross_site(ws):
+            await ws.close(code=4403)
+            return None
+        if not auth:
+            return ""
+        from ech.core.auth import SESSION_COOKIE
+        token = ws.cookies.get(SESSION_COOKIE, "")
+        session = await auth.get_session(token)
+        if not session or session.get("must_change_pw"):
+            await ws.close(code=4401)
+            return None
+        if not allow_viewer and session.get("role") == "viewer":
+            await ws.close(code=4403)
+            return None
+        return token
+
+    async def _ws_session_watch(ws: WebSocket, token: str):
+        """Close an open socket once its session ends (logout, expiry,
+        password change, user deleted) - otherwise it kept streaming."""
+        if not auth:
+            return
+        while True:
+            await asyncio.sleep(WS_SESSION_RECHECK_SEC)
+            session = await auth.get_session(token)
+            if not session or session.get("must_change_pw"):
+                log.info("WS %s: session ended, closing", ws.client)
+                try:
+                    await ws.close(code=4401)
+                except Exception:
+                    pass
+                return
+
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket):
-        # Authenticate before accepting — reject unauthenticated callers.
-        # WebSocket handshake carries cookies, so the session cookie is available.
-        if auth:
-            from ech.core.auth import SESSION_COOKIE
-            token = ws.cookies.get(SESSION_COOKIE, "")
-            session = await auth.get_session(token)
-            if not session:
-                await ws.close(code=4401)
-                return
+        # Live-update push channel for every dashboard page. Server -> browser
+        # only; anything the browser sends is a keepalive and ignored.
+        token = await _ws_admit(ws)
+        if token is None:
+            return
         await ws.accept()
         router.add_ws_client(ws)
         log.info("WS client connected: %s", ws.client)
+        watch = asyncio.ensure_future(_ws_session_watch(ws, token))
         try:
             while True:
-                # Keep alive — client can send pings
                 await ws.receive_text()
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
+            watch.cancel()
             router.remove_ws_client(ws)
             log.info("WS client disconnected: %s", ws.client)
 
@@ -446,13 +484,11 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         through ech.core.remote_hw.registry. See remote_hw.py for the framing."""
         from ech.core.remote_hw import registry as hw_registry
         import json as _json
-        if auth:
-            from ech.core.auth import SESSION_COOKIE
-            token = ws.cookies.get(SESSION_COOKIE, "")
-            session = await auth.get_session(token)
-            if not session:
-                await ws.close(code=4401)
-                return
+        # Viewers are refused: a bridge session carries the radio's traffic
+        # both ways and replaces whatever bridge is already connected.
+        token = await _ws_admit(ws, allow_viewer=False)
+        if token is None:
+            return
         await ws.accept()
         try:
             hello = _json.loads(await ws.receive_text())
@@ -502,6 +538,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 await ws.send_bytes(data)
 
         tx_task = None
+        watch_task = None
         try:
             # Inside the try so any failure here still unregisters the session
             # (otherwise it lingers "alive" and the next connect logs a stale replace).
@@ -511,6 +548,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 log.warning("RemoteHW: %s", mismatch)
                 await ws.send_text(_json.dumps({"type": "warning", "detail": mismatch}))
             tx_task = asyncio.ensure_future(_pump_tx())
+            watch_task = asyncio.ensure_future(_ws_session_watch(ws, token))
             while True:
                 msg = await ws.receive()
                 if msg.get("type") == "websocket.disconnect":
@@ -519,11 +557,13 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                     sess.feed(msg["bytes"])
                 elif msg.get("text"):
                     log.debug("RemoteHW %s: status %s", adapter_name, msg["text"][:120])
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
             if tx_task is not None:
                 tx_task.cancel()
+            if watch_task is not None:
+                watch_task.cancel()
             hw_registry.unregister(sess)
 
     @app.get("/api/remote-hw")

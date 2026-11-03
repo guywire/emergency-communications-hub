@@ -118,3 +118,86 @@ def test_config_write_is_owner_only(tmp_path):
     os.chmod(p, 0o644)
     atomic_write_yaml(p, {"a": 2, "secret": "x"})
     assert (os.stat(p).st_mode & 0o777) == 0o600
+
+
+# ── WebSockets ────────────────────────────────────────────────────────────
+# (starlette's TestClient always sends Host: testserver on WebSocket requests)
+
+class _FakeAuth:
+    """Sessions by token; tests delete entries to simulate logout/expiry."""
+    def __init__(self, sessions):
+        self.sessions = sessions
+
+    async def get_session(self, token):
+        return self.sessions.get(token)
+
+    async def require_session(self, request):
+        return None
+
+
+def _ws_app(tmp_path, sessions):
+    from unittest.mock import MagicMock
+    import yaml
+    from ech.api import app as app_mod
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({}))
+    auth = _FakeAuth(sessions)
+    return app_mod.create_app(MagicMock(), MagicMock(), auth=auth, config_path=str(cfg)), auth
+
+
+def _ws_client(app, token):
+    from starlette.testclient import TestClient
+    c = TestClient(app, base_url="http://ech.test")
+    if token:
+        c.cookies.set("ech_session", token)
+    return c
+
+
+def _closed_with(c, path, headers=None):
+    from starlette.websockets import WebSocketDisconnect
+    try:
+        with c.websocket_connect(path, headers=headers or {}) as ws:
+            ws.receive_text()
+    except WebSocketDisconnect as exc:
+        return exc.code
+    return None
+
+
+def test_ws_refuses_cross_site_and_no_session(tmp_path):
+    app, _ = _ws_app(tmp_path, {"t1": {"username": "a", "role": "operator", "must_change_pw": False}})
+    with _ws_client(app, "t1") as c:
+        assert _closed_with(c, "/ws", {"Origin": "http://evil.example"}) == 4403
+    with _ws_client(app, None) as c:
+        assert _closed_with(c, "/ws", {"Origin": "http://testserver"}) == 4401
+
+
+def test_ws_refuses_pending_password_change(tmp_path):
+    app, _ = _ws_app(tmp_path, {"t1": {"username": "admin", "role": "admin", "must_change_pw": True}})
+    with _ws_client(app, "t1") as c:
+        assert _closed_with(c, "/ws", {"Origin": "http://testserver"}) == 4401
+
+
+def test_ws_closes_when_session_ends(tmp_path, monkeypatch):
+    import time
+    from starlette.websockets import WebSocketDisconnect
+    from ech.api import app as app_mod
+    monkeypatch.setattr(app_mod, "WS_SESSION_RECHECK_SEC", 0.05)
+    app, auth = _ws_app(tmp_path, {"t1": {"username": "a", "role": "operator", "must_change_pw": False}})
+    with _ws_client(app, "t1") as c:
+        with c.websocket_connect("/ws", headers={"Origin": "http://testserver"}) as ws:
+            auth.sessions.clear()          # logout / expiry / password change
+            time.sleep(0.3)
+            try:
+                ws.receive_text()
+                code = None
+            except WebSocketDisconnect as exc:
+                code = exc.code
+    assert code == 4401
+
+
+def test_remote_hw_refuses_viewer(tmp_path):
+    app, _ = _ws_app(tmp_path, {
+        "v": {"username": "v", "role": "viewer", "must_change_pw": False},
+    })
+    with _ws_client(app, "v") as c:
+        assert _closed_with(c, "/ws/remote-hw", {"Origin": "http://testserver"}) == 4403
