@@ -2127,8 +2127,10 @@ function _renderAdapterCards() {
     const schemaFields = schema ? schema.fields || [] : [];
     const schemaByKey = {};
     schemaFields.forEach(f => schemaByKey[f.key] = f);
+    // Flat string lists (e.g. IRC "channels") get a comma-separated box;
+    // nested objects and lists of anything else stay raw-JSON-only.
     const scalarKeys = Object.keys(a).filter(k => k !== 'name' && k !== 'type' && k !== 'enabled' &&
-      (typeof a[k] === 'string' || typeof a[k] === 'number' || typeof a[k] === 'boolean'));
+      (typeof a[k] === 'string' || typeof a[k] === 'number' || typeof a[k] === 'boolean' || _isFlatStringList(a[k])));
     const complexKeys = Object.keys(a).filter(k => k !== 'name' && k !== 'type' && k !== 'enabled' && !scalarKeys.includes(k));
     const fieldsHtml = scalarKeys.map(k => _renderAdapterFieldInput(i, k, a[k], schemaByKey[k])).join('');
     const complexHtml = complexKeys.length
@@ -2154,9 +2156,24 @@ function _renderAdapterCards() {
   }).join('') || '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No adapters configured</div>';
 }
 
+// A list the card editor can round-trip through a comma-separated text box:
+// strings only, and no item may itself contain a comma.
+function _isFlatStringList(v) {
+  return Array.isArray(v) && v.every(x => typeof x === 'string' && !x.includes(','));
+}
+
+function _setAdapterListField(i, key, text) {
+  _adaptersState[i][key] = text.split(',').map(s => s.trim()).filter(Boolean);
+}
+
 function _renderAdapterFieldInput(i, key, value, fieldMeta) {
   const label = fieldMeta && fieldMeta.required ? `${esc(key)} *` : esc(key);
   const title = fieldMeta && fieldMeta.help ? ` title="${esc(fieldMeta.help)}"` : '';
+  if (Array.isArray(value)) {
+    return `<div${title}><label style="margin-top:0">${label}</label>
+      <input type="text" value="${esc(value.join(', '))}" placeholder="comma-separated"
+        oninput="_setAdapterListField(${i}, '${key}', this.value)"></div>`;
+  }
   if (fieldMeta && fieldMeta.kind === 'select' && fieldMeta.options) {
     const opts = fieldMeta.options.map(o =>
       `<option value="${esc(o)}" ${o === value ? 'selected' : ''}>${esc(o)}</option>`).join('');

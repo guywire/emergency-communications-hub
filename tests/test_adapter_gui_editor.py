@@ -165,3 +165,26 @@ async def test_gps_config_requires_port_when_enabling(tmp_path, monkeypatch):
 
     await router.stop()
     await db.close()
+
+
+@pytest.mark.asyncio
+async def test_adapter_config_saves_string_list_as_list(tmp_path, monkeypatch):
+    # The Settings card editor sends list fields (IRC "channels") as JSON
+    # arrays from its comma-separated box; they must land in config.yaml as
+    # a YAML list, not a joined string.
+    from httpx import AsyncClient, ASGITransport
+    app, router, db, cfg_path = await _make_app(tmp_path, monkeypatch=monkeypatch)
+
+    adapter = {"name": "irc-test", "type": "irc", "server": "irc.example.net",
+               "nick": "ech", "channels": ["#one", "#two"]}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post("/api/adapter-config", json={"adapters": [adapter]})
+        assert r.json()["status"] == "ok"
+        r2 = await client.get("/api/adapter-config")
+        assert r2.json()["adapters"][0]["channels"] == ["#one", "#two"]
+
+    on_disk = yaml.safe_load(cfg_path.read_text())
+    assert on_disk["adapters"][0]["channels"] == ["#one", "#two"]
+
+    await router.stop()
+    await db.close()

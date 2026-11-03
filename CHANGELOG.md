@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.40 (2026-11-02)
+
+### Added
+- Settings -> Adapters: list fields such as the IRC adapter's `channels` now get an editable,
+  comma-separated box on the adapter card instead of "edit via raw JSON below". Save all adapters
+  and restart ECH to apply.
+
 ## v1.1.39 (2026-11-01)
 
 ### Fixed
