@@ -116,9 +116,13 @@ def atomic_write_yaml(path, cfg: dict) -> None:
     # !!python/object:... tag for it (plain dump's default behavior).
     rendered = yaml.safe_dump(cfg, default_flow_style=False, allow_unicode=True)
     tmp_path = path.with_name(path.name + ".tmp")
+    # config.yaml holds API keys and passwords: owner-only (0600), never the
+    # umask default (0644, world-readable).
     try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(rendered)
+        os.chmod(tmp_path, 0o600)   # O_CREAT's mode is ignored if the file already existed
     except PermissionError:
         # Live incident 2026-10-10: /etc/ech is root-owned (the ech service
         # user owns config.yaml but can't create files beside it), so the
@@ -135,6 +139,10 @@ def atomic_write_yaml(path, cfg: dict) -> None:
             f.write(rendered)
             f.flush()
             os.fsync(f.fileno())
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
         return
     os.replace(tmp_path, path)
 
@@ -250,8 +258,34 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # ── Auth middleware ───────────────────────────────────────────────────
     # Public paths that don't require login
     PUBLIC_PATHS = {"/login", "/change-password", "/api/auth/login", "/api/auth/change-password",
-                    "/api/health", "/ws", "/static", "/favicon.ico", "/metrics",
+                    "/api/health", "/ws", "/static", "/favicon.ico",
                     "/ca.crt", "/tls-setup", "/phonebook.xml"}
+
+    def _is_loopback(request) -> bool:
+        try:
+            addr = ipaddress.ip_address(request.client.host)
+        except (AttributeError, TypeError, ValueError):
+            return False
+        if addr.version == 6 and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        return addr.is_loopback
+
+    def _cross_site(request) -> bool:
+        """True when a browser says this request came from another site.
+
+        Origin (or Referer when a browser omits Origin) must name the host the
+        request was sent to. Requests carrying neither are non-browser clients
+        (curl, scripts) and pass - cross-site attacks need a victim's browser,
+        and browsers send Origin on every cross-site POST/PUT/PATCH/DELETE.
+        """
+        from urllib.parse import urlsplit
+        src = request.headers.get("origin") or request.headers.get("referer")
+        if not src:
+            return False
+        if src == "null":       # sandboxed iframe / file:// - never our own pages
+            return True
+        host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").lower()
+        return urlsplit(src).netloc.lower() != host
 
     # Paths/prefixes that require admin role (operators are blocked).
     # Covers the settings page, all adapter mutations, user management,
@@ -273,6 +307,15 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     async def auth_middleware(request, call_next):
         path = request.url.path
         method = request.method
+        # Cross-site request forgery: a page on another site can make the
+        # browser POST here with the operator's session cookie. Refuse any
+        # state-changing request whose Origin/Referer is another site.
+        if method in ("POST", "PUT", "PATCH", "DELETE") and _cross_site(request):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "Cross-site request refused"}, status_code=403)
+        # Prometheus scrape: no login needed from this machine only.
+        if path == "/metrics" and _is_loopback(request):
+            return await call_next(request)
         # Network gate for admin paths (server.admin_networks) — applies before, and
         # regardless of, login/role, so a mesh client can't use even an admin account.
         is_admin_path = (

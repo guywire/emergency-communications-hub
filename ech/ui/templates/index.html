@@ -2434,10 +2434,27 @@ function updateChannelVisibility() {
   if (!sel) return;
   const selected = getSelectedAdapters().filter(n => n.toLowerCase().includes('meshcore') || n.toLowerCase().includes('meshtastic'));
   if (!selected.length) {
+    // IRC: pick which joined channel this message goes to. Options are
+    // channel NAMES (the adapter routes on raw.channel_name), not indexes.
+    const ircDetail = _lastChannelsDetail.find(a => getSelectedAdapters().includes(a.adapter)
+      && a.detail && Array.isArray(a.detail.channels) && Array.isArray(a.detail.joined));
+    const ircChans = ircDetail ? ircDetail.detail.channels : [];
+    if (ircChans.length) {
+      const curIrc = sel.value;
+      const defCh = ircDetail.detail.default_channel || ircChans[0];
+      sel.dataset.kind = 'irc';
+      sel.innerHTML = `<option value="">${escHtml(defCh)} (default)</option>` +
+        ircChans.filter(c => c !== defCh).map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+      if ([...sel.options].some(o => o.value === curIrc)) sel.value = curIrc;
+      sel.style.display = '';
+      return;
+    }
     sel.style.display = 'none';
     sel.innerHTML = '';
+    delete sel.dataset.kind;
     return;
   }
+  delete sel.dataset.kind;
   // Use the first matching selected adapter's channel list — if more than
   // one mesh adapter is selected at once, the chosen index applies to all
   // of them (their numbering schemes may not line up; that's on the operator).
@@ -2726,11 +2743,12 @@ async function sendMessage() {
   const subjectField = document.getElementById('compose-subject');
   const subject = subjectField && subjectField.style.display !== 'none' ? subjectField.value.trim() : '';
   const channelField = document.getElementById('compose-channel');
-  const channelIdx = channelField && channelField.style.display !== 'none' && channelField.value !== ''
-    ? parseInt(channelField.value) : undefined;
+  const channelPicked = channelField && channelField.style.display !== 'none' && channelField.value !== '';
+  const ircPick = channelPicked && channelField.dataset.kind === 'irc';
+  const channelIdx = channelPicked && !ircPick ? parseInt(channelField.value) : undefined;
   // Several radios of one protocol number their channels differently — send
   // the channel by NAME so each radio picks its own matching channel.
-  let channelName;
+  let channelName = ircPick ? channelField.value : undefined;
   const meshSel = adapters.filter(a => ['meshc', 'mesh'].includes(adapterMeta(a).cls));
   if (channelIdx !== undefined && meshSel.length > 1) {
     const opt = channelField.options[channelField.selectedIndex];

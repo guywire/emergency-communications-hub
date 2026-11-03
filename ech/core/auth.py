@@ -10,7 +10,9 @@ Session-based authentication for ECH.
   blocked — see ADMIN_PATHS/ADMIN_PREFIXES and the viewer check in
   ech/api/app.py's auth_middleware)
 - Session tokens stored in SQLite with expiry
-- Default admin/admin created on first run if no users exist
+- First run (no users): an "admin" account with a RANDOM password, logged
+  once and written to a root/ech-only file next to the database; changing it
+  is forced on first login. ECH_INITIAL_ADMIN_PASSWORD overrides (tests).
 - Login page at /login, protected routes check session cookie
 
 No OAuth, no LDAP - offline-first emergency system.
@@ -33,15 +35,34 @@ class AuthManager:
     def __init__(self, db):
         self._db = db
 
-    async def init(self) -> None:
-        """Create default admin user if no users exist."""
+    async def init(self, password_file: str | None = None) -> None:
+        """Create the first admin user if no users exist.
+
+        No fixed default password: a well-known admin/admin is usable by
+        anyone who reaches the login page before the operator does. The
+        random one is logged once and, when password_file is given, written
+        there with owner-only permissions.
+        """
+        import os
         users = await self._db.get_users()
-        if not users:
-            await self.create_user("admin", "admin", "admin", must_change_pw=True)
-            log.warning(
-                "AUTH: Created default admin/admin account — "
-                "CHANGE THIS PASSWORD immediately in Settings → Users"
-            )
+        if users:
+            return
+        password = os.environ.get("ECH_INITIAL_ADMIN_PASSWORD") or secrets.token_urlsafe(12)
+        await self.create_user("admin", password, "admin", must_change_pw=True)
+        if password_file:
+            try:
+                fd = os.open(password_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    f.write(f"username: admin\npassword: {password}\n")
+                log.warning("AUTH: created first admin account 'admin' - its password is in %s "
+                            "(readable by root/ech only). You must change it at first login.",
+                            password_file)
+                return
+            except OSError as exc:
+                log.error("AUTH: could not write %s: %s", password_file, exc)
+        # No file to hand it over in: the log is the only place left.
+        log.warning("AUTH: created first admin account - username 'admin', password '%s'. "
+                    "You must change it at first login.", password)
 
     # ── Users ─────────────────────────────────────────────────────────────
 

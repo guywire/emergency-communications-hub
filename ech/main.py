@@ -269,7 +269,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     # Auth manager
     from ech.core.auth import AuthManager
     auth = AuthManager(db)
-    await auth.init()
+    _pw_dir = Path(db_path).resolve().parent if db_path != ":memory:" else Path(".")
+    await auth.init(password_file=str(_pw_dir / "initial-admin-password.txt"))
 
     # Anomaly engine
     from ech.core.anomaly import AnomalyEngine

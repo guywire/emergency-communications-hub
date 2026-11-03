@@ -8,6 +8,18 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.42 (2026-11-02)
+
+### Added
+- IRC: the compose box's channel picker now appears when the IRC adapter is selected, listing its
+  configured channels (default first), so you can choose where a message goes.
+
+### Changed
+- Security hardening: a new install no longer ships a fixed default password (the first admin
+  password is generated and saved to `initial-admin-password.txt` next to the database), the
+  metrics endpoint now needs a login, form/API requests from other websites are refused, and the
+  config file is kept readable by its owner only.
+
 ## v1.1.41 (2026-11-02)
 
 ### Changed

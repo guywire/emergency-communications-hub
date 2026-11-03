@@ -408,7 +408,7 @@ Based on: `ECV_v3_fixes.txt`, `ECH ADAPTER ENHANCEMENT REQUIREMENT.txt`, real-wo
 
 | ID | Severity | Issue | Status |
 |----|----------|-------|--------|
-| SEC-01 | P0 | Default admin/admin password | PARTIAL — forced password change on first login added; change_password.html exists |
+| SEC-01 | P0 | Default admin/admin password | DONE (v1.1.42) — random first-admin password saved to an owner-only file; forced change on first login |
 | SEC-02 | P0 | HTTPS / TLS | DONE — TLS cert generation added; self-signed CA auto-generated; CAT requires HTTPS |
 | SEC-03 | P1 | No role enforcement on /api/users, /api/adapter-config, /api/system | DONE — middleware ADMIN_PREFIXES blocks operators on all sensitive endpoints |
 | SEC-04 | P1 | No login brute-force protection | DONE — 10 attempts / 60s per IP, HTTP 429 on breach |
@@ -907,6 +907,7 @@ verbatim, wire them to `dmr_utils3` for the FEC primitives, then build
 | v1.0.0-rc280 | **Deployed** (2026-10-13) | Deployed | Nav bell icon when a newer VERSION is on GitHub (admin-only, 6 h cache). |
 | v1.0.0-rc284 | **Deployed** (2026-10-14) | Deployed | O139: per-user map layer profiles + default; duplicate sat-btn id fix. |
 | v1.0.0-rc285 | **Deployed** (2026-10-15) | Deployed | O142-O145: UI refresh phase 1 (shared shell + ech-ui.css), adapter-coloured clickable tracks, no Message button on broadcast-only, no ADS-B flash on map open, PSK Reporter legend + detail. |
+| v1.1.42 | **Deployed** (2026-11-02) | Deployed | IRC compose channel picker (was MeshCore/Meshtastic-only; options are channel names, sent as `channel_name`; IRC health detail now includes `default_channel`). Security hardening batch: random first-admin password, metrics behind login, cross-site request refusal, owner-only config file. Tests: tests/test_security_hardening.py. |
 | v1.1.41 | **Deployed** (2026-11-02) | Deployed | PBX call records out of the feed by default: msgTypePrefix() now takes the message and classifies adapterMeta().voice adapters as CALL (asterisk `voice` channel, aredn_ami `AREDN PBX` events) or MSG (SIP texts, voicemail, bot replies); selectDefaultFilter() seeds PBX adapters to MSG alongside APRS. Live PBX feed was ~89% call records (188/212). Unread badges skip entries hidden by the adapter's type filter (also APRS OBJ/POS while MSG-only). Calls still stored in the DB and listed in the Calls panel. |
 | v1.1.40 | **Deployed** (2026-11-02) | Deployed | Settings adapter cards: flat string-list fields (IRC `channels`) render as a comma-separated input instead of the "Complex field(s) ... raw JSON" note; the card editor previously only drew string/number/bool values even though adapter_schemas.py declares `kind: list`. Lists with nested objects or commas inside items stay raw-JSON-only. Test: list round-trips through /api/adapter-config as a YAML list. |
 | v1.1.39 | **Deployed** (2026-11-01) | Deployed | Logins work on the plain-HTTP port (8766, the one the AREDN mesh can use without encryption): the session cookie was always marked Secure when TLS is on, so browsers dropped it over HTTP and every login bounced back to /login - it looked like a separate set of accounts. Secure flag and HSTS now apply on HTTPS requests only. Same process and accounts serve both ports. |

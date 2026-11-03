@@ -406,6 +406,7 @@ class IRCAdapter(Adapter):
             "tls": self._tls,
             "nick": self._nick,
             "channels": self._channels,
+            "default_channel": self._default_channel,
             "joined": sorted(self._joined),
             "rx_count": self._rx_count,
             "tx_count": self._tx_count,

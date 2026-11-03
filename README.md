@@ -1,6 +1,6 @@
 # SignalMatrix
 
-**Version 1.1.36** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
+**Version 1.1.42** (from the `VERSION` file — synced automatically on every deploy by `deploy/build_and_scp.ps1`)
 
 SignalMatrix is a Python/FastAPI application that bridges multiple emergency-communications radio networks into a single web dashboard. It runs on a laptop, thin client, or Raspberry Pi at an incident command post, field site, or contest operation and lets operators monitor, log, and relay messages across all active links from a browser on the LAN.
 
@@ -100,7 +100,9 @@ ech --config /etc/ech/config.yaml
 
 Open a browser to `http://<server-ip>:8765`. That is the dashboard.
 
-On first sign-in (default `admin` / `admin`) you must choose a new password and agree to the
+On first start ECH creates an `admin` account with a random password and saves it to
+`initial-admin-password.txt` next to the database (`/opt/ech/` on a standard install; readable
+by root and the `ech` user only). On first sign-in you must choose a new password and agree to the
 [legal, licensing and interference terms](#legal-licensing-and-interference---read-before-you-transmit).
 
 ### Or: one-step server install (Debian 12 / Ubuntu 22.04+)

@@ -54,6 +54,9 @@ fi
 # settings save failed with "permission denied" from rc247 until this was added).
 sudo chown ech:ech /etc/ech 2>/dev/null || true
 sudo chown ech:ech /etc/ech/config.yaml 2>/dev/null || true
+# config.yaml (and every backup copy of it) holds API keys and passwords:
+# readable by its owner only, not world-readable.
+sudo chmod 600 /etc/ech/config.yaml /etc/ech/config.yaml.bak* 2>/dev/null || true
 
 # Add pskreporter section if missing (required for correct User-Agent to avoid 503s)
 sudo /opt/ech/.venv/bin/python3 - <<'PYEOF'
