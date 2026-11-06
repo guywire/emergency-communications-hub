@@ -8,6 +8,15 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.44 (2026-11-06)
+
+### Added
+- IRC channel browser in Settings → Adapter live control: search the server's public channel
+  list (by name or topic, with a minimum user count), see users and topic for each, and join with
+  one click or by typing a name. Joined channels show as chips with a ✕ to leave. Changes take
+  effect immediately and are saved to config.yaml; newly joined channels appear in the compose
+  channel picker.
+
 ## v1.1.43 (2026-11-02)
 
 ### Changed

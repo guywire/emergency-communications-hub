@@ -58,6 +58,9 @@ EMRG_WORDS = {"emergency", "mayday", "sos", "evacuate now"}
 ELVT_WORDS = {"urgent", "priority", "immediate"}
 
 MAX_LINE = 512           # RFC 2812 limit, including the trailing CRLF
+LIST_TIMEOUT = 45.0      # seconds to wait for a channel LIST to finish
+LIST_MAX_RESULTS = 500   # keep at most this many LIST replies
+JOIN_TIMEOUT = 8.0       # seconds to wait for the server to confirm a JOIN
 REGISTER_TIMEOUT = 30.0  # seconds to reach 001 (welcome) after connecting
 PING_IDLE = 120.0        # send our own PING if the server has been quiet this long
 LINK_TIMEOUT = 300.0     # give up on the link if nothing at all arrives for this long
@@ -65,6 +68,16 @@ LINK_TIMEOUT = 300.0     # give up on the link if nothing at all arrives for thi
 # mIRC colour/bold/italic/underline/reverse/reset control codes
 _FORMAT_RE = re.compile(r"\x03(?:\d{1,2}(?:,\d{1,2})?)?|[\x02\x0f\x11\x16\x1d\x1e\x1f]")
 _CHAN_PREFIXES = "#&+!"
+_CHAN_RE = re.compile(r"^[#&+!][^\s,\x07:]{1,49}$")
+_LIST_MODES_RE = re.compile(r"^\[\+[^\]]*\]\s*")   # "[+nt] " some servers put before the topic
+
+
+def normalize_channel(name: str) -> str:
+    """'ham' -> '#ham'; returns '' if it isn't a valid channel name."""
+    name = (name or "").strip()
+    if name and name[:1] not in _CHAN_PREFIXES:
+        name = "#" + name
+    return name if _CHAN_RE.match(name) else ""
 
 
 def _priority(text: str) -> Priority:
@@ -167,6 +180,12 @@ class IRCAdapter(Adapter):
         self._rx_count = 0
         self._tx_count = 0
         self._last_error: str | None = None
+        # Channel browser (LIST) and live join/leave
+        self._list_lock = asyncio.Lock()
+        self._list_results: list[dict] | None = None
+        self._list_done = asyncio.Event()
+        self._list_error: str | None = None
+        self._join_errors: dict[str, str] = {}
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -354,9 +373,25 @@ class IRCAdapter(Adapter):
             if who == self._nick:
                 self._joined.discard(params[0].lower())
                 log.warning("IRC %s: left %s (%s)", self.name, params[0], cmd)
-        elif cmd in ("471", "473", "474", "475", "477") and len(params) >= 2:
+        elif cmd in ("403", "405", "471", "473", "474", "475", "477", "479") and len(params) >= 2:
             self._last_error = f"cannot join {params[1]}: {params[-1]}"
+            self._join_errors[params[1].lower()] = params[-1]
             log.warning("IRC %s: %s", self.name, self._last_error)
+        elif cmd == "322" and len(params) >= 3 and self._list_results is not None:
+            # RPL_LIST: <me> <channel> <users> :<topic>
+            if len(self._list_results) < LIST_MAX_RESULTS:
+                try:
+                    users = int(params[2])
+                except ValueError:
+                    users = 0
+                topic = _LIST_MODES_RE.sub("", strip_formatting(params[3] if len(params) > 3 else "")).strip()
+                self._list_results.append({"channel": params[1], "users": users, "topic": topic})
+        elif cmd == "323":
+            self._list_done.set()   # RPL_LISTEND
+        elif cmd in ("263", "416") and self._list_results is not None:
+            # RPL_TRYAGAIN (server busy) / ERR_TOOMANYMATCHES
+            self._list_error = params[-1] if params else "server refused LIST"
+            self._list_done.set()
         elif cmd == "NICK" and sender == self._nick and params:
             self._nick = params[0]
         elif cmd == "ERROR":
@@ -397,6 +432,85 @@ class IRCAdapter(Adapter):
             raw={"channel_name": target if is_channel else None, "irc_command": cmd,
                  "prefix": prefix},
         ))
+
+    # ── Channel browser / join / leave ────────────────────────────────────
+
+    async def list_channels(self, query: str = "", min_users: int = 0) -> dict:
+        """Ask the server for its public channel list (LIST), filtered on the
+        server side where it supports ELIST: '*query*' name mask plus
+        '>N' users. Results come back biggest first, capped at
+        LIST_MAX_RESULTS. Filtering on the topic happens here, after LIST."""
+        if not self._connected or not self._writer:
+            raise ConnectionError("not connected")
+        q = re.sub(r"[\s,]", "", query or "")
+        mask = (q if any(ch in q for ch in "*?") else f"*{q}*") if q else ""
+        args = ",".join(a for a in ([f">{int(min_users) - 1}"] if min_users and int(min_users) > 1 else [])
+                        + ([mask] if mask else []))
+        async with self._list_lock:
+            self._list_results, self._list_error = [], None
+            self._list_done.clear()
+            try:
+                await self._raw(f"LIST {args}".strip())
+                await asyncio.wait_for(self._list_done.wait(), timeout=LIST_TIMEOUT)
+                timed_out = False
+            except asyncio.TimeoutError:
+                timed_out = True
+            results, err = self._list_results or [], self._list_error
+            self._list_results = None
+        # Servers without ELIST ignore the mask: filter again here (name or topic).
+        needle = q.strip("*?").lower()
+        if needle:
+            results = [r for r in results if needle in r["channel"].lower() or needle in r["topic"].lower()]
+        if min_users:
+            results = [r for r in results if r["users"] >= int(min_users)]
+        results.sort(key=lambda r: (-r["users"], r["channel"].lower()))
+        joined = {c.lower() for c in self._channels}
+        for r in results:
+            r["joined"] = r["channel"].lower() in joined
+        return {"channels": results, "truncated": len(results) >= LIST_MAX_RESULTS,
+                "timed_out": timed_out, "error": err}
+
+    async def join_channel(self, channel: str) -> dict:
+        """JOIN a channel now and add it to this adapter's channel list."""
+        name = normalize_channel(channel)
+        if not name:
+            raise ValueError(f"not a valid channel name: {channel!r}")
+        if not self._connected or not self._writer:
+            raise ConnectionError("not connected")
+        key = name.lower()
+        self._join_errors.pop(key, None)
+        if key not in self._joined:
+            await self._raw(f"JOIN {name}")
+            deadline = time.monotonic() + JOIN_TIMEOUT
+            while key not in self._joined and key not in self._join_errors and time.monotonic() < deadline:
+                await asyncio.sleep(0.2)
+            if key in self._join_errors:
+                raise ValueError(f"{name}: {self._join_errors.pop(key)}")
+            if key not in self._joined:
+                raise ConnectionError(f"{name}: no reply from the server")
+        if key not in {c.lower() for c in self._channels}:
+            self._channels.append(name)
+        return {"channel": name, "channels": list(self._channels)}
+
+    async def part_channel(self, channel: str) -> dict:
+        """PART a channel now and drop it from this adapter's channel list.
+        The last channel can't be left (the adapter needs at least one)."""
+        name = normalize_channel(channel)
+        key = name.lower()
+        remaining = [c for c in self._channels if c.lower() != key]
+        if not name or len(remaining) == len(self._channels):
+            raise ValueError(f"{channel!r} is not one of this adapter's channels")
+        if not remaining:
+            raise ValueError("can't leave the only channel — join another one first")
+        if self._connected and self._writer and key in self._joined:
+            await self._raw(f"PART {name} :SignalMatrix")
+            self._joined.discard(key)
+        self._channels = remaining
+        if self._default_channel.lower() == key:
+            self._default_channel = remaining[0]
+            self.tx_channel = self._default_channel
+        return {"channel": name, "channels": list(self._channels),
+                "default_channel": self._default_channel}
 
     # ── Health ────────────────────────────────────────────────────────────
 

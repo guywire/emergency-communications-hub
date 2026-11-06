@@ -1442,6 +1442,82 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             log.error("set_m17_server %s: %s", adapter_name, exc)
             return {"status": "error", "detail": str(exc)}
 
+    # ── IRC channel browser: search the server's LIST, join / leave live ──
+
+    def _irc_adapter(adapter_name: str):
+        from ech.adapters.irc import IRCAdapter
+        from fastapi import HTTPException
+        adapter = router._adapters.get(adapter_name)
+        if not adapter:
+            raise HTTPException(status_code=404, detail=f"Adapter '{adapter_name}' not found")
+        if not isinstance(adapter, IRCAdapter):
+            raise HTTPException(status_code=400, detail=f"'{adapter_name}' is not an IRC adapter")
+        return adapter
+
+    def _irc_save_channels(adapter_name: str, channels: list, default_channel: str | None) -> str | None:
+        """Write the adapter's channel list to config.yaml so it survives a
+        restart. Returns an error string, or None when saved."""
+        import yaml
+        cfg_path = Path(app.state.config_path or "/etc/ech/config.yaml")
+        if not cfg_path.exists():
+            cfg_path = Path("config.yaml")
+        try:
+            with open(cfg_path, encoding="utf-8") as f:
+                full_cfg = yaml.safe_load(f) or {}
+            acfg = next((a for a in full_cfg.get("adapters", []) or [] if a.get("name") == adapter_name), None)
+            if acfg is None:
+                return f"adapter '{adapter_name}' not found in config.yaml — joined for now only"
+            acfg["channels"] = list(channels)
+            if acfg.get("default_channel") and default_channel and \
+                    acfg["default_channel"].lower() not in {c.lower() for c in channels}:
+                acfg["default_channel"] = default_channel
+            atomic_write_yaml(cfg_path, full_cfg)
+            return None
+        except (OSError, yaml.YAMLError) as exc:
+            log.error("IRC channel save %s: %s", adapter_name, exc)
+            return f"joined for now, but config.yaml was not saved ({exc})"
+
+    @app.post("/api/adapters/{adapter_name}/irc/list")
+    async def irc_list_channels(adapter_name: str, request: Request):
+        adapter = _irc_adapter(adapter_name)
+        data = await request.json()
+        try:
+            min_users = max(0, int(data.get("min_users") or 0))
+        except (TypeError, ValueError):
+            return {"status": "error", "detail": "min_users must be a number"}
+        query = str(data.get("query") or "").strip()[:50]
+        if not query and min_users < 10:
+            return {"status": "error",
+                    "detail": "type something to search for, or set minimum users to 10 or more — "
+                              "the full list on a big network is tens of thousands of channels"}
+        try:
+            res = await adapter.list_channels(query, min_users)
+        except ConnectionError as exc:
+            return {"status": "error", "detail": f"IRC not connected ({exc})"}
+        return {"status": "ok", **res}
+
+    @app.post("/api/adapters/{adapter_name}/irc/join")
+    async def irc_join_channel(adapter_name: str, request: Request):
+        adapter = _irc_adapter(adapter_name)
+        data = await request.json()
+        try:
+            res = await adapter.join_channel(str(data.get("channel") or ""))
+        except (ValueError, ConnectionError) as exc:
+            return {"status": "error", "detail": str(exc)}
+        warn = _irc_save_channels(adapter_name, res["channels"], None)
+        return {"status": "ok", **res, "warning": warn}
+
+    @app.post("/api/adapters/{adapter_name}/irc/part")
+    async def irc_part_channel(adapter_name: str, request: Request):
+        adapter = _irc_adapter(adapter_name)
+        data = await request.json()
+        try:
+            res = await adapter.part_channel(str(data.get("channel") or ""))
+        except (ValueError, ConnectionError) as exc:
+            return {"status": "error", "detail": str(exc)}
+        warn = _irc_save_channels(adapter_name, res["channels"], res["default_channel"])
+        return {"status": "ok", **res, "warning": warn}
+
     @app.post("/api/adapters/{adapter_name}/discover")
     async def trigger_discovery(adapter_name: str):
         """Immediately send a discovery pulse (APP_START + DEVICE_QUERY) to solicit node adverts."""

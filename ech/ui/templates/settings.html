@@ -669,6 +669,7 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
     </div>
     <div id="adapter-live-body" class="section-body">
       <div id="adapter-live-list"><div style="font-family:var(--mono);font-size:11px;color:var(--dim)">Loading…</div></div>
+      <div id="irc-browser"></div>
       <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:10px">
         Pausing an adapter stops it from generating mock traffic immediately. Does not affect config.yaml.
         To rename/add MeshCore channels or set encryption keys, use MESHCORE TOOLS below.
@@ -3051,8 +3052,185 @@ async function loadAdapterLive() {
         ${m17Controls}
       </div>`;
     }).join('');
+    renderIrcBrowsers(adapters);
   } catch(e) {
     el.innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:11px">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+// ── IRC channel browser ──────────────────────────────────────────────────
+// Lives outside adapter-live-list (which redraws every 10 s) so a search in
+// progress isn't wiped. One panel per IRC adapter, built once; only the
+// "joined" chips refresh.
+const _ircSt = 'font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px';
+let _ircChannels = {};   // adapter -> configured channel list
+
+function _ircId(name) { return name.replace(/[^A-Za-z0-9_-]/g, '_'); }
+
+function renderIrcBrowsers(adapters) {
+  const host = document.getElementById('irc-browser');
+  if (!host) return;
+  const irc = adapters.filter(a => a.detail && Array.isArray(a.detail.channels) && Array.isArray(a.detail.joined));
+  const want = irc.map(a => a.adapter);
+  [...host.children].forEach(c => { if (!want.includes(c.dataset.adapter)) c.remove(); });
+  irc.forEach(a => {
+    const id = _ircId(a.adapter);
+    let panel = document.getElementById(`ircb-${id}`);
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = `ircb-${id}`;
+      panel.dataset.adapter = a.adapter;
+      panel.style.cssText = 'margin-top:10px;padding:8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;display:flex;flex-direction:column;gap:6px';
+      const n = JSON.stringify(a.adapter).replace(/"/g, '&quot;');
+      panel.innerHTML = `
+        <div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--muted)">IRC channels — ${esc(a.adapter)} <span style="font-weight:400;color:var(--dim)">(${esc(a.detail.server || '')})</span></div>
+        <div id="ircb-joined-${id}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input id="ircb-q-${id}" type="text" placeholder="search channels, e.g. ham, aprs, skywarn" style="${_ircSt};width:230px"
+            onkeydown="if(event.key==='Enter')ircSearch(${n})">
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">min users</span>
+          <input id="ircb-min-${id}" type="number" min="0" value="3" style="${_ircSt};width:56px">
+          <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="ircSearch(${n})">Search</button>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:8px">or join by name</span>
+          <input id="ircb-name-${id}" type="text" placeholder="#channel" style="${_ircSt};width:130px"
+            onkeydown="if(event.key==='Enter')ircJoin(${n}, this.value)">
+          <button class="btn btn-green" style="padding:3px 8px;font-size:10px" onclick="ircJoin(${n}, document.getElementById('ircb-name-${id}').value)">Join</button>
+        </div>
+        <div id="ircb-filter-row-${id}" style="display:none;gap:6px;align-items:center">
+          <input id="ircb-filter-${id}" type="text" placeholder="filter these results (name or topic)" style="${_ircSt};width:230px" oninput="ircRenderResults(${n})">
+          <span id="ircb-count-${id}" style="font-family:var(--mono);font-size:10px;color:var(--dim)"></span>
+        </div>
+        <div id="ircb-results-${id}" style="max-height:340px;overflow:auto"></div>`;
+      host.appendChild(panel);
+    }
+    _ircChannels[a.adapter] = a.detail.channels;
+    const joined = new Set(a.detail.joined.map(c => c.toLowerCase()));
+    const n = JSON.stringify(a.adapter).replace(/"/g, '&quot;');
+    document.getElementById(`ircb-joined-${id}`).innerHTML =
+      `<span style="font-family:var(--mono);font-size:10px;color:var(--muted)">In:</span>` +
+      a.detail.channels.map(c => {
+        const on = joined.has(c.toLowerCase());
+        const def = c === a.detail.default_channel;
+        const cj = JSON.stringify(c).replace(/"/g, '&quot;');
+        return `<span style="font-family:var(--mono);font-size:10px;padding:2px 6px;border:1px solid var(--border);border-radius:10px;display:inline-flex;gap:5px;align-items:center"
+            title="${on ? 'joined' : 'not joined right now'}${def ? ' — default send channel' : ''}">
+          <span style="color:${on ? 'var(--green)' : 'var(--red)'}">●</span>${esc(c)}${def ? ' <span style="color:var(--dim)">(default)</span>' : ''}
+          ${a.detail.channels.length > 1 ? `<a href="#" style="color:var(--dim);text-decoration:none" title="Leave ${esc(c)}" onclick="ircPart(${n}, ${cj});return false">✕</a>` : ''}
+        </span>`;
+      }).join('');
+    // keep the Join/Joined buttons in the result list in step
+    if (_ircResults[a.adapter]) ircRenderResults(a.adapter);
+  });
+}
+
+let _ircResults = {};
+
+async function ircSearch(adapterName) {
+  const id = _ircId(adapterName);
+  const q = document.getElementById(`ircb-q-${id}`).value.trim();
+  const min = parseInt(document.getElementById(`ircb-min-${id}`).value || '0', 10) || 0;
+  const out = document.getElementById(`ircb-results-${id}`);
+  out.innerHTML = `<div style="font-family:var(--mono);font-size:10px;color:var(--dim)">Asking the server for its channel list…</div>`;
+  try {
+    const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/irc/list`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: q, min_users: min}),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (d.status !== 'ok') {
+      out.innerHTML = `<div style="font-family:var(--mono);font-size:10px;color:var(--red)">${esc(d.detail || 'search failed')}</div>`;
+      return;
+    }
+    _ircResults[adapterName] = d;
+    document.getElementById(`ircb-filter-${id}`).value = '';
+    ircRenderResults(adapterName);
+  } catch (e) {
+    out.innerHTML = `<div style="font-family:var(--mono);font-size:10px;color:var(--red)">${esc(e.message)}</div>`;
+  }
+}
+
+function ircRenderResults(adapterName) {
+  const id = _ircId(adapterName);
+  const d = _ircResults[adapterName];
+  const out = document.getElementById(`ircb-results-${id}`);
+  const frow = document.getElementById(`ircb-filter-row-${id}`);
+  if (!d || !out) return;
+  const f = (document.getElementById(`ircb-filter-${id}`).value || '').toLowerCase();
+  const mine = new Set((_ircChannels[adapterName] || []).map(c => c.toLowerCase()));
+  const rows = d.channels.filter(c => !f || c.channel.toLowerCase().includes(f) || c.topic.toLowerCase().includes(f));
+  frow.style.display = d.channels.length ? 'flex' : 'none';
+  document.getElementById(`ircb-count-${id}`).textContent =
+    `${rows.length} of ${d.channels.length} channel${d.channels.length === 1 ? '' : 's'}` +
+    (d.truncated ? ' (list cut short — narrow the search)' : '') + (d.timed_out ? ' (server was slow — list may be partial)' : '');
+  const n = JSON.stringify(adapterName).replace(/"/g, '&quot;');
+  const notes = d.error ? `<div style="font-family:var(--mono);font-size:10px;color:var(--yellow)">Server said: ${esc(d.error)}</div>` : '';
+  if (!d.channels.length) {
+    out.innerHTML = notes + `<div style="font-family:var(--mono);font-size:10px;color:var(--dim)">No public channels matched.</div>`;
+    return;
+  }
+  out.innerHTML = notes + `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px">
+    <thead><tr style="color:var(--muted);text-align:left"><th style="padding:3px">Channel</th><th style="padding:3px;text-align:right">Users</th><th style="padding:3px">Topic</th><th></th></tr></thead>
+    <tbody>${rows.map(c => {
+      const cj = JSON.stringify(c.channel).replace(/"/g, '&quot;');
+      const isIn = mine.has(c.channel.toLowerCase());
+      return `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:3px;white-space:nowrap">${esc(c.channel)}</td>
+        <td style="padding:3px;text-align:right">${c.users}</td>
+        <td style="padding:3px;color:var(--dim);word-break:break-word">${esc(c.topic)}</td>
+        <td style="padding:3px;white-space:nowrap">${isIn
+          ? `<span style="color:var(--green)">joined</span>`
+          : `<button class="btn btn-green" style="padding:2px 8px;font-size:10px" onclick="ircJoin(${n}, ${cj})">Join</button>`}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+// Keep the config card editor's copy in step, so a later "save adapters"
+// there doesn't put back the old channel list.
+function _ircSyncEditor(adapterName, channels) {
+  if (typeof _adaptersState === 'undefined' || !Array.isArray(_adaptersState)) return;
+  const i = _adaptersState.findIndex(a => a.name === adapterName);
+  if (i < 0) return;
+  _adaptersState[i].channels = [...channels];
+  if (!document.getElementById('adapter-list')) return;
+  _renderAdapterCards();
+  if (typeof _reapplySerialPortSelects === 'function') _reapplySerialPortSelects();
+}
+
+async function ircJoin(adapterName, channel) {
+  channel = (channel || '').trim();
+  if (!channel) { toast('Type a channel name first'); return; }
+  toast(`${adapterName}: joining ${channel}…`);
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/irc/join`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({channel}),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (d.status === 'ok') {
+    _ircChannels[adapterName] = d.channels;
+    _ircSyncEditor(adapterName, d.channels);
+    toast(d.warning ? `${adapterName}: joined ${d.channel} — ${d.warning}` : `${adapterName}: joined ${d.channel} (saved)`, d.warning ? 'err' : 'ok');
+    const box = document.getElementById(`ircb-name-${_ircId(adapterName)}`);
+    if (box) box.value = '';
+    loadAdapterLive();
+  } else {
+    toast(`${adapterName}: couldn't join — ${d.detail || 'unknown error'}`, 'err');
+  }
+}
+
+async function ircPart(adapterName, channel) {
+  if (!confirm(`Leave ${channel}? It will be removed from ${adapterName}'s channel list.`)) return;
+  const r = await fetch(`/api/adapters/${encodeURIComponent(adapterName)}/irc/part`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({channel}),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (d.status === 'ok') {
+    _ircChannels[adapterName] = d.channels;
+    _ircSyncEditor(adapterName, d.channels);
+    toast(d.warning ? `${adapterName}: left ${d.channel} — ${d.warning}` : `${adapterName}: left ${d.channel} (saved)`, d.warning ? 'err' : 'ok');
+    loadAdapterLive();
+  } else {
+    toast(`${adapterName}: couldn't leave — ${d.detail || 'unknown error'}`, 'err');
   }
 }
 

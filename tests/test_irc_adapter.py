@@ -106,7 +106,12 @@ class FakeServer:
                 pass
             elif cmd == "JOIN":
                 for ch in rest.split(","):
-                    self.say(f":{nick}!~u@h JOIN {ch}")
+                    if ch in getattr(self, "banned", ()):
+                        self.say(f":srv 474 {nick} {ch} :Cannot join channel (+b) - you are banned")
+                    else:
+                        self.say(f":{nick}!~u@h JOIN {ch}")
+            elif cmd == "PART":
+                self.say(f":{nick}!~u@h PART {rest.split()[0]}")
             if cmd in ("USER", "NICK") and nick and not self.sasl or (cmd == "CAP" and rest == "END" and nick):
                 if not getattr(self, "_welcomed", False):
                     self._welcomed = True
@@ -221,3 +226,115 @@ async def test_server_close_drops_link():
     finally:
         await a.disconnect()
         await srv.close()
+
+
+# ── Channel browser: LIST / join / leave ──
+
+async def test_list_channels_filters_and_sorts():
+    srv = FakeServer()
+    port = await srv.start()
+    a = await _adapter(port)
+    try:
+        task = asyncio.create_task(a.list_channels("ham", 5))
+        await srv.wait_for(lambda x: x.startswith("LIST"))
+        assert "LIST >4,*ham*" in srv.lines
+        srv.say(":srv 321 KN0O Channel :Users  Name")
+        srv.say(":srv 322 KN0O #hamradio 120 :[+nt] General ham chat")
+        srv.say(":srv 322 KN0O #ech 9 :ECH test")          # already ours
+        srv.say(":srv 322 KN0O #ham-aprs 40 :APRS talk")
+        srv.say(":srv 322 KN0O #tiny-ham 2 :too small")    # server without ELIST ignores >4
+        srv.say(":srv 323 KN0O :End of /LIST")
+        await srv.writer.drain()
+        res = await asyncio.wait_for(task, 3)
+        assert [r["channel"] for r in res["channels"]] == ["#hamradio", "#ham-aprs"]
+        assert res["channels"][0]["topic"] == "General ham chat"
+        assert res["channels"][0]["users"] == 120 and not res["channels"][0]["joined"]
+        assert res["error"] is None and not res["timed_out"]
+    finally:
+        await a.disconnect()
+        await srv.close()
+
+
+async def test_list_channels_server_busy():
+    srv = FakeServer()
+    port = await srv.start()
+    a = await _adapter(port)
+    try:
+        task = asyncio.create_task(a.list_channels("ham"))
+        await srv.wait_for(lambda x: x.startswith("LIST"))
+        srv.say(":srv 263 KN0O LIST :Server load is temporarily too heavy. Please wait a while and try again.")
+        await srv.writer.drain()
+        res = await asyncio.wait_for(task, 3)
+        assert res["channels"] == [] and "too heavy" in res["error"]
+    finally:
+        await a.disconnect()
+        await srv.close()
+
+
+async def test_join_and_part_channel():
+    srv = FakeServer()
+    srv.banned = {"#closed"}
+    port = await srv.start()
+    a = await _adapter(port)
+    try:
+        await srv.wait_for(lambda x: x == "JOIN #ech,#ares")
+        res = await a.join_channel("hamradio")
+        assert res["channel"] == "#hamradio" and a._channels == ["#ech", "#ares", "#hamradio"]
+        assert "#hamradio" in a._health_detail()["joined"]
+
+        with pytest.raises(ValueError, match="banned"):
+            await a.join_channel("#closed")
+        assert "#closed" not in a._channels
+        with pytest.raises(ValueError):
+            await a.join_channel("bad name")
+
+        res = await a.part_channel("#ech")               # the default channel
+        assert a._channels == ["#ares", "#hamradio"]
+        assert res["default_channel"] == "#ares" and a.tx_channel == "#ares"
+        await srv.wait_for(lambda x: x.startswith("PART #ech"))
+        await a.part_channel("#hamradio")
+        with pytest.raises(ValueError, match="only channel"):
+            await a.part_channel("#ares")
+        with pytest.raises(ValueError):
+            await a.part_channel("#nope")
+    finally:
+        await a.disconnect()
+        await srv.close()
+
+
+async def test_join_part_api_saves_config(tmp_path):
+    import yaml
+    from unittest.mock import MagicMock
+    from httpx import AsyncClient, ASGITransport
+    from ech.api.app import create_app
+
+    a = IRCAdapter({"server": "x", "nick": "N", "channels": ["#ech"], "tls": False})
+    async def fake_join(ch):
+        a._channels.append("#" + ch.lstrip("#"))
+        return {"channel": a._channels[-1], "channels": list(a._channels)}
+    a.join_channel = fake_join
+    router = MagicMock()
+    router._adapters = {"irc-libera": a}
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"adapters": [
+        {"name": "irc-libera", "type": "irc", "channels": ["#ech"], "default_channel": "#ech"}]}))
+
+    class _Auth:
+        async def get_session(self, t): return {"username": "admin", "role": "admin", "must_change_pw": False}
+        async def require_session(self, r): return {"username": "admin", "role": "admin"}
+
+    app = create_app(router, MagicMock(), auth=_Auth(), config_path=str(cfg))
+    async with AsyncClient(transport=ASGITransport(app=app, client=("127.0.0.1", 5000)),
+                           base_url="http://ech.test") as c:
+        c.cookies.set("ech_session", "t")
+        r = await c.post("/api/adapters/irc-libera/irc/join", json={"channel": "hamradio"})
+        assert r.json()["status"] == "ok", r.text
+        assert yaml.safe_load(cfg.read_text())["adapters"][0]["channels"] == ["#ech", "#hamradio"]
+
+        r = await c.post("/api/adapters/irc-libera/irc/part", json={"channel": "#ech"})
+        assert r.json()["status"] == "ok", r.text
+        saved = yaml.safe_load(cfg.read_text())["adapters"][0]
+        assert saved["channels"] == ["#hamradio"] and saved["default_channel"] == "#hamradio"
+
+        r = await c.post("/api/adapters/irc-libera/irc/list", json={"query": "", "min_users": 0})
+        assert r.json()["status"] == "error"   # refuses an unfiltered full-network LIST
