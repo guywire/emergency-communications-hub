@@ -386,6 +386,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     await net_probe.start()
     await mc_hub_compare.start()
     await goes_service.start()
+    from ech.core.directory_status import status as directory_status
+    await directory_status.start(config)
     from ech.core.track_history import TrackHistory
     track_history = TrackHistory(router, db, config)
     await track_history.start()
@@ -509,6 +511,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
             await mc_hub_compare.stop()
         if 'goes_service' in dir():
             await goes_service.stop()
+        from ech.core.directory_status import status as _dir_status
+        await _dir_status.stop()
         if 'aprs_hub' in dir():
             await aprs_hub.stop()
         if 'wx_bot' in dir():

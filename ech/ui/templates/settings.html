@@ -2177,7 +2177,7 @@ function _renderAdapterFieldInput(i, key, value, fieldMeta) {
   }
   if (fieldMeta && fieldMeta.kind === 'select' && fieldMeta.options) {
     const opts = fieldMeta.options.map(o =>
-      `<option value="${esc(o)}" ${o === value ? 'selected' : ''}>${esc(o)}</option>`).join('');
+      `<option value="${esc(o)}" ${String(o) === String(value ?? '') ? 'selected' : ''}>${esc(o) || '(default)'}</option>`).join('');
     return `<div${title}><label style="margin-top:0">${label}</label>
       <select onchange="_adaptersState[${i}]['${key}'] = this.value">${opts}</select></div>`;
   }
@@ -3672,8 +3672,10 @@ function renderPBXDirectory() {
       <div style="margin-bottom:6px">
         <div style="color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${esc(cat)} (${entries.length})</div>
         ${entries.map(e => `
-          <div style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer" onclick="useDirectoryEntry('${esc(e.destination)}')" title="${esc(e.description || '')}">
+          <div style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;${e.asl_status === 'down' ? 'opacity:.55' : ''}" onclick="useDirectoryEntry('${esc(e.destination)}')"
+               title="${esc(e.description || '')}${e.allstar_node ? ` — AllStar ${esc(e.allstar_node)}: ${esc(e.asl_status)}` : ''}">
             <span style="color:var(--blue)">📞</span>
+            <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${e.asl_status === 'up' ? 'var(--green)' : e.asl_status === 'down' ? 'var(--red)' : 'transparent'}"></span>
             <span style="color:var(--text)">${esc(e.name)}</span>
             <span style="color:var(--dim)">(${esc(e.destination)})</span>
           </div>`).join('')}

@@ -215,7 +215,8 @@ pip install fastapi "uvicorn[standard]" pyyaml aiosqlite \
 | meshcoretomqtt | https://github.com/Cisien/meshcoretomqtt | Ed25519 JWT auth scheme for LetsMesh MQTT; ECH replicates auth_token.py logic |
 | Meshtastic Python | https://github.com/meshtastic/python | Used directly via `import meshtastic` in meshtastic_adapter.py |
 | Reticulum | https://github.com/markqvist/Reticulum | Used directly via `import RNS` in reticulum_adapter.py |
-| Pat Winlink | https://github.com/la5nta/pat | External process; ECH calls its HTTP API |
+| Pat Winlink | https://github.com/la5nta/pat | External process; ECH calls its HTTP API (v1.0.1 live) |
+| Mercury HF modem (optional) | https://github.com/Rhizomatica/mercury | VARA-compatible TCP modem (8300/8301) behind Pat's `varahf` transport; GPL-3.0; needs a sound card + radio |
 | Direwolf | https://github.com/wb2osz/direwolf | External process; ECH connects to its KISS-over-TCP port |
 | JS8Call | https://js8call.com | External process; ECH connects to its TCP API on port 2442 |
 | AIS-catcher | https://github.com/jvde-github/AIS-catcher | External process; ECH polls its HTTP JSON API for vessel positions |

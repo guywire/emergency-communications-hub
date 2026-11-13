@@ -8,6 +8,83 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.51 (2026-11-12)
+
+### Changed
+- Calls tab MeshPhone offices now show each office's 7-digit number range (OAKLAND `510-52xx`)
+  and its admin's number instead of the bare 5-digit office code, which read like a short phone
+  number. The office code is still in the tooltip.
+
+## v1.1.50 (2026-11-12)
+
+### Added
+- AREDN MeshPhone directory on the Calls tab. Search about 680 MeshPhone users by callsign, name,
+  number or office, and dial them with one click. An "all offices" list shows all 97 MeshPhone
+  offices with location, office codes, trunks and status. Both refresh hourly over the mesh: the
+  offices from the WT0F MeshPhone database, the people from the white pages copies still served
+  by other PBXs (the original N2MH source is gone, so that list may be months old).
+- `/phonebook-meshphone.xml`: the same people and offices as a Yealink remote phonebook. Add it
+  as a second phonebook on the phone. It is only served on the local network and mesh, never
+  through a reverse proxy.
+- Click-to-call and the phonebook dial MeshPhone numbers as 78 plus the 7-digit number.
+
+## v1.1.49 (2026-11-12)
+
+### Added
+- PBX directory live status. ECH now re-reads the HOIP directory lists and AllStarLink's list of
+  currently registered nodes every hour (one request each). On the Calls tab, AllStar nodes that
+  aren't registered right now are hidden behind a "+N offline" toggle, each entry gets a green or
+  red dot, and a refresh button re-checks on demand (admins, at most every 5 minutes). Offline
+  nodes are also left out of the Yealink phonebook. Settings' directory shows the same dots.
+  An entry is only called offline when it is known to be an AllStar node; others are never hidden.
+
+## v1.1.48 (2026-11-11)
+
+### Added
+- Winlink can connect through **Mercury**, the free open-source HF modem from Rhizomatica, as an
+  alternative to VARA. Mercury speaks VARA's TCP protocol on the same ports, so Pat drives it
+  with its VARA HF transport; pick `mercury` and give a station callsign. The far station must
+  run Mercury too — VARA RMS gateways can't decode it.
+- Winlink panel connect bar: mode (Telnet, VARA HF, Mercury HF, VARA FM, ARDOP, AX.25), gateway
+  callsign, bandwidth, and the last session's result. New `connect_target`, `bandwidth` and
+  `session_timeout` adapter settings.
+
+### Fixed
+- Winlink connect never started a session: ECH posted JSON, but Pat reads the alias/URL from
+  the `url` form field. Sessions now run in the background (they can take minutes over HF), one
+  at a time, and auto-connect no longer holds up adapter startup.
+
+### Changed
+- Pat on the live server updated to v1.0.1.
+
+## v1.1.47 (2026-11-10)
+
+### Changed
+- Calls tab lists only local extensions that have a phone registered; a "+N no phone" button
+  shows the idle ones. The "My phone" picker offers only registered phones. Remote PBX
+  extensions are always listed (their phones' registration can't be seen from here).
+
+## v1.1.46 (2026-11-10)
+
+### Fixed
+- Remote PBX trunk status stayed "trunk unknown": Asterisk 20 reports IAX peers as channel type
+  `IAX`, not `IAX2`.
+
+## v1.1.45 (2026-11-10)
+
+### Added
+- Calls tab shows extensions on a second PBX linked over an IAX2 trunk (e.g. a portable Asterisk
+  on AREDN) under their own heading, each with a call button. Their status dot follows the trunk
+  (from the peer's `qualify=yes`), since ECH can't see the far PBX's own phone registrations.
+  Configure with `remote_extensions`, `remote_iax_peer` and `remote_pbx_label` on the asterisk
+  adapter (also editable on its Settings card).
+- The Yealink phonebook (`/phonebook.xml`) now lists the PBX's live extensions instead of a fixed
+  101-110, plus the remote extensions.
+
+### Changed
+- Intercom and text-to-speech refuse remote extensions with a clear message (they only reach
+  phones registered to this PBX); click-to-call to them works through the dialplan.
+
 ## v1.1.44 (2026-11-06)
 
 ### Added

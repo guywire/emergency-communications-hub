@@ -130,6 +130,15 @@ class AsteriskAdapter(Adapter):
         self._endpoint_scratch: dict[str, dict] = {}   # accumulator during a refresh cycle
         self._endpoint_poll_task: asyncio.Task | None = None
         self._endpoint_poll_sec = float(config.get("endpoint_poll_sec", 20.0))
+        # Phones on another PBX reached over an IAX2 trunk (e.g. a second
+        # Asterisk on AREDN). ECH can't see their registrations, so their
+        # status is the trunk peer's qualify result (needs qualify=yes).
+        self._remote_label = str(config.get("remote_pbx_label") or "Remote PBX")
+        self._remote_peer  = str(config.get("remote_iax_peer") or "").strip()
+        self._remote_exts  = [str(e).strip() for e in (config.get("remote_extensions") or [])
+                              if valid_extension(str(e).strip())]
+        self._iax_peers: dict[str, str] = {}      # peer name -> Status text
+        self._iax_scratch: dict[str, str] = {}
         self.auto_page_on_emergency = bool(config.get("auto_page_on_emergency", True))
 
         # Screen phone stubs
@@ -247,6 +256,11 @@ class AsteriskAdapter(Adapter):
                 elif event == "EndpointListComplete":
                     self._endpoint_status = self._endpoint_scratch
                     self._endpoint_scratch = {}
+                elif event == "PeerEntry" and pkt.get("Channeltype", "").upper().startswith("IAX"):   # Asterisk 20 sends "IAX"
+                    self._iax_scratch[pkt.get("ObjectName", "")] = pkt.get("Status", "")
+                elif event == "PeerlistComplete":
+                    self._iax_peers = self._iax_scratch
+                    self._iax_scratch = {}
         except ConnectionError as exc:
             log.error("Asterisk AMI: connection lost: %s", exc)
             self._connected = False
@@ -425,6 +439,9 @@ class AsteriskAdapter(Adapter):
             try:
                 self._endpoint_scratch = {}
                 await self._send_action({"Action": "PJSIPShowEndpoints"})
+                if self._remote_exts and self._remote_peer:
+                    self._iax_scratch = {}
+                    await self._send_action({"Action": "IAXpeerlist"})
             except Exception as exc:
                 log.debug("%s: endpoint status poll failed: %s", self.name, exc)
             await asyncio.sleep(self._endpoint_poll_sec)
@@ -453,6 +470,28 @@ class AsteriskAdapter(Adapter):
 
     def list_endpoint_status(self) -> list[dict]:
         return sorted(self._endpoint_status.values(), key=lambda e: e["extension"])
+
+    def remote_extensions(self) -> list[str]:
+        return list(self._remote_exts)
+
+    def list_remote_status(self) -> list[dict]:
+        """Extensions on the far PBX. 'online' means the IAX2 trunk to it is
+        up — individual phones there aren't visible from this box."""
+        if not self._remote_exts:
+            return []
+        status = self._iax_peers.get(self._remote_peer, "") if self._remote_peer else ""
+        up = status.upper().startswith("OK")
+        if not self._remote_peer:
+            state = "no trunk set"
+        elif not status:
+            state = "trunk unknown"
+        elif status.lower().startswith("unmonitored"):
+            state = "trunk unmonitored"
+        else:
+            state = f"trunk {status}"
+        return [{"extension": e, "remote": True, "pbx": self._remote_label,
+                 "online": up, "device_state": state, "contacts": ""}
+                for e in self._remote_exts]
 
     # ── Public PBX actions ────────────────────────────────────────────────
 

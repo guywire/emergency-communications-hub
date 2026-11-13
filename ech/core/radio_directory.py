@@ -25,8 +25,9 @@ audio-feeds-list, test-numbers. HOIP is the network the live box is
 actually peered with (confirmed via the asterisk/AMI adapter's IAX2 trunk
 to pbx-us1.hamsoverip.com), so every one of these extensions is reachable
 through the existing `_[1-9]X.` dialplan rule with no further config.
-HOIP's own list changes over time — re-check hamsoverip.github.io/wiki/
-before relying on an entry still being live.
+HOIP's own list changes over time — directory_status.py re-reads it
+(and AllStarLink's registered-node list) on a timer; the lists below are
+the fallback until the first successful refresh.
 
 AREDN has NO built-in entries at all: AREDN addresses
 (`nodename.local.mesh`, 44.x.x.x) are private to each physical mesh network
@@ -247,8 +248,16 @@ def get_directory(config: dict) -> dict:
     """Merge built-in confirmed-real entries with operator-supplied ones
     from config.yaml's radio_directory: block. Operator entries are NOT
     validated (ECH has no way to confirm an arbitrary node/address is
-    real/safe) — they're trusted as the operator's own knowledge."""
+    real/safe) — they're trusted as the operator's own knowledge.
+
+    When directory_status has refreshed the HOIP lists, those replace the
+    built-in HOIP snapshot above; every entry also gets `asl_status`
+    (up/down/unknown) from the last AllStarLink registered-node fetch."""
+    from ech.core.directory_status import status as live
     cfg = config.get("radio_directory", {}) or {}
-    hamvoip = list(BUILTIN_HAMVOIP_ENTRIES) + list(HOIP_ALL_ENTRIES) + list(cfg.get("hamvoip_entries", []) or [])
+    hoip = live.hoip_entries if live.hoip_entries else HOIP_ALL_ENTRIES
+    hamvoip = list(BUILTIN_HAMVOIP_ENTRIES) + list(hoip) + list(cfg.get("hamvoip_entries", []) or [])
     aredn = list(BUILTIN_AREDN_ENTRIES) + list(cfg.get("aredn_entries", []) or [])
-    return {"hamvoip": hamvoip, "aredn": aredn}
+    return {"hamvoip": [live.annotate(e) for e in hamvoip if isinstance(e, dict)],
+            "aredn": aredn,
+            "status": live.status()}

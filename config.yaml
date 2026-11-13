@@ -541,7 +541,14 @@ adapters:
 #     pat_url: http://127.0.0.1:8080
 #     poll_interval: 300
 #     auto_connect: false
-#     connect_alias: telnet          # telnet | ardop | ax25 | vara-hf | vara-fm
+#     connect_alias: telnet          # telnet | varahf | mercury | varafm | ardop | ax25
+#     # connect_target: W1ABC-10     # gateway/peer callsign for the radio modes
+#     # bandwidth: 2300              # VARA HF / Mercury: 500 | 2300 | 2750
+#     # Mercury (github.com/Rhizomatica/mercury) is a free HF modem that speaks
+#     # VARA's TCP protocol on the same ports (8300/8301), so Pat drives it with
+#     # its VARA HF transport: run Mercury where VARA would be (Pat's
+#     # varahf.addr, default localhost:8300) and pick `mercury`. The far end
+#     # must run Mercury too - VARA RMS gateways won't decode it.
 #     # RMS gateway discovery is worldwide (1000+ stations) with no inherent
 #     # range limit, unlike ADS-B/AIS — set this to keep the map's RMS markers
 #     # confined to the same area as everything else, same shape as the
@@ -877,6 +884,21 @@ mesh_bot:
 # hamvoip_entries, used directly by the existing click-to-call/originate()
 # path; for aredn_entries it's just a reference string shown in the UI, not
 # dialable).
+#
+# Live refresh (on by default, no config needed): HOIP's lists + AllStarLink's
+# registered-node list hourly, and the AREDN MeshPhone office list + white
+# pages over the mesh. `.local.mesh` hosts are looked up via the mesh node's
+# DNS taken from the local.mesh DHCP lease, or set dns_server to its IP.
+#   radio_directory:
+#     live_refresh: {enabled: true, interval_min: 60}
+#     meshphone:
+#       enabled: true
+#       offices_url: http://wt0f-meshphone.local.mesh/api/network_json
+#       whitepages_urls:
+#         - http://WT0F-freepbx.local.mesh/whitepages.xml
+#         - http://ka4ema-pbx-cha.local.mesh/whitepages.xml
+#       dns_server: auto
+#
 # radio_directory:
 #   hamvoip_entries:
 #     - name: "Local ARES net hub"

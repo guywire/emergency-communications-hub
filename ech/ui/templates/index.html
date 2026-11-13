@@ -4042,13 +4042,24 @@ async function loadCallLog() {
     el.innerHTML = html;
     loadEndpointStatus();
     loadVoicemailSection(el);
-    loadCallsDirectory(el, canTransmit);
+    loadCallsDirectory(el, canTransmit).then(() => loadCallsMeshPhone(el, canTransmit));
   } catch(e) {
     el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red)">Error loading call log</div>';
   }
 }
 
 let _callsDirectoryCache = null;
+let _callsDirShowDown = false;
+
+// Seconds-since-epoch -> "12 min ago"
+function _dirAgo(ts) {
+  if (!ts) return 'never';
+  const m = Math.round((Date.now() / 1000 - ts) / 60);
+  if (m < 1) return 'just now';
+  if (m < 90) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
+}
 
 // O102: the HamVOIP/AllStarLink + HOIP + AREDN directory (O98 — built for
 // Settings' PBX section) also surfaced here on the Calls tab, so an
@@ -4057,6 +4068,9 @@ let _callsDirectoryCache = null;
 // audio feeds) adds ~150 entries on top of the handful of AllStarLink
 // parrots this originally shipped with — a text filter keeps that usable
 // in this sidebar's limited space instead of dumping everything at once.
+// Entries whose AllStar node isn't registered with AllStarLink right now
+// (asl_status "down", see ech/core/directory_status.py) are hidden behind a
+// toggle, the same way extensions with no phone are.
 async function loadCallsDirectory(el, canTransmit) {
   try {
     _callsDirectoryCache = await fetch('/api/pbx/directory').then(r => r.json());
@@ -4065,7 +4079,7 @@ async function loadCallsDirectory(el, canTransmit) {
   if (!hv.length && !ar.length) return;
   const filterId = `dir-filter-${Date.now()}`;
   el.insertAdjacentHTML('beforeend', `
-    <div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted)">📻 DIRECTORY</div>
+    <div id="${filterId}-head"></div>
     <div style="padding:0 10px 4px"><input type="text" id="${filterId}" placeholder="Filter…"
       style="width:100%;font-size:10px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px"
       oninput="renderCallsDirectory('${filterId}', ${canTransmit})"></div>
@@ -4073,13 +4087,42 @@ async function loadCallsDirectory(el, canTransmit) {
   renderCallsDirectory(filterId, canTransmit);
 }
 
+async function refreshCallsDirectory(filterId, canTransmit, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await fetch('/api/pbx/directory/refresh', {method: 'POST'});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) toast(d.detail || `Refresh failed (${r.status})`, 'err');
+    _callsDirectoryCache = await fetch('/api/pbx/directory').then(r => r.json());
+  } catch(e) { toast('Refresh failed', 'err'); }
+  renderCallsDirectory(filterId, canTransmit);
+}
+
 function renderCallsDirectory(filterId, canTransmit) {
   const listEl = document.getElementById(`${filterId}-list`);
   if (!listEl || !_callsDirectoryCache) return;
+  const st = _callsDirectoryCache.status || {};
+  const all = _callsDirectoryCache.hamvoip || [];
+  const down = all.filter(e => e.asl_status === 'down').length;
+  const headEl = document.getElementById(`${filterId}-head`);
+  if (headEl) {
+    const tip = st.asl_refreshed_at
+      ? `AllStar node status from AllStarLink's registered-node list, checked ${_dirAgo(st.asl_refreshed_at)}. HOIP lists ${st.hoip_refreshed_at ? 'refreshed ' + _dirAgo(st.hoip_refreshed_at) : 'not refreshed yet (built-in copy)'}.${st.last_error ? ' Last error: ' + st.last_error : ''}`
+      : 'AllStar node status not checked yet';
+    headEl.innerHTML = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:6px">
+        <span style="flex:1">📻 DIRECTORY</span>
+        <span style="font-weight:400;color:${st.last_error ? 'var(--amber, var(--dim))' : 'var(--dim)'}" title="${escHtml(tip)}">${st.asl_refreshed_at ? 'status ' + _dirAgo(st.asl_refreshed_at) : 'status unchecked'}</span>
+        ${down ? `<button onclick="_callsDirShowDown=!_callsDirShowDown;renderCallsDirectory('${filterId}', ${canTransmit})" style="font-size:9px;padding:1px 5px;font-weight:400"
+            title="AllStar nodes not registered with AllStarLink right now">${_callsDirShowDown ? 'hide' : '+' + down} offline</button>` : ''}
+        ${_myRole === 'admin' || !_myRole ? `<button onclick="refreshCallsDirectory('${filterId}', ${canTransmit}, this)" style="font-size:9px;padding:1px 5px;font-weight:400" title="Re-check node status now">↻</button>` : ''}
+      </div>`;
+  }
   const filterText = (document.getElementById(filterId)?.value || '').toLowerCase().trim();
-  const hv = (_callsDirectoryCache.hamvoip || []).filter(e =>
-    !filterText || `${e.name} ${e.destination} ${e.category || ''}`.toLowerCase().includes(filterText));
+  const hv = all.filter(e =>
+    (_callsDirShowDown || e.asl_status !== 'down') &&
+    (!filterText || `${e.name} ${e.destination} ${e.category || ''}`.toLowerCase().includes(filterText)));
   const ar = filterText ? [] : (_callsDirectoryCache.aredn || []);
+  const dot = e => e.asl_status === 'up' ? 'var(--green)' : e.asl_status === 'down' ? 'var(--red)' : '';
   let html = '';
   if (hv.length) {
     const byCat = {};
@@ -4087,7 +4130,9 @@ function renderCallsDirectory(filterId, canTransmit) {
     html += Object.entries(byCat).map(([cat, entries]) => `
       <div style="padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">${escHtml(cat)} (${entries.length})</div>
       ${entries.map(e => `
-        <div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px" title="${escHtml(e.description || '')}">
+        <div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px;${e.asl_status === 'down' ? 'opacity:.55' : ''}"
+             title="${escHtml(e.description || '')}${e.allstar_node ? ` — AllStar ${escHtml(e.allstar_node)}: ${escHtml(e.asl_status)}` : ''}">
+          <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${dot(e) || 'transparent'}"></span>
           <span style="flex:1">${escHtml(e.name)} <span style="color:var(--dim)">(${escHtml(e.destination)})</span></span>
           ${canTransmit ? `<button onclick="pbxCallNode('${escHtml(e.destination)}',this)" style="font-size:9px;padding:1px 4px" title="Dial">📞</button>` : ''}
         </div>`).join('')}`).join('');
@@ -4101,6 +4146,93 @@ function renderCallsDirectory(filterId, canTransmit) {
   listEl.innerHTML = html || '<div style="padding:3px 10px;font-size:10px;color:var(--dim)">No matching entries</div>';
 }
 
+// AREDN MeshPhone white pages + office list (ech/core/meshphone_directory.py),
+// refreshed hourly on the server. ~700 people is too many to list, so it's
+// search-first: nothing is shown until you type, apart from an "offices"
+// toggle. Dialing uses 78 + the 7-digit number, which the PBX routes straight
+// into the MeshPhone context.
+let _mpCache = null, _mpCacheAt = 0, _mpShowOffices = false;
+const _MP_STATUS_COLOR = {Active: 'var(--green)', Maintenance: 'var(--amber, var(--muted))',
+                          Provisioning: 'var(--blue)', Inactive: 'var(--red)'};
+function _mpFmt(n) { return n && n.length === 7 ? `${n.slice(0, 3)}-${n.slice(3)}` : (n || ''); }
+// An office's number patterns as 7-digit ranges: "_51052xx" -> "510-52xx",
+// "_164227[6789]" -> "164-227[6789]". Falls back to "code + xx" when the
+// office lists no patterns. (An office code is the first 5 of the 7 digits.)
+function _mpRanges(o) {
+  const out = (o.dialplans || []).map(p => {
+    const toks = String(p).replace(/^_/, '').match(/\[[^\]]*\]|./g) || [];
+    if (toks.length !== 7) return null;
+    return toks.slice(0, 3).join('') + '-' + toks.slice(3).join('').replace(/[Xx]/g, 'x');
+  }).filter(Boolean);
+  return out.length ? out : (o.office_codes || []).filter(c => /^\d{5}$/.test(c)).map(c => `${c.slice(0, 3)}-${c.slice(3)}xx`);
+}
+
+async function loadCallsMeshPhone(el, canTransmit) {
+  try {
+    if (!_mpCache || Date.now() - _mpCacheAt > 600000) {
+      const r = await fetch('/api/pbx/meshphone');
+      if (!r.ok) return;
+      _mpCache = await r.json(); _mpCacheAt = Date.now();
+    }
+  } catch(e) { return; }
+  const ppl = _mpCache.people || [], offs = _mpCache.offices || [];
+  if (!ppl.length && !offs.length) return;
+  const st = _mpCache.status || {};
+  const id = `mp-filter-${Date.now()}`;
+  const tip = `White pages: ${ppl.length} listings from ${st.meshphone_people_source || '?'}, dated ${st.meshphone_people_created || 'unknown'} (the original N2MH source is gone, so this copy may be old). `
+    + `Offices: ${offs.length} from the WT0F MeshPhone database, refreshed ${_dirAgo(st.meshphone_offices_refreshed_at)}. Dial = 78 + number.`;
+  el.insertAdjacentHTML('beforeend', `
+    <div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:6px" title="${escHtml(tip)}">
+      <span style="flex:1">☎ MESHPHONE</span>
+      <span style="font-weight:400;color:var(--dim)">${ppl.length} people · ${offs.length} offices</span>
+      <button onclick="_mpShowOffices=!_mpShowOffices;renderCallsMeshPhone('${id}', ${canTransmit})" style="font-size:9px;padding:1px 5px;font-weight:400"
+        id="${id}-obtn">${_mpShowOffices ? 'hide' : 'all'} offices</button>
+    </div>
+    <div style="padding:0 10px 4px"><input type="text" id="${id}" placeholder="Callsign, name, number, office…"
+      style="width:100%;font-size:10px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px"
+      oninput="renderCallsMeshPhone('${id}', ${canTransmit})"></div>
+    <div id="${id}-list"></div>`);
+  renderCallsMeshPhone(id, canTransmit);
+}
+
+function renderCallsMeshPhone(id, canTransmit) {
+  const listEl = document.getElementById(`${id}-list`);
+  if (!listEl || !_mpCache) return;
+  const btn = document.getElementById(`${id}-obtn`);
+  if (btn) btn.textContent = `${_mpShowOffices ? 'hide' : 'all'} offices`;
+  const q = (document.getElementById(id)?.value || '').toLowerCase().trim();
+  const qd = q.replace(/\D/g, '');
+  const dialBtn = (dial, what) => canTransmit && dial
+    ? `<button onclick="pbxCallNode('${escHtml(dial)}',this)" style="font-size:9px;padding:1px 4px" title="Dial ${escHtml(what)} (78 + number)">📞</button>` : '';
+  const offMatch = o => !q || `${o.name} ${o.location} ${(o.office_codes || []).join(' ')} ${o.admin_callsign}`.toLowerCase().includes(q)
+    || (qd.length >= 3 && (o.office_codes || []).some(c => c.startsWith(qd) || qd.startsWith(c)));
+  const pplMatch = p => q.length >= 2 && (`${p.callsign} ${p.name} ${p.pbx}`.toLowerCase().includes(q) || (qd.length >= 3 && p.number.includes(qd)));
+  const offs = (_mpShowOffices || q.length >= 2) ? (_mpCache.offices || []).filter(offMatch) : [];
+  const allPpl = (_mpCache.people || []).filter(pplMatch);
+  const ppl = allPpl.slice(0, 40);
+  const head = t => `<div style="padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">${t}</div>`;
+  let html = '';
+  if (offs.length) {
+    html += head(`Offices (${offs.length})`) + offs.map(o => `
+      <div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px"
+           title="${escHtml(`Office code ${(o.office_codes || []).join(', ') || '?'} · ${o.pbx_status || 'Unknown'}${o.checkin_at ? ' · last check-in ' + o.checkin_at.slice(0, 10) : ''} · trunks: ${(o.trunks || []).join(', ') || 'none listed'}${o.admin_callsign ? ' · admin ' + o.admin_callsign : ''}`)}">
+        <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${_MP_STATUS_COLOR[o.pbx_status] || 'var(--dim)'}"></span>
+        <span style="flex:1">${escHtml(o.name)} <span style="color:var(--dim)">${escHtml(o.location || '')} · ${escHtml(_mpRanges(o).join(', '))}${o.admin_phone ? ' · admin ' + _mpFmt(o.admin_phone) : ''}</span></span>
+        ${dialBtn(o.dial, `${o.admin_callsign || 'office admin'} ${_mpFmt(o.admin_phone)}`)}
+      </div>`).join('');
+  }
+  if (ppl.length) {
+    html += head(`People (${allPpl.length}${allPpl.length > ppl.length ? ', first ' + ppl.length : ''})`) + ppl.map(p => `
+      <div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px" title="${escHtml(p.pbx ? 'Home PBX ' + p.pbx : '')}">
+        <span style="flex:1"><b>${escHtml(p.callsign)}</b> ${escHtml(p.name || '')} <span style="color:var(--dim)">${_mpFmt(p.number)}${p.pbx ? ' · ' + escHtml(p.pbx) : ''}</span></span>
+        ${dialBtn(p.dial, `${p.callsign} ${_mpFmt(p.number)}`)}
+      </div>`).join('');
+  }
+  if (!html) html = `<div style="padding:3px 10px;font-size:10px;color:var(--dim)">${q.length >= 2 ? 'No matches' : 'Type at least 2 characters to search'}</div>`;
+  listEl.innerHTML = html;
+}
+
+let _pbxShowIdleExt = false;
 async function loadEndpointStatus() {
   const el = document.getElementById('pbx-endpoint-status');
   if (!el) return;
@@ -4113,17 +4245,44 @@ async function loadEndpointStatus() {
     const pick = document.getElementById('pbx-my-ext');
     if (pick) {
       const want = _pbxMyExt();
-      pick.innerHTML = eps.map(e => `<option value="${escHtml(e.extension)}"${e.online ? '' : ' disabled'}>`
-        + `ext ${escHtml(e.extension)}${e.online ? '' : ' (no phone)'}</option>`).join('');
+      const ready = eps.filter(e => e.online);
+      pick.innerHTML = ready.length
+        ? ready.map(e => `<option value="${escHtml(e.extension)}">ext ${escHtml(e.extension)}</option>`).join('')
+        : '<option value="" disabled selected>no phone registered</option>';
       if ([...pick.options].some(o => o.value === want && !o.disabled)) pick.value = want;
       else { const dflt = [...pick.options].find(o => o.value === _pbxDefaultExt && !o.disabled) || [...pick.options].find(o => !o.disabled); if (dflt) pick.value = dflt.value; }
     }
-    el.innerHTML = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted)">EXTENSIONS</div>` +
-      eps.map(e => `<div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px">
+    // Only extensions with a phone registered are listed; the rest are
+    // defined on the PBX but idle. A toggle reveals them.
+    const live = eps.filter(e => e.online);
+    const idle = eps.length - live.length;
+    const shown = _pbxShowIdleExt ? eps : live;
+    el.innerHTML = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:6px">
+        <span style="flex:1">EXTENSIONS</span>
+        ${idle ? `<button onclick="_pbxShowIdleExt=!_pbxShowIdleExt;loadEndpointStatus()" style="font-size:9px;padding:1px 5px;font-weight:400"
+            title="Extensions defined on the PBX with no phone registered">${_pbxShowIdleExt ? 'hide' : '+' + idle} no phone</button>` : ''}
+      </div>` +
+      (shown.length ? '' : '<div style="padding:3px 10px;font-size:10px;color:var(--dim)">No phones registered</div>') +
+      shown.map(e => `<div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px">
         <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${e.online ? 'var(--green)' : 'var(--dim)'}"></span>
         <span style="flex:1">ext ${escHtml(e.extension)}</span>
         <span style="color:var(--muted);font-size:10px">${escHtml(e.device_state || 'unknown')}</span>
       </div>`).join('');
+    const rem = d.remote || [];
+    if (rem.length) {
+      const canCall = _myRole !== 'viewer';
+      const r0 = rem[0];
+      el.innerHTML += `<div style="padding:6px 10px 2px;font-size:10px;font-weight:600;color:var(--muted);display:flex;gap:6px;align-items:center"
+          title="Phones on the other PBX, reached over the IAX trunk. The dot shows whether the trunk is up; ECH can't see those phones' own registration.">
+          <span style="flex:1">${escHtml((r0.pbx || 'Remote PBX').toUpperCase())}</span>
+          <span style="font-weight:400;color:${r0.online ? 'var(--green)' : 'var(--dim)'}">${escHtml(r0.device_state || '')}</span>
+        </div>` +
+        rem.map(e => `<div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px">
+          <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${e.online ? 'var(--green)' : 'var(--dim)'}"></span>
+          <span style="flex:1">ext ${escHtml(e.extension)}</span>
+          ${canCall ? `<button onclick="pbxCallNode('${escHtml(e.extension)}',this)" style="font-size:9px;padding:1px 4px" title="Dial ext ${escHtml(e.extension)} over the trunk">📞</button>` : ''}
+        </div>`).join('');
+    }
   } catch(e) {}
 }
 
@@ -4175,6 +4334,7 @@ async function loadWinlinkPanel() {
         <button onclick="loadWinlinkPanel()" style="font-size:10px;padding:2px 6px">↻ Refresh</button>
       </span>
     </div>`;
+    html += winlinkConnectBar(d.connect);
     if (!d.messages || !d.messages.length) {
       html += '<div style="padding:12px;font-size:11px;color:var(--dim)">Inbox empty</div>';
     } else {
@@ -4189,9 +4349,68 @@ async function loadWinlinkPanel() {
       });
     }
     el.innerHTML = html;
+    if (d.connect) wlModeChanged();
   } catch(e) {
     el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red)">Error loading Winlink inbox</div>';
   }
+}
+
+// Connect bar: run one Pat session (telnet, or a radio mode to a gateway /
+// peer callsign). "Mercury HF" is Pat's VARA HF transport with the free
+// Mercury modem behind it, so the far station must run Mercury too.
+let _wlConnectPoll = null;
+function winlinkConnectBar(c) {
+  if (!c) return '';
+  const modes = c.modes || {};
+  const opts = Object.keys(modes).map(k =>
+    `<option value="${escHtml(k)}" ${k === c.mode ? 'selected' : ''}>${escHtml(modes[k])}</option>`).join('');
+  const custom = modes[c.mode] ? '' : `<option value="${escHtml(c.mode)}" selected>${escHtml(c.mode)}</option>`;
+  const bw = [500, 2300, 2750].map(b => `<option value="${b}" ${b === c.bandwidth ? 'selected' : ''}>${b} Hz</option>`).join('');
+  return `<div style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:10px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+    <select id="wl-mode" onchange="wlModeChanged()" style="font-size:10px">${custom}${opts}</select>
+    <input id="wl-target" value="${escHtml(c.target || '')}" placeholder="Gateway / station call" style="font-size:10px;width:120px;text-transform:uppercase">
+    <select id="wl-bw" style="font-size:10px"><option value="">Pat BW</option>${bw}</select>
+    <button id="wl-connect-btn" onclick="winlinkConnect()" style="font-size:10px;padding:2px 6px" ${c.running ? 'disabled' : ''}>⇄ Connect</button>
+    <span id="wl-connect-status" style="color:var(--muted);flex-basis:100%">${winlinkConnectStatus(c)}</span>
+  </div>`;
+}
+function winlinkConnectStatus(c) {
+  const l = (c && c.last) || {};
+  const mode = l.mode ? ((c.modes || {})[l.mode] || l.mode) : '';
+  if (c && c.running) return `Session running via ${escHtml(mode)} (${escHtml(l.url || '')})…`;
+  if (!l.started) return (c && c.mode === 'mercury') ? 'Mercury: the far station must also run Mercury' : '';
+  const when = escHtml((l.finished || l.started || '').replace('T', ' ').slice(0, 16));
+  return l.ok
+    ? `<span style="color:var(--green)">Last session ${when} via ${escHtml(mode)}: ${l.received ?? 0} received</span>`
+    : `<span style="color:var(--red)">Last session ${when} via ${escHtml(mode)} failed: ${escHtml(l.error || '')}</span>`;
+}
+function wlModeChanged() {
+  const m = document.getElementById('wl-mode').value;
+  const radio = ['varahf','mercury','varafm','ardop','ax25'].includes(m);
+  document.getElementById('wl-target').style.display = radio ? '' : 'none';
+  document.getElementById('wl-bw').style.display = (m === 'varahf' || m === 'mercury') ? '' : 'none';
+}
+async function winlinkConnect() {
+  const body = {mode: document.getElementById('wl-mode').value,
+                target: document.getElementById('wl-target').value.trim().toUpperCase()};
+  const bw = document.getElementById('wl-bw').value;
+  if (bw) body.bandwidth = parseInt(bw, 10);
+  const st = document.getElementById('wl-connect-status');
+  try {
+    const d = await fetch('/api/winlink/connect', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                   body: JSON.stringify(body)}).then(r => r.json());
+    if (d.status !== 'started') { st.innerHTML = `<span style="color:var(--red)">${escHtml(d.detail || 'Connect failed')}</span>`; return; }
+    document.getElementById('wl-connect-btn').disabled = true;
+    st.textContent = `Session started (${d.url})…`;
+    clearInterval(_wlConnectPoll);
+    _wlConnectPoll = setInterval(async () => {
+      const c = await fetch('/api/winlink/connect').then(r => r.json()).catch(() => null);
+      const s2 = document.getElementById('wl-connect-status');
+      if (!c || !s2) { clearInterval(_wlConnectPoll); return; }
+      s2.innerHTML = winlinkConnectStatus(c);
+      if (!c.running) { clearInterval(_wlConnectPoll); loadWinlinkPanel(); }
+    }, 3000);
+  } catch (e) { st.innerHTML = '<span style="color:var(--red)">Connect request failed</span>'; }
 }
 
 let _wlCurrentMsg = null;

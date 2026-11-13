@@ -262,7 +262,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # Public paths that don't require login
     PUBLIC_PATHS = {"/login", "/change-password", "/api/auth/login", "/api/auth/change-password",
                     "/api/health", "/ws", "/static", "/favicon.ico",
-                    "/ca.crt", "/tls-setup", "/phonebook.xml"}
+                    "/ca.crt", "/tls-setup", "/phonebook.xml",
+                    "/phonebook-meshphone.xml"}
 
     def _is_loopback(request) -> bool:
         try:
@@ -1799,15 +1800,29 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 pass
         directory = get_directory(cfg)
 
+        # Prefer the PBX's live endpoint list so disabled extensions drop out;
+        # fall back to the static roster before the first AMI poll lands.
+        roster = _PBX_ROSTER
+        pbx = _find_pbx_adapter()
+        live = pbx.list_endpoint_status() if pbx and hasattr(pbx, "list_endpoint_status") else []
+        if live:
+            names = dict(_PBX_ROSTER)
+            roster = [(e["extension"], names.get(e["extension"], f"{_op_callsign} Extension {e['extension']}"))
+                      for e in live]
+        if pbx and hasattr(pbx, "remote_extensions"):
+            label = getattr(pbx, "_remote_label", "Remote PBX")
+            roster = roster + [(x, f"{label} {x}") for x in pbx.remote_extensions()]
         entries = "".join(
             f'<DirectoryEntry><Name>{escape(name)}</Name><Telephone>{escape(ext)}</Telephone></DirectoryEntry>'
-            for ext, name in _PBX_ROSTER
+            for ext, name in roster
         )
         entries += "".join(
             f'<DirectoryEntry><Name>{escape(name)}</Name><Telephone>{escape(code)}</Telephone></DirectoryEntry>'
             for code, name in _PBX_FEATURE_CODES
         )
         for e in directory.get("hamvoip", []):
+            if e.get("asl_status") == "down":
+                continue   # AllStar node not registered right now — don't put it on the phones
             tag = _DIRECTORY_CATEGORY_TAGS.get(e.get("category"))
             name = f"[{tag}] {e['name']}" if tag else e["name"]
             entries += (f'<DirectoryEntry><Name>{escape(name)}</Name>'
@@ -4798,6 +4813,62 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 pass
         return get_directory(cfg)
 
+    @app.post("/api/pbx/directory/refresh")
+    async def pbx_directory_refresh(request: Request):
+        """Re-read the HOIP lists and AllStarLink's registered-node list now
+        (directory_status.py). Admin only; at most once per 5 minutes, which
+        is AllStarLink's stated cache time for the node list."""
+        await _admin_required(request)
+        from ech.core.directory_status import status as live
+        ok, wait = live.can_refresh_now()
+        if not ok:
+            return {"ok": False, "detail": f"Refreshed recently — try again in {wait // 60 + 1} min",
+                    "status": live.status()}
+        st = await live.refresh()
+        return {"ok": not st.get("last_error"), "detail": st.get("last_error") or "Directory refreshed",
+                "status": st}
+
+    @app.get("/api/pbx/meshphone")
+    async def pbx_meshphone():
+        """AREDN MeshPhone offices + white pages (meshphone_directory.py),
+        from the last hourly refresh. People/offices carry `dial` (78 + number)."""
+        from ech.core.directory_status import status as live
+        return live.meshphone()
+
+    @app.get("/phonebook-meshphone.xml")
+    async def pbx_phonebook_meshphone(request: Request):
+        """Yealink remote phonebook of MeshPhone people and offices, kept apart
+        from /phonebook.xml so ~700 listings don't crowd the main one (add it
+        as a second remote phonebook on the phone). No login, like
+        /phonebook.xml, but only for direct requests from private/loopback
+        addresses: the white pages are other operators' contact details and
+        must not leak to the internet through a reverse proxy."""
+        from xml.sax.saxutils import escape
+        from ech.core.directory_status import status as live
+        try:
+            addr = ipaddress.ip_address(request.client.host)
+            if addr.version == 6 and addr.ipv4_mapped:
+                addr = addr.ipv4_mapped
+            local = addr.is_private or addr.is_loopback
+        except (AttributeError, TypeError, ValueError):
+            local = False
+        if not local or request.headers.get("x-forwarded-for") or request.headers.get("forwarded"):
+            raise HTTPException(status_code=403, detail="MeshPhone phonebook is only served on the local network")
+        d = live.meshphone()
+        rows = []
+        for p in d["people"]:
+            label = " ".join(x for x in (p["callsign"], p.get("name") or "") if x)
+            if p.get("pbx"):
+                label += f" ({p['pbx']})"
+            rows.append((label, p["dial"]))
+        for o in d["offices"]:
+            if o.get("dial"):
+                rows.append((f"[OFFICE] {o['name']} {o.get('admin_callsign') or ''}".strip(), o["dial"]))
+        entries = "".join(f"<DirectoryEntry><Name>{escape(n)}</Name><Telephone>{escape(t)}</Telephone></DirectoryEntry>"
+                          for n, t in rows)
+        xml = f'<?xml version="1.0" encoding="UTF-8"?><YealinkIPPhoneDirectory>{entries}</YealinkIPPhoneDirectory>'
+        return Response(content=xml, media_type="application/xml")
+
     @app.get("/api/pbx/aredn-discovery")
     async def pbx_aredn_discovery():
         """Live-queries a configured local AREDN node's sysinfo.json for
@@ -4856,7 +4927,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         from ech.adapters.asterisk_adapter import valid_extension
         if not valid_extension(ext):
             return f"'{ext}' is not a valid extension"
-        known = {e["extension"]: e for e in (a.list_endpoint_status() if hasattr(a, "list_endpoint_status") else [])}
+        if ext in (a.remote_extensions() if hasattr(a, "remote_extensions") else []):
+            return (f"ext {ext} is on the {getattr(a, '_remote_label', 'remote PBX')} - "
+                    "intercom and text-to-speech only reach phones on this PBX (calls work)")
+        known ={e["extension"]: e for e in (a.list_endpoint_status() if hasattr(a, "list_endpoint_status") else [])}
         if ext in known and not known[ext].get("online"):
             return f"ext {ext} has no phone connected ({known[ext].get('device_state') or 'unavailable'})"
         return None
@@ -4919,6 +4993,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return {"status": "error", "detail": "No PBX adapter configured"}
         if not a._connected:
             return {"status": "error", "detail": "PBX adapter not connected"}
+        if extension in (a.remote_extensions() if hasattr(a, "remote_extensions") else []):
+            return {"status": "error", "detail": _pbx_ext_problem(a, extension)}
         ok = await a.speak(extension, text)
         return {"status": "ok" if ok else "error", "extension": extension}
 
@@ -4927,8 +5003,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         """Live registration status for every configured SIP extension."""
         a = _find_pbx_adapter()
         if not a or not hasattr(a, "list_endpoint_status"):
-            return {"endpoints": []}
-        return {"endpoints": a.list_endpoint_status()}
+            return {"endpoints": [], "remote": []}
+        return {"endpoints": a.list_endpoint_status(),
+                "remote": a.list_remote_status() if hasattr(a, "list_remote_status") else []}
 
     @app.get("/api/pbx/voicemail")
     async def pbx_voicemail_mailboxes():
@@ -4986,6 +5063,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                     "count": len(messages),
                     "unread": sum(1 for m in messages if m.get("unread")),
                     "messages": messages,
+                    "connect": adapter.connect_info() if hasattr(adapter, "connect_info") else None,
                 }
         return {"count": 0, "unread": 0, "messages": []}
 
@@ -5046,16 +5124,35 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     @app.post("/api/winlink/connect")
     async def winlink_connect(request: Request):
-        """Trigger a Pat connect session."""
-        data = await request.json()
-        alias = data.get("alias")
+        """Start one Pat session in the background. Body (all optional):
+        {"mode": "telnet|varahf|mercury|varafm|ardop|ax25|<pat alias>",
+         "target": "W1ABC-10", "bandwidth": 2300}. Omitted fields use the
+        adapter config. Progress/result: GET /api/winlink/connect."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        mode = data.get("mode") or data.get("alias")
+        target = data.get("target")
+        bw = data.get("bandwidth")
         for adapter in router._adapters.values():
-            if hasattr(adapter, "_trigger_connect"):
-                if alias:
-                    adapter._connect_alias = alias
-                await adapter._trigger_connect()
-                return {"status": "ok", "alias": adapter._connect_alias}
+            if hasattr(adapter, "_trigger_connect") and hasattr(adapter, "connect_url"):
+                try:
+                    url = adapter.connect_url(mode, target, int(bw) if bw not in (None, "") else None)
+                except (ValueError, TypeError) as exc:
+                    return {"status": "error", "detail": str(exc)}
+                if adapter.connect_busy():
+                    return {"status": "error", "detail": "A Winlink session is already running"}
+                adapter.start_session(mode, target, int(bw) if bw not in (None, "") else None)
+                return {"status": "started", "url": url}
         return {"status": "error", "detail": "No Winlink adapter configured"}
+
+    @app.get("/api/winlink/connect")
+    async def winlink_connect_status():
+        for adapter in router._adapters.values():
+            if hasattr(adapter, "connect_info"):
+                return adapter.connect_info()
+        return {}
 
     # ── meshcore-hub gap comparison (O96) ───────────────────────────────────
 

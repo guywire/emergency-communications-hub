@@ -137,7 +137,16 @@ ADAPTER_SCHEMAS: dict[str, dict] = {
             {"key": "auto_connect", "kind": "boolean", "required": False, "default": False,
              "help": "Trigger a Pat connect session on ECH startup"},
             {"key": "connect_alias", "kind": "select", "required": False, "default": "telnet",
-             "help": "Pat connect alias to use", "options": ["telnet", "ardop", "ax25"]},
+             "help": "How Pat connects. mercury = Pat's VARA HF transport with the free Mercury "
+                     "modem behind it (the far station must run Mercury too)",
+             "options": ["telnet", "varahf", "mercury", "varafm", "ardop", "ax25"]},
+            {"key": "connect_target", "kind": "string", "required": False, "default": "",
+             "help": "RMS gateway or peer callsign for the radio modes, e.g. W1ABC-10"},
+            {"key": "bandwidth", "kind": "select", "required": False, "default": "",
+             "help": "VARA HF / Mercury bandwidth in Hz (blank = Pat's setting)",
+             "options": ["", "500", "2300", "2750"]},
+            {"key": "session_timeout", "kind": "number", "required": False, "default": 900,
+             "help": "Seconds to wait for one Pat session to finish"},
         ],
     },
 
@@ -159,6 +168,13 @@ ADAPTER_SCHEMAS: dict[str, dict] = {
              "help": "Dialplan context"},
             {"key": "caller_id", "kind": "string", "required": False, "default": "ECH <100>",
              "help": "Outbound caller ID"},
+            {"key": "remote_extensions", "kind": "list", "required": False, "default": [],
+             "help": "Extensions on another PBX reached over an IAX2 trunk, e.g. [\"201\",\"202\"] - "
+                     "shown on the Calls tab; the dialplan must route them to the trunk"},
+            {"key": "remote_iax_peer", "kind": "string", "required": False, "default": "",
+             "help": "iax.conf peer name of that trunk (status comes from its qualify=yes)"},
+            {"key": "remote_pbx_label", "kind": "string", "required": False, "default": "Remote PBX",
+             "help": "Heading for the remote extensions on the Calls tab"},
         ],
     },
 

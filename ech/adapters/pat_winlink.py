@@ -8,13 +8,15 @@ Integration model:
   Pat runs as a sidecar systemd service on the same machine as ECH.
   ECH talks to Pat's HTTP API on localhost:8080 using httpx (async HTTP).
   Pat handles all Winlink protocol complexity: B2F forwarding, CMS
-  authentication, transport negotiation (ARDOP / AX.25 / telnet).
+  authentication, transport negotiation (telnet / VARA / Mercury / ARDOP / AX.25).
 
 Pat HTTP API (localhost:8080 by default):
   GET  /api/mailbox/{folder}          list messages  (folder: in|out|sent|archive)
   GET  /api/mailbox/{folder}/{mid}    read one message
   POST /api/mailbox/out               compose/post to outbox
-  POST /api/connect                   trigger a connect session
+  POST /api/connect?url=...           run one connect session (alias or URL in
+                                      the `url` FORM value; blocks until done,
+                                      replies {"NumReceived": n}, 500 on failure)
   POST /api/disconnect                abort current session
   GET  /api/status                    station info + connection state
   WS   /ws                            live event stream (new mail, progress)
@@ -33,8 +35,21 @@ Config keys:
   pat_url         str     Pat HTTP base URL (default: http://127.0.0.1:8080)
   poll_interval   int     seconds between inbox polls (default: 300 = 5 min)
   auto_connect    bool    trigger Pat connect on startup (default: False)
-  connect_alias   str     Pat connect alias to use (default: telnet)
-                          e.g. "telnet", "ardop", "ax25"
+  connect_alias   str     how to connect (default: telnet). One of
+                          telnet | varahf | mercury | varafm | ardop | ax25,
+                          a Pat connect-alias name, or a full Pat connect URL
+  connect_target  str     RMS gateway / peer callsign for the radio modes
+  bandwidth       int     VARA HF / Mercury bandwidth: 500 | 2300 | 2750
+  session_timeout int     seconds to wait for one Pat session (default 900)
+
+Mercury (https://github.com/Rhizomatica/mercury) is a free, open-source HF
+modem that speaks VARA's TCP protocol (command port 8300, data port 8301 —
+the same defaults as Pat's `varahf.addr`). Pat therefore drives it with its
+VARA HF transport unchanged: run Mercury instead of VARA behind Pat's
+`varahf` address and connect with `varahf:///CALL`. "mercury" here is that
+URL with a clearer label. Mercury's waveform is NOT VARA's, so the station at
+the other end must also run Mercury — VARA-only RMS gateways won't answer.
+Pat keeps one VARA HF address, so VARA HF and Mercury are either/or per Pat.
   mailbox_path    str     path to Pat mailbox dir (for file-watch fallback)
                           default: ~/.local/share/pat/mailbox/{callsign}/in
 
@@ -59,6 +74,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -71,6 +87,47 @@ log = logging.getLogger(__name__)
 
 EMRG_WORDS = {"emergency", "mayday", "sos", "urgent help", "life safety", "evacuate now"}
 ELVT_WORDS = {"urgent", "priority", "immediate", "standby all", "resource request"}
+
+
+# Radio modes -> the Pat transport scheme that carries them. Mercury rides on
+# Pat's VARA HF transport (see the module docstring).
+RF_SCHEMES = {"varahf": "varahf", "vara-hf": "varahf", "mercury": "varahf",
+              "varafm": "varafm", "vara-fm": "varafm", "ardop": "ardop", "ax25": "ax25"}
+MODE_LABELS = {"telnet": "Telnet (internet)", "varahf": "VARA HF", "mercury": "Mercury HF",
+               "varafm": "VARA FM", "ardop": "ARDOP", "ax25": "AX.25 packet"}
+VARA_HF_BANDWIDTHS = (500, 2300, 2750)
+_TARGET_RE = re.compile(r"^[A-Z0-9]{3,7}(-[0-9]{1,2})?$")
+_ALIAS_RE = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
+
+
+def build_connect_url(mode: str, target: str = "", bandwidth: int | None = None,
+                      allow_raw: bool = False) -> str:
+    """The `url` value for Pat's POST /api/connect.
+
+    "telnet" is Pat's built-in alias for the CMS over the internet. The radio
+    modes need a gateway/peer callsign and become Pat connect URLs
+    (`varahf:///W1ABC?bw=2300`). Any other bare word is passed as one of the
+    operator's own Pat connect aliases. A full URL is accepted only when
+    `allow_raw` (it comes from config.yaml, not from a web request)."""
+    mode = (mode or "telnet").strip()
+    key = mode.lower()
+    if key in RF_SCHEMES:
+        target = (target or "").strip().upper()
+        if not _TARGET_RE.match(target):
+            raise ValueError(f"{MODE_LABELS.get(key, mode)} needs a gateway or station callsign")
+        url = f"{RF_SCHEMES[key]}:///{target}"
+        if RF_SCHEMES[key] == "varahf" and bandwidth:
+            if int(bandwidth) not in VARA_HF_BANDWIDTHS:
+                raise ValueError("bandwidth must be 500, 2300 or 2750")
+            url += f"?bw={int(bandwidth)}"
+        return url
+    if "://" in mode:
+        if not allow_raw:
+            raise ValueError("connect URLs can only be set in the adapter config")
+        return mode
+    if _ALIAS_RE.match(mode):
+        return mode     # telnet, or a Pat connect alias
+    raise ValueError(f"unknown connect mode {mode!r}")
 
 
 def _priority(subject: str, body: str) -> Priority:
@@ -123,6 +180,13 @@ class PatWinlinkAdapter(Adapter):
         self._poll_interval = int(config.get("poll_interval", 300))
         self._auto_connect  = bool(config.get("auto_connect", False))
         self._connect_alias = config.get("connect_alias", "telnet")
+        self._connect_target = str(config.get("connect_target") or "").strip().upper()
+        bw = config.get("bandwidth")
+        self._bandwidth = int(bw) if bw not in (None, "") else None
+        self._session_timeout = float(config.get("session_timeout", 900))
+        self._connect_lock = asyncio.Lock()
+        self._session_tasks: set[asyncio.Task] = set()
+        self._last_connect: dict = {}    # last session: mode/url/started/finished/ok/received/error
         self._mailbox_path  = config.get("mailbox_path", None)
         # RMS discovery (_discover_rms) pulls EVERY active Winlink gateway
         # worldwide (1150+ at last count) with no inherent range limit, unlike
@@ -173,9 +237,10 @@ class PatWinlinkAdapter(Adapter):
         # Initial inbox drain (mark existing as seen without emitting them)
         await self._mark_existing_seen()
 
-        # Auto-connect to fetch any waiting messages
+        # Auto-connect to fetch any waiting messages. A session can run for
+        # minutes over radio, so it must not hold up adapter startup.
         if self._auto_connect:
-            await self._trigger_connect()
+            self.start_session()
 
         # Start poll loop, WebSocket watcher, and RMS discovery
         self._run_task = asyncio.create_task(self._run(), name=f"{self.name}-poll")
@@ -239,7 +304,7 @@ class PatWinlinkAdapter(Adapter):
             log.info("Pat Winlink %s: posted to outbox → %s", self.name, message.to_id)
 
             if self._auto_connect:
-                asyncio.create_task(self._trigger_connect())
+                self.start_session()
 
             return True
         except Exception as exc:
@@ -436,18 +501,90 @@ class PatWinlinkAdapter(Adapter):
         await self._enqueue(nm)
         log.debug("Pat Winlink %s: emitted mid=%s from=%s subj=%r", self.name, mid, from_, subject)
 
-    async def _trigger_connect(self) -> None:
-        """POST /api/connect — tell Pat to connect and exchange messages."""
+    def connect_url(self, mode: str | None = None, target: str | None = None,
+                    bandwidth: int | None = None) -> str:
+        """Pat connect string for `mode` (default: the configured alias). A
+        full URL is only honoured when it IS the configured alias."""
+        raw = mode is None or mode == self._connect_alias
+        return build_connect_url(mode or self._connect_alias,
+                                 target if target is not None else self._connect_target,
+                                 bandwidth if bandwidth is not None else self._bandwidth,
+                                 allow_raw=raw)
+
+    def start_session(self, mode: str | None = None, target: str | None = None,
+                      bandwidth: int | None = None) -> asyncio.Task:
+        """_trigger_connect as a background task (kept referenced until done)."""
+        task = asyncio.create_task(self._trigger_connect(mode, target, bandwidth),
+                                   name=f"{self.name}-session")
+        self._session_tasks.add(task)
+        task.add_done_callback(self._session_tasks.discard)
+        return task
+
+    def connect_busy(self) -> bool:
+        return self._connect_lock.locked()
+
+    def connect_info(self) -> dict:
+        """Connect settings + last session, for the dashboard's Winlink panel."""
+        return {
+            "mode": self._connect_alias,
+            "target": self._connect_target,
+            "bandwidth": self._bandwidth,
+            "modes": MODE_LABELS,
+            "running": self.connect_busy(),
+            "last": dict(self._last_connect),
+        }
+
+    async def _trigger_connect(self, mode: str | None = None, target: str | None = None,
+                               bandwidth: int | None = None) -> dict:
+        """Run one Pat session: POST /api/connect with the alias/URL in the
+        `url` FORM value. Pat's ConnectHandler reads req.FormValue("url") —
+        an earlier version posted JSON {"transport": ...}, which Pat never
+        reads, so every trigger was an empty connect that failed. Pat answers
+        only when the session ends (minutes over HF), hence the long read
+        timeout. One session at a time."""
         try:
-            resp = await self._client.post(
-                "/api/connect",
-                json={"transport": self._connect_alias},
-                timeout=5.0,
-            )
-            resp.raise_for_status()
-            log.info("Pat Winlink %s: connect triggered via %s", self.name, self._connect_alias)
-        except Exception as exc:
-            log.warning("Pat Winlink %s: connect trigger failed: %s", self.name, exc)
+            url = self.connect_url(mode, target, bandwidth)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not self._client:
+            return {"ok": False, "error": "Pat adapter not connected"}
+        if self._connect_lock.locked():
+            return {"ok": False, "error": "a Winlink session is already running"}
+        async with self._connect_lock:
+            started = datetime.now(timezone.utc)
+            self._last_connect = {"mode": mode or self._connect_alias, "url": url,
+                                  "started": started.isoformat(timespec="seconds")}
+            log.info("Pat Winlink %s: connect session via %s", self.name, url)
+            result: dict
+            try:
+                resp = await self._client.post(
+                    "/api/connect", params={"url": url},
+                    timeout=httpx.Timeout(10.0, read=self._session_timeout))
+                received = None
+                try:
+                    # Pat writes {"NumReceived": n} even after a 500's error text
+                    tail = resp.text[resp.text.rfind("{"):] if "{" in resp.text else ""
+                    received = json.loads(tail).get("NumReceived") if tail else None
+                except ValueError:
+                    pass
+                if resp.status_code == 200:
+                    result = {"ok": True, "received": received}
+                else:
+                    result = {"ok": False, "received": received,
+                              "error": ((resp.text.splitlines() or [""])[0] or f"HTTP {resp.status_code}")[:200]}
+            except httpx.ReadTimeout:
+                result = {"ok": False, "error": f"no answer from Pat after {int(self._session_timeout)} s "
+                                                f"(the session may still be running in Pat)"}
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)[:200]}
+            self._last_connect.update(result, finished=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+            if result["ok"]:
+                log.info("Pat Winlink %s: session via %s done, %s received",
+                         self.name, url, result.get("received"))
+                asyncio.create_task(self._poll_inbox())
+            else:
+                log.warning("Pat Winlink %s: session via %s failed: %s", self.name, url, result.get("error"))
+            return dict(self._last_connect)
 
     async def _refresh_status(self) -> None:
         try:
@@ -662,6 +799,8 @@ class PatWinlinkAdapter(Adapter):
             "session_connected": self._pat_status.get("connected", False),
             "connected_to": self._pat_status.get("remote_addr", ""),
             "connect_alias": self._connect_alias,
+            "connect_target": self._connect_target or None,
+            "last_connect": self._last_connect or None,
             "seen_messages": len(self._seen_mids),
             "rx_count": self._rx_count,
             "tx_count": self._tx_count,

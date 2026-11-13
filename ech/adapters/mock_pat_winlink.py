@@ -169,7 +169,7 @@ class MockPatServer:
       POST /api/mailbox/out        → application/x-www-form-urlencoded body
                                       (to/cc/subject/body/date/p2ponly) — real Pat's
                                       postOutboundMessageHandler parses r.Form, NOT JSON
-      POST /api/connect            → acknowledge connect request
+      POST /api/connect?url=...    → record the url, reply {"NumReceived": 0}
 
     These shapes were verified against the actual la5nta/pat Go source
     (api/mailbox.go, api/types/types.go), not guessed — earlier versions of
@@ -205,6 +205,13 @@ class MockPatServer:
     @property
     def port(self) -> int:
         return self._server.sockets[0].getsockname()[1] if self._server else self._port
+
+    @property
+    def connects(self) -> list[str]:
+        """Every `url` value POSTed to /api/connect, in order."""
+        if not hasattr(self, "_connects"):
+            self._connects: list[str] = []
+        return self._connects
 
     @property
     def outbox(self) -> list[dict]:
@@ -291,7 +298,12 @@ class MockPatServer:
             self._outbox.append(msg)
             return {"status": "queued"}
 
-        if path == "/api/connect" and method == "POST":
-            return {"status": "connecting"}
+        if path.split("?")[0] == "/api/connect" and method == "POST":
+            # Real Pat reads the alias/URL from the `url` FORM value (query or
+            # urlencoded body) and replies {"NumReceived": n} when done.
+            query = path.split("?", 1)[1] if "?" in path else ""
+            url = (parse_qs(query).get("url") or parse_qs(body).get("url") or [""])[0]
+            self.connects.append(url)
+            return {"NumReceived": 0}
 
         return {}

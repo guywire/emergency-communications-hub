@@ -17,6 +17,21 @@ from ech.core.radio_directory import (
     HOIP_CONFERENCE_AP_ENTRIES, HOIP_RF_LINK_US_ENTRIES, HOIP_RF_LINK_EU_ENTRIES,
     HOIP_RF_LINK_AP_ENTRIES, HOIP_AUDIO_FEED_ENTRIES, get_directory,
 )
+import pytest
+from ech.core import directory_status
+
+
+@pytest.fixture(autouse=True)
+def _no_live_refresh(monkeypatch):
+    """These tests cover the built-in lists; make sure no refreshed data
+    from another test leaks into the singleton."""
+    monkeypatch.setattr(directory_status, "status", directory_status.DirectoryStatus())
+    yield
+
+
+def _plain(entries):
+    """Drop the live-status fields get_directory() adds."""
+    return [{k: v for k, v in e.items() if k not in ("asl_status", "allstar_node")} for e in entries]
 
 
 def test_builtin_hamvoip_entries_are_all_test_category():
@@ -90,8 +105,10 @@ def test_hoip_test_entries_include_echo_test():
 
 def test_get_directory_without_config_returns_builtins_only():
     d = get_directory({})
-    assert d["hamvoip"] == BUILTIN_HAMVOIP_ENTRIES + HOIP_ALL_ENTRIES
+    assert _plain(d["hamvoip"]) == BUILTIN_HAMVOIP_ENTRIES + HOIP_ALL_ENTRIES
     assert d["aredn"] == []
+    # No refresh has happened, so nothing can be claimed up or down
+    assert {e["asl_status"] for e in d["hamvoip"]} == {"unknown"}
 
 
 def test_get_directory_includes_hoip_entries():
@@ -125,5 +142,7 @@ def test_get_directory_merges_operator_entries():
 
 def test_get_directory_handles_missing_sections_gracefully():
     expected_hamvoip = BUILTIN_HAMVOIP_ENTRIES + HOIP_ALL_ENTRIES
-    assert get_directory({"radio_directory": {}}) == {"hamvoip": expected_hamvoip, "aredn": []}
-    assert get_directory({"radio_directory": None}) == {"hamvoip": expected_hamvoip, "aredn": []}
+    for cfg in ({"radio_directory": {}}, {"radio_directory": None}):
+        d = get_directory(cfg)
+        assert _plain(d["hamvoip"]) == expected_hamvoip
+        assert d["aredn"] == []

@@ -96,6 +96,13 @@ class MockAsteriskAdapter(Adapter):
         return [{"extension": e, "device_state": "Not in use" if e in ("101", "102") else "Unavailable",
                  "online": e in ("101", "102"), "contacts": ""} for e in ("101", "102", "103", "104")]
 
+    def remote_extensions(self) -> list[str]:
+        return ["201", "202"]
+
+    def list_remote_status(self) -> list[dict]:
+        return [{"extension": e, "remote": True, "pbx": "Remote PBX", "online": True,
+                 "device_state": "trunk OK (12 ms)", "contacts": ""} for e in self.remote_extensions()]
+
     async def intercom(self, targets: list, text: str | None = None,
                        caller_extension: str | None = None) -> dict:
         mode = "speak" if text and text.strip() else "talk"
