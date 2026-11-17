@@ -298,12 +298,21 @@ class BridgeEngine:
         return out
 
     def _echo(self, adapter_name: str, text: str, now: float) -> bool:
-        q = self._sent.get(adapter_name)
-        if not q:
+        # Check what we bridged into ANY adapter, not just this one: text we
+        # publish to Meshtastic over MQTT is put on the air by a gateway and
+        # then heard by our own USB Meshtastic radio — a different adapter —
+        # which another rule would otherwise carry back across.
+        for q in self._sent.values():
+            while q and now - q[0][0] > DEDUPE_WINDOW_S:
+                q.popleft()
+        if not any(self._sent.values()):
             return False
-        while q and now - q[0][0] > DEDUPE_WINDOW_S:
-            q.popleft()
         n = _norm(text)
+        # Text we sent INTO this adapter always counts. Text sent into another
+        # adapter counts unless it originated here — then this is just the
+        # original heard again (multi-path), which the duplicate check handles.
+        q = [(t, s) for dst, dq in self._sent.items() for t, s, origin in dq
+             if dst == adapter_name or origin != adapter_name]
         # The network may hand our text back with its own decoration
         # ("MSG KN0O: …", a node-name prefix) — match by containment, but
         # only for texts long enough that containment isn't a coincidence
@@ -318,8 +327,8 @@ class BridgeEngine:
                 return True
         return False
 
-    def _remember_sent(self, adapter_name: str, text: str, now: float) -> None:
-        self._sent.setdefault(adapter_name, deque(maxlen=200)).append((now, _norm(text)))
+    def _remember_sent(self, adapter_name: str, text: str, now: float, origin: str = "") -> None:
+        self._sent.setdefault(adapter_name, deque(maxlen=200)).append((now, _norm(text), origin))
 
     def _dup(self, key: str, now: float) -> bool:
         while self._seen and now - self._seen[0][0] > DEDUPE_WINDOW_S:
@@ -399,7 +408,7 @@ class BridgeEngine:
                     source_adapter=msg.source_adapter, source_channel=msg.source_channel,
                     from_id=msg.from_id, from_display=msg.from_display, body=out,
                     to_id=dst.to, priority=msg.priority, raw=raw)
-                self._remember_sent(dst.adapter, out, now)
+                self._remember_sent(dst.adapter, out, now, msg.source_adapter)
                 try:
                     ok = await target.send(fwd)
                 except Exception as exc:

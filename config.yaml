@@ -350,6 +350,11 @@ adapters:
 #     port: 1883
 #     topics:
 #       - "msh/US/ME/#"          # adjust region/channel filter as needed
+#     # Protobuf uplinks (msh/.../2/e/<channel>/...) are decrypted locally.
+#     # Keep "meshtastic" in the adapter name so the UI shows it as Meshtastic chat.
+#     channel_keys:              # channel name -> PSK (base64 or hex); "AQ==" = default key
+#       LongFast: "AQ=="
+#     fallback_keys: ["AQ=="]    # tried for channels not listed above
 #
 # ── Local mosquitto broker ────────────────────────────────────────────────────
 #   - type: mqtt
@@ -570,6 +575,8 @@ adapters:
 #     context: from-internal
 #     caller_id: "ECH <100>"
 #     vm_context: default          # voicemail context; mailboxes are "{ext}@{vm_context}"
+#     watch_extensions: ["107"]    # registrations / calls / blocked dials -> Anomalies page
+#     security_alerts: true        # failed logins (3 from one address in 15 min) -> Anomalies page
 
 # ── AREDN (real) ─────────────────────────────────────────────────────────────
 #   Polls AREDN mesh node API for topology and device info.

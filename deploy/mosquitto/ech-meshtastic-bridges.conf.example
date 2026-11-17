@@ -1,0 +1,56 @@
+# ECH: pull Meshtastic MQTT brokers into the local Mosquitto, one prefix per
+# source, so a single ECH Meshtastic MQTT adapter reads them all and dedups
+# packets that both brokers carry.
+#
+# Install:  /etc/mosquitto/conf.d/ech-meshtastic-bridges.conf
+#           mode 0640, owner root:mosquitto (it holds broker credentials)
+#           systemctl restart mosquitto   (bridges are not re-read on reload)
+#
+# Inbound:  <upstream> msh/...              -> local mt/<source>/msh/...
+# Outbound: local mt/out/<source>/2/e/...   -> <upstream> <root>/2/e/...
+#
+# Matching ECH adapter (config.yaml):
+#   - type: mqtt
+#     name: meshtastic-mqtt-<region>
+#     host: 127.0.0.1
+#     port: 1883
+#     topics: ["mt/state/#", "mt/public/#"]
+#     publish_roots: ["mt/out/state"]
+#     node_id: "!ec......"        # pin it: the derived default changes with host
+#     meshtastic_publish: true
+#     channel_keys: {LongFast: "AQ=="}
+
+# A private/state broker: read everything, publish ECH's own posts only.
+connection ech-state
+address <broker-host>:1883
+remote_clientid <unique-client-id>
+remote_username <user>
+remote_password <password>
+bridge_protocol_version mqttv311
+try_private false
+cleansession true
+start_type automatic
+restart_timeout 10 120
+keepalive_interval 60
+notifications true
+notifications_local_only true
+notification_topic ech/bridge/state/state
+topic # in 0 mt/state/msh/ msh/
+topic 2/e/# out 0 mt/out/state/ msh/US/<ST>/
+
+# The public Meshtastic broker, read-only, limited to one state's subtopic.
+connection ech-mtpublic
+address mqtt.meshtastic.org:1883
+remote_clientid <unique-client-id>
+remote_username meshdev
+remote_password large4cats
+bridge_protocol_version mqttv311
+try_private false
+cleansession true
+start_type automatic
+restart_timeout 10 120
+keepalive_interval 60
+notifications true
+notifications_local_only true
+notification_topic ech/bridge/public/state
+topic # in 0 mt/public/msh/US/<ST>/ msh/US/<ST>/

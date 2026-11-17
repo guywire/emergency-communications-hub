@@ -38,6 +38,15 @@ _ALT_FL_RE  = re.compile(r'\bFL\s*(\d{2,3})\b', re.IGNORECASE)
 _ALT_M_RE   = re.compile(r'\b(\d{4,6})\s*m(?:eters?)?\b', re.IGNORECASE)
 
 
+# Aircraft-spotting bots relay ADS-B sightings ("[MIL: ACFT] N/A Alt:21000ft Sq:5367
+# Hex:AE0146"): the altitude is the AIRCRAFT's, not the sending node's.
+_AIRCRAFT_REPORT_RE = re.compile(r"\b(?:hex|icao|sq)\s*[:=]\s*[0-9a-f]{2}|\bsquawk\s*[:=]?\s*\d{4}\b", re.IGNORECASE)
+
+
+def _looks_like_aircraft_report(body: str) -> bool:
+    return bool(_AIRCRAFT_REPORT_RE.search(body or ""))
+
+
 def _extract_altitude_m_from_text(body: str) -> float | None:
     """Return altitude in metres if a recognisable altitude mention is found."""
     m = _ALT_FT_RE.search(body)
@@ -253,6 +262,14 @@ class AnomalyEngine:
         rssi       = raw.get("rssi")
         lat        = msg.lat
         lon        = msg.lon
+        # Traffic read from an MQTT broker (raw["mqtt"], set only by the MQTT
+        # adapter) is SUPPOSED to be internet-carried: its SNR/RSSI/hops describe
+        # some remote gateway's radio link, not ours, and "arrived via MQTT" or
+        # "far away" is the normal case. Only the RF-link rules are skipped;
+        # altitude, position-jump and stale-position checks still run.
+        broker_feed = raw.get("mqtt") is True
+        if broker_feed:
+            hop_count = snr = rssi = None
         altitude   = raw.get("altitude") or raw.get("alt")
         pkt_ts     = raw.get("timestamp") or raw.get("packet_timestamp")
 
@@ -284,7 +301,7 @@ class AnomalyEngine:
             new_findings.append(f)
 
         # ── RULE: high altitude mentioned in message text ─────────────────
-        if altitude is None and msg.body:
+        if altitude is None and msg.body and not _looks_like_aircraft_report(msg.body):
             text_alt = _extract_altitude_m_from_text(msg.body)
             if text_alt is not None and text_alt > self._alt_threshold_m:
                 f = self._make_finding(
@@ -343,7 +360,9 @@ class AnomalyEngine:
 
         # ── RULE: MQTT injection heuristic ────────────────────────────────
         # viaMqtt flag is definitive; hop_count=0 with position is circumstantial.
-        if msg.via_mqtt and lat is not None:
+        if broker_feed:
+            pass
+        elif msg.via_mqtt and lat is not None:
             f = self._make_finding(
                 msg, "mqtt_injection", Severity.ALERT,
                 "Node position arrived via MQTT gateway (viaMqtt flag set) — "
@@ -366,7 +385,7 @@ class AnomalyEngine:
         # Fire once per node when it first appears beyond the threshold.
         # Classifies as: confirmed internet bridge, likely internet bridge,
         # possible ducting (RF path at plausible ducting range), or multi-hop relay.
-        if (lat is not None and lon is not None
+        if (lat is not None and lon is not None and not broker_feed
                 and self._base_lat is not None and self._base_lon is not None
                 and key not in self._long_range_noted):
             dist_km = _haversine_km(self._base_lat, self._base_lon, lat, lon)
@@ -646,6 +665,23 @@ class AnomalyEngine:
                     finding = f
 
         return finding
+
+    async def report(self, adapter: str, node_id: str, rule: str, severity: Severity,
+                     summary: str, evidence: dict | None = None) -> AnomalyFinding | None:
+        """Record a finding raised by an adapter itself (e.g. the PBX's failed
+        logins or a watched extension's activity), the same way the built-in
+        rules do: kept in memory, saved to the DB, pushed to the UI."""
+        if not self.enabled:
+            return None
+        f = AnomalyFinding(id=self._next_id(), adapter=adapter, node_id=node_id, rule=rule,
+                           severity=severity, summary=summary, evidence=evidence or {})
+        self.findings.append(f)
+        await self.findings_queue.put(f)
+        if self._db:
+            await self._db.save_anomaly(f)
+        log.info("Anomaly [%s] %s on %s:%s — %s",
+                 f.severity.value.upper(), rule, adapter, node_id[:12], summary[:80])
+        return f
 
     def acknowledge(self, finding_id: str) -> bool:
         for f in self.findings:

@@ -8,6 +8,219 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.69 (2026-11-17)
+
+### Fixed
+- MeshCore: sending to a hashtag channel by name (e.g. `#weather`) now finds it. The radio
+  stores the name with its `#` and the lookup compared it without, so every such send
+  fell back to the default channel. A numeric slot hint above 7 is also accepted when the
+  radio has that slot.
+- **Share Weather**, **Broadcast weather** and **Share Air Quality** now post on the
+  configured weather channel (`auto_broadcast_channel`), like automatic alerts. Before,
+  they used each adapter's default channel. Adapters without that channel still use their
+  default.
+
+## v1.1.68 (2026-11-17)
+
+### Fixed
+- Mesh bot: mentioning the radio by its own node name now works. The MeshCore app inserts
+  `@[NodeName]` when you tap a node, but the bot only knew its configured mention name, so
+  "@[SignalMatrix] …" on Public was ignored. Both `@Name` and `@[Name]` now match, and
+  `mention_name` may list several names.
+- Mesh bot: hashtag channels (`ch2:#bot`) now match channel names written with the `#`
+  in the bot's settings.
+
+### Added
+- Mesh bot: `respond_all_channels` lists dedicated bot channels where every message is a
+  request. Commands work without a mention, and anything else gets a help reply. It can
+  also be set in Settings → Bot ("Bot channels").
+
+## v1.1.67 (2026-11-17)
+
+### Changed
+- Messages sidebar: the channel and message-type filter pills for the selected adapter now
+  sit directly under that adapter's row, slightly indented, instead of at the bottom of the
+  list.
+
+## v1.1.66 (2026-11-17)
+
+### Fixed
+- Database: a write that hits "database is locked" (another process briefly writing to
+  `ech.db`) no longer wedges ECH's connection. Before, the failed write's transaction stayed
+  open on a stale snapshot, and every later write failed until a restart. The connection
+  now rolls back on the first lock error and recovers.
+- Failed log writes are dropped quietly instead of each producing another error. That
+  feedback had turned the outage into hundreds of tracebacks a second.
+- Database startup reads the result of its WAL PRAGMAs. Newer Python/aiosqlite otherwise
+  failed to start with "database table is locked".
+
+### Changed
+- Meshtastic MQTT: direct messages between *other* nodes (some gateways republish decrypted
+  DMs as plain JSON) appear on their own **Other DMs** channel as "[to <recipient>] …".
+  They are never shown as "[DM]", which looked as if they'd been sent to us, and they're
+  never bridged. `PKI` (the DM topic) is no longer listed as a channel.
+
+## v1.1.65 (2026-11-17)
+
+### Changed
+- Meshtastic MQTT: direct messages between other nodes were hidden. Superseded by v1.1.66.
+
+## v1.1.64 (2026-11-17)
+
+### Fixed
+- Meshtastic MQTT: gateways' plain-JSON uplinks (`msh/.../2/json/<channel>/...`) are now
+  decoded like the encrypted packets. They land on their real channel, with node names and
+  positions, and copies of a packet already received are dropped. Before, they showed as
+  anonymous `mqtt:ME` / `mqtt:msh` messages from a bare number. Typically this is a bot
+  posting on its own channel.
+- Anomalies: aircraft sightings relayed as text ("Alt:21000ft Sq:5367 Hex:AE0146") no
+  longer raise high-altitude warnings. That altitude belongs to the aircraft, not the node.
+
+### Added
+- Messages panel: right-click a channel pill to mute that channel. It drops out of
+  "All ch" (struck through) but can still be opened on its own. Right-click again to
+  unmute. The setting is remembered in this browser.
+
+## v1.1.63 (2026-11-16)
+
+### Fixed
+- Anomalies: traffic read from an MQTT broker no longer triggers "position arrived via MQTT"
+  alerts or long-range-contact notes. Coming over the internet is the normal case for that
+  traffic. Its SNR and hop counts describe some remote gateway's radio link, so they're also
+  left out of the ducting and hop-count rules. Altitude, position-jump and stale-position
+  checks still run. A radio packet flagged as having come from MQTT still raises the alert.
+
+## v1.1.62 (2026-11-16)
+
+### Fixed
+- Meshtastic MQTT messages get a map link (⌖) again. A text carries the sender's last reported
+  position, and hovering the link says so.
+- Bridge rules in Settings show their state plainly: a **● LIVE**, **● DRY RUN** or
+  **● DISABLED** badge, the forwarded (or would-have-forwarded) count, and the rule's last
+  action. The toggle reads **Go live** / **Switch to dry run**. The old **Dry run** button
+  looked like a status. The add-form checkbox now says it only applies to the bridge
+  being added.
+
+## v1.1.61 (2026-11-16)
+
+### Fixed
+- Meshtastic MQTT no longer offers DMs. Nodes on current firmware expect DMs encrypted to
+  them personally, which a node reached through MQTT can't do, so these DMs were silently
+  lost. Sending one now fails with a reason. Clicking **Reply** on an MQTT message fills
+  in an `@name` mention and picks the channel the message came from. `allow_dm: true`
+  restores the old behavior.
+- Failed sends show the adapter's own reason when it gives one, instead of just "send failed".
+
+### Added
+- Meshtastic MQTT accepts topics re-homed by a local broker bridge, e.g.
+  `mt/<source>/msh/US/ME/2/e/…`, so one adapter can read several upstream brokers through
+  the local Mosquitto. Each message records which broker it came from (`raw.source`).
+- Map: Meshtastic MQTT nodes are tagged with their protocol, and the map colors and filters
+  by that tag before falling back to the adapter name. A shared feed still separates
+  Meshtastic from MeshCore.
+
+## v1.1.60 (2026-11-16)
+
+### Changed
+- The public Meshtastic MQTT adapter is listen-only in the UI. It no longer appears as a
+  Compose send target.
+
+## v1.1.59 (2026-11-16)
+
+### Added
+- Meshtastic MQTT: a second, read-only broker can sit next to the main one. Set `dedup_with`
+  to the main adapter's name. Texts that both brokers carry then show up once, from the main
+  adapter, and the main adapter's own posts relayed through the other broker are hidden. The
+  second broker holds each text for `dedup_delay` seconds (3 by default) so the main
+  broker's copy arrives first.
+- Messages and Nodes panels: an adapter whose name contains `public` gets its own `MQTP`
+  badge, "Meshtastic MQTT (public)".
+
+## v1.1.58 (2026-11-16)
+
+### Added
+- Nodes tab: filter by adapter, using the drop-down next to the search box or by clicking an
+  adapter's chip (click it again to show all). The choice is remembered in the browser. Search
+  also matches short names. Meshtastic MQTT nodes carry an `MQTT` badge instead of `MSHT`.
+
+### Changed
+- Nodes tab: clicking an adapter chip used to clear that adapter's cached nodes straight away.
+  Clearing now has its own ✕ button and asks first.
+
+## v1.1.57 (2026-11-16)
+
+### Fixed
+- Meshtastic MQTT node names: names and positions are now saved and reloaded after a restart.
+  Before this, every node showed as `!xxxxxxxx` until it sent its next NodeInfo, which nodes
+  only do every few hours. Names are also taken from gateways' map reports (`<root>/2/map/`).
+
+## v1.1.56 (2026-11-16)
+
+### Added
+- Meshtastic MQTT can send: with `meshtastic_publish: true` the adapter publishes channel text
+  (and DMs to `!nodeid`) as encrypted Meshtastic packets under every topic root the channel was
+  heard on, so gateways with downlink enabled put it on the air. It announces its own NodeInfo
+  (`long_name` / `short_name`) every few hours so people see a name.
+- Meshtastic MQTT channels: each channel heard on the broker (e.g. LongFast, MaineNet) gets an
+  index, a filter pill in the Messages panel and an entry in the compose channel picker. Channels
+  heard without a matching key are listed in the adapter's health. Bridge rules can link a
+  channel index to a MeshCore channel.
+
+### Changed
+- The Meshtastic MQTT adapter has its own `MQTT` badge, sidebar label and compose toggle. It is
+  no longer merged into the local Meshtastic radio's toggle, where a send failure on the MQTT
+  side made the whole send report as failed.
+
+### Fixed
+- Bridges: text a bridge sent into one adapter and then heard back on a different one (published
+  over MQTT, transmitted by a gateway, received by the local radio) is no longer bridged again.
+
+## v1.1.55 (2026-11-16)
+
+### Added
+- Meshtastic chat from an MQTT broker: the `mqtt` adapter now decodes Meshtastic protobuf
+  uplinks (`msh/<region>/2/e/<channel>/...`) and decrypts them with the channel keys in
+  `channel_keys` (the default LongFast key unless you set others). Text messages show up in
+  the Meshtastic chat under their channel name, with the sender's node name once a NodeInfo has
+  been heard. A packet relayed by several gateways is shown once. Nodes heard over MQTT, with
+  names and positions, are listed alongside the radio's own nodes.
+
+### Fixed
+- The `mqtt` adapter no longer turns binary payloads (Meshtastic protobuf, map reports) and
+  gateway online/offline status into garbled text messages.
+
+## v1.1.54 (2026-11-14)
+
+### Fixed
+- PBX text messages: the sender, recipient and text now reach ECH base64-encoded (`From64`,
+  `To64`, `Body64` on the ECHTextMessage UserEvent). A comma in a message could otherwise
+  relabel who it came from. Plain fields from an older dialplan are still accepted.
+
+## v1.1.53 (2026-11-13)
+
+### Changed
+- Calls tab: the AREDN PBX extensions are listed above the local ones. The extension groups and
+  each directory category are collapsible. They start collapsed, the browser remembers which
+  ones you opened, and typing in the directory filter opens every category that matches.
+- Directory: HOIP's own numbers come first. Their test numbers (3191-3198) are the ones that
+  actually work from this PBX.
+
+### Fixed
+- The five AllStarLink parrot and echo nodes (55553, 42565, 40894, 48230, 2002) no longer have a
+  dial button and are left out of the phones' phonebook. They are AllStar node numbers, and the
+  PBX's only outside trunk is Hams Over IP, which answers them with "cannot be completed as
+  dialed". They are still listed, marked "AllStar only", with their AllStarLink status.
+
+## v1.1.52 (2026-11-13)
+
+### Added
+- PBX alerts on the Anomalies page. Repeated failed phone or trunk logins from one address
+  raise a finding: the first after 3 failures within 15 minutes, another each time the count
+  doubles.
+- `watch_extensions` for the PBX adapter. Every registration (with the phone's address), call
+  to or from, and blocked dial of a watched extension becomes a finding. A watched phone that
+  registers from a new address, or from outside the mesh, is flagged higher.
+
 ## v1.1.51 (2026-11-12)
 
 ### Changed

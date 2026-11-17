@@ -36,6 +36,27 @@ Config keys:
   publish_topic     str     topic to publish outbound messages on (optional)
   keepalive         int     keepalive seconds (default: 60)
   qos               int     subscription QoS 0/1/2 (default: 0)
+  channel_keys      dict    Meshtastic channel name -> PSK (base64 or hex; "AQ==" = default key).
+                            Used to decrypt protobuf uplinks on msh/.../2/e/<channel>/...
+                            (default: {LongFast: "AQ=="})
+  fallback_keys     list    PSKs to try for channels NOT listed in channel_keys (default: ["AQ=="])
+  meshtastic_publish bool   send() publishes Meshtastic protobuf text to msh/.../2/e/<channel>/<node>
+                            (encrypted with that channel's key) instead of publish_topic (default: False)
+  publish_roots     list    topic roots to publish under, e.g. ["msh/US/ME", "msh/US"]
+                            (default: every root the channel has been heard on)
+  tx_channel        str     channel name send() uses when the message names none (default: first in channel_keys)
+  node_id           str     this gateway's Meshtastic node id, e.g. "!ec0a1b2c" (default: derived from name+host)
+  long_name         str     NodeInfo long name announced on the TX channel (default: "ECH <name>")
+  short_name        str     NodeInfo short name, max 4 chars (default: "ECH")
+  nodeinfo_interval int     seconds between NodeInfo announcements, 0 = never (default: 10800)
+  allow_dm          bool    let send() publish channel-key DMs to a !node id (default: False — modern
+                            firmware expects PKI DMs, so these are normally dropped)
+  dedup_with        list   other Meshtastic MQTT adapter names (same ECH process) this one defers to:
+                            a text those adapters already delivered is dropped here, and their own
+                            gateway node's packets are ignored. Use it on a second, read-only broker
+                            that overlaps the main one (e.g. public mqtt.meshtastic.org + a state broker)
+  dedup_delay       float   seconds to hold a text before the dedup_with check, so the main
+                            broker's copy wins the race (default: 3)
 
 Example configs:
   # Meshtastic public MQTT
@@ -44,6 +65,16 @@ Example configs:
     host: mqtt.meshtastic.org
     port: 1883
     topics: ["msh/US/ME/#"]
+
+  # Private/regional Meshtastic broker (protobuf uplinks, decrypted locally).
+  # Name it with "meshtastic" in it so the UI treats it as Meshtastic chat.
+  - type: mqtt
+    name: meshtastic-mqtt-me
+    host: broker.example.org
+    username: user           # live config only, never commit
+    password: pass
+    topics: ["msh/US/ME/#"]
+    channel_keys: {LongFast: "AQ=="}
 
   # Local MeshCore broker
   - type: mqtt
@@ -81,12 +112,23 @@ import asyncio
 import base64
 import json
 import logging
+import random
 import time
+import weakref
+import zlib
+from collections import OrderedDict
+from datetime import datetime, timezone
 
 from ech.adapters.base import Adapter
-from ech.core.models import NormalizedMessage, Priority
+from ech.core.models import MeshNode, NormalizedMessage, Priority
 
 log = logging.getLogger(__name__)
+
+# Channel label for DMs between OTHER nodes that a gateway exposed in plain JSON.
+OTHER_DMS_CHANNEL = "Other DMs"
+
+# Meshtastic MQTT adapters by name, for dedup_with lookups between brokers.
+_MT_REGISTRY: "weakref.WeakValueDictionary[str, MQTTAdapter]" = weakref.WeakValueDictionary()
 
 EMRG_WORDS = {"emergency", "mayday", "sos", "911", "fire", "flood"}
 ELVT_WORDS  = {"urgent", "priority", "immediate"}
@@ -136,6 +178,63 @@ class MQTTAdapter(Adapter):
         self._msg_count        = 0
         self._run_task: asyncio.Task | None = None
         self._client = None
+        # Meshtastic protobuf uplinks (msh/<region>/2/e/<channel>/<gateway>)
+        from ech.adapters import meshtastic_mqtt_codec as codec
+        expand_psk = codec.expand_psk
+        self._mt_enabled = (
+            "channel_keys" in config or "meshtastic" in self.name.lower()
+            or any("msh/" in str(t) for t in self._topics)
+        )
+        ck = config.get("channel_keys")
+        if not isinstance(ck, dict):
+            ck = {"LongFast": "AQ=="}
+        self._mt_keys: dict[str, bytes | None] = {}
+        for ch, key in ck.items():
+            try:
+                self._mt_keys[str(ch)] = expand_psk(key)
+            except ValueError as exc:
+                log.error("MQTT %s: channel_keys[%s] invalid: %s", self.name, ch, exc)
+        self._mt_fallback: list[bytes] = []
+        for key in config.get("fallback_keys", ["AQ=="]) or []:
+            try:
+                k = expand_psk(key)
+            except ValueError as exc:
+                log.error("MQTT %s: fallback_keys entry invalid: %s", self.name, exc)
+                continue
+            if k:
+                self._mt_fallback.append(k)
+        self._mt_seen: OrderedDict[tuple[int, int], float] = OrderedDict()
+        self._mt_nodes: dict[str, MeshNode] = {}
+        self._mt_stats = {"decoded": 0, "undecryptable": 0, "duplicates": 0, "text": 0,
+                          "sent": 0, "own_heard": 0}
+        # Index order is stable: configured channels first (bridge rules refer to
+        # these indexes), channels discovered on the broker appended after.
+        self._mt_channel_names: list[str] = list(self._mt_keys)
+        self._mt_roots: dict[str, set[str]] = {}          # channel -> topic roots seen
+        self._mt_undecodable: dict[str, int] = {}         # channel -> packets we had no key for
+        self._mt_publish = bool(config.get("meshtastic_publish", False))
+        self._mt_publish_roots = [str(r).rstrip("/") for r in (config.get("publish_roots") or []) if r]
+        num = codec.parse_node_id(config["node_id"]) if config.get("node_id") else None
+        if num is None:
+            num = 0xEC000000 | (zlib.crc32(f"ech-{self.name}-{self._host}".encode()) & 0x00FFFFFF)
+        self._mt_node_num = num
+        self._mt_gateway_id = codec.node_id_str(num)
+        self._mt_long_name = str(config.get("long_name") or f"ECH {self.name}")[:39]
+        self._mt_short_name = str(config.get("short_name") or "ECH")[:4]
+        self._mt_nodeinfo_interval = int(config.get("nodeinfo_interval", 10800))
+        tx = str(config.get("tx_channel") or "")
+        self._mt_tx_idx = self._mt_channel_names.index(tx) if tx in self._mt_channel_names else 0
+        self._mt_own_heard: OrderedDict[int, set[str]] = OrderedDict()   # our packet id -> gateways
+        self._mt_announce_task: asyncio.Task | None = None
+        # Cross-broker dedup: texts this adapter delivered, keyed (from, packet id).
+        self._mt_text_seen: OrderedDict[tuple[int, int], float] = OrderedDict()
+        self._mt_dedup_with = [str(n) for n in (config.get("dedup_with") or []) if n]
+        self._mt_dedup_delay = float(config.get("dedup_delay", 3.0))
+        self._mt_stats["cross_duplicates"] = 0
+        self._mt_pending: set[asyncio.Task] = set()
+        self._mt_allow_dm = bool(config.get("allow_dm", False))
+        self.last_send_error: str | None = None
+        _MT_REGISTRY[self.name] = self
 
     @staticmethod
     def _b64url(data: bytes) -> str:
@@ -275,7 +374,12 @@ class MQTTAdapter(Adapter):
             )
         log.info("MQTT %s: connecting to %s:%d", self.name, self._host, self._port)
         self._connected = True
+        if self._mt_enabled:
+            await self._mt_load_nodes()
         self._run_task = asyncio.create_task(self._run(), name=f"{self.name}-run")
+        if self._mt_publish and self._mt_nodeinfo_interval > 0:
+            self._mt_announce_task = asyncio.create_task(self._mt_announce_loop(),
+                                                         name=f"{self.name}-nodeinfo")
 
     async def disconnect(self) -> None:
         self._connected = False
@@ -285,12 +389,18 @@ class MQTTAdapter(Adapter):
                 await self._run_task
             except asyncio.CancelledError:
                 pass
+        if self._mt_announce_task:
+            self._mt_announce_task.cancel()
+            self._mt_announce_task = None
         log.info("MQTT %s: disconnected", self.name)
 
     async def send(self, message: NormalizedMessage) -> bool:
-        """Publish a message to the configured publish_topic."""
+        """Publish a message: Meshtastic protobuf when meshtastic_publish is on, else raw text to publish_topic."""
+        if self._mt_publish:
+            return await self._mt_send(message)
         if not self._pub_topic:
-            log.warning("MQTT %s: no publish_topic configured", self.name)
+            log.warning("MQTT %s: no publish_topic configured (set meshtastic_publish: true "
+                        "to send Meshtastic channel text)", self.name)
             return False
         try:
             import aiomqtt
@@ -374,9 +484,26 @@ class MQTTAdapter(Adapter):
 
     async def _handle_message(self, topic: str, payload: bytes) -> None:
         self._msg_count += 1
+        parts = topic.split("/")
+        mi = parts.index("msh") if "msh" in parts else -1
+        if mi >= 0 and "2" in parts[mi:]:
+            i = parts.index("2", mi) + 1
+            kind = parts[i] if i < len(parts) else ""
+            if kind in ("e", "c", "map"):
+                # e/c: channel traffic; map: gateways' MapReport (name + rough position)
+                await self._handle_meshtastic_protobuf(topic, payload)
+                return
+            if kind == "json" and self._mt_enabled:
+                # Plain-JSON uplink of the same packets (gateways with JSON output on).
+                await self._handle_meshtastic_json(topic, payload)
+                return
+            if kind != "json":
+                # stat (online/offline) - not chat traffic
+                return
         try:
-            raw_str = payload.decode("utf-8", errors="replace")
-        except Exception:
+            raw_str = payload.decode("utf-8")
+        except UnicodeDecodeError:
+            # Binary payload with no known decoder - never enqueue it as text.
             return
 
         # Try to parse as JSON
@@ -400,6 +527,426 @@ class MQTTAdapter(Adapter):
         if msg:
             await self._enqueue(msg)
             log.debug("MQTT %s: RX on %s: %s", self.name, topic, msg.body[:60])
+
+    # -- Meshtastic protobuf -------------------------------------------------
+    def _mt_is_duplicate(self, from_num: int, packet_id: int) -> bool:
+        """The same packet is uplinked by every gateway that heard it."""
+        if not packet_id:
+            return False
+        now = time.monotonic()
+        key = (from_num, packet_id)
+        if key in self._mt_seen and now - self._mt_seen[key] < 600:
+            return True
+        self._mt_seen[key] = now
+        self._mt_seen.move_to_end(key)
+        while len(self._mt_seen) > 4000:
+            self._mt_seen.popitem(last=False)
+        return False
+
+    @staticmethod
+    def _mt_apply_identity(node: MeshNode, info: dict, source: str) -> None:
+        if info.get("long_name"):
+            node.display_name = info["long_name"]
+            node.name_source = source
+        if info.get("short_name"):
+            node.short_name = info["short_name"]
+            node.meta["short_name"] = info["short_name"]
+        if info.get("hw_model"):
+            node.hw_model = info["hw_model"]
+            node.meta["hw_model"] = info["hw_model"]
+        if info.get("role"):
+            node.meta["node_type"] = info["role"]
+
+    def _mt_persist(self, node: MeshNode) -> None:
+        """Save name/position so they survive restarts (NodeInfo only comes every ~3 h)."""
+        if self._db is None:
+            return
+        try:
+            asyncio.get_running_loop().create_task(self._db.upsert_mesh_node(self.name, node))
+        except Exception as exc:
+            log.debug("MQTT %s: node persist failed: %s", self.name, exc)
+
+    async def _mt_load_nodes(self) -> None:
+        if self._db is None:
+            return
+        try:
+            rows = await self._db.get_mesh_nodes(self.name)
+        except Exception as exc:
+            log.warning("MQTT %s: could not load saved nodes: %s", self.name, exc)
+            return
+        named = 0
+        for row in rows:
+            nid = row["node_id"]
+            if nid in self._mt_nodes:
+                continue
+            lh = None
+            if row.get("last_heard"):
+                try:
+                    lh = datetime.fromisoformat(row["last_heard"])
+                except ValueError:
+                    pass
+            try:
+                meta = json.loads(row["meta_json"]) if row.get("meta_json") else {}
+            except ValueError:
+                meta = {}
+            node = MeshNode(node_id=nid, display_name=row["display_name"] or nid, first_seen=lh,
+                            last_heard=lh, lat=row.get("lat"), lon=row.get("lon"),
+                            short_name=meta.get("short_name", ""), hw_model=meta.get("hw_model", ""),
+                            name_source="saved" if row["display_name"] and row["display_name"] != nid else "")
+            node.meta.update(meta)
+            node.meta.setdefault("via", "mqtt")
+            node.meta["protocol"] = "meshtastic"
+            self._mt_nodes[nid] = node
+            named += node.display_name != nid
+        log.info("MQTT %s: loaded %d saved Meshtastic nodes (%d named)", self.name, len(rows), named)
+
+    def _mt_node(self, node_id: str) -> MeshNode:
+        node = self._mt_nodes.get(node_id)
+        now = datetime.now(timezone.utc)
+        if node is None:
+            node = MeshNode(node_id=node_id, display_name=node_id, first_seen=now)
+            node.meta["via"] = "mqtt"
+            node.meta["protocol"] = "meshtastic"
+            self._mt_nodes[node_id] = node
+        node.last_heard = now
+        return node
+
+    # -- channel table (same shape the native Meshtastic adapter exposes) ----
+    @property
+    def _channel_list(self) -> list[dict]:
+        return [{"index": i, "name": n} for i, n in enumerate(self._mt_channel_names)]
+
+    def set_tx_channel(self, idx: int) -> None:
+        if 0 <= int(idx) < len(self._mt_channel_names):
+            self._mt_tx_idx = int(idx)
+            log.info("MQTT %s: TX channel -> %s", self.name, self._mt_channel_names[self._mt_tx_idx])
+
+    def _mt_channel_idx(self, name: str) -> int:
+        if name not in self._mt_channel_names:
+            self._mt_channel_names.append(name)
+            log.info("MQTT %s: discovered Meshtastic channel %r", self.name, name)
+        return self._mt_channel_names.index(name)
+
+    @staticmethod
+    def _mt_topic_parts(topic: str) -> tuple[str, str]:
+        """msh/US/ME/2/e/LongFast/!gw -> ("msh/US/ME", "LongFast")
+        (a bridged mt/state/msh/US/ME/2/e/... keeps its prefix in the root)"""
+        parts = topic.split("/")
+        i = parts.index("2", parts.index("msh") if "msh" in parts else 0)
+        return "/".join(parts[:i]), (parts[i + 2] if i + 2 < len(parts) else "")
+
+    @staticmethod
+    def _mt_source(topic: str) -> str:
+        """Which upstream broker a bridged topic came from: mt/state/msh/... -> "state"."""
+        parts = topic.split("/")
+        mi = parts.index("msh") if "msh" in parts else 0
+        return parts[mi - 1] if mi > 0 else ""
+
+    async def _handle_meshtastic_protobuf(self, topic: str, payload: bytes) -> None:
+        from ech.adapters import meshtastic_mqtt_codec as codec
+        root, topic_channel = self._mt_topic_parts(topic)
+        try:
+            pkt = codec.decode_envelope(payload, self._mt_keys, self._mt_fallback)
+        except Exception as exc:
+            log.debug("MQTT %s: protobuf decode error on %s: %s", self.name, topic, exc)
+            pkt = None
+        if pkt is None:
+            self._mt_stats["undecryptable"] += 1
+            if topic_channel and topic_channel != "PKI":
+                if topic_channel not in self._mt_undecodable:
+                    log.info("MQTT %s: channel %r heard but no key decrypts it", self.name, topic_channel)
+                self._mt_undecodable[topic_channel] = self._mt_undecodable.get(topic_channel, 0) + 1
+            return
+        channel = pkt["channel"] or topic_channel
+        if channel and channel != "PKI":   # PKI = the DM topic, not a channel
+            self._mt_roots.setdefault(channel, set()).add(root)
+            self._mt_channel_idx(channel)
+        if any(p._mt_node_num == pkt["from_num"] for p in self._mt_peers()):
+            return   # another ECH adapter's own gateway node (our posts relayed between brokers)
+        if pkt["from_num"] == self._mt_node_num:
+            # Our own publish coming back. From our own gateway id it's just the
+            # broker echo; from anyone else's it was transmitted on RF and heard.
+            gw = pkt["gateway_id"]
+            if gw and gw != self._mt_gateway_id:
+                seen = self._mt_own_heard.setdefault(pkt["packet_id"], set())
+                if gw not in seen:
+                    seen.add(gw)
+                    self._mt_stats["own_heard"] += 1
+                    log.info("MQTT %s: our packet %08x on %s was heard on RF and re-uplinked by %s",
+                             self.name, pkt["packet_id"], channel, gw)
+                while len(self._mt_own_heard) > 500:
+                    self._mt_own_heard.popitem(last=False)
+            return
+        if self._mt_is_duplicate(pkt["from_num"], pkt["packet_id"]):
+            self._mt_stats["duplicates"] += 1
+            return
+        self._mt_stats["decoded"] += 1
+
+        node = self._mt_node(pkt["from_id"])
+        port = pkt["portnum"]
+        if port in ("NODEINFO_APP", "MAP_REPORT_APP"):
+            info = (codec.parse_user if port == "NODEINFO_APP" else codec.parse_map_report)(pkt["payload"])
+            if info:
+                self._mt_apply_identity(node, info, "nodeinfo" if port == "NODEINFO_APP" else "map_report")
+                if info.get("lat") is not None:
+                    node.lat, node.lon = info["lat"], info["lon"]
+                self._mt_persist(node)
+        elif port == "POSITION_APP":
+            pos = codec.parse_position(pkt["payload"])
+            if pos:
+                node.lat, node.lon = pos["lat"], pos["lon"]
+                if pos["alt"] is not None:
+                    node.meta["altitude"] = pos["alt"]
+                self._mt_persist(node)
+        elif port == "TEXT_MESSAGE_APP":
+            await self._mt_text(topic, pkt, node)
+
+    async def _handle_meshtastic_json(self, topic: str, payload: bytes) -> None:
+        """msh/.../2/json/<channel>/<gateway>: the gateway's plain-JSON copy of a
+        packet. Treated like a decrypted protobuf packet (same channel naming,
+        node names, dedup), so it doesn't land as anonymous generic MQTT."""
+        from ech.adapters import meshtastic_mqtt_codec as codec
+        try:
+            data = json.loads(payload.decode("utf-8"))
+            from_num = int(data["from"]) & 0xFFFFFFFF
+        except Exception:
+            return
+        if not isinstance(data, dict):
+            return
+        root, channel = self._mt_topic_parts(topic)
+        if channel and channel != "PKI":   # PKI = the DM topic, not a channel
+            self._mt_roots.setdefault(channel, set()).add(root)
+            self._mt_channel_idx(channel)
+        if from_num == self._mt_node_num or any(p._mt_node_num == from_num for p in self._mt_peers()):
+            return
+        pid = int(data.get("id") or 0) & 0xFFFFFFFF
+        if self._mt_is_duplicate(from_num, pid):
+            self._mt_stats["duplicates"] += 1
+            return
+        self._mt_stats["decoded"] += 1
+        self._mt_stats["json"] = self._mt_stats.get("json", 0) + 1
+        node = self._mt_node(codec.node_id_str(from_num))
+        kind = str(data.get("type") or "")
+        body = data.get("payload")
+        if kind == "nodeinfo" and isinstance(body, dict):
+            self._mt_apply_identity(node, {
+                "long_name": body.get("longname") or body.get("long_name"),
+                "short_name": body.get("shortname") or body.get("short_name"),
+                "hw_model": str(body.get("hardware") or "") or None,
+            }, "nodeinfo")
+            self._mt_persist(node)
+        elif kind == "position" and isinstance(body, dict):
+            lat_i, lon_i = body.get("latitude_i"), body.get("longitude_i")
+            if lat_i and lon_i:
+                node.lat, node.lon = lat_i / 1e7, lon_i / 1e7
+                if body.get("altitude") is not None:
+                    node.meta["altitude"] = body["altitude"]
+                self._mt_persist(node)
+        elif kind == "text":
+            text = body.get("text") if isinstance(body, dict) else body
+            if not isinstance(text, str) or not text.strip():
+                return
+            to_num = int(data.get("to") or codec.BROADCAST) & 0xFFFFFFFF
+            hops_away = data.get("hops_away")
+            pkt = {
+                "payload": text.encode("utf-8"), "channel": channel, "packet_id": pid,
+                "from_num": from_num, "from_id": codec.node_id_str(from_num),
+                "to_num": to_num, "to_id": codec.node_id_str(to_num),
+                "is_broadcast": to_num == codec.BROADCAST,
+                "gateway_id": data.get("sender") or "",
+                # JSON gives hops_away, not start/limit; express it as a 0-based pair
+                "hop_start": hops_away if isinstance(hops_away, int) else None,
+                "hop_limit": 0 if isinstance(hops_away, int) else None,
+                "rx_snr": data.get("snr"), "rx_rssi": data.get("rssi"),
+            }
+            await self._mt_text(topic, pkt, node)
+
+    async def _mt_text(self, topic: str, pkt: dict, node: MeshNode, _deferred: bool = False) -> None:
+        text = pkt["payload"].decode("utf-8", errors="replace").strip()
+        if not text:
+            return
+        if self._mt_dedup_with and pkt["packet_id"] and self._mt_dedup_delay > 0 and not _deferred:
+            # Hold it off the receive loop so the main broker's copy can land first.
+            async def _later():
+                await asyncio.sleep(self._mt_dedup_delay)
+                await self._mt_text(topic, pkt, node, _deferred=True)
+            t = asyncio.create_task(_later())
+            self._mt_pending.add(t)
+            t.add_done_callback(self._mt_pending.discard)
+            return
+        is_dm = not pkt["is_broadcast"]
+        # Someone else's DM (some gateways republish decrypted DMs as JSON on .../PKI/).
+        # Shown on its own "Other DMs" channel, addressed to its recipient, so it never
+        # looks like a DM to us. It isn't a real Meshtastic channel: no index, so
+        # bridges and compose never pick it.
+        others_dm = is_dm and pkt.get("to_num") is not None and pkt["to_num"] != self._mt_node_num
+        if others_dm:
+            self._mt_stats["others_dm"] = self._mt_stats.get("others_dm", 0) + 1
+            rcpt = self._mt_nodes.get(pkt["to_id"])
+            rcpt_name = rcpt.display_name if rcpt else pkt["to_id"]
+            channel, ch_idx = OTHER_DMS_CHANNEL, None
+        else:
+            channel = pkt["channel"] or "mqtt"
+            # A DM's "channel" is just the topic it rode on (often PKI); don't list it
+            ch_idx = None if is_dm and channel == "PKI" else self._mt_channel_idx(channel)
+        hop_start, hop_limit = pkt["hop_start"], pkt["hop_limit"]
+        hop_count = (hop_start - hop_limit) if (hop_start is not None and hop_limit is not None) else None
+        key = (pkt["from_num"], pkt["packet_id"])
+        if self._mt_dedup_with and pkt["packet_id"]:
+            now = time.monotonic()
+            if any(now - p._mt_text_seen.get(key, -1e9) < 600 for p in self._mt_peers()):
+                self._mt_stats["cross_duplicates"] += 1
+                log.debug("MQTT %s: text %08x already delivered by %s", self.name, pkt["packet_id"],
+                          ",".join(self._mt_dedup_with))
+                return
+        if pkt["packet_id"]:
+            self._mt_text_seen[key] = time.monotonic()
+            while len(self._mt_text_seen) > 2000:
+                self._mt_text_seen.popitem(last=False)
+        self._mt_stats["text"] += 1
+        msg = NormalizedMessage(
+            source_adapter=self.name,
+            source_channel=OTHER_DMS_CHANNEL if others_dm else ("DM" if is_dm else channel),
+            from_id=pkt["from_id"],
+            from_display=node.display_name,
+            to_id=pkt["to_id"] if is_dm else None,
+            body=(f"[to {rcpt_name}] {text}" if others_dm else f"[DM] {text}" if is_dm else text),
+            priority=_priority(text),
+            hop_count=hop_count,
+            hop_start=hop_start,
+            via_mqtt=True,
+            # Text packets carry no position; use the sender's last known one so the
+            # message gets a map link (flagged in raw so the UI can say so).
+            lat=node.lat,
+            lon=node.lon,
+            raw={
+                "position": "last_known" if node.lat is not None else None,
+                "topic": topic,
+                "mqtt": True,
+                "channel": channel,
+                "channel_idx": ch_idx,
+                "channel_name": channel,
+                "gateway": pkt["gateway_id"],
+                "source": self._mt_source(topic),
+                "packet_id": pkt["packet_id"],
+                "snr": pkt["rx_snr"],
+                "rssi": pkt["rx_rssi"],
+            },
+        )
+        await self._enqueue(msg)
+        log.debug("MQTT %s: meshtastic text %s on %s via %s: %s",
+                  self.name, node.display_name, channel, pkt["gateway_id"], text[:60])
+
+    def _mt_peers(self) -> list["MQTTAdapter"]:
+        return [p for n in self._mt_dedup_with
+                if (p := _MT_REGISTRY.get(n)) is not None and p is not self]
+
+    async def nodes(self) -> list[MeshNode]:
+        return list(self._mt_nodes.values())
+
+    # -- Meshtastic publish ---------------------------------------------------
+    def _mt_resolve_channel(self, raw: dict) -> str | None:
+        hinted = str(raw.get("channel_name") or "").strip()
+        if hinted:
+            # "ch1:MaineNet" (native label) / "#MaineNet" / "MaineNet"
+            want = hinted.split(":", 1)[-1].lstrip("#").lower()
+            for n in self._mt_channel_names:
+                if n.lower() == want:
+                    return n
+        if raw.get("channel_idx") is not None:
+            try:
+                return self._mt_channel_names[int(raw["channel_idx"])]
+            except (TypeError, ValueError, IndexError):
+                log.warning("MQTT %s: no channel at index %r", self.name, raw.get("channel_idx"))
+                return None
+        if hinted:
+            log.info("MQTT %s: channel %r not known here, using TX channel", self.name, hinted)
+        if not self._mt_channel_names:
+            return None
+        return self._mt_channel_names[min(self._mt_tx_idx, len(self._mt_channel_names) - 1)]
+
+    def _mt_roots_for(self, channel: str) -> list[str]:
+        return self._mt_publish_roots or sorted(self._mt_roots.get(channel, ())) or ["msh/US"]
+
+    async def _mt_publish_packet(self, channel: str, to_num: int, portnum: int, payload: bytes) -> int | None:
+        from ech.adapters import meshtastic_mqtt_codec as codec
+        client = self._client
+        if client is None:
+            log.warning("MQTT %s: not connected to broker, can't publish", self.name)
+            return None
+        key = self._mt_keys.get(channel)
+        pid = random.getrandbits(32) or 1
+        env = codec.encode_envelope(from_num=self._mt_node_num, to_num=to_num, packet_id=pid,
+                                    channel=channel, key=key, gateway_id=self._mt_gateway_id,
+                                    portnum=portnum, payload=payload)
+        for root in self._mt_roots_for(channel):
+            await client.publish(f"{root}/2/e/{channel}/{self._mt_gateway_id}", payload=env, qos=self._qos)
+        return pid
+
+    async def _mt_send(self, message: NormalizedMessage) -> bool:
+        from ech.adapters import meshtastic_mqtt_codec as codec
+        raw = message.raw or {}
+        channel = self._mt_resolve_channel(raw)
+        if not channel:
+            return False
+        if channel not in self._mt_keys:
+            log.warning("MQTT %s: no key configured for channel %r - add it to channel_keys", self.name, channel)
+            return False
+        to_num = codec.BROADCAST
+        self.last_send_error = None
+        if message.to_id and not self._mt_allow_dm:
+            # Current firmware uses PKI for DMs (the receiving node's public key + our
+            # private key); a channel-key DM injected via MQTT is dropped by most nodes,
+            # and gateways often don't downlink it. Refuse rather than "succeed" silently.
+            self.last_send_error = "DMs aren't possible over Meshtastic MQTT - reply on the channel"
+            log.warning("MQTT %s: refused DM to %s (DMs not supported over MQTT)", self.name, message.to_id)
+            return False
+        if message.to_id:
+            to_num = codec.parse_node_id(message.to_id)
+            if to_num is None:
+                log.warning("MQTT %s: DM target %r is not a Meshtastic node id", self.name, message.to_id)
+                return False
+        text = message.body.encode("utf-8")
+        if len(text) > 200:
+            text = text[:200].decode("utf-8", errors="ignore").encode("utf-8")
+        try:
+            pid = await self._mt_publish_packet(channel, to_num, 1, text)   # 1 = TEXT_MESSAGE_APP
+        except Exception as exc:
+            log.error("MQTT %s: publish error: %s", self.name, exc)
+            return False
+        if pid is None:
+            return False
+        self._mt_stats["sent"] += 1
+        message.source_channel = "DM" if message.to_id else channel
+        message.raw = {**raw, "channel_idx": self._mt_channel_names.index(channel),
+                       "channel_name": channel, "packet_id": pid, "mqtt": True}
+        self._mark_tx(message)
+        log.info("MQTT %s: published text %08x to %s on %s", self.name, pid,
+                 "DM " + codec.node_id_str(to_num) if message.to_id else "channel", channel)
+        return True
+
+    async def _mt_announce_loop(self) -> None:
+        """Announce our NodeInfo so Meshtastic users see a name, not !ecxxxxxx."""
+        from meshtastic.protobuf import mesh_pb2
+        from ech.adapters import meshtastic_mqtt_codec as codec
+        try:
+            await asyncio.sleep(20)          # let the connection come up and roots be learned
+            while self._connected:
+                channel = self._mt_resolve_channel({})
+                if self._client is not None and channel in self._mt_keys:
+                    user = mesh_pb2.User(id=self._mt_gateway_id, long_name=self._mt_long_name,
+                                         short_name=self._mt_short_name, hw_model=255)  # PRIVATE_HW
+                    try:
+                        await self._mt_publish_packet(channel, codec.BROADCAST, 4, user.SerializeToString())
+                        log.info("MQTT %s: announced NodeInfo %s %r on %s", self.name,
+                                 self._mt_gateway_id, self._mt_long_name, channel)
+                    except Exception as exc:
+                        log.warning("MQTT %s: NodeInfo publish failed: %s", self.name, exc)
+                    await asyncio.sleep(self._mt_nodeinfo_interval)
+                else:
+                    await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            pass
 
     def _looks_meshtastic(self, topic: str, data: dict) -> bool:
         return (
@@ -547,6 +1094,28 @@ class MQTTAdapter(Adapter):
             "tls": self._tls,
             "connected": self._client is not None,
             "auth": auth,
+            **(self._mt_health() if self._mt_enabled else {}),
+        }
+
+    def _mt_health(self) -> dict:
+        names = self._mt_channel_names
+        tx = names[min(self._mt_tx_idx, len(names) - 1)] if names else None
+        return {
+            # Same keys the native Meshtastic adapter reports, so the compose
+            # channel picker and Settings channel switcher work unchanged.
+            "channels_list": [{"idx": i, "name": n} for i, n in enumerate(names)],
+            "channel_labels": list(names),
+            "channel_idx": self._mt_tx_idx,
+            "channel_name": tx,
+            "meshtastic": {
+                **self._mt_stats,
+                "nodes": len(self._mt_nodes),
+                "node_id": self._mt_gateway_id,
+                "publish": self._mt_publish,
+                "channels": {n: {"key": n in self._mt_keys,
+                                 "roots": sorted(self._mt_roots.get(n, ()))} for n in names},
+                "undecodable_channels": dict(self._mt_undecodable),
+            },
         }
 
 

@@ -302,6 +302,10 @@ function toggleNodeBucket(bucket) {
 let _showProtocols = new Set(['meshtastic', 'meshcore', 'aprs']);
 
 function nodeProtocol(node) {
+  // A shared feed (one MQTT adapter carrying several networks) tags each node
+  // with its protocol; fall back to the adapter's name for everything else.
+  const p = node.meta && node.meta.protocol;
+  if (p === 'meshtastic' || p === 'meshcore' || p === 'aprs') return p;
   const a = (node._adapter || '').toLowerCase();
   if (a.includes('meshtastic')) return 'meshtastic';
   if (a.includes('meshcore'))   return 'meshcore';
@@ -827,11 +831,11 @@ async function loadNodes() {
       // reduced marker opacity below — the old grey (#555566) override erased
       // which network a stale node belonged to and, on the dark tiles, made
       // dimmed markers look missing entirely.
-      const color = isAlert ? '#f85149' : isVessel ? adapterColor('ais') : adapterColor(node._adapter);
+      const color = isAlert ? '#f85149' : isVessel ? adapterColor('ais') : adapterColor(nodeProtocol(node) || node._adapter);
       const size  = isAlert ? 16 : 12;
       const popup = popupContent(node, isAlert);
       const icon  = makeNodeIcon(node, color, size);
-      _trackRecord(id, node.lat, node.lon, isVessel ? adapterColor('ais') : adapterColor(node._adapter), _trackInfo(node));
+      _trackRecord(id, node.lat, node.lon, isVessel ? adapterColor('ais') : adapterColor(nodeProtocol(node) || node._adapter), _trackInfo(node));
 
       if (markers[id]) {
         markers[id].setLatLng([node.lat, node.lon]);

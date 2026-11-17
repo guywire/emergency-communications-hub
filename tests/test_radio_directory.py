@@ -34,10 +34,12 @@ def _plain(entries):
     return [{k: v for k, v in e.items() if k not in ("asl_status", "allstar_node")} for e in entries]
 
 
-def test_builtin_hamvoip_entries_are_all_test_category():
-    """No built-in 'group' or 'music' entries — see module docstring for why."""
+def test_builtin_hamvoip_entries_are_allstar_reference_only():
+    """No built-in 'group' or 'music' entries — see module docstring for why.
+    They're AllStarLink node numbers, which this PBX's HOIP trunk can't reach,
+    so they're marked not dialable."""
     assert len(BUILTIN_HAMVOIP_ENTRIES) > 0
-    assert all(e["category"] == "test" for e in BUILTIN_HAMVOIP_ENTRIES)
+    assert all(e["category"] == "allstar" and e["dialable"] is False for e in BUILTIN_HAMVOIP_ENTRIES)
 
 
 def test_builtin_hamvoip_entries_have_required_fields():
@@ -105,7 +107,7 @@ def test_hoip_test_entries_include_echo_test():
 
 def test_get_directory_without_config_returns_builtins_only():
     d = get_directory({})
-    assert _plain(d["hamvoip"]) == BUILTIN_HAMVOIP_ENTRIES + HOIP_ALL_ENTRIES
+    assert _plain(d["hamvoip"]) == HOIP_ALL_ENTRIES + BUILTIN_HAMVOIP_ENTRIES
     assert d["aredn"] == []
     # No refresh has happened, so nothing can be claimed up or down
     assert {e["asl_status"] for e in d["hamvoip"]} == {"unknown"}
@@ -135,13 +137,14 @@ def test_get_directory_merges_operator_entries():
     }
     d = get_directory(cfg)
     assert len(d["hamvoip"]) == len(BUILTIN_HAMVOIP_ENTRIES) + len(HOIP_ALL_ENTRIES) + 1
-    assert d["hamvoip"][-1]["name"] == "Local ARES hub"
+    assert d["hamvoip"][len(HOIP_ALL_ENTRIES)]["name"] == "Local ARES hub"   # after HOIP, before AllStar
+    assert d["hamvoip"][0]["category"] == "hoip_test"
     assert len(d["aredn"]) == 1
     assert d["aredn"][0]["destination"] == "n0call-gw.local.mesh"
 
 
 def test_get_directory_handles_missing_sections_gracefully():
-    expected_hamvoip = BUILTIN_HAMVOIP_ENTRIES + HOIP_ALL_ENTRIES
+    expected_hamvoip = HOIP_ALL_ENTRIES + BUILTIN_HAMVOIP_ENTRIES
     for cfg in ({"radio_directory": {}}, {"radio_directory": None}):
         d = get_directory(cfg)
         assert _plain(d["hamvoip"]) == expected_hamvoip

@@ -1635,11 +1635,13 @@ class MeshCoreAdapter(Adapter):
                 # Support numeric string ("2") as a direct channel index
                 try:
                     ch_idx = int(want)
-                    if ch_idx < 0 or ch_idx > 7:
+                    if ch_idx < 0 or (self._channels and ch_idx not in self._channels and ch_idx > 7):
                         raise ValueError("out of range")
                 except ValueError:
+                    # Hashtag channels are stored WITH their "#" ("#weather"); the hint
+                    # has it stripped, so compare both without it.
                     resolved = next(
-                        (idx for idx, n in self._channels.items() if n.lower() == want),
+                        (idx for idx, n in self._channels.items() if n.lower().lstrip("#") == want),
                         None,
                     )
                     if resolved is None:

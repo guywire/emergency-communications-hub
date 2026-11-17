@@ -859,7 +859,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                 elif adapter._paused:
                     failure_reasons[name] = "paused"
                 else:
-                    failure_reasons[name] = "send failed"
+                    failure_reasons[name] = getattr(adapter, "last_send_error", None) or "send failed"
         return {
             "results": {k: v["ok"] for k, v in tracked.items()},
             "msg_ids": {k: v["msg_id"] for k, v in tracked.items() if v["msg_id"]},
@@ -1780,7 +1780,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     # own wiki reference lists, plus the generic AllStarLink parrot nodes)
     # actually comes from.
     _DIRECTORY_CATEGORY_TAGS = {
-        "test": "TEST", "hoip_test": "HOIP TEST",
+        "test": "TEST", "allstar": "ALLSTAR", "hoip_test": "HOIP TEST",
         "hoip_conference_us": "CONF-US", "hoip_conference_eu": "CONF-EU", "hoip_conference_ap": "CONF-AP",
         "hoip_rf_link_us": "RF-US", "hoip_rf_link_eu": "RF-EU", "hoip_rf_link_ap": "RF-AP",
         "hoip_audio_feed": "AUDIO",
@@ -1823,6 +1823,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         for e in directory.get("hamvoip", []):
             if e.get("asl_status") == "down":
                 continue   # AllStar node not registered right now — don't put it on the phones
+            if e.get("dialable") is False:
+                continue   # AllStar node number: not reachable through this PBX's trunks
             tag = _DIRECTORY_CATEGORY_TAGS.get(e.get("category"))
             name = f"[{tag}] {e['name']}" if tag else e["name"]
             entries += (f'<DirectoryEntry><Name>{escape(name)}</Name>'
@@ -1993,7 +1995,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not wx_service:
             return {"status": "error", "detail": "Weather service not configured"}
         summary = await wx_service.fetch_conditions_and_forecast()
-        results = await router.send(body=summary, adapter_names=adapters or None)
+        results = await router.send(body=summary, adapter_names=adapters or None,
+                                    raw=wx_service.channel_hint())
         return {"status": "ok", "summary": summary, "sent": results}
 
     # ── Air quality / wildfire smoke service ────────────────────────────────
@@ -3351,8 +3354,15 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             "ndbc_station":          wx_bot._ndbc_station,
             "ndbc_lat":              wx_bot._ndbc_lat,
             "ndbc_lon":              wx_bot._ndbc_lon,
-            "mention_name":          wx_bot._mention_name,
+            # A list internally (several names may address the bot); the form edits it comma-separated
+            "mention_name":          ", ".join(wx_bot._mention_name),
+            "respond_all_channels":  ", ".join(wx_bot._respond_all_channels),
         }
+
+    def _split_names(v) -> list[str]:
+        """Comma-separated string (or list) -> clean list of names."""
+        items = v if isinstance(v, list) else str(v or "").split(",")
+        return [str(x).strip() for x in items if str(x).strip()]
 
     @app.post("/api/bot/config")
     async def update_bot_config(request: Request):
@@ -3380,7 +3390,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             wx_bot._config.setdefault("mesh_bot", {})["aprs_fi_key"] = data["aprs_fi_key"]
         if "ships_radius_nm" in data:
             wx_bot._config.setdefault("mesh_bot", {})["ships_radius_nm"] = float(data["ships_radius_nm"])
-        if "mention_name" in data:          wx_bot._mention_name         = str(data["mention_name"]).strip()
+        if "mention_name" in data:          wx_bot._mention_name         = _split_names(data["mention_name"])
+        if "respond_all_channels" in data:  wx_bot._respond_all_channels = [c.lower() for c in _split_names(data["respond_all_channels"])]
         if "tide_station" in data:          wx_bot._tide_station         = str(data["tide_station"]).strip()
         if "ndbc_station" in data:          wx_bot._ndbc_station         = str(data["ndbc_station"]).strip()
         if "ndbc_lat" in data:              wx_bot._ndbc_lat             = float(data["ndbc_lat"]) if data["ndbc_lat"] not in (None, "") else None
@@ -3412,7 +3423,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             if "ndbc_station" in data:          bot_cfg["ndbc_station"]          = str(data["ndbc_station"]).strip()
             if "ndbc_lat" in data:              bot_cfg["ndbc_lat"]              = float(data["ndbc_lat"]) if data["ndbc_lat"] not in (None, "") else None
             if "ndbc_lon" in data:              bot_cfg["ndbc_lon"]              = float(data["ndbc_lon"]) if data["ndbc_lon"] not in (None, "") else None
-            if "mention_name" in data:          bot_cfg["mention_name"]          = str(data["mention_name"]).strip()
+            if "mention_name" in data:
+                _mn = _split_names(data["mention_name"])
+                bot_cfg["mention_name"] = _mn[0] if len(_mn) == 1 else _mn
+            if "respond_all_channels" in data:  bot_cfg["respond_all_channels"]  = _split_names(data["respond_all_channels"])
             atomic_write_yaml(config_path, cfg)
             return {"status": "ok"}
         except PermissionError as exc:

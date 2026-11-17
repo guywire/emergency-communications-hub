@@ -352,6 +352,74 @@ CREATE INDEX IF NOT EXISTS idx_net_probe_ts ON net_probe (ts);
 """
 
 
+def _is_lock_error(exc: BaseException) -> bool:
+    import sqlite3
+    return isinstance(exc, sqlite3.OperationalError) and (
+        "locked" in str(exc).lower() or "busy" in str(exc).lower())
+
+
+class _GuardedConnection:
+    """Wraps ECH's single aiosqlite connection so a statement that fails with
+    "database is locked" can't wedge it.
+
+    sqlite3 opens an implicit transaction on the first write. If that write (or a
+    later one before commit) hits a lock held by another process, the
+    transaction stays open on a WAL snapshot that goes stale as soon as the other
+    writer commits. After that, every write on this connection fails at once with
+    "database is locked" until a restart (seen live 2026-11-16). Rolling back on
+    the first lock error ends the stale transaction. Uncommitted writes queued by
+    other coroutines on this connection are lost with it, but they could never
+    have committed anyway.
+    """
+
+    _last_warn = 0.0
+
+    def __init__(self, conn: aiosqlite.Connection):
+        object.__setattr__(self, "_c", conn)
+
+    def __getattr__(self, name):
+        return getattr(self._c, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._c, name, value)
+
+    async def _recover(self, exc: BaseException) -> None:
+        if not _is_lock_error(exc):
+            return
+        try:
+            if self._c.in_transaction:
+                await self._c.rollback()
+        except Exception:
+            pass
+        import time
+        now = time.monotonic()
+        if now - _GuardedConnection._last_warn > 60:
+            _GuardedConnection._last_warn = now
+            log.warning("Database: write hit a lock (%s) - rolled back the open transaction", exc)
+
+    async def _guard(self, coro):
+        try:
+            return await coro
+        except Exception as exc:
+            await self._recover(exc)
+            raise
+
+    def execute(self, *args, **kwargs):
+        from aiosqlite.context import Result
+        return Result(self._guard(self._c.execute(*args, **kwargs)))
+
+    def executemany(self, *args, **kwargs):
+        from aiosqlite.context import Result
+        return Result(self._guard(self._c.executemany(*args, **kwargs)))
+
+    def executescript(self, *args, **kwargs):
+        from aiosqlite.context import Result
+        return Result(self._guard(self._c.executescript(*args, **kwargs)))
+
+    async def commit(self) -> None:
+        await self._guard(self._c.commit())
+
+
 class Database:
     def __init__(self, path: str | Path = "ech.db"):
         self._path = str(path)
@@ -362,10 +430,14 @@ class Database:
         self.last_health_check: dict = {"ok": None, "checked_at": None, "detail": None}
 
     async def connect(self) -> None:
-        self._db = await aiosqlite.connect(self._path)
+        self._db = _GuardedConnection(await aiosqlite.connect(self._path))
         self._db.row_factory = aiosqlite.Row
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        # Read (and so finalize) each PRAGMA's result row: on newer
+        # Python/aiosqlite an unread cursor keeps the statement open and the next
+        # checkpoint/schema statement fails with "database table is locked".
+        for pragma in ("PRAGMA journal_mode=WAL", "PRAGMA wal_checkpoint(TRUNCATE)"):
+            async with self._db.execute(pragma) as cur:
+                await cur.fetchall()
         await self._db.executescript(SCHEMA)
         await self._db.commit()
         await self._migrate()
@@ -1272,6 +1344,12 @@ class Database:
             # Log lines emitted during shutdown can race the database close —
             # drop them quietly instead of an unhandled-task traceback.
             pass
+        except sqlite3.OperationalError:
+            # e.g. "database is locked": drop this line. Raising (or logging it)
+            # would schedule another log write, and a stuck database turned that
+            # into hundreds of tracebacks a second. The connection guard has
+            # already rolled back, so the next write can succeed.
+            self.dropped_log_writes = getattr(self, "dropped_log_writes", 0) + 1
 
     async def _save_log_entry(self, level: str, logger: str, message: str, ts: str) -> None:
         if self._db is None:

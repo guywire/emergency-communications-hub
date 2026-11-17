@@ -806,7 +806,7 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
         <label><input type="checkbox" id="br-dm"> Include direct messages</label>
         <label><input type="checkbox" id="br-prefix" checked> Sender attribution ("Bob: …")</label>
         <label><input type="checkbox" id="br-callsign"> Only senders with a callsign</label>
-        <label><input type="checkbox" id="br-dry" checked> Dry run (log only)</label>
+        <label title="Applies to the bridge you are adding; existing bridges show their own LIVE / DRY RUN state above"><input type="checkbox" id="br-dry" checked> Start new bridge in dry run (log only)</label>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
         <button class="btn btn-green" onclick="addBridgeRule()">Add bridge</button>
@@ -1117,8 +1117,12 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
       </div>
       <div class="row">
         <div>
-          <label>Channel mention name (@name triggers an error reply on unrecognized channel messages)</label>
+          <label>Mention names (comma-separated; @name or @[name] addresses the bot on a channel — the radio's own node name always counts too)</label>
           <input type="text" id="bot-mention-name" placeholder="SM">
+        </div>
+        <div>
+          <label>Bot channels (comma-separated; every message there gets an answer, no @mention needed)</label>
+          <input type="text" id="bot-respond-all" placeholder="#bot">
         </div>
       </div>
       <div class="row3">
@@ -2768,15 +2772,22 @@ function renderBridgeRules() {
     }
     const st = (_bridgeStatus.rules || []).find(s => s.name === r.name);
     const c = st ? st.counters : null;
-    const counts = c ? `fwd ${c.forwarded}${r.dry_run ? ` · would ${c.would_forward}` : ''} · rate-drop ${c.dropped_rate} · loop ${c.dropped_loop} · dup ${c.dropped_duplicate}` : '';
-    const flags = [(r.types || []).join('+'), `${r.rate_per_min}/min`, r.dry_run ? 'DRY RUN' : '', r.require_callsign ? 'callsign only' : '', r.enabled === false ? 'DISABLED' : '']
+    const counts = c ? (r.dry_run ? `would have forwarded ${c.would_forward}` : `forwarded ${c.forwarded}`)
+      + ` · rate-drop ${c.dropped_rate} · loop ${c.dropped_loop} · dup ${c.dropped_duplicate}` : '';
+    // Last thing this rule did, from the decision log below
+    const last = (_bridgeStatus.log || []).filter(e => e.rule === r.name).slice(-1)[0];
+    const lastTxt = last ? `last: ${new Date(last.t * 1000).toLocaleTimeString()} ${last.outcome}` : 'no traffic since the last restart';
+    const state = r.enabled === false ? ['DISABLED', 'var(--muted)']
+      : r.dry_run ? ['DRY RUN — logging only, nothing is sent', 'var(--yellow)'] : ['LIVE', 'var(--green)'];
+    const badge = `<span style="color:${state[1]};font-weight:600">● ${state[0]}</span>`;
+    const flags = [(r.types || []).join('+'), `${r.rate_per_min}/min`, r.require_callsign ? 'callsign only' : '']
       .filter(Boolean).join(' · ');
     return `<div class="user-row" style="align-items:flex-start">
       <span class="user-name" style="font-family:var(--mono);font-size:11px;line-height:1.5">
         <b>${esc(r.name)}</b>: ${_endpointText(r.a)} <span style="color:var(--blue)">${arrow[r.direction] || '?'}</span> ${_endpointText(r.b)}<br>
-        <span style="color:var(--muted)">${flags}</span>${counts ? `<br><span style="color:var(--dim)">${counts}</span>` : ''}</span>
+        ${badge} <span style="color:var(--muted)">${flags}</span>${counts ? `<br><span style="color:var(--dim)">${counts} · ${esc(lastTxt)}</span>` : ''}</span>
       <span style="display:flex;gap:4px">
-        <button class="btn btn-blue" onclick="toggleBridgeDry(${i})" style="padding:3px 8px;font-size:10px">${r.dry_run ? 'Go live' : 'Dry run'}</button>
+        <button class="btn ${r.dry_run ? 'btn-green' : 'btn-blue'}" onclick="toggleBridgeDry(${i})" style="padding:3px 8px;font-size:10px">${r.dry_run ? 'Go live' : 'Switch to dry run'}</button>
         <button class="btn btn-red" onclick="deleteBridge(${i})" style="padding:3px 8px;font-size:10px">Remove</button>
       </span></div>`;
   }).join('') : '<div style="font-family:var(--mono);font-size:11px;color:var(--dim)">No bridges</div>';
@@ -3672,9 +3683,9 @@ function renderPBXDirectory() {
       <div style="margin-bottom:6px">
         <div style="color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${esc(cat)} (${entries.length})</div>
         ${entries.map(e => `
-          <div style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;${e.asl_status === 'down' ? 'opacity:.55' : ''}" onclick="useDirectoryEntry('${esc(e.destination)}')"
-               title="${esc(e.description || '')}${e.allstar_node ? ` — AllStar ${esc(e.allstar_node)}: ${esc(e.asl_status)}` : ''}">
-            <span style="color:var(--blue)">📞</span>
+          <div style="display:flex;align-items:center;gap:6px;padding:2px 0;${e.dialable === false ? '' : 'cursor:pointer;'}${e.asl_status === 'down' ? 'opacity:.55' : ''}" ${e.dialable === false ? '' : `onclick="useDirectoryEntry('${esc(e.destination)}')"`}
+               title="${esc(e.description || '')}${e.allstar_node ? ` — AllStar ${esc(e.allstar_node)}: ${esc(e.asl_status)}` : ''}${e.dialable === false ? ' — AllStarLink node: not dialable through this PBX' : ''}">
+            <span style="color:${e.dialable === false ? 'var(--dim)' : 'var(--blue)'}">${e.dialable === false ? '·' : '📞'}</span>
             <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${e.asl_status === 'up' ? 'var(--green)' : e.asl_status === 'down' ? 'var(--red)' : 'transparent'}"></span>
             <span style="color:var(--text)">${esc(e.name)}</span>
             <span style="color:var(--dim)">(${esc(e.destination)})</span>
@@ -4409,6 +4420,7 @@ async function loadBotConfig() {
     }
     document.getElementById('bot-adapters').value     = (d.adapters||[]).join(', ');
     document.getElementById('bot-mention-name').value = d.mention_name || '';
+    document.getElementById('bot-respond-all').value = d.respond_all_channels || '';
     document.getElementById('bot-user-cd').value      = d.per_user_cooldown_sec ?? 30;
     document.getElementById('bot-global-cd').value    = d.global_cooldown_sec ?? 5;
     document.getElementById('bot-maxlen').value       = d.max_reply_len ?? 200;
@@ -4444,6 +4456,7 @@ async function saveBotConfig() {
     channels:              chStr.split(',').map(s=>s.trim()).filter(Boolean),
     adapters:              adStr.split(',').map(s=>s.trim()).filter(Boolean),
     mention_name:          document.getElementById('bot-mention-name').value.trim(),
+    respond_all_channels:  document.getElementById('bot-respond-all').value.trim(),
     per_user_cooldown_sec: parseInt(document.getElementById('bot-user-cd').value)||30,
     global_cooldown_sec:   parseInt(document.getElementById('bot-global-cd').value)||5,
     max_reply_len:         parseInt(document.getElementById('bot-maxlen').value)||200,

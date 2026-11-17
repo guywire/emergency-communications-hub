@@ -94,7 +94,11 @@ Config block (config.yaml):
     ships_radius_nm: 50               # nautical miles for nearby ship list
     tle_targets: ["ISS (ZARYA)", "NOAA 19", "NOAA 18"]
     solar_cache_sec: 900              # re-fetch solar data after this many seconds
-    mention_name: "SM"                # @name that triggers an error reply on unrecognized channel messages
+    mention_name: "SM"                # @name(s) that address the bot (string or list). The receiving
+                                      # radio's own node name always counts too, so the MeshCore app's
+                                      # "@[NodeName]" mention works without configuring it.
+    respond_all_channels: ["#bot"]    # channels where EVERY message gets an answer (unrecognized
+                                      # text gets a help reply) - a dedicated bot channel
 """
 from __future__ import annotations
 
@@ -366,14 +370,21 @@ def _parse_channel_idx(source_channel: str | None) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _is_mentioned(body: str, name: str) -> bool:
+def _is_mentioned(body: str, name) -> bool:
     """True if body contains "@name" as a whole word (case-insensitive), used to
     let channel traffic address the bot directly without it replying to every
     message. The trailing boundary check keeps "foo@smith.com" from matching
-    mention_name="SM"."""
-    if not name:
-        return False
-    return re.search(r'@' + re.escape(name) + r'(?![a-z0-9])', body, re.IGNORECASE) is not None
+    mention_name="SM". `name` may be a list. Each name matches both "@Name" and
+    the MeshCore app's "@[Name]" form, with or without brackets in the config."""
+    names = name if isinstance(name, (list, tuple, set)) else [name]
+    for n in names:
+        bare = str(n or "").strip().strip("[]").strip()
+        if not bare:
+            continue
+        pat = r'@(?:\[' + re.escape(bare) + r'\]|' + re.escape(bare) + r'(?![a-z0-9]))'
+        if re.search(pat, body, re.IGNORECASE):
+            return True
+    return False
 
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
@@ -474,7 +485,10 @@ class MeshBot:
         self._ndbc_station         = str(cfg.get("ndbc_station", "")).strip()
         self._ndbc_lat: float | None = cfg.get("ndbc_lat")
         self._ndbc_lon: float | None = cfg.get("ndbc_lon")
-        self._mention_name         = str(cfg.get("mention_name", "SM")).strip()
+        _mn = cfg.get("mention_name", "SM")
+        self._mention_name: list[str] = [str(x).strip() for x in (_mn if isinstance(_mn, list) else [_mn]) if str(x).strip()]
+        # Dedicated bot channels: every message there is a request.
+        self._respond_all_channels = [c.lower() for c in cfg.get("respond_all_channels", [])]
 
         # Observer coordinates — priority: mesh_bot.lat/lon → weather_service.nws_lat/lon → state.base_lat/lon
         wx_cfg = config.get("weather_service", {})
@@ -577,6 +591,20 @@ class MeshBot:
 
     # ── Inbound pipeline hook ─────────────────────────────────────────────────
 
+    def _names_for(self, msg: NormalizedMessage) -> list[str]:
+        """Names that address the bot on this message: the configured mention
+        name(s) plus the receiving radio's own node name (what the MeshCore app
+        inserts as "@[NodeName]" when you tap the node)."""
+        names = list(self._mention_name)
+        try:
+            ad = self._router._adapters.get(msg.source_adapter) if self._router else None
+            own = getattr(ad, "_device_name", "") or getattr(ad, "_mt_long_name", "")
+            if own and own not in names:
+                names.append(own)
+        except Exception:
+            pass
+        return names
+
     async def handle(self, msg: NormalizedMessage) -> None:
         if not self.enabled or not self._client:
             return
@@ -591,9 +619,12 @@ class MeshBot:
         ch = (msg.source_channel or "").lower()
         is_dm = ch == "dm"
         mention_required = False
+        respond_all = False
+        names = self._names_for(msg)
         if not is_dm:
             if ":" in ch:
                 ch_idx_part, ch_name_part = ch.split(":", 1)  # e.g. "ch2", "testing"
+                ch_name_part = ch_name_part.lstrip("#")       # "ch2:#bot" matches a configured "#bot"
             else:
                 ch_idx_part, ch_name_part = ch, ""            # e.g. "ch2", ""
             # Extract bare numeric index ("ch2" → "2")
@@ -609,7 +640,7 @@ class MeshBot:
                 if ":" in c:
                     c_idx, c_name = c.split(":", 1)
                     if c_idx == ch_idx_part:           return True   # idx part matches
-                    if c_name and c_name == ch_name_part: return True  # name part matches
+                    if c_name and c_name.lstrip("#") == ch_name_part: return True  # name part matches
                 return False
 
             if self._channels:
@@ -633,6 +664,7 @@ class MeshBot:
             # the bot itself already asked (trivia answer, category pick below),
             # only to starting something new from a bare command word.
             mention_required = any(_matches(c) for c in self._mention_required_channels)
+            respond_all = any(_matches(c) for c in self._respond_all_channels)
 
             # A pending category prompt claims the next channel message as the
             # pick, same idea as the DM version below.
@@ -691,7 +723,7 @@ class MeshBot:
                 asyncio.ensure_future(self._dispatch_trivia_answer(msg, am.group(1).upper()))
                 return
 
-        if mention_required and not _is_mentioned(msg.body, self._mention_name):
+        if mention_required and not _is_mentioned(msg.body, names):
             # This channel requires an explicit @mention for anything to fire —
             # skip command matching entirely rather than letting an ordinary
             # sentence that happens to contain a trigger word dispatch a reply.
@@ -707,7 +739,7 @@ class MeshBot:
             # bot, so always answer — silence there looks like a dead bot. Channel
             # traffic is only answered if it @-mentions the bot; otherwise every
             # unrelated chat message on a monitored channel would get an error reply.
-            if not is_dm and not _is_mentioned(msg.body, self._mention_name):
+            if not is_dm and not respond_all and not _is_mentioned(msg.body, names):
                 return
             cmd, args = "unknown", ""
 

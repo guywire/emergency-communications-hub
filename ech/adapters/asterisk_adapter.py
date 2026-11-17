@@ -46,6 +46,14 @@ Config keys (under adapters: in config.yaml)
   intercom_chime  bool    Play a two-note chime before the speech (default: true)
   vm_context      str     Voicemail context (mailboxes are "{ext}@{vm_context}")
                           (default: default)
+  watch_extensions list   Extensions to keep an eye on (e.g. a guest phone on
+                          AREDN): every registration, call to/from and blocked
+                          dial becomes a finding on the Anomalies page (default: none)
+  security_alerts bool    Failed SIP/IAX/AMI logins (Asterisk security events)
+                          become findings, grouped per remote address (default: true)
+  security_alert_threshold int   Failures from one address before the first
+                          finding; later ones each time the count doubles (default: 3)
+  security_alert_window_s float  Counting window per address (default: 900)
   vm_spool_dir    str     Voicemail spool directory override — defaults to
                           /var/spool/asterisk/voicemail/{vm_context}. ECH reads
                           this directly (no AMI equivalent exists) to list and
@@ -99,6 +107,45 @@ def valid_extension(ext) -> bool:
     return bool(ext) and bool(_EXT_RE.fullmatch(str(ext)))
 
 
+# Asterisk security events (AMI class "security") that mean a failed login or
+# a refused request. ChallengeSent / SuccessfulAuth are normal traffic.
+SECURITY_FAIL_EVENTS = frozenset({
+    "InvalidPassword", "ChallengeResponseFailed", "InvalidAccountID", "FailedACL",
+    "UnexpectedAddress", "AuthMethodNotAllowed", "RequestNotAllowed",
+})
+
+
+def remote_ip(addr: str) -> str:
+    """'IPV4/UDP/10.1.2.3/5060' -> '10.1.2.3'."""
+    parts = (addr or "").split("/")
+    return parts[2] if len(parts) >= 3 else ""
+
+
+def contact_ip(uri: str) -> str:
+    """'sip:107@10.1.2.3:5060;ob' -> '10.1.2.3'."""
+    m = re.search(r"@\[?([0-9A-Fa-f.:]+?)\]?(?::\d+)?(?:[;>]|$)", uri or "")
+    return m.group(1) if m else ""
+
+
+def _b64_field(pkt: dict, name: str) -> str:
+    """`<name>64` (base64, as the [messages] dialplan sends it) if present,
+    else the plain `<name>` header (older dialplans)."""
+    enc = pkt.get(name + "64")
+    if enc is not None:
+        import base64, binascii
+        try:
+            return base64.b64decode(enc.strip(), validate=False).decode("utf-8", "replace")
+        except (binascii.Error, ValueError):
+            return ""
+    return pkt.get(name, "")
+
+
+def channel_endpoint(channel: str) -> str:
+    """'PJSIP/107-0000001a' -> '107' ('' for other channel types)."""
+    m = re.match(r"PJSIP/([^-]+)-", channel or "")
+    return m.group(1) if m else ""
+
+
 class AsteriskAdapter(Adapter):
 
     # Overridden below (True) — this box can send real SIP MESSAGE text to
@@ -140,6 +187,17 @@ class AsteriskAdapter(Adapter):
         self._iax_peers: dict[str, str] = {}      # peer name -> Status text
         self._iax_scratch: dict[str, str] = {}
         self.auto_page_on_emergency = bool(config.get("auto_page_on_emergency", True))
+
+        # PBX security / watch findings (Anomalies page). The router sets
+        # _anomaly_engine on adapters that have the attribute.
+        self._anomaly_engine = None
+        self._watch_exts = {str(e).strip() for e in (config.get("watch_extensions") or [])
+                            if valid_extension(str(e).strip())}
+        self._security_alerts = bool(config.get("security_alerts", True))
+        self._sec_threshold = max(1, int(config.get("security_alert_threshold", 3)))
+        self._sec_window = float(config.get("security_alert_window_s", 900))
+        self._sec_seen: dict[str, dict] = {}       # remote IP -> {first, count, accounts, alerted}
+        self._watch_contact_ip: dict[str, str] = {}   # watched ext -> last registered IP
 
         # Screen phone stubs
         self._screen_ext     = config.get("screen_extension", "")
@@ -245,6 +303,15 @@ class AsteriskAdapter(Adapter):
                 event = pkt.get("Event", "")
                 if event == "Newchannel":
                     self._on_new_channel(pkt)
+                    await self._watch_new_channel(pkt)
+                elif event in SECURITY_FAIL_EVENTS:
+                    await self._on_security_failure(event, pkt)
+                elif event == "ContactStatus":
+                    await self._on_contact_status(pkt)
+                elif event == "DialBegin":
+                    await self._watch_dial_begin(pkt)
+                elif event == "UserEvent" and pkt.get("UserEvent") == "ECHGuestBlocked":
+                    await self._on_guest_blocked(pkt)
                 elif event == "Hangup":
                     await self._on_hangup(pkt)
                 elif event == "MessageWaiting":
@@ -382,6 +449,106 @@ class AsteriskAdapter(Adapter):
             self._call_log = self._call_log[:50]
         log.info("AMI Hangup: %s from %s duration=%s", status, call["callerid"], dur_str)
 
+    # ── PBX security + watched extensions (findings on the Anomalies page) ──
+
+    async def _finding(self, node_id: str, rule: str, severity: str, summary: str, evidence: dict) -> None:
+        if not self._anomaly_engine:
+            return
+        from ech.core.anomaly import Severity
+        try:
+            await self._anomaly_engine.report(self.name, node_id, rule, Severity(severity), summary, evidence)
+        except Exception as exc:
+            log.warning("%s: could not record %s finding: %s", self.name, rule, exc)
+
+    async def _on_security_failure(self, event: str, pkt: dict) -> None:
+        """Failed SIP/IAX/AMI logins: wrong password, unknown account, ACL
+        refusal. One finding per remote address once it reaches the threshold
+        within the window, then a follow-up each time the count doubles."""
+        if not self._security_alerts:
+            return
+        ip = remote_ip(pkt.get("RemoteAddress", "")) or "unknown"
+        account = pkt.get("AccountID", "")[:40]
+        now = time.monotonic()
+        rec = self._sec_seen.get(ip)
+        if not rec or now - rec["first"] > self._sec_window:
+            rec = {"first": now, "count": 0, "accounts": set(), "events": set(), "alerted": 0}
+            self._sec_seen[ip] = rec
+            if len(self._sec_seen) > 500:   # don't grow without bound during a scan
+                for k in sorted(self._sec_seen, key=lambda k: self._sec_seen[k]["first"])[:250]:
+                    self._sec_seen.pop(k, None)
+        rec["count"] += 1
+        if account:
+            rec["accounts"].add(account)
+        rec["events"].add(event)
+        n = rec["count"]
+        if n < self._sec_threshold or n < rec["alerted"] * 2:
+            return
+        rec["alerted"] = n
+        accts = sorted(rec["accounts"])
+        watched = sorted(set(accts) & self._watch_exts)
+        sev = "alert" if (n >= 20 or watched) else "warn"
+        what = ", ".join(sorted(rec["events"]))
+        summary = (f"{n} failed PBX logins from {ip} in {int((now - rec['first']) // 60)} min "
+                   f"({what}; account {', '.join(accts[:5]) or '?'}{'…' if len(accts) > 5 else ''})")
+        await self._finding(ip, "pbx_auth_failure", sev, summary, {
+            "remote_ip": ip, "count": n, "events": sorted(rec["events"]), "accounts": accts[:20],
+            "service": pkt.get("Service", ""), "watched_extension": watched,
+            "tip": "Repeated failures from one address are usually a SIP scanner or a phone with "
+                   "a wrong password. fail2ban's asterisk jail bans persistent offenders."})
+
+    async def _on_contact_status(self, pkt: dict) -> None:
+        ext = pkt.get("EndpointName") or pkt.get("AOR", "")
+        if ext not in self._watch_exts:
+            return
+        status = pkt.get("ContactStatus", "")
+        if status not in ("Created", "Removed", "Unreachable"):
+            return
+        ip = contact_ip(pkt.get("URI", ""))
+        prev = self._watch_contact_ip.get(ext)
+        sev = "info"
+        note = ""
+        if status == "Created":
+            self._watch_contact_ip[ext] = ip
+            if prev and ip and ip != prev:
+                sev, note = "warn", f" (was {prev})"
+            if ip and not ip.startswith("10."):
+                sev, note = "alert", note + " - not an AREDN mesh address"
+        verb = {"Created": "registered from", "Removed": "unregistered from",
+                "Unreachable": "stopped answering at"}[status]
+        await self._finding(ext, "pbx_watched_registration", sev,
+                            f"Ext {ext} {verb} {ip or '?'}{note}",
+                            {"extension": ext, "status": status, "ip": ip, "previous_ip": prev,
+                             "user_agent": pkt.get("UserAgent", "")[:80]})
+
+    async def _watch_new_channel(self, pkt: dict) -> None:
+        """A call placed BY a watched extension (its phone's own channel)."""
+        ext = channel_endpoint(pkt.get("Channel", ""))
+        dialed = pkt.get("Exten", "")
+        if ext not in self._watch_exts or dialed in ("", "s"):
+            return
+        await self._finding(ext, "pbx_watched_call", "info", f"Ext {ext} dialed {dialed}",
+                            {"extension": ext, "dialed": dialed, "context": pkt.get("Context", ""),
+                             "direction": "outbound"})
+
+    async def _watch_dial_begin(self, pkt: dict) -> None:
+        """A call TO a watched extension."""
+        ext = channel_endpoint(pkt.get("DestChannel", ""))
+        if ext not in self._watch_exts:
+            return
+        frm = pkt.get("CallerIDNum", "") or "?"
+        await self._finding(ext, "pbx_watched_call", "info", f"Ext {ext} called by {frm}",
+                            {"extension": ext, "caller": frm,
+                             "caller_name": pkt.get("CallerIDName", "")[:40], "direction": "inbound"})
+
+    async def _on_guest_blocked(self, pkt: dict) -> None:
+        """[aredn-guest]'s catch-all: a guest phone dialed something it may not
+        (the HOIP trunk, paging, ...). Raised by UserEvent(ECHGuestBlocked)."""
+        ext = channel_endpoint(pkt.get("Channel", "")) or pkt.get("Caller", "?")
+        dialed = pkt.get("Exten", "")[:40]
+        await self._finding(ext, "pbx_guest_blocked", "warn",
+                            f"Ext {ext} tried to dial {dialed} - not allowed for guest phones",
+                            {"extension": ext, "dialed": dialed})
+
     async def _on_message_waiting(self, pkt: dict) -> None:
         mailbox_full = pkt.get("Mailbox", "")   # e.g. "101@default"
         mailbox = mailbox_full.split("@")[0].strip()
@@ -414,9 +581,12 @@ class AsteriskAdapter(Adapter):
         """Inbound SIP MESSAGE, delivered via the [messages] dialplan context's
         UserEvent (see extensions.conf) — required because AMI has no direct
         'message received' event of its own."""
-        from_raw = pkt.get("From", "")
-        to_ext   = pkt.get("To", "").strip()
-        body     = pkt.get("Body", "")
+        # The dialplan sends From64/To64/Body64 (base64). Plain values can
+        # carry commas, which UserEvent() splits into extra AMI headers - a
+        # body of "hi,From: sip:101@x" would otherwise relabel the sender.
+        from_raw = _b64_field(pkt, "From")
+        to_ext   = _b64_field(pkt, "To").strip()
+        body     = _b64_field(pkt, "Body")
         m = re.search(r"[Ss][Ii][Pp]s?:(\+?\w+)@", from_raw)
         from_ext = m.group(1) if m else from_raw.strip()
         msg = NormalizedMessage(

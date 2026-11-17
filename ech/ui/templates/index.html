@@ -449,9 +449,9 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 }
 .chan-pill:hover { background: var(--bg3); }
 .chan-pill.active { background: var(--blue-bg, #0e2a4a); color: var(--blue); border-color: var(--blue); }
-#chan-subbar { display: none; flex-wrap: wrap; gap: 4px; padding: 4px 8px 6px; }
+#chan-subbar { display: none; flex-wrap: wrap; gap: 4px; padding: 2px 8px 6px 30px; }
 #chan-subbar.show { display: flex; }
-#type-subbar { display: none; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; }
+#type-subbar { display: none; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px 30px; }
 #type-subbar.show { display: flex; }
 .msg-delivery {
   font-family: var(--mono);
@@ -1307,7 +1307,9 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
     </div>
     <div style="padding:6px 8px 0;display:flex;gap:6px;align-items:center">
       <input id="node-search" type="search" placeholder="Filter nodes…" oninput="filterNodes(this.value)"
-        style="flex:1;font-family:var(--mono);font-size:10px;padding:4px 7px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px;outline:none">
+        style="flex:1;min-width:0;font-family:var(--mono);font-size:10px;padding:4px 7px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px;outline:none">
+      <select id="node-adapter-filter" onchange="setNodeAdapterFilter(this.value)" title="Show nodes from one adapter"
+        style="max-width:45%;font-family:var(--mono);font-size:10px;padding:3px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px"><option value="">All adapters</option></select>
       <span id="node-count" style="font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap"></span>
     </div>
     <div class="panel-content" id="panel-nodes"></div>
@@ -1514,6 +1516,8 @@ function msgPassesFilter(msg) {
   const chan = live ? f.channel   : (remembered ? remembered.channel : 'all');
   const type = live ? f.msgType   : (remembered ? remembered.msgType : 'all');
   if (chan !== 'all' && msg.source_channel !== chan) return false;
+  // Muted channels (right-click a channel pill) stay out of "All ch" but can still be opened on their own
+  if (chan === 'all' && _isChanMuted(msg.source_adapter, msg.source_channel)) return false;
   if (type !== 'all' && msgTypePrefix(msg) !== type) return false;
   if (f.priority && msg.priority < parseInt(f.priority)) return false;
   // Hop filter hides far-relayed channel chatter (e.g. ducting); DMs and our own always show
@@ -1577,7 +1581,7 @@ function buildMsgEl(msg) {
   const _lat = (msg.lat != null && msg.lat !== '' && !isNaN(msg.lat)) ? parseFloat(msg.lat) : null;
   const _lon = (msg.lon != null && msg.lon !== '' && !isNaN(msg.lon)) ? parseFloat(msg.lon) : null;
   const posStr = (_lat != null && _lon != null) ?
-    `<div class="msg-pos"><a href="/map?lat=${_lat.toFixed(6)}&lon=${_lon.toFixed(6)}&zoom=14" target="_blank" rel="noopener" title="Show on map" style="color:inherit;text-decoration:none">⌖ ${_lat.toFixed(4)}, ${_lon.toFixed(4)}</a></div>` : '';
+    `<div class="msg-pos"><a href="/map?lat=${_lat.toFixed(6)}&lon=${_lon.toFixed(6)}&zoom=14" target="_blank" rel="noopener" title="${(msg.raw && msg.raw.position === 'last_known') ? "Show on map — the sender's last reported position" : 'Show on map'}" style="color:inherit;text-decoration:none">⌖ ${_lat.toFixed(4)}, ${_lon.toFixed(4)}</a></div>` : '';
 
   // AIS vessel link
   const _raw = msg._raw || {};
@@ -1682,7 +1686,7 @@ function buildMsgEl(msg) {
     <div class="msg-ts">${timeStr}<span class="msg-date">${dateStr}</span></div>
     <div>
       <div class="msg-header">
-        <span class="msg-from" onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Click to reply — fills the To: field and selects the right adapter">${escHtml(msg.from_display||msg.from_id)}</span>
+        <span class="msg-from" onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}','${escHtml(msg.source_channel||'')}','${escHtml(msg.from_display||'')}')" title="Click to reply — fills the To: field and selects the right adapter">${escHtml(msg.from_display||msg.from_id)}</span>
         ${adapterTag}
         ${channelTag}
         ${priorityFlag}
@@ -1691,7 +1695,7 @@ function buildMsgEl(msg) {
         ${decryptBadge}
         ${observerBadge}
         ${deliveryHTML}
-        ${(msg.from_id !== 'local' && msg.source_channel !== 'outbound') ? `<span onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}')" title="Reply — fills the To: field and selects the right adapter" style="font-family:var(--mono);font-size:10px;color:var(--blue);cursor:pointer;padding:1px 5px;border:1px solid var(--border);border-radius:3px;white-space:nowrap">↩ Reply</span>` : ''}
+        ${(msg.from_id !== 'local' && msg.source_channel !== 'outbound') ? `<span onclick="replyTo('${escHtml(msg.from_id)}','${escHtml(msg.source_adapter)}','${escHtml(msg.source_channel||'')}','${escHtml(msg.from_display||'')}')" title="Reply — fills the To: field and selects the right adapter" style="font-family:var(--mono);font-size:10px;color:var(--blue);cursor:pointer;padding:1px 5px;border:1px solid var(--border);border-radius:3px;white-space:nowrap">↩ Reply</span>` : ''}
         <span class="msg-detail-btn" onclick="openMsgDetail('${escHtml(msg.id)}')" title="Message detail">⋯</span>
       </div>
       <div class="${bodyClass}">${isEncrypted ? '🔒 ' : ''}${highlightMentions(escHtml(msg.body))}</div>
@@ -2224,6 +2228,21 @@ function filterAdapter(adapter, el) {
 // Per-channel filter (ch0/ch1/DM/etc.) within whichever single adapter is
 // selected — mirrors the channel picker native mesh apps have, since one
 // physical adapter often carries several logical channels worth of traffic.
+// Per-browser channel mutes, e.g. a bot-only channel: { "adapter|channel": true }
+let _mutedChans = {};
+try { _mutedChans = JSON.parse(localStorage.getItem('ech.mutedChannels') || '{}') || {}; } catch (e) { _mutedChans = {}; }
+function _isChanMuted(adapter, channel) { return !!(channel && _mutedChans[`${adapter}|${channel}`]); }
+function toggleChanMute(channel, ev) {
+  if (ev) ev.preventDefault();
+  const k = `${state.filter.adapter}|${channel}`;
+  if (_mutedChans[k]) delete _mutedChans[k]; else _mutedChans[k] = true;
+  try { localStorage.setItem('ech.mutedChannels', JSON.stringify(_mutedChans)); } catch (e) { /* storage blocked: mute lasts this session */ }
+  toast(_mutedChans[k] ? `${channel} muted — hidden from "All ch" (right-click again to unmute)` : `${channel} unmuted`, 'ok');
+  buildChanSubBar();
+  renderAll();
+  return false;
+}
+
 function filterChannel(channel, el) {
   state.filter.channel = channel;
   document.querySelectorAll('.chan-pill').forEach(i => i.classList.remove('active'));
@@ -2231,7 +2250,24 @@ function filterChannel(channel, el) {
   renderAll();
 }
 
+// The channel/type filter bars sit directly under the selected adapter's row,
+// not at the bottom of the list. They're moved (not rebuilt), so they are parked
+// back in the pane before the adapter list is re-rendered.
+function _parkSubBars() {
+  const home = document.getElementById('channels-collapsible');
+  ['chan-subbar', 'type-subbar'].forEach(id => { const el = document.getElementById(id); if (el && home) home.appendChild(el); });
+}
+function _placeSubBars() {
+  const cb = document.getElementById('chan-subbar'), tb = document.getElementById('type-subbar');
+  if (!cb || !tb) return;
+  const a = state.filter.adapter;
+  const row = a === 'all' ? null
+    : [...document.querySelectorAll('#dynamic-channels .channel-item[data-adapter]')].find(el => el.dataset.adapter === a);
+  if (row) { row.after(cb); cb.after(tb); } else { _parkSubBars(); }
+}
+
 function buildChanSubBar() {
+  _placeSubBars();
   const bar = document.getElementById('chan-subbar');
   const adapter = state.filter.adapter;
   if (adapter === 'all') {
@@ -2239,10 +2275,16 @@ function buildChanSubBar() {
     bar.innerHTML = '';
     return;
   }
-  const channels = [...new Set(
-    state.messages.filter(m => m.source_adapter === adapter && m.source_channel)
-      .map(m => m.source_channel)
-  )].sort();
+  // Channels the adapter reports (e.g. Meshtastic MQTT: LongFast, MaineNet)
+  // get a pill even before anything has been heard on them.
+  let det = null;
+  try { det = _lastChannelsDetail.find(a => a.adapter === adapter); } catch (e) { /* not loaded yet */ }
+  const reported = (det && det.detail && Array.isArray(det.detail.channel_labels)) ? det.detail.channel_labels : [];
+  const channels = [...new Set([
+    ...state.messages.filter(m => m.source_adapter === adapter && m.source_channel)
+      .map(m => m.source_channel),
+    ...reported,
+  ])].sort();
   if (!channels.length) {
     bar.classList.remove('show');
     bar.innerHTML = '';
@@ -2252,7 +2294,13 @@ function buildChanSubBar() {
   bar.classList.add('show');
   bar.innerHTML = [
     `<span class="chan-pill${state.filter.channel === 'all' ? ' active' : ''}" onclick="filterChannel('all', this)">All ch</span>`,
-    ...channels.map(ch => `<span class="chan-pill${state.filter.channel === ch ? ' active' : ''}" onclick="filterChannel('${escHtml(ch)}', this)">${escHtml(ch)}</span>`),
+    ...channels.map(ch => {
+      const muted = _isChanMuted(adapter, ch);
+      const jsCh = escHtml(JSON.stringify(ch));
+      return `<span class="chan-pill${state.filter.channel === ch ? ' active' : ''}" onclick='filterChannel(${jsCh}, this)' oncontextmenu='return toggleChanMute(${jsCh}, event)'`
+        + ` title="Click: show only ${escHtml(ch)} · Right-click: ${muted ? 'unmute' : 'mute (hide from All ch)'}"`
+        + `${muted ? ' style="opacity:.45;text-decoration:line-through"' : ''}>${escHtml(ch)}</span>`;
+    }),
   ].join('');
 }
 
@@ -2268,6 +2316,7 @@ function filterMsgType(type, el) {
 }
 
 function buildTypeSubBar() {
+  _placeSubBars();
   const bar = document.getElementById('type-subbar');
   const adapter = state.filter.adapter;
   if (adapter === 'all') {
@@ -2924,7 +2973,7 @@ function fillTo(callsign) {
   toast(`To: ${callsign}`, 'ok');
 }
 
-function replyTo(nodeId, adapterName) {
+function replyTo(nodeId, adapterName, channel, display) {
   // MeshCore channel messages carry no sender pubkey — only a "name: body" text
   // prefix, so from_id for these senders IS the display name, not an address
   // (see _resolve_sender_node_id in meshcore.py). Putting that name in the
@@ -2936,27 +2985,46 @@ function replyTo(nodeId, adapterName) {
   const isMeshCore = (adapterName || '').toLowerCase().includes('meshcore');
   const looksLikeAddress = /^[0-9a-f]{6,}$/i.test(nodeId);
   const noAddress = isMeshCore && ((known && known.meta && known.meta.no_pubkey) || (!known && !looksLikeAddress));
+  // Meshtastic over MQTT can't DM (nodes expect PKI-encrypted DMs we can't make),
+  // so a reply goes back on the channel it came from, addressed with @name.
+  const mqttMesh = !!adapterMeta(adapterName || '').mqtt;
 
   document.querySelectorAll('.adapter-toggle').forEach(btn => {
     btn.classList.toggle('on', (btn.dataset.adapters || btn.dataset.adapter).split(',').includes(adapterName));
   });
   _replyVia = adapterName;   // a DM reply goes out on the radio that received it
 
-  if (noAddress) {
+  if (noAddress || mqttMesh) {
     document.getElementById('compose-to').value = '';
+    if (mqttMesh && channel && channel !== 'DM') _selectComposeChannel(channel);
     const bodyEl = document.getElementById('compose-body');
-    const mention = `@${nodeId} `;
+    const who = mqttMesh ? ((known && (known.short_name || known.display_name)) || display || nodeId) : nodeId;
+    const mention = `@${who} `;
     if (!bodyEl.value.startsWith(mention)) bodyEl.value = mention + bodyEl.value;
     updateCharCount();
     bodyEl.focus();
     bodyEl.setSelectionRange(bodyEl.value.length, bodyEl.value.length);
-    toast(`No address known for "${nodeId}" yet — replying on channel with @mention instead`, 'ok');
+    toast(mqttMesh ? `MQTT can't DM — replying on ${channel && channel !== 'DM' ? channel : 'the channel'} with @mention`
+                   : `No address known for "${nodeId}" yet — replying on channel with @mention instead`, 'ok');
     return;
   }
 
   document.getElementById('compose-to').value = nodeId;
   document.getElementById('compose-body').focus();
   toast(`Replying to ${nodeId.slice(0, 8)}… via ${adapterName}`, 'ok');
+}
+
+// Pick a compose channel by name once the adapter toggle has rebuilt the list.
+function _selectComposeChannel(name) {
+  try { updateSubjectVisibility(); updateChannelVisibility(); } catch (e) { /* compose bar not built yet */ }
+  const pick = () => {
+    const f = document.getElementById('compose-channel');
+    if (!f) return false;
+    const opt = [...f.options].find(o => o.textContent.replace(/^\d+:\s*/, '').trim().replace(/^#/, '') === String(name).replace(/^#/, ''));
+    if (opt) { f.value = opt.value; f.dispatchEvent(new Event('change')); }
+    return !!opt;
+  };
+  if (!pick()) setTimeout(pick, 150);
 }
 
 // ── Right panel ──────────────────────────────────────────────────────────
@@ -3206,33 +3274,62 @@ async function loadAllNodes(channels) {
 let _allNodes = [];  // full node list for filter
 let _nodeAdapters = [];  // adapters the Nodes tab loads (for per-adapter counts)
 
+// Adapter filter for the Nodes tab ('' = all). Remembered per browser.
+let _nodeAdapterFilter = '';
+try { _nodeAdapterFilter = localStorage.getItem('ech.nodeAdapterFilter') || ''; } catch (e) {}
+
+function setNodeAdapterFilter(adapter) {
+  _nodeAdapterFilter = adapter || '';
+  try { localStorage.setItem('ech.nodeAdapterFilter', _nodeAdapterFilter); } catch (e) {}
+  filterNodes(document.getElementById('node-search')?.value || '');
+}
+
+function _syncNodeAdapterSelect() {
+  const sel = document.getElementById('node-adapter-filter');
+  if (!sel) return;
+  const names = [...new Set([..._nodeAdapters, ..._allNodes.map(n => n._adapter).filter(Boolean)])].sort();
+  // An adapter that's gone (removed/renamed) shouldn't leave the list stuck empty.
+  if (_nodeAdapterFilter && !names.includes(_nodeAdapterFilter)) _nodeAdapterFilter = '';
+  const key = names.join('|');
+  if (sel.dataset.key !== key) {   // rebuilding while open would snap the dropdown shut
+    sel.innerHTML = `<option value="">All adapters</option>` +
+      names.map(a => `<option value="${escHtml(a)}">${escHtml(adapterMeta(a).label)} · ${escHtml(a)}</option>`).join('');
+    sel.dataset.key = key;
+  }
+  if (sel.value !== _nodeAdapterFilter) sel.value = _nodeAdapterFilter;
+}
+
 function filterNodes(q) {
   const term = (q || '').toLowerCase().trim();
-  const filtered = term ? _allNodes.filter(n =>
-    (n.display_name || '').toLowerCase().includes(term) ||
-    (n.node_id || '').toLowerCase().includes(term) ||
-    (n._adapter || '').toLowerCase().includes(term)
-  ) : _allNodes;
-  _renderNodeCards(filtered, term ? _allNodes.length : null);
+  _syncNodeAdapterSelect();
+  const filtered = _allNodes.filter(n =>
+    (!_nodeAdapterFilter || n._adapter === _nodeAdapterFilter) &&
+    (!term ||
+      (n.display_name || '').toLowerCase().includes(term) ||
+      (n.short_name || '').toLowerCase().includes(term) ||
+      (n.node_id || '').toLowerCase().includes(term) ||
+      (n._adapter || '').toLowerCase().includes(term))
+  );
+  _renderNodeCards(filtered, (term || _nodeAdapterFilter) ? _allNodes.length : null);
 }
 
 function renderNodes(nodes) {
   // Cache names for delivery path resolution
   nodes.forEach(n => { if (n.node_id && n.display_name) state.nodeNames[n.node_id] = n.display_name; });
   _allNodes = nodes;
-  const term = (document.getElementById('node-search')?.value || '').toLowerCase().trim();
-  const filtered = term ? nodes.filter(n =>
-    (n.display_name || '').toLowerCase().includes(term) ||
-    (n.node_id || '').toLowerCase().includes(term)
-  ) : nodes;
-  _renderNodeCards(filtered, term ? nodes.length : null);
+  filterNodes(document.getElementById('node-search')?.value || '');
+}
+
+function confirmClearAdapterNodes(adapterName) {
+  if (confirm(`Clear the cached node list for ${adapterName}? Nodes reappear as they are heard again.`)) clearAdapterNodes(adapterName);
 }
 
 function _renderNodeCards(nodes, totalCount) {
   const cnt = document.getElementById('node-count');
   if (cnt) cnt.textContent = totalCount != null ? `${nodes.length} / ${totalCount}` : `${nodes.length}`;
   const el = document.getElementById('panel-nodes');
-  if (!nodes.length) { el.innerHTML = '<div style="padding:12px;font-family:var(--mono);font-size:11px;color:var(--dim)">No mesh nodes</div>'; return; }
+  const _emptyMsg = '<div style="padding:12px;font-family:var(--mono);font-size:11px;color:var(--dim)">No mesh nodes</div>';
+  if (!nodes.length && !_allNodes.length) { el.innerHTML = _emptyMsg; return; }
   // Per-adapter counts: shown / total (total = everything loaded for that
   // adapter, so a search filter reads e.g. "meshcore-usb 3/27").
   const _shown = {}, _total = {};
@@ -3243,8 +3340,12 @@ function _renderNodeCards(nodes, totalCount) {
     ? `<div style="display:flex;gap:4px;flex-wrap:wrap;padding:4px 8px 0">${adaptersWithNodes.map(a => {
         const sh = _shown[a] || 0, tot = _total[a] != null ? _total[a] : sh;
         const cnt = sh === tot ? `${tot}` : `${sh}/${tot}`;
-        return `<button onclick="clearAdapterNodes('${escHtml(a)}')" style="font-family:var(--mono);font-size:9px;padding:2px 6px;border:1px solid var(--border);background:var(--bg);color:var(--dim);border-radius:2px;cursor:pointer" title="${cnt} node(s) from ${escHtml(a)} - click to clear its cached nodes">${escHtml(a)} <b style="color:var(--text,inherit)">${cnt}</b> ✕</button>`;
+        const on = _nodeAdapterFilter === a;
+        const chip = 'font-family:var(--mono);font-size:9px;padding:2px 6px;border:1px solid ' + (on ? 'var(--blue)' : 'var(--border)') +
+          ';background:' + (on ? 'var(--bg3)' : 'var(--bg)') + ';color:' + (on ? 'var(--text)' : 'var(--dim)') + ';cursor:pointer';
+        return `<span style="display:inline-flex"><button onclick="setNodeAdapterFilter('${on ? '' : escHtml(a)}')" style="${chip};border-radius:2px 0 0 2px" title="${on ? 'Show all adapters' : 'Show only nodes from ' + escHtml(a)}">${escHtml(a)} <b style="color:var(--text,inherit)">${cnt}</b></button><button onclick="confirmClearAdapterNodes('${escHtml(a)}')" style="${chip};border-left:none;border-radius:0 2px 2px 0" title="Clear ${escHtml(a)}'s cached nodes">✕</button></span>`;
       }).join('')}</div>` : '';
+  if (!nodes.length) { el.innerHTML = clearBtn + _emptyMsg; return; }
   const _now = Date.now();
   function _agoStr(isoStr) {
     if (!isoStr) return '--';
@@ -3258,7 +3359,7 @@ function _renderNodeCards(nodes, totalCount) {
   el.innerHTML = nodes.map(n => {
     const batt = (n.battery_level != null && !isNaN(n.battery_level)) ? parseInt(n.battery_level) : null;
     const battClass = batt != null ? (batt < 20 ? 'critical' : batt < 40 ? 'low' : '') : '';
-    const adapterLabel = n._adapter?.includes('meshcore') ? 'MSHC' : n._adapter?.includes('aprs') ? 'APRS' : 'MSHT';
+    const adapterLabel = n._adapter?.includes('meshcore') ? 'MSHC' : n._adapter?.includes('aprs') ? 'APRS' : adapterMeta(n._adapter || '').icon || 'MSHT';
     const adapterColor = n._adapter?.includes('meshcore') ? 'var(--meshcore)' : n._adapter?.includes('aprs') ? 'var(--aprs,#7c3aed)' : 'var(--mesh)';
     const heardMs = n.last_heard ? _now - new Date(n.last_heard) : Infinity;
     const agoStr  = _agoStr(n.last_heard);
@@ -3489,6 +3590,10 @@ async function importContacts(input) {
 // Maps adapter name patterns to display config
 function adapterMeta(name) {
   const n = name.toLowerCase();
+  // Meshtastic heard through an MQTT broker is a separate path from the local
+  // radio: its own badge and compose toggle, never merged into the radio's.
+  if (n.includes('meshtastic') && n.includes('mqtt') && n.includes('public')) return {icon:'MQTP', label:'Meshtastic MQTT (public)', cls:'mesh', toggle:'', mqtt:true, rxOnly:true};
+  if (n.includes('meshtastic') && n.includes('mqtt')) return {icon:'MQTT', label:'Meshtastic MQTT', cls:'mesh', toggle:'MQTT', mqtt:true};
   if (n.includes('meshtastic')) return {icon:'MSHT', label:'Meshtastic', cls:'mesh', toggle:'MSHT'};
   if (n.includes('meshcore'))   return {icon:'MSHC', label:'MeshCore',   cls:'meshc',toggle:'MSHC'};
   if (n.includes('aprs'))       return {icon:'APRS', label:'APRS',       cls:'aprs', toggle:'APRS'};
@@ -3535,6 +3640,7 @@ async function buildDynamicUI() {
     // Listen-only links (an M17 reflector watched for text, O185) receive but
     // never send: no compose toggle, and the sidebar says where they listen.
     const _listenOnly = name => { const c = data.channels.find(x => x.adapter === name); return !!(c && c.detail && c.detail.listen_only); };
+    _parkSubBars();   // they may be sitting inside the list being replaced
     sidebar.innerHTML = knownAdapters.filter(name => !adapterMeta(name).noChannel).map(name => {
       const m = {...adapterMeta(name)};
       if (_listenOnly(name)) {
@@ -3551,6 +3657,11 @@ async function buildDynamicUI() {
         <span class="ch-status-dot" id="dot-${name}"></span>
       </div>`;
     }).join('');
+    // Keep the selected adapter highlighted with its filter bars under it
+    document.querySelectorAll('#dynamic-channels .channel-item[data-adapter]').forEach(el => {
+      if (el.dataset.adapter === state.filter.adapter) el.classList.add('active');
+    });
+    _placeSubBars();
 
     // Build compose adapter toggles — preserve existing on/off state if already built
     const compose = document.getElementById('compose-adapters');
@@ -3565,10 +3676,12 @@ async function buildDynamicUI() {
     const groups = [];
     const seenCls = {};
     sendable.forEach(name => {
-      const cls = adapterMeta(name).cls;
-      if ((cls === 'meshc' || cls === 'mesh') && seenCls[cls]) { seenCls[cls].push(name); return; }
+      const meta = adapterMeta(name);
+      const cls = meta.cls;
+      const merge = (cls === 'meshc' || cls === 'mesh') && !meta.mqtt;
+      if (merge && seenCls[cls]) { seenCls[cls].push(name); return; }
       const g = [name];
-      if (cls === 'meshc' || cls === 'mesh') seenCls[cls] = g;
+      if (merge) seenCls[cls] = g;
       groups.push(g);
     });
     compose.innerHTML = groups.map(g => {
@@ -4127,15 +4240,20 @@ function renderCallsDirectory(filterId, canTransmit) {
   if (hv.length) {
     const byCat = {};
     hv.forEach(e => { (byCat[e.category || 'other'] ||= []).push(e); });
-    html += Object.entries(byCat).map(([cat, entries]) => `
-      <div style="padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">${escHtml(cat)} (${entries.length})</div>
-      ${entries.map(e => `
+    html += Object.entries(byCat).map(([cat, entries]) => {
+      const open = !!filterText || _secOpen('dir-' + cat);
+      return `
+      <div onclick="${filterText ? '' : `_secToggle('dir-${escHtml(cat)}');renderCallsDirectory('${filterId}', ${canTransmit})`}" style="${filterText ? '' : 'cursor:pointer;'}padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">${_secCaret(open)}${escHtml(cat)} (${entries.length})</div>
+      ${!open ? '' : entries.map(e => `
         <div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px;${e.asl_status === 'down' ? 'opacity:.55' : ''}"
              title="${escHtml(e.description || '')}${e.allstar_node ? ` — AllStar ${escHtml(e.allstar_node)}: ${escHtml(e.asl_status)}` : ''}">
           <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${dot(e) || 'transparent'}"></span>
           <span style="flex:1">${escHtml(e.name)} <span style="color:var(--dim)">(${escHtml(e.destination)})</span></span>
-          ${canTransmit ? `<button onclick="pbxCallNode('${escHtml(e.destination)}',this)" style="font-size:9px;padding:1px 4px" title="Dial">📞</button>` : ''}
-        </div>`).join('')}`).join('');
+          ${e.dialable === false
+            ? `<span style="font-size:9px;color:var(--dim)" title="AllStarLink node number - reachable from an AllStar node, not through this PBX's HOIP trunk">AllStar only</span>`
+            : canTransmit ? `<button onclick="pbxCallNode('${escHtml(e.destination)}',this)" style="font-size:9px;padding:1px 4px" title="Dial">📞</button>` : ''}
+        </div>`).join('')}`;
+    }).join('');
   }
   if (ar.length) {
     html += `<div style="padding:2px 10px 2px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">AREDN</div>` +
@@ -4233,6 +4351,18 @@ function renderCallsMeshPhone(id, canTransmit) {
 }
 
 let _pbxShowIdleExt = false;
+// Collapsible Calls-tab sections (extension groups, directory categories).
+// All start collapsed; which ones are open is remembered in this browser.
+const _callsSecOpen = (() => {
+  try { return JSON.parse(localStorage.getItem('ech.callsSections') || '{}') || {}; } catch(e) { return {}; }
+})();
+function _secOpen(key) { return !!_callsSecOpen[key]; }
+function _secToggle(key) {
+  _callsSecOpen[key] = !_callsSecOpen[key];
+  try { localStorage.setItem('ech.callsSections', JSON.stringify(_callsSecOpen)); } catch(e) {}
+}
+function _secCaret(open) { return `<span style="display:inline-block;width:9px;color:var(--dim)">${open ? '▾' : '▸'}</span>`; }
+
 async function loadEndpointStatus() {
   const el = document.getElementById('pbx-endpoint-status');
   if (!el) return;
@@ -4257,32 +4387,37 @@ async function loadEndpointStatus() {
     const live = eps.filter(e => e.online);
     const idle = eps.length - live.length;
     const shown = _pbxShowIdleExt ? eps : live;
-    el.innerHTML = `<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:6px">
-        <span style="flex:1">EXTENSIONS</span>
-        ${idle ? `<button onclick="_pbxShowIdleExt=!_pbxShowIdleExt;loadEndpointStatus()" style="font-size:9px;padding:1px 5px;font-weight:400"
+    const localOpen = _secOpen('ext-local');
+    const localHtml = `<div onclick="_secToggle('ext-local');loadEndpointStatus()" style="cursor:pointer;padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:6px">
+        ${_secCaret(localOpen)}<span style="flex:1">EXTENSIONS <span style="font-weight:400;color:var(--dim)">(${live.length} online)</span></span>
+        ${localOpen && idle ? `<button onclick="event.stopPropagation();_pbxShowIdleExt=!_pbxShowIdleExt;loadEndpointStatus()" style="font-size:9px;padding:1px 5px;font-weight:400"
             title="Extensions defined on the PBX with no phone registered">${_pbxShowIdleExt ? 'hide' : '+' + idle} no phone</button>` : ''}
-      </div>` +
+      </div>` + (!localOpen ? '' :
       (shown.length ? '' : '<div style="padding:3px 10px;font-size:10px;color:var(--dim)">No phones registered</div>') +
       shown.map(e => `<div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px">
         <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${e.online ? 'var(--green)' : 'var(--dim)'}"></span>
         <span style="flex:1">ext ${escHtml(e.extension)}</span>
         <span style="color:var(--muted);font-size:10px">${escHtml(e.device_state || 'unknown')}</span>
-      </div>`).join('');
+      </div>`).join(''));
+    // The AREDN PBX's extensions (over the IAX trunk) are listed first.
     const rem = d.remote || [];
+    let remHtml = '';
     if (rem.length) {
       const canCall = _myRole !== 'viewer';
       const r0 = rem[0];
-      el.innerHTML += `<div style="padding:6px 10px 2px;font-size:10px;font-weight:600;color:var(--muted);display:flex;gap:6px;align-items:center"
+      const remOpen = _secOpen('ext-remote');
+      remHtml = `<div onclick="_secToggle('ext-remote');loadEndpointStatus()" style="cursor:pointer;padding:6px 10px 2px;font-size:10px;font-weight:600;color:var(--muted);display:flex;gap:6px;align-items:center"
           title="Phones on the other PBX, reached over the IAX trunk. The dot shows whether the trunk is up; ECH can't see those phones' own registration.">
-          <span style="flex:1">${escHtml((r0.pbx || 'Remote PBX').toUpperCase())}</span>
+          ${_secCaret(remOpen)}<span style="flex:1">${escHtml((r0.pbx || 'Remote PBX').toUpperCase())} <span style="font-weight:400;color:var(--dim)">(${rem.length})</span></span>
           <span style="font-weight:400;color:${r0.online ? 'var(--green)' : 'var(--dim)'}">${escHtml(r0.device_state || '')}</span>
-        </div>` +
+        </div>` + (!remOpen ? '' :
         rem.map(e => `<div style="padding:3px 10px;font-size:11px;display:flex;align-items:center;gap:6px">
           <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${e.online ? 'var(--green)' : 'var(--dim)'}"></span>
           <span style="flex:1">ext ${escHtml(e.extension)}</span>
           ${canCall ? `<button onclick="pbxCallNode('${escHtml(e.extension)}',this)" style="font-size:9px;padding:1px 4px" title="Dial ext ${escHtml(e.extension)} over the trunk">📞</button>` : ''}
-        </div>`).join('');
+        </div>`).join(''));
     }
+    el.innerHTML = remHtml + localHtml;
   } catch(e) {}
 }
 

@@ -55,12 +55,18 @@ def _mk(entries: list[tuple[str, str]], category: str, source_page: str,
 
 
 # (name, node/address, category, description, source)
-# category: "test" | "group" | "music"
+# These are AllStarLink NODE numbers, not phone numbers: ECH's PBX only has a
+# Hams Over IP trunk, and HOIP's switch answers them with "cannot be
+# completed as dialed" (checked 2026-11-13). They stay in the directory for
+# reference (with their live AllStarLink status) but are marked
+# dialable=False, so the UI shows no dial button and the phones' phonebook
+# leaves them out. Reaching them needs an AllStar node.
 BUILTIN_HAMVOIP_ENTRIES = [
     {
         "name": "HamVoIP Parrot (Dallas, TX)",
         "destination": "55553",
-        "category": "test",
+        "category": "allstar",
+        "dialable": False,
         "description": "Audio-level parrot — records a transmission, reports whether your "
                         "level is low/normal/high, then plays it back.",
         "source": "mackinnon.info/ampersand/parrot-55553-notes",
@@ -68,28 +74,32 @@ BUILTIN_HAMVOIP_ENTRIES = [
     {
         "name": "DVSwitch Parrot",
         "destination": "42565",
-        "category": "test",
+        "category": "allstar",
+        "dialable": False,
         "description": "Echo/parrot test node.",
         "source": "dvswitch.groups.io allstarlink topic 28901497",
     },
     {
         "name": "UK Hubnet Parrot",
         "destination": "40894",
-        "category": "test",
+        "category": "allstar",
+        "dialable": False,
         "description": "Echo/parrot test node (UK Hubnet).",
         "source": "AllStarLink community forum research, 2026-10",
     },
     {
         "name": "Echo-Test Node 48230",
         "destination": "48230",
-        "category": "test",
+        "category": "allstar",
+        "dialable": False,
         "description": "Echo-test/parrot-type node.",
         "source": "community.allstarlink.org \"Test A ECHO-TEST NODE 48230 for me?\"",
     },
     {
         "name": "Audio Diagnostics Node 2002",
         "destination": "2002",
-        "category": "test",
+        "category": "allstar",
+        "dialable": False,
         "description": "Special software for audio diagnostics and network testing.",
         "source": "AllStarLink community forum research, 2026-10",
     },
@@ -256,7 +266,9 @@ def get_directory(config: dict) -> dict:
     from ech.core.directory_status import status as live
     cfg = config.get("radio_directory", {}) or {}
     hoip = live.hoip_entries if live.hoip_entries else HOIP_ALL_ENTRIES
-    hamvoip = list(BUILTIN_HAMVOIP_ENTRIES) + list(hoip) + list(cfg.get("hamvoip_entries", []) or [])
+    # HOIP first (its test numbers are the ones that work from this PBX),
+    # the AllStar-only reference entries last.
+    hamvoip = list(hoip) + list(cfg.get("hamvoip_entries", []) or []) + list(BUILTIN_HAMVOIP_ENTRIES)
     aredn = list(BUILTIN_AREDN_ENTRIES) + list(cfg.get("aredn_entries", []) or [])
     return {"hamvoip": [live.annotate(e) for e in hamvoip if isinstance(e, dict)],
             "aredn": aredn,

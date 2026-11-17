@@ -387,7 +387,8 @@ class AirQualityService:
         no rate limiting (operator-initiated, same as Share Weather)."""
         if not self._router:
             return {}
-        return await self._router.send(body=self.format_summary()[:200], adapter_names=adapter_names)
+        raw = {"channel_name": self._auto_channel} if self._auto_channel else None
+        return await self._router.send(body=self.format_summary()[:200], adapter_names=adapter_names, raw=raw)
 
     async def _maybe_auto_broadcast(self) -> None:
         if not (self._auto_broadcast and self._router):

@@ -71,6 +71,7 @@ def test_parse_asl_nodes():
     ({"category": "hoip_rf_link_us", "name": "EAST COAST REFLECTOR"}, None),
     ({"category": "hoip_conference_us", "name": "REGION 1 HAMS NET 10029"}, None),
     ({"category": "test", "destination": "55553"}, "55553"),
+    ({"category": "allstar", "destination": "55553"}, "55553"),
     ({"category": "group", "destination": "999", "allstar_node": 12345}, "12345"),
 ])
 def test_allstar_node_for(entry, node):

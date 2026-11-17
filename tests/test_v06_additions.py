@@ -339,3 +339,30 @@ async def test_api_send_message():
 
     await router.stop()
     await db.close()
+
+
+@pytest.mark.asyncio
+async def test_broker_feed_position_is_not_an_mqtt_anomaly(engine):
+    """Positions read from an MQTT broker are internet-carried by design."""
+    engine._base_lat, engine._base_lon = 39.08, -77.15
+    msg = _make_mesh_msg(source_adapter="meshtastic-mqtt-me", from_id="!b0b0b0b0", via_mqtt=True,
+                         lat=44.31, lon=-69.78, hop_count=0, raw={"mqtt": True, "snr": 9.0})
+    found = await engine.process(msg)
+    assert not [f for f in found if f.rule in ("mqtt_injection", "long_range_contact", "ducting_event")]
+
+
+@pytest.mark.asyncio
+async def test_rf_packet_flagged_via_mqtt_still_alerts(engine):
+    """A radio adapter's packet with viaMqtt set is still worth flagging."""
+    msg = _make_mesh_msg(from_id="!c0c0c0c0", via_mqtt=True, lat=44.31, lon=-69.78, raw={"snr": 9.0})
+    found = await engine.process(msg)
+    assert any(f.rule == "mqtt_injection" for f in found)
+
+
+@pytest.mark.asyncio
+async def test_aircraft_report_altitude_is_not_the_nodes(engine):
+    msg = _make_mesh_msg(from_id="!d0d0d0d0", body="[MIL: ACFT] N/A Alt:21000ft Sq:5367 Hex:AE0146 @22:25")
+    found = await engine.process(msg)
+    assert not [f for f in found if f.rule == "high_altitude_reported"]
+    msg2 = _make_mesh_msg(from_id="!d0d0d0d1", body="balloon is at 30000ft now")
+    assert any(f.rule == "high_altitude_reported" for f in await engine.process(msg2))

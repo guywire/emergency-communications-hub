@@ -143,7 +143,7 @@ def _node_and_certainty(entry: dict) -> tuple[str | None, bool]:
     node = entry.get("allstar_node")   # operator-supplied config entries may say so
     if node and str(node).isdigit():
         return str(node), True
-    if cat == "test":
+    if cat in ("test", "allstar"):
         dest = str(entry.get("destination") or "")
         return (dest, True) if dest.isdigit() else (None, False)
     if cat.startswith("hoip_rf_link"):

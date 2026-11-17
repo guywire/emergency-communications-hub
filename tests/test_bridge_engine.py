@@ -187,3 +187,22 @@ async def test_ech_status_notices_are_never_bridged():
     assert ad["aprs"].sent == []
     await eng.apply(mesh_msg("real chatter", ch=0), ad)
     assert len(ad["aprs"].sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_echo_heard_back_on_a_different_radio_is_not_rebridged():
+    # MeshCore ch6 -> Meshtastic MQTT ch0; a gateway puts it on the air and our
+    # USB Meshtastic radio hears it. A second rule (USB radio -> MeshCore) must
+    # not carry it back.
+    eng = BridgeEngine()
+    eng.load([
+        {"name": "mqtt", "a": {"adapter": "mqtt", "channel": 0}, "b": {"adapter": "mc", "channel": 6},
+         "direction": "both", "rate_per_min": 60},
+        {"name": "usb", "a": {"adapter": "usb"}, "b": {"adapter": "mc"}, "direction": "both", "rate_per_min": 60},
+    ])
+    ad = {n: FakeMeshtasticAdapter(n) for n in ("mqtt", "mc", "usb")}
+    await eng.apply(mesh_msg("anyone on the coast tonight", ch=6, src="mc"), ad)
+    assert [m.body for m in ad["mqtt"].sent] == ["Bob: anyone on the coast tonight"]
+    sent_before = len(ad["mc"].sent)
+    await eng.apply(mesh_msg("Bob: anyone on the coast tonight", ch=0, sender="ECH", src="usb"), ad)
+    assert len(ad["mc"].sent) == sent_before

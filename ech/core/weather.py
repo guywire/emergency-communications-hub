@@ -484,9 +484,15 @@ class WeatherService:
             body=body,
             adapter_names=adapter_names,
             priority=Priority.ELEVATED if self._active_alerts else Priority.NORMAL,
+            raw=self.channel_hint(),
         )
         self._broadcast_count += 1
         return all(results.values()) if results else False
+
+    def channel_hint(self) -> dict | None:
+        """Where weather posts go: auto_broadcast_channel (e.g. "#weather"), resolved by
+        name on each adapter; adapters without that channel use their default."""
+        return {"channel_name": self._auto_channel} if self._auto_channel else None
 
     # ── Current conditions + forecast ────────────────────────────────────────
 
