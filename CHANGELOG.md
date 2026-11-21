@@ -8,6 +8,137 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.91 (2026-11-21)
+
+- Who is talking: desk phones on 760/761 now show the M17 caller's callsign as the call name ("M17: W1ABC", "M17 (quiet)", "You are transmitting"), via a connected-line update. AllStar listening on the web page shows the keyed linked node with its callsign and place from the node directory (polled from `rpt xnode` while someone listens), or "local user" when someone on our node keys up.
+
+## v1.1.90 (2026-11-21)
+
+- Push-to-talk. Web Listen page: a "Hold to talk" button (or hold the space bar) for M17 links that can transmit, and for AllStar through a new "Talk on AllStar" button (the web phone calls 750, press sends *99, release sends #). Echo test sends M17 to #PARROT so you hear yourself back. 3 minute limit, on-air timer.
+- M17 transmit: ECH Codec2-encodes the microphone and sends a paced M17 voice stream to the reflector under the station callsign. It refuses while someone else is talking, and on listen-only links. Desk phones on 760/761 use the same keys as AllStar: *99, wait for the beep, talk, # to stop.
+- Web phone keypad sends key presses during a connected call (IVRs, AllStar commands).
+- AllStar node directory on the desk phone: nodes in your state, callsign search and node lookup from AllStarLink's public node list (cached daily). Each node has Link and listen, Link listen-only, Link transceive (asks first) and Disconnect.
+- "How to talk" help on the phone (AllStar and M17 menus) and the web page. M17 rows show "RX only" when they can't transmit. Listen page buttons line up.
+- Mesh bot: no more "Unrecognized command" spam on #bot. It ignores other bots (names ending in "bot", bot-shaped replies), messages addressed to someone else, and unknown words unless they @-mention it. New `mesh_bot.ignore_senders` and `ignore_bot_names`.
+- Mesh bot `max_hops` (off by default): channel requests from farther than N hops are answered only when they @-mention the bot, so ECH serves the local mesh and leaves distant users to their own bots. DMs are not affected.
+
+## v1.1.89 (2026-11-20)
+
+- Market sentiment instead of predictions: VIX with a plain level (calm / normal / elevated / high fear) and Kalshi's daily odds that the S&P 500 and Nasdaq-100 close up today (mid of bid/ask on KXINXDUD / KXNASDAQDUD, public market data, no account).
+- Bot: `markets` now fits futures, VIX and Kalshi odds in one message; new `sentiment` (alias `kalshi`). Phone Markets screen shows all three. Series configurable under `markets.kalshi`. Market odds and quotes, not advice.
+
+## v1.1.88 (2026-11-20)
+
+- News and markets: bot commands `news` (world), `news local` / `localnews`, `headlines`, and `markets` / `futures` (NQ and ES index futures, delayed quotes). Desk phone ECH menu: World news and Local news (headline lists; each opens its summary) and Markets (NQ, ES futures with change and day range).
+- Sources (no API keys): world = BBC World + NPR World; local = Penobscot Bay Pilot + Bangor Daily News; futures = Yahoo Finance chart data (unofficial, delayed). Headlines cached 15 min, quotes 3 min. Configurable under `news.local`, `news.world`, `markets.symbols`.
+- Bot help lists news and markets (status and water still work, dropped from the 160-character help line); the Settings bot test console knows the new commands; double-escaped feed HTML is cleaned.
+
+## v1.1.87 (2026-11-20)
+
+- Pick M17 reflectors and modules from the front end: a "Change…" picker on each M17 source on the Listen page (saved servers, the reflector directory, or Other… for any host; module A-Z), suggestions on the Settings host field, and "Change reflector…" on the phone's M17 panel (20 per page, then a module). Every server you switch to is remembered in config.yaml `m17_reflectors`.
+- Reflector directory: Pi-Star's M17 host file, fetched at most daily and cached (m17_reflectors.json next to ech.db), so the picker still works from saved + cached entries when the source is down. Sources configurable under `m17_directory.sources`. API: GET /api/m17/reflectors, POST /api/m17/reflectors/refresh.
+
+## v1.1.86 (2026-11-20)
+
+- Desk phone: new "AllStar" and "M17" line keys (XML panels). AllStar: linked nodes, listen (750-752), link any node by number (listen only), disconnect all. M17: listen live (760), change module A-Z (saved like the Settings switch), recent messages. Both also in the ECH menu. Push to phones places the keys; config pbx_phones.allstar_key / m17_key: false to skip.
+- Extensions 760/761 play live M17 voice from the first/second M17 adapter (by name) on any phone; listed in the Audio Streams directory.
+- AudioSocket sessions send keepalive silence: Asterisk 22 hangs up an AudioSocket call after 2 s with no audio either way (seen on a quiet M17 module).
+
+## v1.1.85 (2026-11-20)
+
+- Web phone shows "unknown caller" when an inbound call has no caller ID.
+- Requirements: O191 marked done (except DMR); O192 records the DMR audio options (hardware vocoder, mbelib-neo with its AMBE+2 patent caveat, md380-emu, or AllStar-bridged talkgroups).
+
+## v1.1.84 (2026-11-20)
+
+- New Listen page (Radio menu, O191): play the PBX internet streams in the browser (ECH relays the MP3), listen live to the AllStar node (with link/unlink controls and W1PBR presets) and to M17 voice (Codec2 decoded on the server), with a talker label and level meter.
+- Web phone: extension 111 in the browser. Mark yourself available and calls to 111 ring the page (caller hears ringback); call any extension, stream, AllStar or Hams Over IP number. Microphone needs the HTTPS port. Viewers can listen but not use the phone.
+- Under the hood: ECH runs an Asterisk AudioSocket endpoint on 127.0.0.1:9093 and writes /etc/asterisk/ech_audio.conf ([ech-audio]); config `pbx_audio` (allstar_node, webphone_ext, audiosocket_port).
+
+## v1.1.83 (2026-11-19)
+
+- Desk phones get a separate "Audio Streams" directory: internet streams (7xx), AllStar access (750-752) and the Hams Over IP audio feeds (900xx), as a third remote phonebook (/phonebook-streams.xml), a Contacts group and a book in the ECH menu's Directory. Those entries leave the main ECH directory.
+- Requirements: O191 (listen to streams and digital-voice adapter audio in the web browser) added.
+- PBX AllStar node is now KN0O's registered node 63018 (server config): 751/752 link to W1PBR and listen; 750 joins the node in phone mode.
+
+## v1.1.82 (2026-11-19)
+
+- PBX moved to AllStarLink 3 (Asterisk 22 + app_rpt), replacing the source-built Asterisk 20; all PBX configs carried over (phones, voicemail, HOIP, MeshPhone, AREDN guest, streams, ECH AMI). Desk phones reach AllStar on 750 (local node, phone mode) and 751/752 (W1PBR Pen Bay ARC hub 620860 / 147.060 repeater 620861, listen). Linking to public nodes needs a registered AllStarLink node number. Internet streams now use 700-749.
+
+## v1.1.81 (2026-11-19)
+
+- PBX stream 709: SomaFM Black Rock FM.
+
+## v1.1.80 (2026-11-19)
+
+- Internet audio streams on the PBX: dial 701-723 on a desk phone for SomaFM (Groove Salad, Dub Step Beyond, The Trip, Vaporwaves, DEF CON, Space Station, Drone Zone, Secret Agent), Nightride FM synthwave (Nightride, Chillsynth, Darksynth), 1.FM Amsterdam Trance, RauteMusik Trance and UK Bass Radio. Add or drop streams with `pbx_streams.streams` in config.yaml (ext 700-799, MP3 only); ECH writes /etc/asterisk/ech_streams.conf and reloads the dialplan at startup. Streams are listed in the phone directory as "[STREAM] ...".
+
+## v1.1.79 (2026-11-19)
+
+- Desk-phone ECH menu Directory rebuilt as text menus (the T67 showed "File layout error" for the Yealink directory object): big books open an A-Z index, pages of 20 with Previous/Next, and picking an entry dials it.
+
+## v1.1.78 (2026-11-19)
+
+- Phone directory load reports the phone's real contact count and backs up the full old list (the phone returns contacts 10 per page).
+
+## v1.1.77 (2026-11-19)
+
+- Push to phones now also loads the phone's local directory (the list the Contacts app shows) with the ECH/PBX phonebook (extensions, AREDN PBX, feature codes, AllStar/HamVOIP) and the MeshPhone directory, in groups "ECH" and "MeshPhone". The phone's import replaces the whole local list, so each push keeps it in sync without duplicates; the old list is backed up first. Turn off with `pbx_phones.local_contacts: false`.
+
+## v1.1.76 (2026-11-19)
+
+- Desk-phone menu: "Forecast (7 day)" lists the NWS forecast periods; each opens its detailed forecast and wind. Cached 15 minutes. The bot's short reply stays as "Conditions now".
+
+## v1.1.75 (2026-11-19)
+
+- Desk-phone ECH menu (XML Browser key) gains: a dialable Directory (ECH/PBX and MeshPhone phonebooks, 20 per page with Next/Prev), weather forecast, METAR, aircraft overhead, ships nearby, APRS stations heard (each opens the bot's APRS lookup), satellite passes, space weather, tides, marine/buoy, sun and moon, mesh nodes heard and contests. Each page runs the mesh bot's own command, so the phone shows the same answer a mesh user gets; long replies split into parts.
+- Phone text is cleaned to plain ASCII: emoji and accent marks are dropped instead of shown as "?".
+
+## v1.1.74 (2026-11-19)
+
+- Timestamps show the date as well as the time: Logs page (app logs, packets, encrypted, bot activity), dashboard bot "Last:" line, APRS outgoing/bulletins/packets/NWS lists, and Settings bridge/observer activity lines.
+
+## v1.1.73 (2026-11-17)
+
+### Fixed
+- Desk phone ECH menu: opening a Winlink message showed "File layout error". The phone
+  rejects text screens of a few KB, so a long message now opens as a short list of parts
+  ("Part 1 of 3: ...") and each part is a small screen. Text is sent as plain ASCII, and
+  the alerts and mesh screens are kept short too.
+
+## v1.1.72 (2026-11-17)
+
+### Added
+- **ECH menu on the desk phone** (Yealink XML Browser): **Push to phones** now adds an
+  "ECH" line key. It opens a menu on the phone's own screen, no browser or app needed:
+  Winlink inbox (open a message to read it; it is marked read in Pat), weather alerts, air
+  quality, HF conditions, recent mesh messages and extensions online. The pages need no
+  login but only answer on the local network, at a random per-install address that only
+  configured phones are given.
+
+## v1.1.71 (2026-11-17)
+
+### Changed
+- Desk phones, **Send a file**: choosing a file no longer sends it straight away. The file
+  name shows next to the button, the type (wallpaper, screensaver, ringtone, app) is
+  picked from the file extension, and an explicit **Send** button sends it. The result
+  shows inside that phone's box.
+
+## v1.1.70 (2026-11-17)
+
+### Added
+- **Desk phones** (Settings → PBX): ECH logs into Yealink Android desk phones as their
+  admin, pulls each phone's full config (kept as a backup) and pushes only ECH's settings:
+  the ECH and MeshPhone directories, the voicemail key (`*98`) on the line registered to
+  ECH, and the phone's built-in Browser app (un-hidden). **Check phones** shows what
+  would change; **Push to phones** imports it, and the phone restarts (~40 s). Lines
+  registered to other servers and other directories are left alone. The phone's own
+  provisioning server is not changed, so carrier-managed phones keep their provisioning.
+- **Send file** to a phone: wallpaper, screensaver image or ringtone (then pick it on the
+  phone), or an Android app (.apk) where the phone allows app installs.
+- **Phone display** page (`/phone-display`) for a phone's browser: clocks, NWS alerts, air
+  quality, HF conditions, extensions online and recent mesh messages.
+
 ## v1.1.69 (2026-11-17)
 
 ### Fixed

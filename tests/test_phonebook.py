@@ -28,6 +28,9 @@ async def test_phonebook_includes_roster_and_hoip_entries():
         r = await client.get("/phonebook.xml")
         assert r.status_code == 200
         body = r.text
+        rs = await client.get("/phonebook-streams.xml")
+        assert rs.status_code == 200
+        streams = rs.text
 
     assert "<YealinkIPPhoneDirectory>" in body
     # Local extension roster still present
@@ -35,8 +38,11 @@ async def test_phonebook_includes_roster_and_hoip_entries():
     # HOIP entries, category-tagged for on-phone scanning
     assert "[HOIP TEST] Echo Test" in body
     assert "<Telephone>3194</Telephone>" in body
-    assert "[AUDIO] TOP 80's" in body
-    assert "<Telephone>90009</Telephone>" in body
+    # audio feeds, internet streams and AllStar access live in their own book
+    assert "[AUDIO] TOP 80's" not in body and "[STREAM]" not in body
+    assert "[AUDIO] TOP 80's" in streams and "<Telephone>90009</Telephone>" in streams
+    assert "[STREAM] SomaFM Black Rock FM" in streams and "<Telephone>709</Telephone>" in streams
+    assert "<Telephone>751</Telephone>" in streams
     assert "[CONF-US] PUBLIC 1" in body
     assert "[RF-EU] G8PY ALLSTAR 54775" in body
 

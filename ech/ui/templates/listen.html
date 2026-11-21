@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SM — Listen</title>
+<style>
+:root {
+  --bg:#0d1117;--bg2:#161b22;--bg3:#1c2230;--border:#30363d;--border2:#444c56;
+  --text:#e6edf3;--muted:#8b949e;--dim:#6e7681;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#388bfd;
+  --mono:'IBM Plex Mono','Cascadia Code','Consolas',monospace;--sans:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+#sim-banner{display:none;position:fixed;top:0;left:0;right:0;height:26px;background:#431407;border-bottom:2px solid #c2410c;color:#fb923c;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-align:center;line-height:24px;z-index:2000;text-transform:uppercase}
+body.sim-mode #sim-banner{display:block}
+body.sim-mode{padding-top:26px}
+#header{display:flex;align-items:center;gap:16px;padding:0 20px;height:48px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.logo{font-family:var(--mono);font-size:13px;color:var(--green);letter-spacing:.08em}
+.spacer{flex:1}
+#content{max-width:1100px;margin:0 auto;padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;align-items:start}
+.panel{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;min-width:0}
+.panel h2{font-size:14px;font-weight:600;margin-bottom:4px}
+.panel .sub{font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.45}
+.row{display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid var(--border)}
+.row:last-child{border-bottom:none}
+.row .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .ext{font-family:var(--mono);font-size:11px;color:var(--dim);width:34px}
+button{font:inherit;font-size:12px;background:var(--bg3);color:var(--text);border:1px solid var(--border2);border-radius:5px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--blue)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+button.on{background:#12361f;border-color:var(--green);color:var(--green)}
+button.danger{border-color:#6e2a2a;color:var(--red)}
+button.primary{background:#0d2a52;border-color:var(--blue)}
+button:disabled{opacity:.45;cursor:default}
+input{font:inherit;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:6px 8px;min-width:0}
+.now{font-family:var(--mono);font-size:12px;color:var(--green);min-height:18px;margin:8px 0 2px}
+.talker{font-family:var(--mono);font-size:12px;color:var(--yellow)}
+.meter{height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-top:6px}
+.meter i{display:block;height:100%;width:0;background:var(--green);transition:width .1s}
+.links{font-family:var(--mono);font-size:12px;color:var(--muted);margin:6px 0}
+.ctl{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}
+.m17pick{padding:6px 4px 10px;border-bottom:1px solid var(--border)}
+select{font:inherit;font-size:12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:5px 6px;max-width:100%}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0}
+.pad button{padding:9px 0;font-family:var(--mono);font-size:15px}
+.ring{display:none;background:#2a2410;border:1px solid var(--yellow);border-radius:6px;padding:10px;margin:8px 0}
+.ring.show{display:block}
+.note{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.45}
+.warn{color:var(--yellow)}
+.vol{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:10px}
+.vol input{flex:1;padding:0}
+/* fixed-width action buttons so Listen/Stop/Play/Change line up in a column */
+.row button{min-width:76px;text-align:center;flex:none}
+.tag{font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--muted);border:1px solid var(--border2);border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:1px}
+.ctl.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.ctl.grid3 input{grid-column:1/-1}
+.ctl.grid3 button{width:100%}
+.ctl.dialrow{flex-wrap:nowrap}
+.ctl.dialrow button{min-width:76px}
+details.howto{margin-top:12px;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--bg)}
+details.howto summary{cursor:pointer;font-size:12px;font-weight:600}
+details.howto ol,details.howto p{font-size:12px;color:var(--muted);line-height:1.5;margin:6px 0 0 0}
+details.howto ol{padding-left:18px}
+.ptt{margin-top:12px;border:1px solid var(--border);border-radius:6px;padding:10px;background:var(--bg)}
+.ptt[hidden]{display:none}
+.ptt-target{font-size:12px;color:var(--muted);margin-bottom:8px}
+.ptt-target b{color:var(--text)}
+button.ptt-btn{display:block;width:100%;padding:14px 10px;font-size:15px;font-weight:600;letter-spacing:.04em;touch-action:none;user-select:none;-webkit-user-select:none}
+button.ptt-btn.keyed{background:#4a1111;border-color:var(--red);color:#ffb4ae}
+.ptt-state{font-family:var(--mono);font-size:12px;margin-top:6px;min-height:16px}
+.ptt-state.tx{color:var(--red)}
+.ptt label{display:flex;gap:6px;align-items:flex-start;font-size:12px;color:var(--muted);margin-top:8px;line-height:1.4}
+.ptt label input{margin-top:2px}
+kbd{font-family:var(--mono);font-size:11px;background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:0 4px;color:var(--text)}
+@media (max-width:520px){#content{padding:12px}}
+</style>
+</head>
+<body>
+<div id="sim-banner">&#9888; SIMULATION MODE — FOR TRAINING USE ONLY &#9888;</div>
+<div id="header">
+  <div class="logo">▣ SM / Listen</div>
+  <div class="spacer"></div>
+</div>
+
+<div id="content">
+  <section class="panel" aria-labelledby="h-streams">
+    <h2 id="h-streams">Internet streams</h2>
+    <p class="sub">The same streams the desk phones get on 7xx, relayed through ECH.</p>
+    <div class="now" id="stream-now"></div>
+    <audio id="stream-audio" preload="none"></audio>
+    <div id="stream-list"><div class="note">Loading…</div></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-live">
+    <h2 id="h-live">Live radio</h2>
+    <p class="sub">AllStar node audio and M17 voice, decoded on the ECH server. Audio starts a second or two after you press Listen.</p>
+    <div id="live-list"><div class="note">Loading…</div></div>
+    <div class="talker" id="talker"></div>
+    <div class="meter" aria-hidden="true"><i id="meter"></i></div>
+    <div class="ptt" id="ptt-box" hidden>
+      <div class="ptt-target" id="ptt-target"></div>
+      <button class="ptt-btn" id="ptt" aria-describedby="ptt-state">Hold to talk</button>
+      <div class="ptt-state" id="ptt-state" role="status"></div>
+      <label id="ptt-echo-row"><input type="checkbox" id="ptt-echo"> Echo test: send to #PARROT. The reflector plays your transmission back to you and nobody else hears it.</label>
+      <div class="note">Hold the button, or the space bar, while you talk. Release to listen. 3 minute limit. Identify with your callsign.</div>
+    </div>
+    <div id="allstar-ctl" style="display:none">
+      <div class="links" id="asl-links"></div>
+      <div class="ctl" id="asl-presets"></div>
+      <div class="ctl grid3">
+        <input id="asl-node" inputmode="numeric" placeholder="Node number" size="10" aria-label="AllStar node number">
+        <button id="asl-mon">Link (listen)</button>
+        <button id="asl-tx" title="Transceive: audio from ECH's phone users can go out">Link (transceive)</button>
+        <button class="danger" id="asl-off">Disconnect all</button>
+      </div>
+      <div class="ctl"><button class="primary" id="asl-talk" title="Calls 750 from the web phone, then push-to-talk keys the node">Talk on AllStar (web phone calls 750)</button></div>
+    </div>
+    <div class="vol"><label for="vol-live">Volume</label><input type="range" id="vol-live" min="0" max="2" step="0.05" value="1"></div>
+    <details class="howto">
+      <summary>How to talk (push-to-talk)</summary>
+      <p><b>Listening alone never transmits.</b> Your microphone only goes out while you hold <b>Hold to talk</b>, or during a web phone call.</p>
+      <p><b>AllStar, from a desk phone:</b></p>
+      <ol>
+        <li>Dial <kbd>750</kbd> (or the AllStar key, then Listen to the node).</li>
+        <li>Press <kbd>*</kbd><kbd>9</kbd><kbd>9</kbd> to transmit. Wait a second, then speak.</li>
+        <li>Press <kbd>#</kbd> to stop. Transmissions time out after 3 minutes.</li>
+      </ol>
+      <p>The 751 and 752 hub links are listen-only. To be heard on a linked node, link it with <b>Link (transceive)</b> above. Identify with your callsign.</p>
+      <p><b>AllStar, from this browser:</b> press <b>Talk on AllStar</b> (the web phone calls 750), then hold <b>Hold to talk</b>. It sends <kbd>*</kbd><kbd>9</kbd><kbd>9</kbd> when you press and <kbd>#</kbd> when you let go.</p>
+      <p><b>M17, from this browser:</b> press <b>Listen</b> on an M17 link, then hold <b>Hold to talk</b>. Tick <b>Echo test</b> first to hear yourself back from the reflector. Links marked <span class="tag">RX only</span> are listen-only.</p>
+      <p><b>M17, from a desk phone:</b> dial 760 (761 for the second link) and use the same keys as AllStar: <kbd>*</kbd><kbd>9</kbd><kbd>9</kbd>, wait for the beep, talk, then <kbd>#</kbd>. A low tone means the channel is busy or the link is listen-only.</p>
+    </details>
+  </section>
+
+  <section class="panel" aria-labelledby="h-phone" id="phone-panel">
+    <h2 id="h-phone">Web phone</h2>
+    <p class="sub" id="phone-sub">A PBX extension in your browser.</p>
+    <div class="ctl"><button id="avail">Available for calls</button><span class="note" id="avail-note"></span></div>
+    <div class="ring" id="ring" role="alert">
+      <div>Incoming call from <b id="ring-from"></b></div>
+      <div class="ctl"><button class="primary" id="ring-answer">Answer</button><button class="danger" id="ring-decline">Decline</button></div>
+    </div>
+    <div class="ctl dialrow" style="margin-top:12px">
+      <input id="dial" inputmode="tel" placeholder="Number or extension" aria-label="Number to call" style="flex:1">
+      <button class="primary" id="call">Call</button>
+      <button class="danger" id="hangup" disabled>Hang up</button>
+    </div>
+    <div class="pad" id="pad"></div>
+    <div class="now" id="call-state"></div>
+    <div class="vol"><label for="vol-call">Volume</label><input type="range" id="vol-call" min="0" max="2" step="0.05" value="1"></div>
+    <div class="note" id="mic-note"></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  const BP = window.ECH_BASE_PATH || '';
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let SRC = null, ws = null, wsReady = null, listening = null, call = null, available = false;
+
+  // ── Audio out: 8 kHz PCM frames scheduled back to back ──
+  let ctx = null; const gains = {}, next = {1: 0, 2: 0};
+  function ac() {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [1, 2].forEach(k => { gains[k] = ctx.createGain(); gains[k].connect(ctx.destination); });
+      gains[1].gain.value = +$('vol-live').value; gains[2].gain.value = +$('vol-call').value;
+    }
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+  $('vol-live').oninput = e => { if (gains[1]) gains[1].gain.value = +e.target.value; };
+  $('vol-call').oninput = e => { if (gains[2]) gains[2].gain.value = +e.target.value; };
+  let peak = 0;
+  function playPcm(kind, ab) {
+    const c = ac(); const i16 = new Int16Array(ab); if (!i16.length) return;
+    const f = new Float32Array(i16.length); let pk = 0;
+    for (let i = 0; i < i16.length; i++) { f[i] = i16[i] / 32768; const a = Math.abs(f[i]); if (a > pk) pk = a; }
+    if (kind === 1) peak = Math.max(peak * 0.8, pk);
+    const b = c.createBuffer(1, f.length, 8000); b.copyToChannel(f, 0);
+    const s = c.createBufferSource(); s.buffer = b; s.connect(gains[kind]);
+    const now = c.currentTime;
+    if (next[kind] < now + 0.04 || next[kind] > now + 1.2) next[kind] = now + 0.2;   // (re)build a 200 ms cushion
+    s.start(next[kind]); next[kind] += b.duration;
+  }
+  setInterval(() => { $('meter').style.width = Math.min(100, peak * 140) + '%'; peak *= 0.6; }, 120);
+
+  // ── Socket ──
+  function connect() {
+    if (wsReady) return wsReady;
+    wsReady = new Promise(resolve => {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${location.host}/ws/audio`);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => resolve(ws);
+      ws.onmessage = ev => {
+        if (typeof ev.data !== 'string') {
+          const kind = new Uint8Array(ev.data, 0, 1)[0];
+          playPcm(kind, ev.data.slice(1));
+          return;
+        }
+        onEvent(JSON.parse(ev.data));
+      };
+      ws.onclose = () => {
+        ws = null; wsReady = null;
+        if (call) endCall('connection lost');
+        if (listening) { const l = listening; listening = null; renderLive(); setTimeout(() => startListen(l), 2000); }
+        if (available) setTimeout(() => setAvailable(true), 2000);
+      };
+    });
+    return wsReady;
+  }
+  async function send(obj) { const s = await connect(); s.send(JSON.stringify(obj)); }
+
+  function onEvent(m) {
+    if (m.type === 'listening') { listening = m.source; renderLive(); }
+    else if (m.type === 'talker') { $('talker').textContent = m.name ? 'Talking: ' + m.name : ''; }
+    else if (m.type === 'error') { $('call-state').textContent = m.message; }
+    else if (m.type === 'm17_tx') {
+      if (m.on) { if (ptt.keyed) { ptt.live = true; renderPtt(); } }
+      else { const was = ptt.keyed && ptt.kind === 'm17'; if (was) pttRelease(true); if (m.reason) { ptt.msg = 'Not transmitting: ' + m.reason; renderPtt(); } }
+    }
+    else if (m.type === 'available') { available = m.on; renderAvail(); }
+    else if (m.type === 'ring') { if (!call) { call = {id: m.id, state: 'ringing', peer: m.from, dir: 'in'}; $('ring-from').textContent = m.from; $('ring').classList.add('show'); ringTone(true); } }
+    else if (m.type === 'call') {
+      if (!call || call.id !== m.id) { if (m.state === 'calling') call = {id: m.id, state: 'calling', peer: m.peer}; else return; }
+      if (m.state === 'connected') { call.state = 'connected'; $('ring').classList.remove('show'); ringTone(false); startMic(); renderPtt(); }
+      if (m.state === 'ended' || m.state === 'taken') { endCall(m.state === 'taken' ? 'answered elsewhere' : (m.reason || 'ended')); return; }
+      renderCall();
+    }
+  }
+
+  // ── Internet streams ──
+  let playingExt = null;
+  function renderStreams() {
+    const box = $('stream-list');
+    if (!SRC.streams.length) { box.innerHTML = '<div class="note">No streams configured.</div>'; return; }
+    box.innerHTML = SRC.streams.map(s => `<div class="row"><span class="ext">${esc(s.ext)}</span><span class="name" title="${esc(s.name)}">${esc(s.name)}</span>
+      <button data-ext="${esc(s.ext)}" class="${playingExt === s.ext ? 'on' : ''}">${playingExt === s.ext ? 'Stop' : 'Play'}</button></div>`).join('');
+    box.querySelectorAll('button').forEach(b => b.onclick = () => toggleStream(b.dataset.ext));
+  }
+  function toggleStream(ext) {
+    const a = $('stream-audio');
+    if (playingExt === ext) { a.pause(); a.removeAttribute('src'); a.load(); playingExt = null; $('stream-now').textContent = ''; renderStreams(); return; }
+    playingExt = ext;
+    const s = SRC.streams.find(x => x.ext === ext);
+    $('stream-now').textContent = 'Connecting… ' + s.name;
+    a.src = `${BP}/api/audio/stream/${encodeURIComponent(ext)}`;
+    a.play().then(() => { $('stream-now').textContent = '▶ ' + s.name; }).catch(e => { $('stream-now').textContent = 'Could not play: ' + e.message; playingExt = null; renderStreams(); });
+    renderStreams();
+  }
+  $('stream-audio').onerror = () => { if (playingExt) { $('stream-now').textContent = 'Stream unavailable right now.'; playingExt = null; renderStreams(); } };
+
+  // ── Live sources ──
+  function renderLive() {
+    const box = $('live-list');
+    const live = SRC.live || [];
+    if (!live.length) { box.innerHTML = '<div class="note">No live sources: the PBX/AllStar node and M17 adapters register here once they are connected.</div>'; }
+    else box.innerHTML = live.map(s => `<div class="row"><span class="name">${esc(s.label)}${s.kind === 'm17' && !s.tx ? '<span class="tag" title="This M17 link is listen-only">RX only</span>' : ''}</span>
+      ${s.kind === 'm17' && SRC.webphone.allowed ? `<button data-chg="${esc(s.key.slice(4))}" title="Pick another reflector or module">Change…</button>` : ''}
+      <button data-k="${esc(s.key)}" class="${listening === s.key ? 'on' : ''}">${listening === s.key ? 'Stop' : 'Listen'}</button></div>
+      ${s.kind === 'm17' ? `<div class="m17pick" id="pick-${esc(s.key.slice(4))}" hidden></div>` : ''}`).join('');
+    box.querySelectorAll('button[data-k]').forEach(b => b.onclick = () => listening === b.dataset.k ? stopListen() : startListen(b.dataset.k));
+    box.querySelectorAll('button[data-chg]').forEach(b => b.onclick = () => openPicker(b.dataset.chg));
+    Object.keys(openPickers).forEach(a => { if (openPickers[a]) openPicker(a, true); });
+    renderPtt();
+    const asl = SRC.allstar || {};
+    $('allstar-ctl').style.display = asl.node && SRC.webphone.allowed ? '' : 'none';
+    $('asl-links').textContent = asl.node ? `Node ${asl.node} linked to: ${(asl.links || []).length ? asl.links.map(x => x.replace(/^[RT]/, '')).join(', ') : 'nothing'}` : '';
+    $('asl-presets').innerHTML = (asl.presets || []).map(p => `<button data-n="${esc(p.node)}">Listen to ${esc(p.name)}</button>`).join('');
+    $('asl-presets').querySelectorAll('button').forEach(b => b.onclick = async () => { await aslCmd('link', b.dataset.n, 'monitor'); startListen('allstar'); });
+  }
+  // ── M17 reflector / module picker ──
+  const openPickers = {};
+  let REFL = null;
+  async function openPicker(adapter, keepOpen) {
+    const box = document.getElementById('pick-' + adapter); if (!box) return;
+    if (!keepOpen && !box.hidden) { box.hidden = true; openPickers[adapter] = false; return; }
+    openPickers[adapter] = true; box.hidden = false;
+    if (!REFL) { box.innerHTML = '<div class="note">Loading reflectors…</div>'; REFL = await (await fetch('/api/m17/reflectors')).json(); }
+    const cur = (REFL.adapters || []).find(a => a.adapter === adapter) || {};
+    const opt = r => `<option value="${esc(r.host)}|${r.port}|${esc(r.name)}"${r.host === cur.host ? ' selected' : ''}>${esc(r.name)}${r.name !== r.host ? ' — ' + esc(r.host) : ''}</option>`;
+    const saved = REFL.reflectors.filter(r => r.source === 'saved'), dir = REFL.reflectors.filter(r => r.source === 'directory');
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(c => `<option${c === cur.module ? ' selected' : ''}>${c}</option>`).join('');
+    const dirNote = dir.length ? `${dir.length} from the reflector directory` :
+      'The online reflector directory is unavailable right now; showing saved servers. Use Other… for any host.';
+    box.innerHTML = `<div class="ctl">
+        <select id="pr-${esc(adapter)}" aria-label="Reflector" style="flex:1;min-width:0">
+          <optgroup label="Saved">${saved.map(opt).join('')}</optgroup>
+          ${dir.length ? `<optgroup label="Directory">${dir.map(opt).join('')}</optgroup>` : ''}
+          <option value="other">Other…</option></select>
+        <select id="pm-${esc(adapter)}" aria-label="Module">${letters}</select>
+        <button class="primary" id="pa-${esc(adapter)}">Switch</button></div>
+      <div class="ctl" id="po-${esc(adapter)}" hidden><input id="ph-${esc(adapter)}" placeholder="reflector host" style="flex:1">
+        <input id="pp-${esc(adapter)}" value="17000" size="6" aria-label="Port"></div>
+      <div class="note">${esc(dirNote)}${cur.listen_only ? ' This adapter is listen-only.' : ''}</div>`;
+    const sel = document.getElementById('pr-' + adapter);
+    sel.onchange = () => { document.getElementById('po-' + adapter).hidden = sel.value !== 'other'; };
+    document.getElementById('pa-' + adapter).onclick = () => switchM17(adapter, cur);
+  }
+  async function switchM17(adapter, cur) {
+    const sel = document.getElementById('pr-' + adapter).value, module = document.getElementById('pm-' + adapter).value;
+    let host, port, name = '';
+    if (sel === 'other') { host = document.getElementById('ph-' + adapter).value.trim(); port = +document.getElementById('pp-' + adapter).value || 17000; }
+    else [host, port, name] = sel.split('|');
+    if (!host) return;
+    const same = host === cur.host && +port === +cur.port;
+    const url = same ? `/api/adapters/${encodeURIComponent(adapter)}/m17/module` : `/api/adapters/${encodeURIComponent(adapter)}/m17/server`;
+    const body = same ? {module} : {reflector_host: host, reflector_port: +port, module, name};
+    const btn = document.getElementById('pa-' + adapter); btn.disabled = true; btn.textContent = 'Switching…';
+    try {
+      const d = await (await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})).json();
+      if (d.status !== 'ok') alert('Switch failed: ' + (d.detail || 'unknown error'));
+    } catch (e) { alert('Switch failed: ' + e.message); }
+    REFL = null; openPickers[adapter] = false;
+    if (listening === 'm17:' + adapter) setTimeout(() => startListen('m17:' + adapter), 3000);
+    setTimeout(load, same ? 500 : 3000);
+  }
+
+  async function startListen(key) { ac(); await send({op: 'listen', source: key}); }
+  async function stopListen() { if (ptt.keyed && ptt.kind === 'm17') pttRelease(); await send({op: 'stop'}); $('talker').textContent = ''; }
+  async function aslCmd(action, node, mode) {
+    const r = await fetch('/api/audio/allstar', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action, node, mode})});
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.detail || ('Failed: HTTP ' + r.status)); }
+    setTimeout(load, 4000);
+  }
+  $('asl-mon').onclick = () => { const n = $('asl-node').value.trim(); if (n) aslCmd('link', n, 'monitor'); };
+  $('asl-tx').onclick = () => { const n = $('asl-node').value.trim(); if (n && confirm('Transceive link: anything ECH\'s phone users key up on node ' + SRC.allstar.node + ' goes out to ' + n + '. Continue?')) aslCmd('link', n, 'transceive'); };
+  $('asl-off').onclick = () => aslCmd('unlink_all');
+  $('asl-talk').onclick = async () => {
+    if (call) { alert('Hang up the current web phone call first.'); return; }
+    $('dial').value = '750'; $('call').click();
+  };
+
+  // ── Web phone ──
+  ['1','2','3','4','5','6','7','8','9','*','0','#'].forEach(d => {
+    const b = document.createElement('button'); b.textContent = d; b.setAttribute('aria-label', 'Digit ' + d);
+    b.onclick = () => {
+      if (call && call.state === 'connected') { send({op: 'dtmf', id: call.id, digits: d}); $('call-state').textContent = 'Connected: ' + call.peer + ' (sent ' + d + ')'; }
+      else $('dial').value += d;
+    }; $('pad').appendChild(b);
+  });
+  function renderAvail() {
+    $('avail').classList.toggle('on', available);
+    $('avail').textContent = available ? 'Available for calls ✓' : 'Available for calls';
+    $('avail-note').textContent = available ? `Calls to ${SRC.webphone.ext} ring this browser.` : '';
+  }
+  async function setAvailable(on) { ac(); await send({op: 'available', on}); if (on) ensureMicPermission(); }
+  $('avail').onclick = () => setAvailable(!available);
+  function renderCall() {
+    const st = call ? ({calling: 'Calling ' + call.peer + '…', ringing: 'Ringing: ' + call.peer, connected: 'Connected: ' + call.peer}[call.state] || '') : '';
+    $('call-state').textContent = st;
+    $('hangup').disabled = !call; $('call').disabled = !!call;
+  }
+  $('call').onclick = async () => {
+    const n = $('dial').value.replace(/[^0-9*#]/g, ''); if (!n) return;
+    ac(); await ensureMicPermission(); await send({op: 'call', number: n});
+  };
+  $('dial').onkeydown = e => { if (e.key === 'Enter') $('call').click(); };
+  $('hangup').onclick = () => { if (call) send({op: 'hangup', id: call.id}); endCall('hung up'); };
+  $('ring-answer').onclick = async () => { ac(); await ensureMicPermission(); send({op: 'answer', id: call.id}); };
+  $('ring-decline').onclick = () => { send({op: 'hangup', id: call.id}); endCall('declined'); };
+  function endCall(why) {
+    if (ptt.keyed && ptt.kind === 'allstar') pttRelease(true);
+    call = null; if (!ptt.keyed) stopMic(); ringTone(false); $('ring').classList.remove('show'); renderPtt();
+    renderCall(); $('call-state').textContent = 'Call ' + why + '.';
+  }
+
+  // incoming-call chime in the browser
+  let ringTimer = null;
+  function ringTone(on) {
+    clearInterval(ringTimer); ringTimer = null;
+    if (!on) return;
+    const beep = () => { const c = ac(); [0, 0.25].forEach(t => { const o = c.createOscillator(), g = c.createGain(); o.frequency.value = 880; g.gain.value = 0.12; o.connect(g); g.connect(c.destination); o.start(c.currentTime + t); o.stop(c.currentTime + t + 0.18); }); };
+    beep(); ringTimer = setInterval(beep, 3000);
+  }
+
+  // ── Microphone: capture, downsample to 8 kHz, 20 ms Int16 frames ──
+  let micStream = null, micNode = null, micSrc = null, micBuf = [], micPos = 0;
+  async function ensureMicPermission() {
+    if (!window.isSecureContext || !navigator.mediaDevices) {
+      $('mic-note').innerHTML = '<span class="warn">The microphone needs this page on HTTPS (port 8765). You can still listen.</span>';
+      return false;
+    }
+    if (micStream) return true;
+    try { micStream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}}); $('mic-note').textContent = ''; return true; }
+    catch (e) { $('mic-note').innerHTML = '<span class="warn">Microphone blocked: ' + esc(e.message) + '. The other side will not hear you.</span>'; return false; }
+  }
+  function startMic() {
+    if (!micStream || micNode) return;
+    const c = ac(); micSrc = c.createMediaStreamSource(micStream);
+    micNode = c.createScriptProcessor(2048, 1, 1);
+    const step = c.sampleRate / 8000; micPos = 0; micBuf = [];
+    micNode.onaudioprocess = e => {
+      const inCall = call && call.state === 'connected';
+      if ((!inCall && !(ptt.keyed && ptt.kind === 'm17')) || !ws || ws.readyState !== 1) return;
+      const x = e.inputBuffer.getChannelData(0);
+      for (; micPos < x.length; micPos += step) {
+        const v = Math.max(-1, Math.min(1, x[Math.floor(micPos)])); micBuf.push(v < 0 ? v * 32768 : v * 32767);
+        if (micBuf.length === 160) { ws.send(Int16Array.from(micBuf).buffer); micBuf = []; }
+      }
+      micPos -= x.length;
+    };
+    micSrc.connect(micNode); micNode.connect(c.destination);
+  }
+  function stopMic() { if (micNode) { micNode.disconnect(); micSrc.disconnect(); micNode = null; micSrc = null; } }
+
+  // ── Push to talk ──
+  // AllStar: during a web phone call to the node (750-759 or a 62086x hub link)
+  //          *99 keys app_rpt's phone mode and # unkeys it.
+  // M17:     while listening to an M17 link that can transmit, the server
+  //          Codec2-encodes the mic and sends a voice stream to the reflector.
+  const MAX_TX_MS = 180000;
+  const ptt = {keyed: false, kind: null, key: null, live: false, t0: 0, timer: null, msg: ''};
+  const isAllStarNum = n => /^(75\d|62086\d)$/.test(n || '');
+  function pttTarget() {
+    if (call && call.state === 'connected' && isAllStarNum(call.peer)) return {kind: 'allstar', label: 'AllStar node ' + ((SRC && SRC.allstar && SRC.allstar.node) || '') + ' (web phone call ' + call.peer + ')'};
+    if (listening && listening.startsWith('m17:')) {
+      const s = ((SRC && SRC.live) || []).find(x => x.key === listening);
+      if (s && s.tx && SRC.webphone.allowed) return {kind: 'm17', key: s.key, label: s.label};
+    }
+    return null;
+  }
+  function renderPtt() {
+    const t = ptt.keyed ? {kind: ptt.kind, label: ptt.label} : pttTarget();
+    $('ptt-box').hidden = !t;
+    if (!t) return;
+    $('ptt-target').innerHTML = 'Talk on <b>' + esc(t.label) + '</b>';
+    $('ptt-echo-row').style.display = t.kind === 'm17' ? '' : 'none';
+    $('ptt-echo').disabled = ptt.keyed;
+    const b = $('ptt'); b.classList.toggle('keyed', ptt.keyed);
+    b.textContent = ptt.keyed ? (ptt.live ? 'TRANSMITTING (release to stop)' : 'Keying up…') : 'Hold to talk';
+    const st = $('ptt-state');
+    if (ptt.keyed && ptt.live) {
+      const s = Math.floor((Date.now() - ptt.t0) / 1000);
+      st.textContent = 'On air ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') + ' / 3:00' + (ptt.echo ? ' (echo test)' : '');
+      st.className = 'ptt-state tx';
+    } else { st.textContent = ptt.msg; st.className = 'ptt-state'; }
+  }
+  async function pttPress() {
+    if (ptt.keyed) return;
+    const t = pttTarget(); if (!t) return;
+    ac();
+    if (!await ensureMicPermission()) { ptt.msg = 'Microphone not available, cannot transmit.'; renderPtt(); return; }
+    Object.assign(ptt, {keyed: true, kind: t.kind, key: t.key || null, label: t.label, live: false, t0: Date.now(), msg: '', echo: t.kind === 'm17' && $('ptt-echo').checked});
+    if (t.kind === 'allstar') {
+      await send({op: 'dtmf', id: call.id, digits: '*99'});
+      setTimeout(() => { if (ptt.keyed && ptt.kind === 'allstar') { ptt.live = true; renderPtt(); } }, 500);
+    } else {
+      await send({op: 'm17_tx', source: t.key, on: true, dst: ptt.echo ? '#PARROT' : ''});
+      startMic();
+    }
+    clearInterval(ptt.timer);
+    ptt.timer = setInterval(() => { if (Date.now() - ptt.t0 > MAX_TX_MS) { pttRelease(); ptt.msg = 'Stopped at the 3 minute limit.'; } renderPtt(); }, 500);
+    renderPtt();
+  }
+  function pttRelease(quiet) {
+    if (!ptt.keyed) return;
+    const kind = ptt.kind, key = ptt.key;
+    Object.assign(ptt, {keyed: false, live: false, kind: null, key: null});
+    clearInterval(ptt.timer); ptt.timer = null;
+    if (!quiet) {
+      if (kind === 'allstar' && call) send({op: 'dtmf', id: call.id, digits: '#'});
+      if (kind === 'm17') send({op: 'm17_tx', source: key, on: false});
+    }
+    if (!call) stopMic();
+    if (!ptt.msg) ptt.msg = 'Listening.';
+    renderPtt();
+  }
+  const pb = $('ptt');
+  pb.addEventListener('pointerdown', e => { e.preventDefault(); try { pb.setPointerCapture(e.pointerId); } catch (_) {} pttPress(); });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => pb.addEventListener(ev, () => pttRelease()));
+  pb.addEventListener('keydown', e => { if ((e.key === 'Enter') && !e.repeat) { e.preventDefault(); pttPress(); } });
+  pb.addEventListener('keyup', e => { if (e.key === 'Enter') pttRelease(); });
+  pb.addEventListener('contextmenu', e => e.preventDefault());
+  const typing = el => el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA');
+  document.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && !typing(document.activeElement) && !$('ptt-box').hidden) { e.preventDefault(); pttPress(); } });
+  document.addEventListener('keyup', e => { if (e.code === 'Space' && ptt.keyed) { e.preventDefault(); pttRelease(); } });
+  window.addEventListener('blur', () => pttRelease());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pttRelease(); });
+
+  // ── Load ──
+  async function load() {
+    try {
+      SRC = await (await fetch('/api/audio/sources')).json();
+    } catch (e) { $('stream-list').innerHTML = '<div class="note warn">Could not load sources.</div>'; return; }
+    renderStreams(); renderLive();
+    const wp = SRC.webphone || {};
+    if (!wp.enabled) { $('phone-sub').textContent = 'The web phone is not set up on this server.'; $('phone-panel').querySelectorAll('button,input:not([type=range])').forEach(x => x.disabled = true); }
+    else if (!wp.allowed) { $('phone-sub').textContent = 'Viewer accounts can listen but not use the web phone.'; $('phone-panel').querySelectorAll('button,input:not([type=range])').forEach(x => x.disabled = true); }
+    else { $('phone-sub').textContent = `Extension ${wp.ext} on the PBX, in this browser. Call any extension, stream (7xx), AllStar (75x) or Hams Over IP number.`; renderCall(); }
+    renderAvail();
+    const live = (SRC.live || []).find(s => s.key === listening);
+    $('talker').textContent = live && live.talker ? 'Talking: ' + live.talker : '';
+  }
+  load(); setInterval(load, 15000);
+})();
+</script>
+</body>
+</html>

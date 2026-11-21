@@ -82,7 +82,9 @@ Config keys:
 from __future__ import annotations
 
 import asyncio
+import collections
 import logging
+import os
 import time
 
 from ech.adapters.base import Adapter
@@ -192,6 +194,41 @@ def _crc16_m17(data: bytes) -> int:
     return crc
 
 
+# Stream mode LSF TYPE: bit 0 = 1 (stream), bits 1-2 = 2 (voice, Codec2 3200),
+# no encryption, CAN 0. Same bit layout parse_m17_stream() reads on receive.
+VOICE_TYPE = 0x0005
+VOICE_FRAME_S = 0.04          # one stream frame = 2 Codec2 3200 frames = 40 ms
+VOICE_FRAME_PCM = 640         # 320 samples of s16le
+MAX_TX_S = 180.0              # transmit time-out, like app_rpt's totime
+TX_IDLE_S = 1.0               # no mic audio this long = the talker let go
+BUSY_S = 1.0                  # someone else's stream heard this recently = channel busy
+
+
+def build_stream_frame(sid: int, dst: bytes, src: bytes, fn: int, payload: bytes,
+                       last: bool = False, type_field: int = VOICE_TYPE) -> bytes:
+    """54-byte M17-over-IP stream frame: 'M17 ' + stream id + LSF (dst, src, type,
+    14-byte meta) + frame number (bit 15 = last) + 16-byte payload + CRC-16 over
+    everything before it."""
+    body = (b"M17 " + (sid & 0xFFFF).to_bytes(2, "big") + dst + src + type_field.to_bytes(2, "big")
+            + b"\x00" * 14 + (((fn & 0x7FFF) | (0x8000 if last else 0)).to_bytes(2, "big"))
+            + payload[:16].ljust(16, b"\x00"))
+    return body + _crc16_m17(body).to_bytes(2, "big")
+
+
+class _VoiceTx:
+    """One transmission: mic PCM in, paced 40 ms stream frames out."""
+
+    def __init__(self, owner: str, dst: bytes, encoder):
+        self.owner, self.dst, self.enc = owner, dst, encoder
+        self.sid = int.from_bytes(os.urandom(2), "big") or 1
+        self.fn = 0
+        self.pcm = bytearray()
+        self.frames: collections.deque = collections.deque()
+        self.started = self.last_audio = time.monotonic()
+        self.ending = False
+        self.task: asyncio.Task | None = None
+
+
 class _M17Protocol(asyncio.DatagramProtocol):
     def __init__(self, adapter: "M17ReflectorAdapter"):
         self._adapter = adapter
@@ -234,9 +271,14 @@ class M17ReflectorAdapter(Adapter):
         self._linked = asyncio.Event()
         self._last_rx_from_reflector = 0.0
         self._rx_count = 0
+        self._voice_streams: dict = {}   # stream id -> (Codec2Decoder, callsign), only while someone listens
         self._tx_count = 0
         self._last_error: str | None = None
         self._switching = False      # set_module() in progress: a DISC echo is expected
+        self._vtx: _VoiceTx | None = None    # our transmission in progress (O191 PTT)
+        self._rx_voice_at = 0.0               # last time someone else's voice stream arrived
+        self._rx_voice_who = ""
+        self._voice_tx_count = 0
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -268,6 +310,11 @@ class M17ReflectorAdapter(Adapter):
         self._last_rx_from_reflector = time.monotonic()
         self._run_task = asyncio.create_task(self._run(), name=f"{self.name}-run")
         self._watchdog_task = asyncio.create_task(self._watchdog(), name=f"{self.name}-watchdog")
+        try:
+            from ech.core.audio_hub import hub
+            hub.register(f"m17:{self.name}", f"M17 {self._host} module {self._module}", "m17", tx=self)
+        except Exception:
+            pass
         log.info("M17 %s: linked to %s:%d module %s as %s",
                   self.name, self._host, self._port, self._module, self._callsign)
 
@@ -393,6 +440,101 @@ class M17ReflectorAdapter(Adapter):
                   message.to_id or "BROADCAST", self._tx_count)
         return True
 
+    # ── Voice transmit (push-to-talk from the web page or a desk phone) ──
+    # Callers: audio_hub.PhoneKeyer (*99 / # on 76x) and app.py /ws/audio (hold-to-talk).
+
+    def can_transmit(self) -> bool:
+        from ech.core.audio_hub import Codec2Encoder
+        return bool(self._connected and self._transport and not self._listen_only
+                    and Codec2Encoder.available())
+
+    def voice_start(self, owner: str, dst: str = "") -> str | None:
+        """Key up. Returns None, or why not (busy, listen-only, ...)."""
+        from ech.core.audio_hub import Codec2Encoder
+        if self._listen_only:
+            return "this M17 link is listen-only"
+        if not self._connected or not self._transport:
+            return "M17 link is not connected"
+        if self._vtx and self._vtx.owner != owner:
+            return "another ECH user is transmitting on this link"
+        if self._vtx and not self._vtx.ending:
+            return None
+        if self._vtx:
+            return "still finishing the last transmission, try again"
+        if time.monotonic() - self._rx_voice_at < BUSY_S:
+            return f"channel busy: {self._rx_voice_who or 'someone'} is talking"
+        try:
+            dst_addr = encode_callsign(dst) if dst else BROADCAST_ADDR
+        except ValueError as exc:
+            return f"bad destination: {exc}"
+        try:
+            enc = Codec2Encoder(Codec2Encoder.MODE_3200)
+        except RuntimeError as exc:
+            return str(exc)
+        v = self._vtx = _VoiceTx(owner, dst_addr, enc)
+        v.task = asyncio.ensure_future(self._voice_pacer(v))
+        log.info("M17 %s: voice TX start (stream %04x, dst=%s, owner=%s)", self.name, v.sid,
+                 dst or "BROADCAST", owner[:12])
+        return None
+
+    def voice_push(self, owner: str, pcm: bytes) -> bool:
+        """Mic audio (8 kHz s16le). False = not transmitting (time-out, link down)."""
+        v = self._vtx
+        if not v or v.owner != owner or v.ending:
+            return False
+        if time.monotonic() - v.started > MAX_TX_S:
+            log.info("M17 %s: voice TX time-out after %.0f s", self.name, MAX_TX_S)
+            self.voice_end(owner)
+            return False
+        v.last_audio = time.monotonic()
+        v.pcm += pcm
+        while len(v.pcm) >= VOICE_FRAME_PCM:
+            chunk, v.pcm = bytes(v.pcm[:VOICE_FRAME_PCM]), v.pcm[VOICE_FRAME_PCM:]
+            v.frames.append(v.enc.encode(chunk))
+        return True
+
+    def voice_end(self, owner: str) -> None:
+        v = self._vtx
+        if v and v.owner == owner and not v.ending:
+            v.ending = True        # the pacer drains what is queued, then sends the last frame
+
+    async def _voice_pacer(self, v: _VoiceTx) -> None:
+        """Send one frame per 40 ms on a steady clock (mic audio arrives in bursts)."""
+        silence = v.enc.encode(bytes(VOICE_FRAME_PCM))
+        await asyncio.sleep(VOICE_FRAME_S * 2)               # small pre-buffer
+        nxt = time.monotonic()
+        try:
+            while True:
+                if not self._connected or not self._transport:
+                    break
+                if not v.ending and time.monotonic() - v.last_audio > TX_IDLE_S:
+                    log.info("M17 %s: voice TX idle, unkeying", self.name)
+                    v.ending = True
+                if v.ending and not v.frames:
+                    break
+                payload = v.frames.popleft() if v.frames else silence
+                self._send_voice_frame(v, payload, last=False)
+                nxt += VOICE_FRAME_S
+                await asyncio.sleep(max(0.0, nxt - time.monotonic()))
+            if self._transport:
+                self._send_voice_frame(v, silence, last=True)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            v.enc.close()
+            if self._vtx is v:
+                self._vtx = None
+            self._voice_tx_count += 1
+            log.info("M17 %s: voice TX end (stream %04x, %d frames, %.1f s)", self.name, v.sid,
+                     v.fn, v.fn * VOICE_FRAME_S)
+
+    def _send_voice_frame(self, v: _VoiceTx, payload: bytes, last: bool) -> None:
+        try:
+            self._transport.sendto(build_stream_frame(v.sid, v.dst, self._own_addr, v.fn, payload, last))
+        except OSError as exc:
+            self._last_error = str(exc)
+        v.fn = (v.fn + 1) & 0x7FFF
+
     # ── Receive ───────────────────────────────────────────────────────────
 
     def _on_datagram(self, data: bytes) -> None:
@@ -417,8 +559,11 @@ class M17ReflectorAdapter(Adapter):
             log.warning("M17 %s: reflector sent DISC — link dropped (blacklisted? config changed?)", self.name)
             self._connected = False
             return
+        if magic == b"M17 ":
+            self._on_voice(data)
+            return
         if magic != b"M17P":
-            return   # ignore M17 (stream/voice) and anything else — text-only adapter
+            return
 
         if len(data) < 36:
             return
@@ -447,6 +592,36 @@ class M17ReflectorAdapter(Adapter):
                  "lsf_meta": data[18:32].hex(), "payload_len": len(payload)},
         )
         asyncio.ensure_future(self._enqueue(msg))
+
+    def _on_voice(self, data: bytes) -> None:
+        """M17 voice stream frame -> Codec2 -> web UI listeners (O191). Nothing is
+        decoded unless a browser is listening to this adapter."""
+        from ech.core.audio_hub import hub, parse_m17_stream, Codec2Decoder
+        key = f"m17:{self.name}"
+        f = parse_m17_stream(data)
+        if not f or f["data_type"] not in (2, 3):
+            return
+        self._rx_voice_at = time.monotonic()      # channel-busy check for our own PTT
+        if f["sid"] not in self._voice_streams:
+            self._rx_voice_who = decode_callsign(f["src"])
+        if not hub.has_listeners(key):
+            st = self._voice_streams.pop(f["sid"], None)
+            if st:
+                st[0].close()
+            return
+        st = self._voice_streams.get(f["sid"])
+        if st is None:
+            try:
+                dec = Codec2Decoder(Codec2Decoder.MODE_3200 if f["data_type"] == 2 else Codec2Decoder.MODE_1600)
+            except RuntimeError:
+                return
+            st = self._voice_streams[f["sid"]] = (dec, decode_callsign(f["src"]))
+        dec, who = st
+        bits = f["payload"] if dec.mode == Codec2Decoder.MODE_3200 else f["payload"][:8]
+        hub.publish(key, dec.decode(bits), talker=who)
+        if f["last"]:
+            dec.close()
+            self._voice_streams.pop(f["sid"], None)
 
     # ── Keepalive ─────────────────────────────────────────────────────────
     # This doubles as the required Adapter._run() override — inbound
@@ -484,6 +659,8 @@ class M17ReflectorAdapter(Adapter):
             "module": self._module,
             "callsign": self._callsign,
             "listen_only": self._listen_only,
+            "voice_tx_count": self._voice_tx_count,
+            "transmitting": bool(self._vtx),
             "rx_count": self._rx_count,
             "tx_count": self._tx_count,
             "last_error": self._last_error,

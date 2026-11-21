@@ -263,7 +263,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     PUBLIC_PATHS = {"/login", "/change-password", "/api/auth/login", "/api/auth/change-password",
                     "/api/health", "/ws", "/static", "/favicon.ico",
                     "/ca.crt", "/tls-setup", "/phonebook.xml",
-                    "/phonebook-meshphone.xml"}
+                    "/phonebook-meshphone.xml", "/phonebook-streams.xml"}
 
     def _is_loopback(request) -> bool:
         try:
@@ -302,6 +302,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         "/api/bridge-rules",     # bridge rules + status (was uncovered: lives outside /api/config)
         "/api/adapter-config",   # full config.yaml read/write (contains credentials)
         "/api/meshcore-bridge",  # MQTT bridge toggle
+        "/api/phones",           # desk phones: log in as their admin, change settings
         "/api/system/",          # service restarts, reboot
         "/api/anomalies/clear",
         "/api/messages/clear",
@@ -342,7 +343,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         is_public = (
             path in PUBLIC_PATHS or
             path.startswith("/static/") or
-            path.startswith("/api/auth/")
+            path.startswith("/api/auth/") or
+            path.startswith("/yealink/")      # desk-phone XML pages: own key + LAN check per route
         )
         if is_public:
             return await call_next(request)
@@ -598,6 +600,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     <button type="button" title="Radio"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="6" width="12" height="8" rx="1.5"/><path d="M4 6l8-4"/><circle cx="10.5" cy="10" r="1.8"/><path d="M4 9h3M4 11h3"/></svg><span class="lbl">Radio</span><svg class="car" viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
     <div class="menu">
       <a href="/aprs" data-p="/aprs" data-t="APRS">APRS<small>Messages, objects, bulletins, packets, weather</small></a>
+      <a href="/listen" data-p="/listen" data-t="Listen">Listen<small>Streams, AllStar, M17 audio and the web phone</small></a>
       <a href="/hamlog" data-p="/hamlog" data-t="Ham Log">Ham Log<small>QSO logging, contests, rig control</small></a>
       <a href="/remote-hw" data-p="/remote-hw" data-t="Remote Hardware">Remote hardware<small>Radios and devices on other machines</small></a>
     </div>
@@ -982,12 +985,18 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         write the module into config.yaml (as the Settings server switch, O99,
         does) so it is remembered until changed (O152). Viewers are blocked by
         auth_middleware."""
-        adapter = router._adapters.get(adapter_name)
-        if adapter is None or not hasattr(adapter, "set_module"):
+        if router._adapters.get(adapter_name) is None or not hasattr(router._adapters.get(adapter_name), "set_module"):
             raise HTTPException(status_code=404, detail=f"No M17 adapter '{adapter_name}'")
         data = await request.json()
+        return await _switch_m17_module(adapter_name, str(data.get("module") or ""))
+
+    async def _switch_m17_module(adapter_name: str, wanted: str) -> dict:
+        """Shared by Settings and the desk-phone M17 panel."""
+        adapter = router._adapters.get(adapter_name)
+        if adapter is None or not hasattr(adapter, "set_module"):
+            return {"status": "error", "detail": f"No M17 adapter '{adapter_name}'", "module": None}
         try:
-            module = await adapter.set_module(str(data.get("module") or ""))
+            module = await adapter.set_module(wanted)
         except ValueError as exc:
             return {"status": "error", "detail": str(exc), "module": getattr(adapter, "_module", None)}
         import yaml
@@ -1393,24 +1402,32 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         here (unlike MeshCore's live in-place channel switch) because this
         may be an entirely different server, not just a channel index on
         the same device."""
-        from ech.adapters.m17_reflector import M17ReflectorAdapter
         from fastapi import HTTPException
-        adapter = router._adapters.get(adapter_name)
-        if not adapter:
+        if not router._adapters.get(adapter_name):
             raise HTTPException(status_code=404, detail=f"Adapter '{adapter_name}' not found")
+        data = await request.json()
+        return await _switch_m17_server(adapter_name, str(data.get("reflector_host", "")),
+                                        data.get("reflector_port", 17000), str(data.get("module", "")),
+                                        str(data.get("name") or ""))
+
+    async def _switch_m17_server(adapter_name: str, host: str, port, module: str, name: str = "") -> dict:
+        """Point an M17 adapter at another reflector/module, save it in config.yaml
+        (adapter + the saved m17_reflectors list), and restart the adapter."""
+        from ech.adapters.m17_reflector import M17ReflectorAdapter
+        from ech.core.m17_directory import valid_host
+        adapter = router._adapters.get(adapter_name)
         if not isinstance(adapter, M17ReflectorAdapter):
             return {"status": "error", "detail": f"'{adapter_name}' is not an M17 reflector adapter"}
-
-        data = await request.json()
-        host = str(data.get("reflector_host", "")).strip()
-        module = str(data.get("module", "")).strip().upper()
-        if not host:
-            return {"status": "error", "detail": "reflector_host is required"}
+        host = host.strip().lower()
+        module = module.strip().upper()
+        if not valid_host(host):
+            return {"status": "error", "detail": "reflector_host is required (a hostname or IP)"}
         if not module or len(module) != 1 or not module.isalpha():
             return {"status": "error", "detail": "module must be a single letter A-Z"}
         try:
-            port = int(data.get("reflector_port", 17000))
-        except (TypeError, ValueError):
+            port = int(port or 17000)
+            assert 0 < port < 65536
+        except (TypeError, ValueError, AssertionError):
             return {"status": "error", "detail": "reflector_port must be a number"}
 
         import yaml
@@ -1423,9 +1440,14 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             adapter_cfg = next((a for a in full_cfg.get("adapters", []) if a.get("name") == adapter_name), None)
             if adapter_cfg is None:
                 return {"status": "error", "detail": f"Adapter '{adapter_name}' not found in config.yaml"}
+            old_host, old_port = adapter_cfg.get("reflector_host"), adapter_cfg.get("reflector_port", 17000)
             adapter_cfg["reflector_host"] = host
             adapter_cfg["reflector_port"] = port
             adapter_cfg["module"] = module
+            saved = full_cfg.setdefault("m17_reflectors", [])
+            for h, p, n in ((old_host, old_port, adapter_name), (host, port, name or host)):
+                if h and not any(str(s.get("host", "")).lower() == str(h).lower() for s in saved):
+                    saved.append({"name": n, "host": str(h).lower(), "port": int(p or 17000)})
             atomic_write_yaml(cfg_path, full_cfg)
         except PermissionError:
             return {"status": "error", "detail": "could not write config.yaml (permission denied)"}
@@ -1821,6 +1843,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             for code, name in _PBX_FEATURE_CODES
         )
         for e in directory.get("hamvoip", []):
+            if e.get("category") == "hoip_audio_feed":
+                continue   # listed in /phonebook-streams.xml instead
             if e.get("asl_status") == "down":
                 continue   # AllStar node not registered right now — don't put it on the phones
             if e.get("dialable") is False:
@@ -1829,6 +1853,36 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             name = f"[{tag}] {e['name']}" if tag else e["name"]
             entries += (f'<DirectoryEntry><Name>{escape(name)}</Name>'
                         f'<Telephone>{escape(e["destination"])}</Telephone></DirectoryEntry>')
+        xml = f'<?xml version="1.0" encoding="UTF-8"?><YealinkIPPhoneDirectory>{entries}</YealinkIPPhoneDirectory>'
+        return Response(content=xml, media_type="application/xml")
+
+    def _audio_rows() -> list[tuple[str, str]]:
+        """(name, number) for the phones' "Audio Streams" book: internet streams (7xx),
+        AllStar access (75x) and the Hams Over IP audio feeds (900xx)."""
+        from ech.core.radio_directory import get_directory
+        from ech.core.pbx_streams import streams_from_config, ALLSTAR_PHONE_ENTRIES
+        import yaml as _yaml
+        cfg = {}
+        if app.state.config_path:
+            try:
+                with open(app.state.config_path) as f:
+                    cfg = _yaml.safe_load(f) or {}
+            except Exception:
+                pass
+        rows = [(f"[STREAM] {s['name']}", s["ext"]) for s in streams_from_config(cfg)]
+        rows += [(n, x) for x, n in ALLSTAR_PHONE_ENTRIES]
+        for ad, ext in _m17_listen_exts():
+            if ext:
+                rows.append((f"[M17] {getattr(ad, '_host', ad.name)} module {getattr(ad, '_module', '')}", ext))
+        rows += [(f"[AUDIO] {e['name']}", e["destination"]) for e in get_directory(cfg).get("hamvoip", [])
+                 if e.get("category") == "hoip_audio_feed" and e.get("dialable") is not False]
+        return rows
+
+    @app.get("/phonebook-streams.xml")
+    async def pbx_phonebook_streams():
+        from xml.sax.saxutils import escape
+        entries = "".join(f"<DirectoryEntry><Name>{escape(n)}</Name><Telephone>{escape(t)}</Telephone></DirectoryEntry>"
+                          for n, t in _audio_rows())
         xml = f'<?xml version="1.0" encoding="UTF-8"?><YealinkIPPhoneDirectory>{entries}</YealinkIPPhoneDirectory>'
         return Response(content=xml, media_type="application/xml")
 
@@ -3481,6 +3535,10 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             elif cmd in ("satpass", "sat"):  result = await wx_bot._cmd_satpass(args)
             elif cmd in ("solar", "space"):  result = await wx_bot._cmd_solar()
             elif cmd == "ships":             result = await wx_bot._cmd_ships()
+            elif cmd in ("news", "headlines", "localnews"):
+                result = await wx_bot._cmd_news("local" if cmd == "localnews" or args.lower().startswith("local") else "world")
+            elif cmd in ("markets", "futures"): result = await wx_bot._cmd_markets()
+            elif cmd in ("sentiment", "kalshi"): result = await wx_bot._cmd_sentiment()
             elif cmd == "fcc":               result = await wx_bot._cmd_fcc(args)
             elif cmd == "trivia":            result = await wx_bot._cmd_trivia(fake)
             elif cmd == "skywarn":           result = await wx_bot._cmd_skywarn(fake)
@@ -4849,6 +4907,21 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         from ech.core.directory_status import status as live
         return live.meshphone()
 
+    def _meshphone_rows() -> list[tuple[str, str]]:
+        """(label, dial) for every MeshPhone person and office with a number."""
+        from ech.core.directory_status import status as live
+        d = live.meshphone()
+        rows = []
+        for p in d["people"]:
+            label = " ".join(x for x in (p["callsign"], p.get("name") or "") if x)
+            if p.get("pbx"):
+                label += f" ({p['pbx']})"
+            rows.append((label, p["dial"]))
+        for o in d["offices"]:
+            if o.get("dial"):
+                rows.append((f"[OFFICE] {o['name']} {o.get('admin_callsign') or ''}".strip(), o["dial"]))
+        return rows
+
     @app.get("/phonebook-meshphone.xml")
     async def pbx_phonebook_meshphone(request: Request):
         """Yealink remote phonebook of MeshPhone people and offices, kept apart
@@ -4868,16 +4941,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             local = False
         if not local or request.headers.get("x-forwarded-for") or request.headers.get("forwarded"):
             raise HTTPException(status_code=403, detail="MeshPhone phonebook is only served on the local network")
-        d = live.meshphone()
-        rows = []
-        for p in d["people"]:
-            label = " ".join(x for x in (p["callsign"], p.get("name") or "") if x)
-            if p.get("pbx"):
-                label += f" ({p['pbx']})"
-            rows.append((label, p["dial"]))
-        for o in d["offices"]:
-            if o.get("dial"):
-                rows.append((f"[OFFICE] {o['name']} {o.get('admin_callsign') or ''}".strip(), o["dial"]))
+        rows = _meshphone_rows()
         entries = "".join(f"<DirectoryEntry><Name>{escape(n)}</Name><Telephone>{escape(t)}</Telephone></DirectoryEntry>"
                           for n, t in rows)
         xml = f'<?xml version="1.0" encoding="UTF-8"?><YealinkIPPhoneDirectory>{entries}</YealinkIPPhoneDirectory>'
@@ -5048,6 +5112,843 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not path:
             raise HTTPException(status_code=404, detail="Voicemail not found")
         return Response(content=path.read_bytes(), media_type="audio/wav")
+
+    # ── Desk phones: push directory/settings, install apps ───────────────
+    # ech/core/phone_provision.py. Admin-only (/api/phones prefix): these log
+    # into the phones as their admin and change their settings.
+    _phone_last: dict = {}
+
+    async def _json_or_empty(request) -> dict:
+        try:
+            d = await request.json()
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    def _local_ipv4s() -> set:
+        import subprocess
+        ips = set()
+        try:
+            out = subprocess.run(["ip", "-o", "-4", "addr", "show"], capture_output=True,
+                                 text=True, timeout=5).stdout
+            ips |= set(re.findall(r"inet (\d+\.\d+\.\d+\.\d+)/", out))
+        except Exception:
+            pass
+        ips.discard("127.0.0.1")
+        return ips
+
+    def _phone_manager():
+        from ech.core.phone_provision import PhoneManager
+        import yaml as _yaml
+        cfg = {}
+        if app.state.config_path:
+            try:
+                with open(app.state.config_path) as f:
+                    cfg = _yaml.safe_load(f) or {}
+            except Exception:
+                pass
+        pc = cfg.get("pbx_phones") or {}
+        hosts = _local_ipv4s() | {str(h) for h in (pc.get("ech_hosts") or [])}
+        try:
+            bdir = Path(getattr(db, "_path", "ech.db")).resolve().parent / "phone_backups"
+        except Exception:
+            bdir = Path("phone_backups")
+        m = PhoneManager(cfg, hosts, bdir)
+        m.last = _phone_last
+        if _xml_key_cache.get("k"):
+            m.opts["xml_key"] = _xml_key_cache["k"]
+        return m
+
+    async def _phone_manager_ready():
+        await _phone_xml_key()
+        return _phone_manager()
+
+    @app.get("/api/phones")
+    async def phones_list():
+        m = _phone_manager()
+        return {"phones": m.public_list(), "ech_hosts": sorted(m.ech_hosts),
+                "options": {k: m.opts.get(k) for k in ("http_port", "flash_time", "voicemail_code", "show_browser")}}
+
+    @app.post("/api/phones/check")
+    async def phones_check(request: Request):
+        data = await _json_or_empty(request)
+        return {"results": await (await _phone_manager_ready()).check(data.get("host") or None)}
+
+    @app.post("/api/phones/push")
+    async def phones_push(request: Request):
+        data = await _json_or_empty(request)
+        m = await _phone_manager_ready()
+        contacts = None
+        if m.opts.get("local_contacts", True):
+            books = await _phone_books()
+            contacts = [("ECH", books["ech"][1]), ("Audio Streams", books["streams"][1]), ("MeshPhone", books["mesh"][1])]
+        return {"results": await m.push(data.get("host") or None, force=bool(data.get("force")), contacts=contacts)}
+
+    @app.post("/api/phones/file")
+    async def phones_file(host: str = Query(...), kind: str = Query("apk"), file: UploadFile = File(...)):
+        """Install an app (kind=apk) or add a wallpaper / screensaver / ringtone."""
+        name = Path(file.filename or "upload").name
+        blob = await file.read()
+        if len(blob) > 200 * 1024 * 1024:
+            return {"ok": False, "error": "file is larger than 200 MB"}
+        return await _phone_manager().send_file(host, kind, name, blob)
+
+    # ── Yealink XML Browser menu (line key "ECH" on the desk phones) ────
+    # No login (the phone can't do one): a random key in the path that only
+    # phones ECH configured know, plus local-network-only like the MeshPhone
+    # phonebook. ech/core/yealink_xml.py builds the pages.
+    _xml_key_cache: dict = {}
+
+    async def _phone_xml_key() -> str:
+        if _xml_key_cache.get("k"):
+            return _xml_key_cache["k"]
+        import secrets as _secrets
+        k = await db.get_kv("phone_xml_key")
+        if not k:
+            k = _secrets.token_urlsafe(18)
+            await db.set_kv("phone_xml_key", k)
+        _xml_key_cache["k"] = k
+        return k
+
+    def _xml_local(request) -> bool:
+        try:
+            addr = ipaddress.ip_address(request.client.host)
+            if addr.version == 6 and addr.ipv4_mapped:
+                addr = addr.ipv4_mapped
+            local = addr.is_private or addr.is_loopback
+        except (AttributeError, TypeError, ValueError):
+            local = False
+        return local and not request.headers.get("x-forwarded-for") and not request.headers.get("forwarded")
+
+    async def _xml_guard(request, key: str) -> str:
+        """Return the base URL for links, or raise 404 (don't confirm the route exists)."""
+        import hmac as _hmac
+        if not _xml_local(request) or not _hmac.compare_digest(key, await _phone_xml_key()):
+            raise HTTPException(status_code=404, detail="Not found")
+        return f"{str(request.base_url).rstrip('/')}/yealink/{key}"
+
+    def _xml(doc: str) -> Response:
+        return Response(content=doc, media_type="text/xml; charset=utf-8", headers=_NO_CACHE)
+
+    @app.get("/yealink/{key}/menu.xml")
+    async def yealink_menu(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        return _xml(yx.main_menu(await _xml_guard(request, key)))
+
+    @app.get("/yealink/{key}/winlink.xml")
+    async def yealink_winlink(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        try:
+            inbox = await winlink_inbox_list()
+        except Exception as e:
+            return _xml(yx.text_screen("Winlink", f"Pat is not reachable: {e.__class__.__name__}"))
+        return _xml(yx.winlink_menu(base, inbox))
+
+    @app.get("/yealink/{key}/winlink/{mid}.xml")
+    async def yealink_winlink_msg(request: Request, key: str, mid: str, page: int = 0):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        if not re.fullmatch(r"[A-Za-z0-9]{1,32}", mid):
+            raise HTTPException(status_code=404, detail="Not found")
+        try:
+            msg = await winlink_inbox_message(mid)
+        except HTTPException:
+            return _xml(yx.text_screen("Winlink", "Message not found."))
+        for adapter in router._adapters.values():          # opening it on the phone marks it read in Pat
+            if hasattr(adapter, "set_read"):
+                try:
+                    await adapter.set_read("in", mid, True)
+                except Exception:
+                    pass
+                break
+        return _xml(yx.winlink_message(msg, f"{base}/winlink/{mid}.xml", page))
+
+    @app.get("/yealink/{key}/alerts.xml")
+    async def yealink_alerts(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        await _xml_guard(request, key)
+        return _xml(yx.alerts_screen(list(wx_service._active_alerts) if wx_service else []))
+
+    @app.get("/yealink/{key}/aq.xml")
+    async def yealink_aq(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        await _xml_guard(request, key)
+        return _xml(yx.aq_screen(aq_service.status() if aq_service else {}))
+
+    @app.get("/yealink/{key}/hf.xml")
+    async def yealink_hf(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        await _xml_guard(request, key)
+        return _xml(yx.hf_screen(await get_propagation()))
+
+    @app.get("/yealink/{key}/mesh.xml")
+    async def yealink_mesh(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        await _xml_guard(request, key)
+        return _xml(yx.mesh_screen(await db.get_messages(limit=1000)))
+
+    @app.get("/yealink/{key}/pbx.xml")
+    async def yealink_pbx(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        await _xml_guard(request, key)
+        return _xml(yx.pbx_screen((await pbx_endpoints()).get("endpoints") or []))
+
+    async def _phone_books(request=None) -> dict:
+        """Entries of the two remote phonebooks: key -> (label, [(name, number)])."""
+        import xml.etree.ElementTree as _ET
+        out = {}
+        try:
+            root = _ET.fromstring((await pbx_phonebook()).body)
+            out["ech"] = ("ECH / PBX", [((e.findtext("Name") or "").strip(), (e.findtext("Telephone") or "").strip())
+                                        for e in root.iter("DirectoryEntry")])
+        except Exception as e:
+            log.warning("phone directory ech: %s", e)
+            out["ech"] = ("ECH / PBX", [])
+        try:
+            out["streams"] = ("Audio Streams", _audio_rows())
+        except Exception as e:
+            log.warning("phone directory streams: %s", e)
+            out["streams"] = ("Audio Streams", [])
+        try:
+            out["mesh"] = ("MeshPhone", _meshphone_rows())
+        except Exception as e:
+            log.warning("phone directory mesh: %s", e)
+            out["mesh"] = ("MeshPhone", [])
+        return out
+
+    @app.get("/yealink/{key}/dir.xml")
+    async def yealink_dir(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        books = await _phone_books(request)
+        return _xml(yx.directory_index(base, [(k, lbl, len(e)) for k, (lbl, e) in books.items()]))
+
+    @app.get("/yealink/{key}/dir/{book}.xml")
+    async def yealink_dir_book(request: Request, key: str, book: str, page: int = 0, letter: str = ""):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        books = await _phone_books(request)
+        if book not in books or (letter and not re.fullmatch(r"[A-Za-z0]", letter)):
+            raise HTTPException(status_code=404, detail="Not found")
+        label, entries = books[book]
+        url = f"{base}/dir/{book}.xml"
+        if not letter and not page and len(entries) > 2 * yx.DIR_PAGE:
+            return _xml(yx.directory_letters(label, entries, url))
+        return _xml(yx.directory_page(label, entries, url, f"{base}/dial.xml", page or 1, letter))
+
+    @app.get("/yealink/{key}/news/{kind}.xml")
+    async def yealink_news(request: Request, key: str, kind: str):
+        from ech.core import yealink_xml as yx
+        from ech.core.news_markets import get_service
+        base = await _xml_guard(request, key)
+        if kind not in ("local", "world"):
+            raise HTTPException(status_code=404, detail="Not found")
+        return _xml(yx.news_menu(base, kind, await get_service(_cfg_now()).headlines(kind, 30)))
+
+    @app.get("/yealink/{key}/news/{kind}/{idx}.xml")
+    async def yealink_news_item(request: Request, key: str, kind: str, idx: int):
+        from ech.core import yealink_xml as yx
+        from ech.core.news_markets import get_service
+        await _xml_guard(request, key)
+        if kind not in ("local", "world"):
+            raise HTTPException(status_code=404, detail="Not found")
+        items = await get_service(_cfg_now()).headlines(kind, 30)
+        if not 0 <= idx < len(items):
+            return _xml(yx.text_screen("News", "That story has rolled off the list. Go back and reopen the headlines."))
+        return _xml(yx.news_item(items[idx]))
+
+    @app.get("/yealink/{key}/markets.xml")
+    async def yealink_markets(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        from ech.core.news_markets import get_service, fmt_quote, fmt_kalshi, vix_label
+        await _xml_guard(request, key)
+        svc = get_service(_cfg_now())
+        quotes, sent = await asyncio.gather(svc.futures(), svc.sentiment())
+        return _xml(yx.markets_screen(quotes, fmt_quote, sent, fmt_kalshi, vix_label))
+
+    @app.get("/yealink/{key}/allstar.xml")
+    async def yealink_allstar(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        from ech.core import audio_hub as ah
+        base = await _xml_guard(request, key)
+        node = (ah.state.get("options") or {}).get("allstar_node") or ""
+        if not node:
+            return _xml(yx.text_screen("AllStar", "No AllStar node is set up (config pbx_audio.allstar_node)."))
+        presets = [{"node": "620860", "name": "W1PBR Pen Bay ARC hub"},
+                   {"node": "620861", "name": "W1PBR 147.060 Hope ME"}]
+        return _xml(yx.allstar_menu(base, node, await _asl_links(node), presets))
+
+    @app.get("/yealink/{key}/talk.xml")
+    async def yealink_talk_help(request: Request, key: str, t: str = "allstar"):
+        from ech.core import yealink_xml as yx
+        from ech.core import audio_hub as ah
+        await _xml_guard(request, key)
+        return _xml(yx.talk_help(t, (ah.state.get("options") or {}).get("allstar_node") or ""))
+
+    @app.get("/yealink/{key}/allstar/input.xml")
+    async def yealink_allstar_input(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        return _xml(yx.input_screen("Link node (listen)", f"{base}/allstar/link.xml", "node", "Node:"))
+
+    @app.get("/yealink/{key}/allstar/link.xml")
+    async def yealink_allstar_link(request: Request, key: str, node: str = "", mode: str = "", dial: str = ""):
+        """Link our node to `node`: monitor by default, mode=tx = transceive (the
+        directory asks first). dial=1 then has the phone call 750 to listen."""
+        from ech.core import yealink_xml as yx
+        from ech.core import audio_hub as ah
+        await _xml_guard(request, key)
+        mine = (ah.state.get("options") or {}).get("allstar_node")
+        pbx = _find_pbx_adapter()
+        if not re.fullmatch(r"\d{4,7}", node) or not mine or not pbx or not hasattr(pbx, "cli"):
+            return _xml(yx.text_screen("AllStar", "Enter a 4-7 digit node number."))
+        tx = mode == "tx"
+        await pbx.cli(f"rpt cmd {mine} ilink {3 if tx else 2} {node}")
+        _asl_links_cache["t"] = 0.0
+        log.info("AllStar %s: phone panel linked %s (%s)", mine, node, "transceive" if tx else "monitor")
+        if dial == "1":
+            return _xml(yx.dial_execute("750"))
+        how = "transceive: *99 on 750 talks there" if tx else "listen only"
+        return _xml(yx.text_screen("AllStar", f"Linking {mine} to {node} ({how}).\n\nDial 750 to hear it.", timeout=8))
+
+    @app.get("/yealink/{key}/allstar/unlink.xml")
+    async def yealink_allstar_unlink(request: Request, key: str, node: str = ""):
+        from ech.core import yealink_xml as yx
+        from ech.core import audio_hub as ah
+        await _xml_guard(request, key)
+        mine = (ah.state.get("options") or {}).get("allstar_node")
+        pbx = _find_pbx_adapter()
+        one = bool(re.fullmatch(r"\d{4,7}", node))
+        if mine and pbx and hasattr(pbx, "cli"):
+            await pbx.cli(f"rpt cmd {mine} ilink 1 {node}" if one else f"rpt cmd {mine} ilink 6 0")
+            _asl_links_cache["t"] = 0.0
+            log.info("AllStar %s: phone panel disconnected %s", mine, node if one else "all links")
+        return _xml(yx.text_screen("AllStar", f"Disconnected {node}." if one else "All links disconnected.", timeout=6))
+
+    _asl_dir: dict = {}
+
+    async def _allstar_directory():
+        from ech.core.allstar_directory import AllStarDirectory
+        if "d" not in _asl_dir:
+            try:
+                cache = Path(getattr(db, "_path", "ech.db")).resolve().parent / "allstar_nodes.txt"
+            except Exception:
+                cache = Path("allstar_nodes.txt")
+            _asl_dir["d"] = AllStarDirectory(cache, (_cfg_now().get("allstar_directory") or {}).get("source") or "")
+        d = _asl_dir["d"]
+        from ech.core import audio_hub as ah
+        al = ah.state.get("allstar")
+        if al is not None and al.name_for is None:
+            def name_for(n, d=d):
+                r = d.lookup(n)
+                return f"{r['call']} {r['loc']}".strip() if r else ""
+            al.name_for = name_for          # AllStar talker shows callsign + place
+        if d.nodes:
+            asyncio.ensure_future(d.refresh())       # stale copy now, fresh one next time
+        else:
+            await d.refresh()
+        return d
+
+    def _allstar_state(d) -> str:
+        """Our state for the state list: config allstar_directory.state, else our node's own entry."""
+        from ech.core import audio_hub as ah
+        from ech.core.allstar_directory import state_of, US_STATES
+        want = str((_cfg_now().get("allstar_directory") or {}).get("state") or "").strip().lower()
+        if want:
+            return want if want in US_STATES else state_of(want)
+        me = d.lookup((ah.state.get("options") or {}).get("allstar_node") or "")
+        return state_of(me["loc"]) if me else ""
+
+    @app.get("/yealink/{key}/allstar/dir.xml")
+    async def yealink_allstar_dir(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        d = await _allstar_directory()
+        st = _allstar_state(d)
+        return _xml(yx.allstar_dir_menu(base, st, len(d.in_state(st)), len(d.nodes), d.error))
+
+    @app.get("/yealink/{key}/allstar/dir/state.xml")
+    async def yealink_allstar_dir_state(request: Request, key: str, page: int = 1):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        d = await _allstar_directory()
+        st = _allstar_state(d)
+        return _xml(yx.allstar_node_list(base, f"AllStar {st.title()}", d.in_state(st),
+                                         f"{base}/allstar/dir/state.xml", page))
+
+    @app.get("/yealink/{key}/allstar/dir/callinput.xml")
+    async def yealink_allstar_dir_callinput(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        return _xml(yx.input_screen("Search AllStar by callsign", f"{base}/allstar/dir/search.xml", "q",
+                                    "Callsign:", kind="string"))
+
+    @app.get("/yealink/{key}/allstar/dir/nodeinput.xml")
+    async def yealink_allstar_dir_nodeinput(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        return _xml(yx.input_screen("Look up AllStar node", f"{base}/allstar/node.xml", "node", "Node:"))
+
+    @app.get("/yealink/{key}/allstar/dir/search.xml")
+    async def yealink_allstar_dir_search(request: Request, key: str, q: str = "", page: int = 1):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        q = re.sub(r"[^A-Za-z0-9]", "", q)[:10].upper()
+        if len(q) < 2:
+            return _xml(yx.text_screen("AllStar search", "Enter at least 2 letters or digits of a callsign."))
+        d = await _allstar_directory()
+        return _xml(yx.allstar_node_list(base, f"Callsign {q}", d.search_call(q),
+                                         f"{base}/allstar/dir/search.xml?q={q}", page))
+
+    @app.get("/yealink/{key}/allstar/node.xml")
+    async def yealink_allstar_node(request: Request, key: str, node: str = "", confirm: str = ""):
+        from ech.core import yealink_xml as yx
+        from ech.core import audio_hub as ah
+        base = await _xml_guard(request, key)
+        if not re.fullmatch(r"\d{4,7}", node):
+            return _xml(yx.text_screen("AllStar", "Enter a 4-7 digit node number."))
+        mine = (ah.state.get("options") or {}).get("allstar_node") or ""
+        d = await _allstar_directory()
+        r = d.lookup(node) or {"node": node, "call": "?", "desc": "not in the AllStar directory", "loc": ""}
+        if confirm == "tx":
+            return _xml(yx.allstar_confirm_tx(base, mine, r))
+        linked = any(x.lstrip("RTC") == node for x in (await _asl_links(mine) if mine else []))
+        return _xml(yx.allstar_node_menu(base, r, linked))
+
+    def _m17_adapters() -> list:
+        return [a for a in router._adapters.values() if hasattr(a, "set_module") and a.__class__.__name__ == "M17ReflectorAdapter"]
+
+    @app.get("/yealink/{key}/m17.xml")
+    async def yealink_m17(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        rows = [{"name": a.name, "host": getattr(a, "_host", ""), "module": getattr(a, "_module", ""),
+                 "connected": getattr(a, "_connected", False), "ext": ext,
+                 "listen_only": getattr(a, "_listen_only", False)}
+                for a, ext in _m17_listen_exts()]
+        return _xml(yx.m17_menu(base, rows))
+
+    def _m17_listen_exts() -> list:
+        """(adapter, listen extension) in the order the dialplan numbers them (760 = first by name)."""
+        from ech.core import audio_hub as ah
+        first = (ah.state.get("options") or {}).get("m17_ext") or ""
+        ads = sorted(_m17_adapters(), key=lambda a: a.name)
+        if not re.fullmatch(r"7[5-9]0", first):
+            return [(a, "") for a in ads]
+        return [(a, str(int(first) + i) if i < 5 else "") for i, a in enumerate(ads)]
+
+    @app.get("/yealink/{key}/m17/module.xml")
+    async def yealink_m17_module(request: Request, key: str, a: str = "", m: str = "", h: str = "", p: int = 17000):
+        from ech.core import yealink_xml as yx
+        from ech.core.m17_directory import valid_host
+        base = await _xml_guard(request, key)
+        ad = next((x for x in _m17_adapters() if x.name == a), None)
+        if not ad:
+            return _xml(yx.text_screen("M17", "Unknown M17 adapter."))
+        if h and valid_host(h) and h.lower() != str(getattr(ad, "_host", "")).lower():
+            return _xml(yx.m17_modules(base, a, "", h.lower(), p))     # new reflector: pick its module
+        if not m:
+            return _xml(yx.m17_modules(base, a, getattr(ad, "_module", "")))
+        if not re.fullmatch(r"[A-Za-z]", m):
+            return _xml(yx.text_screen("M17", "Pick a module letter A-Z."))
+        r = await _switch_m17_module(a, m)
+        msg = (f"Now on module {r.get('module')}." if r.get("status") == "ok"
+               else f"Could not switch: {r.get('detail')}")
+        return _xml(yx.text_screen("M17", msg + ("\n" + r["warning"] if r.get("warning") else ""), timeout=8))
+
+    @app.get("/yealink/{key}/m17/reflectors.xml")
+    async def yealink_m17_reflectors(request: Request, key: str, a: str = "", page: int = 1):
+        from ech.core import yealink_xml as yx
+        from ech.core.m17_directory import saved_from_config
+        base = await _xml_guard(request, key)
+        ad = next((x for x in _m17_adapters() if x.name == a), None)
+        if not ad:
+            return _xml(yx.text_screen("M17", "Unknown M17 adapter."))
+        d = _m17_directory()
+        asyncio.ensure_future(d.refresh())
+        rows = d.merged(saved_from_config(_cfg_now()))
+        return _xml(yx.m17_reflectors(base, a, rows, str(getattr(ad, "_host", "")).lower(), page))
+
+    @app.get("/yealink/{key}/m17/server.xml")
+    async def yealink_m17_server(request: Request, key: str, a: str = "", h: str = "", p: int = 17000, m: str = ""):
+        from ech.core import yealink_xml as yx
+        await _xml_guard(request, key)
+        name = next((r["name"] for r in _m17_directory().entries if r["host"] == h.lower()), "")
+        r = await _switch_m17_server(a, h, p, m, name)
+        log.info("M17 %s: phone panel switched to %s:%s module %s -> %s", a, h, p, m, r.get("status"))
+        msg = (f"Linked to {h} module {r.get('module')}." if r.get("status") == "ok"
+               else f"Could not switch: {r.get('detail')}")
+        return _xml(yx.text_screen("M17", msg, timeout=8))
+
+    @app.get("/yealink/{key}/m17/messages.xml")
+    async def yealink_m17_messages(request: Request, key: str, a: str = ""):
+        from ech.core import yealink_xml as yx
+        await _xml_guard(request, key)
+        rows = [m for m in await db.get_messages(limit=1000) if m.get("source_adapter") == a and m.get("msg_type", "text") == "text"]
+        return _xml(yx.m17_messages(rows))
+
+    @app.get("/yealink/{key}/dial.xml")
+    async def yealink_dial(request: Request, key: str, n: str = ""):
+        from ech.core import yealink_xml as yx
+        await _xml_guard(request, key)
+        if not re.fullmatch(r"[0-9*#]{1,24}", n):
+            raise HTTPException(status_code=404, detail="Not found")
+        return _xml(yx.dial_execute(n))
+
+    @app.get("/yealink/{key}/forecast.xml")
+    async def yealink_forecast(request: Request, key: str, period: int = 0):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        if not wx_service or not hasattr(wx_service, "fetch_forecast_periods"):
+            return _xml(yx.text_screen("Forecast", "Weather service is not running."))
+        try:
+            periods = await asyncio.wait_for(wx_service.fetch_forecast_periods(), timeout=25)
+        except Exception as e:
+            log.warning("phone forecast: %s", e)
+            return _xml(yx.text_screen("Forecast", f"Forecast unavailable ({e.__class__.__name__})."))
+        if 1 <= period <= len(periods):
+            return _xml(yx.forecast_period(periods[period - 1]))
+        return _xml(yx.forecast_menu(base, periods))
+
+    @app.get("/yealink/{key}/aprs.xml")
+    async def yealink_aprs(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        from ech.core.aprs_hub import hub
+        return _xml(yx.aprs_menu(await _xml_guard(request, key), list(hub.packets)))
+
+    @app.get("/yealink/{key}/bot/{name}.xml")
+    async def yealink_bot(request: Request, key: str, name: str, call: str = "", page: int = 0):
+        """Run one allowlisted mesh-bot command and show its reply on the phone."""
+        import inspect as _inspect
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        if name == "aprs":
+            if not re.fullmatch(r"[A-Za-z0-9]{3,9}(-[A-Za-z0-9]{1,2})?", call):
+                raise HTTPException(status_code=404, detail="Not found")
+            title, cmd, args = f"APRS {call.upper()}", "aprs", call.upper()
+            url = f"{base}/bot/aprs.xml?call={call.upper()}"
+        elif name in yx.BOT_PAGES:
+            title, cmd = yx.BOT_PAGES[name]
+            args, url = "", f"{base}/bot/{name}.xml"
+        else:
+            raise HTTPException(status_code=404, detail="Not found")
+        bot = getattr(router, "_weather_bot", None)
+        fn = getattr(bot, f"_cmd_{cmd}", None) if bot else None
+        if not fn:
+            return _xml(yx.text_screen(title, "The mesh bot is not running."))
+        try:
+            res = fn(args) if _inspect.signature(fn).parameters else fn()
+            if _inspect.isawaitable(res):
+                res = await asyncio.wait_for(res, timeout=25)
+        except asyncio.TimeoutError:
+            res = "Timed out fetching data. Try again in a minute."
+        except Exception as e:
+            log.warning("phone bot page %s: %s", name, e)
+            res = f"Not available right now ({e.__class__.__name__})."
+        return _xml(yx.paged_screen(title, str(res or "(no data)"), url, page))
+
+    # ── Live audio in the browser (O191) ──────────────────────────────────
+    # Internet streams are relayed as MP3 (the outside URL stays server-side);
+    # AllStar, M17 and the web phone travel as 8 kHz 16-bit PCM over /ws/audio.
+
+    def _cfg_now() -> dict:
+        import yaml as _yaml
+        try:
+            with open(app.state.config_path) as f:
+                return _yaml.safe_load(f) or {}
+        except Exception:
+            return {}
+
+    _asl_links_cache: dict = {"t": 0.0, "links": []}
+
+    async def _asl_links(node: str) -> list[str]:
+        """Nodes linked to ours, from AllStarLink's public stats (cached 20 s)."""
+        if time.time() - _asl_links_cache["t"] < 20:
+            return _asl_links_cache["links"]
+        links: list[str] = []
+        try:
+            import httpx as _httpx
+            async with _httpx.AsyncClient(timeout=8) as c:
+                d = (await c.get(f"https://stats.allstarlink.org/api/stats/{node}")).json()
+            links = [str(x) for x in (((d.get("stats") or {}).get("data") or {}).get("links") or [])]
+        except Exception:
+            pass
+        _asl_links_cache.update(t=time.time(), links=links)
+        return links
+
+    _m17_dir: dict = {}
+
+    def _m17_directory():
+        from ech.core.m17_directory import M17Directory
+        if "d" not in _m17_dir:
+            try:
+                cache = Path(getattr(db, "_path", "ech.db")).resolve().parent / "m17_reflectors.json"
+            except Exception:
+                cache = Path("m17_reflectors.json")
+            _m17_dir["d"] = M17Directory(cache, (_cfg_now().get("m17_directory") or {}).get("sources"))
+        return _m17_dir["d"]
+
+    def _m17_adapter_rows() -> list[dict]:
+        return [{"adapter": a.name, "host": getattr(a, "_host", ""), "port": getattr(a, "_port", 17000),
+                 "module": getattr(a, "_module", ""), "connected": bool(getattr(a, "_connected", False)),
+                 "listen_only": bool(getattr(a, "_listen_only", False))}
+                for a in sorted(_m17_adapters(), key=lambda x: x.name)]
+
+    @app.get("/api/m17/reflectors")
+    async def m17_reflectors():
+        """Reflectors for the server pickers: saved first, then the downloaded directory."""
+        from ech.core.m17_directory import saved_from_config
+        d = _m17_directory()
+        asyncio.ensure_future(d.refresh())          # background; never blocks the page
+        return {"reflectors": d.merged(saved_from_config(_cfg_now())), "adapters": _m17_adapter_rows(),
+                "directory_fetched_at": d.fetched_at or None, "directory_error": d.error}
+
+    @app.post("/api/m17/reflectors/refresh")
+    async def m17_reflectors_refresh():
+        d = _m17_directory()
+        await d.refresh(force=True)
+        return {"count": len(d.entries), "error": d.error}
+
+    @app.get("/listen", response_class=HTMLResponse)
+    async def listen_page():
+        return HTMLResponse(content=_render_template("listen.html"), headers=_NO_CACHE)
+
+    @app.get("/api/audio/sources")
+    async def audio_sources(request: Request):
+        from ech.core import audio_hub as ah
+        from ech.core.pbx_streams import streams_from_config
+        role = "admin"
+        if auth:
+            from ech.core.auth import SESSION_COOKIE
+            sess = await auth.get_session(request.cookies.get(SESSION_COOKIE, "")) or {}
+            role = sess.get("role") or "viewer"
+        opts = ah.state.get("options") or {}
+        node = opts.get("allstar_node") or ""
+        if node and "d" not in _asl_dir:
+            asyncio.ensure_future(_allstar_directory())     # names for the AllStar talker
+        return {
+            "streams": [{"ext": s["ext"], "name": s["name"]} for s in streams_from_config(_cfg_now())],
+            "live": ah.hub.listing(),
+            "allstar": {"node": node, "links": await _asl_links(node) if node else [],
+                        "presets": [{"node": "620860", "name": "W1PBR Pen Bay ARC hub"},
+                                    {"node": "620861", "name": "W1PBR 147.060 Hope ME"}]},
+            "webphone": {"ext": opts.get("webphone_ext") or "", "enabled": bool(ah.state.get("webphone")),
+                         "allowed": role != "viewer"},
+        }
+
+    @app.get("/api/audio/stream/{ext}")
+    async def audio_stream(ext: str):
+        """Relay one PBX internet stream (MP3) to the browser."""
+        from ech.core.pbx_streams import streams_from_config
+        from fastapi.responses import StreamingResponse
+        import httpx as _httpx
+        s = next((x for x in streams_from_config(_cfg_now()) if x["ext"] == ext), None)
+        if not s:
+            raise HTTPException(status_code=404, detail="Unknown stream")
+        client = _httpx.AsyncClient(timeout=_httpx.Timeout(15, read=60), follow_redirects=True,
+                                    headers={"User-Agent": f"ECH/{ECH_VERSION}"})
+        try:
+            upstream = await client.send(client.build_request("GET", s["url"]), stream=True)
+        except Exception as e:
+            await client.aclose()
+            raise HTTPException(status_code=502, detail=f"stream unavailable: {e.__class__.__name__}")
+        if upstream.status_code != 200:
+            await upstream.aclose()
+            await client.aclose()
+            raise HTTPException(status_code=502, detail=f"stream returned HTTP {upstream.status_code}")
+
+        async def body():
+            try:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+            finally:
+                await upstream.aclose()
+                await client.aclose()
+        return StreamingResponse(body(), media_type="audio/mpeg",
+                                 headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+    @app.post("/api/audio/allstar")
+    async def audio_allstar(request: Request):
+        """Link/unlink our AllStar node (operators). mode: monitor | transceive."""
+        from ech.core import audio_hub as ah
+        data = await _json_or_empty(request)
+        node = (ah.state.get("options") or {}).get("allstar_node")
+        pbx = _find_pbx_adapter()
+        if not node or not pbx or not hasattr(pbx, "cli"):
+            raise HTTPException(status_code=409, detail="AllStar node or PBX not available")
+        action = data.get("action")
+        target = str(data.get("node") or "")
+        if action in ("link", "unlink") and not re.fullmatch(r"\d{4,7}", target):
+            raise HTTPException(status_code=400, detail="node number required")
+        if action == "link":
+            fn = "3" if data.get("mode") == "transceive" else "2"
+            await pbx.cli(f"rpt cmd {node} ilink {fn} {target}")
+        elif action == "unlink":
+            await pbx.cli(f"rpt cmd {node} ilink 1 {target}")
+        elif action == "unlink_all":
+            await pbx.cli(f"rpt cmd {node} ilink 6 0")
+        else:
+            raise HTTPException(status_code=400, detail="unknown action")
+        _asl_links_cache["t"] = 0.0
+        log.info("AllStar %s: %s %s %s", node, action, target, data.get("mode") or "")
+        return {"ok": True}
+
+    class _AudioClient:
+        """One /ws/audio browser: binary frames = 1-byte kind (1 listen, 2 call) + PCM."""
+
+        def __init__(self, ws: WebSocket):
+            self.ws = ws
+            self._send_lock = asyncio.Lock()
+
+        async def send_json(self, obj: dict) -> None:
+            async with self._send_lock:
+                await self.ws.send_text(json.dumps(obj))
+
+        def send_audio(self, pcm: bytes, kind: int = 2) -> None:
+            asyncio.ensure_future(self._send_bytes(bytes([kind]) + pcm))
+
+        async def _send_bytes(self, b: bytes) -> None:
+            try:
+                async with self._send_lock:
+                    await self.ws.send_bytes(b)
+            except Exception:
+                pass
+
+    @app.websocket("/ws/audio")
+    async def ws_audio(ws: WebSocket):
+        from ech.core import audio_hub as ah
+        token = await _ws_admit(ws)
+        if token is None:
+            return
+        role = "admin"
+        if auth:
+            role = (await auth.get_session(token) or {}).get("role") or "viewer"
+        await ws.accept()
+        client = _AudioClient(ws)
+        wp = ah.state.get("webphone")
+        listen: dict = {"key": None, "q": None, "task": None}
+        m17tx: dict = {"key": None}                  # hold-to-talk on an M17 source
+        owner = f"web-{id(client):x}"
+        watch = asyncio.ensure_future(_ws_session_watch(ws, token))
+
+        def m17_release():
+            tx = ah.hub.tx_for(m17tx["key"]) if m17tx["key"] else None
+            if tx:
+                tx.voice_end(owner)
+            m17tx["key"] = None
+
+        async def stop_listen():
+            if listen["task"]:
+                listen["task"].cancel()
+            if listen["key"]:
+                await ah.hub.unsubscribe(listen["key"], listen["q"])
+            listen.update(key=None, q=None, task=None)
+
+        async def pump(q, key):
+            last = None
+            while True:
+                pcm = await q.get()
+                await client._send_bytes(b"\x01" + pcm)
+                src = ah.hub.sources.get(key)
+                who = src.talker if src and time.time() - src.talker_at < 2 else ""
+                if who != last:
+                    last = who
+                    await client.send_json({"type": "talker", "name": who})
+
+        try:
+            while True:
+                msg = await ws.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                if msg.get("bytes") is not None:
+                    if role == "viewer":
+                        continue
+                    if m17tx["key"]:
+                        tx = ah.hub.tx_for(m17tx["key"])
+                        if not tx or tx.voice_push(owner, msg["bytes"]) is False:
+                            m17tx["key"] = None
+                            await client.send_json({"type": "m17_tx", "on": False,
+                                                    "reason": "transmission ended (3 minute limit or link down)"})
+                    elif wp:
+                        wp.mic(client, msg["bytes"])
+                    continue
+                try:
+                    op = json.loads(msg.get("text") or "{}")
+                except ValueError:
+                    continue
+                kind = op.get("op")
+                if kind == "listen":
+                    await stop_listen()
+                    key = str(op.get("source") or "")
+                    try:
+                        q = await ah.hub.subscribe(key)
+                    except KeyError:
+                        await client.send_json({"type": "error", "message": f"unknown source {key}"})
+                        continue
+                    listen.update(key=key, q=q, task=asyncio.ensure_future(pump(q, key)))
+                    await client.send_json({"type": "listening", "source": key})
+                elif kind == "stop":
+                    await stop_listen()
+                    await client.send_json({"type": "listening", "source": None})
+                elif kind == "m17_tx":
+                    key = str(op.get("source") or "")
+                    if role == "viewer":
+                        await client.send_json({"type": "m17_tx", "on": False, "reason": "viewer accounts cannot transmit"})
+                        continue
+                    if not op.get("on"):
+                        m17_release()
+                        await client.send_json({"type": "m17_tx", "on": False, "source": key})
+                        continue
+                    dst = str(op.get("dst") or "")
+                    if dst not in ("", "#PARROT"):
+                        dst = ""
+                    tx = ah.hub.tx_for(key)
+                    err = tx.voice_start(owner, dst) if tx else "this source cannot transmit"
+                    if err:
+                        await client.send_json({"type": "m17_tx", "on": False, "source": key, "reason": err})
+                        continue
+                    m17tx["key"] = key
+                    log.info("M17 PTT: web user keyed %s%s", key, " (echo test)" if dst else "")
+                    await client.send_json({"type": "m17_tx", "on": True, "source": key, "dst": dst})
+                elif kind == "dtmf":
+                    ok = bool(wp and role != "viewer" and
+                              await wp.dtmf(client, str(op.get("id") or ""), re.sub(r"[^0-9*#]", "", str(op.get("digits") or ""))))
+                    if not ok:
+                        await client.send_json({"type": "error", "message": "key presses only work on a connected call you placed"})
+                elif kind in ("available", "call", "answer", "hangup"):
+                    if not wp or role == "viewer":
+                        await client.send_json({"type": "error", "message": "web phone not available for this account"})
+                        continue
+                    if kind == "available":
+                        await wp.set_available(client, bool(op.get("on")))
+                        await client.send_json({"type": "available", "on": bool(op.get("on")), "ext": wp.ext})
+                    elif kind == "call":
+                        number = str(op.get("number") or "")
+                        if not re.fullmatch(r"[0-9*#]{1,24}", number):
+                            await client.send_json({"type": "error", "message": "enter digits, * or #"})
+                            continue
+                        try:
+                            c = await wp.call(client, number)
+                            await client.send_json({"type": "call", "id": c.id, "state": "calling", "peer": number})
+                        except Exception as e:
+                            await client.send_json({"type": "error", "message": str(e)})
+                    elif kind == "answer":
+                        await wp.answer(client, str(op.get("id") or ""))
+                    elif kind == "hangup":
+                        await wp.hangup(str(op.get("id") or ""))
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            watch.cancel()
+            m17_release()
+            await stop_listen()
+            if wp:
+                await wp.drop_client(client)
+
+    @app.get("/phone-display", response_class=HTMLResponse)
+    async def phone_display_page():
+        return HTMLResponse(content=_render_template("phone_display.html"), headers=_NO_CACHE)
 
     @app.get("/api/winlink/rms")
     async def winlink_rms_list():

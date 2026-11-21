@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ECH Display</title>
+<style>
+:root{--bg:#0b1016;--panel:#121a23;--line:#223040;--text:#e6edf3;--dim:#8b9bb0;--green:#3fb950;--yellow:#d8b100;--red:#f85149;--blue:#58a6ff;
+  --mono:ui-monospace,"DejaVu Sans Mono",Menlo,Consolas,monospace}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f6f8;--panel:#fff;--line:#d0d7de;--text:#1f2328;--dim:#57606a;--green:#1a7f37;--yellow:#9a6700;--red:#cf222e;--blue:#0969da}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{padding:10px;min-height:100vh}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:0}
+.card h2{margin:0 0 6px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);font-weight:600}
+.clock{font-family:var(--mono);font-size:44px;font-weight:700;line-height:1.05}
+.sub{font-family:var(--mono);font-size:15px;color:var(--dim)}
+.big{font-size:28px;font-weight:700}
+.row{display:flex;justify-content:space-between;gap:8px;font-size:14px;padding:2px 0}
+.row span:last-child{font-family:var(--mono)}
+.Good{color:var(--green)}.Fair{color:var(--yellow)}.Poor{color:var(--red)}
+.alert{border-left:4px solid var(--red);padding:4px 8px;margin:4px 0;font-size:14px}
+.msg{font-size:13px;padding:3px 0;border-bottom:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg b{color:var(--blue);font-weight:600}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;background:var(--dim)}
+.on{background:var(--green)}
+.foot{margin-top:8px;font-size:11px;color:var(--dim);text-align:right}
+.ok{color:var(--green)}
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="card">
+    <h2>Local time</h2>
+    <div class="clock" id="t-local">--:--</div>
+    <div class="sub" id="t-date"></div>
+    <div class="sub" style="margin-top:6px">UTC <span id="t-utc">--:--</span></div>
+  </div>
+  <div class="card">
+    <h2>Weather alerts</h2>
+    <div id="wx">Loading…</div>
+    <h2 style="margin-top:10px">Air quality</h2>
+    <div id="aq">—</div>
+  </div>
+  <div class="card">
+    <h2>HF conditions</h2>
+    <div id="prop">Loading…</div>
+  </div>
+  <div class="card">
+    <h2>Phones</h2>
+    <div id="pbx">Loading…</div>
+  </div>
+  <div class="card" style="grid-column:1/-1">
+    <h2>Recent mesh messages</h2>
+    <div id="msgs">Loading…</div>
+  </div>
+</div>
+<div class="foot">ECH · updated <span id="upd">—</span></div>
+<script>
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function pad(n){return (n<10?'0':'')+n}
+function tick(){
+  var d=new Date();
+  document.getElementById('t-local').textContent=pad(d.getHours())+':'+pad(d.getMinutes());
+  document.getElementById('t-utc').textContent=pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+'Z';
+  document.getElementById('t-date').textContent=d.toDateString();
+}
+function get(u){return fetch(u,{credentials:'same-origin'}).then(function(r){
+  if(r.status===401){location.href='/login?next=/phone-display';throw new Error('login')}
+  return r.json()})}
+var SKIP_ADAPTERS=/^(aprs|irc)/;
+function load(){
+  get('/api/weather/alerts').then(function(d){
+    var a=(d&&d.alerts)||[];
+    document.getElementById('wx').innerHTML=a.length?a.slice(0,4).map(function(x){
+      return '<div class="alert"><b>'+esc(x.event||x.headline||'Alert')+'</b><br>'+esc(x.headline||x.areaDesc||'')+'</div>'}).join('')
+      :'<span class="ok">No active NWS alerts</span>';
+  }).catch(function(){});
+  get('/api/airquality').then(function(d){
+    var c=d&&d.current;
+    document.getElementById('aq').innerHTML=c?'<span class="big" style="color:'+esc(c.color||'inherit')+'">'+esc(c.aqi)+'</span> '+esc(c.category)+' <span class="sub">'+esc(c.parameter||'')+' · '+esc(c.reporting_area||'')+'</span>':'—';
+  }).catch(function(){});
+  get('/api/propagation').then(function(d){
+    if(!d||d.error){document.getElementById('prop').textContent='unavailable';return}
+    var h='<div class="row"><span>SFI / SSN</span><span>'+esc(d.sfi)+' / '+esc(d.sunspots)+'</span></div>'+
+          '<div class="row"><span>K / A</span><span>'+esc(d.kindex)+' / '+esc(d.aindex)+'</span></div>'+
+          '<div class="row"><span>X-ray</span><span>'+esc(d.xray)+'</span></div>'+
+          '<div class="row"><span>Noise</span><span>'+esc(d.signalnoise)+'</span></div>';
+    var b=d.bands||{};
+    h+='<div class="row" style="color:var(--dim)"><span>Band</span><span>day / night</span></div>';
+    Object.keys(b).forEach(function(k){h+='<div class="row"><span>'+esc(k)+'</span><span><span class="'+esc(b[k].day)+'">'+esc(b[k].day)+'</span> / <span class="'+esc(b[k].night)+'">'+esc(b[k].night)+'</span></span></div>'});
+    document.getElementById('prop').innerHTML=h;
+  }).catch(function(){});
+  get('/api/pbx/endpoints').then(function(d){
+    var e=((d&&d.endpoints)||[]).concat((d&&d.remote)||[]);
+    var on=e.filter(function(x){return x.online});
+    document.getElementById('pbx').innerHTML=(on.length?on:e.slice(0,4)).map(function(x){
+      return '<div class="row"><span><span class="dot '+(x.online?'on':'')+'"></span>'+esc(x.extension)+'</span><span>'+esc(x.device_state||'')+'</span></div>'}).join('')+
+      '<div class="sub" style="margin-top:4px">'+on.length+' of '+e.length+' extensions online</div>';
+  }).catch(function(){});
+  get('/api/messages?limit=60').then(function(d){
+    var m=((d&&d.messages)||[]).filter(function(x){return x.msg_type==='text'&&!SKIP_ADAPTERS.test(x.source_adapter||'')}).slice(0,8);
+    document.getElementById('msgs').innerHTML=m.length?m.map(function(x){
+      var t=new Date(x.timestamp);
+      return '<div class="msg"><span class="sub">'+pad(t.getHours())+':'+pad(t.getMinutes())+'</span> <b>'+esc(x.from_display||x.from_id)+'</b> <span class="sub">'+esc(x.source_channel||x.source_adapter)+'</span> '+esc(x.body)+'</div>'}).join('')
+      :'<span class="sub">No recent messages</span>';
+  }).catch(function(){});
+  var d=new Date();document.getElementById('upd').textContent=pad(d.getHours())+':'+pad(d.getMinutes());
+}
+tick();load();setInterval(tick,1000);setInterval(load,60000);
+</script>
+</body>
+</html>

@@ -910,6 +910,20 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
         </div>
       </div>
       <div style="margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--text)">
+        <strong>Desk phones</strong>
+        <span style="color:var(--dim);font-size:10px"> — ECH logs into each phone and sets its directory, voicemail key and Browser app. The phone restarts (~40 s) when something changes.</span>
+        <div id="phones-panel" style="margin-top:6px;font-size:10px;color:var(--muted)">Loading…</div>
+        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-blue" style="padding:3px 8px;font-size:10px" onclick="phonesCheck()" title="Log into each phone, pull its config and show what a push would change. Changes nothing.">🔍 Check phones</button>
+          <button class="btn btn-green" style="padding:3px 8px;font-size:10px" onclick="phonesPush(false)" title="Import ECH's settings into every phone that needs them. The phone's full config is backed up first.">📲 Push to phones</button>
+          <label style="font-size:10px;color:var(--dim)"><input type="checkbox" id="phones-force"> re-send even if up to date</label>
+        </div>
+        <div id="phones-msg" style="font-size:10px;color:var(--dim);margin-top:4px;white-space:pre-wrap"></div>
+        <div style="margin-top:6px;font-size:10px;color:var(--dim)">
+          Phone screen display: open <code id="phones-display-url"></code> in the phone's Browser app.
+        </div>
+      </div>
+      <div style="margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--text)">
         <strong>HamVOIP / AllStarLink / HOIP / AREDN directory</strong>
         <span style="color:var(--dim);font-size:10px"> — click a node to fill the Destination field above</span>
         <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
@@ -1561,6 +1575,7 @@ async function init() {
   setInterval(loadAdapterLive, 10000);
   loadMQTTStatus();
   loadPBXStatus();
+  loadPhones();
   fetch('/api/version').then(r => r.json()).then(d => {
     const el = document.getElementById('settings-ech-version');
     if (el) el.textContent = 'v' + d.version;
@@ -2776,7 +2791,7 @@ function renderBridgeRules() {
       + ` · rate-drop ${c.dropped_rate} · loop ${c.dropped_loop} · dup ${c.dropped_duplicate}` : '';
     // Last thing this rule did, from the decision log below
     const last = (_bridgeStatus.log || []).filter(e => e.rule === r.name).slice(-1)[0];
-    const lastTxt = last ? `last: ${new Date(last.t * 1000).toLocaleTimeString()} ${last.outcome}` : 'no traffic since the last restart';
+    const lastTxt = last ? `last: ${new Date(last.t * 1000).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})} ${last.outcome}` : 'no traffic since the last restart';
     const state = r.enabled === false ? ['DISABLED', 'var(--muted)']
       : r.dry_run ? ['DRY RUN — logging only, nothing is sent', 'var(--yellow)'] : ['LIVE', 'var(--green)'];
     const badge = `<span style="color:${state[1]};font-weight:600">● ${state[0]}</span>`;
@@ -2850,7 +2865,7 @@ async function refreshBridgeStatus() {
   renderBridgeRules();
   const log = (_bridgeStatus.log || []).slice().reverse();
   document.getElementById('bridge-log').innerHTML = log.length ? log.map(e =>
-    `<div>${new Date(e.t * 1000).toLocaleTimeString()} <b>${esc(e.rule)}</b> [${esc(e.leg)}] ${esc(e.outcome)} — ${esc(e.from)}: ${esc(e.text)}</div>`
+    `<div>${new Date(e.t * 1000).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'})} <b>${esc(e.rule)}</b> [${esc(e.leg)}] ${esc(e.outcome)} — ${esc(e.from)}: ${esc(e.text)}</div>`
   ).join('') : '<div style="color:var(--dim)">Nothing yet</div>';
 }
 
@@ -3043,7 +3058,7 @@ async function loadAdapterLive() {
           <div style="font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted)">M17 reflector${curReflector ? ` — currently linked to ${esc(curReflector)} module ${esc(curModule)}` : ''}</div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Host:</span>
-            <input id="m17-host-${aEsc}" type="text" value="${esc(curHost)}" placeholder="reflector host/IP" style="width:160px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
+            <input id="m17-host-${aEsc}" type="text" list="m17-refl-list" onfocus="loadM17ReflectorList()" value="${esc(curHost)}" placeholder="reflector host/IP" style="width:160px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
             <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Port:</span>
             <input id="m17-port-${aEsc}" type="number" min="1" max="65535" value="${esc(curPort || '17000')}" style="width:70px;font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">
             <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Module:</span>
@@ -3510,6 +3525,19 @@ async function reconnectAdapter(name) {
   toast(d.status === 'ok' ? `${name}: reconnected` : `${name}: reconnect failed — ${d.detail || 'unknown error'}`);
 }
 
+// Suggestions for the M17 host field: saved servers + the reflector directory (/api/m17/reflectors)
+let _m17ReflLoaded = false;
+async function loadM17ReflectorList() {
+  if (_m17ReflLoaded) return;
+  _m17ReflLoaded = true;
+  try {
+    const d = await (await fetch('/api/m17/reflectors')).json();
+    let dl = document.getElementById('m17-refl-list');
+    if (!dl) { dl = document.createElement('datalist'); dl.id = 'm17-refl-list'; document.body.appendChild(dl); }
+    dl.innerHTML = (d.reflectors || []).map(r => `<option value="${esc(r.host)}">${esc(r.name)}${r.source === 'saved' ? ' (saved)' : ''}${r.port !== 17000 ? ' port ' + r.port : ''}</option>`).join('');
+  } catch (e) { _m17ReflLoaded = false; }
+}
+
 async function setM17Server(adapterName) {
   const host = document.getElementById(`m17-host-${adapterName}`).value.trim();
   const port = document.getElementById(`m17-port-${adapterName}`).value.trim();
@@ -3549,7 +3577,7 @@ async function loadPacketCompare() {
     const cov = s.local_coverage_pct == null ? '—' : s.local_coverage_pct + '%';
     const types = Object.entries(s.by_type).map(([k, v]) => `${esc(k)} ${v.both}/${v.local_only}/${v.observers_only}`).join(' · ');
     const obs = Object.entries(s.observers).map(([k, o]) => `${esc(o.name || k)} (${o.shared_with_us}/${o.packets} shared)`).join(', ') || 'none yet';
-    const missed = (d.recent || []).map(m => `<div>${new Date(m.first * 1000).toLocaleTimeString()} ${esc(m.type)} ${esc(m.hash)} — heard by ${m.observers.map(o => esc(o.name || o.id)).join(', ')}</div>`).join('');
+    const missed = (d.recent || []).map(m => `<div>${new Date(m.first * 1000).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'})} ${esc(m.type)} ${esc(m.hash)} — heard by ${m.observers.map(o => esc(o.name || o.id)).join(', ')}</div>`).join('');
     el.innerHTML = `<div>Heard by both <b style="color:var(--text)">${s.heard_by_both}</b> · only us <b style="color:var(--text)">${s.local_only}</b> · only others <b style="color:var(--text)">${s.observers_only}</b> · we heard <b style="color:var(--text)">${cov}</b> of what others reported</div>` +
       `<div>By type (both/us/others): ${types}</div><div>Observers: ${obs}</div>` +
       (missed ? `<div style="margin-top:4px;color:var(--text)">Recently missed by this station:</div>${missed}` : '');
@@ -3617,6 +3645,128 @@ async function fetchPSK() {
     loadPSKStatus();
   } catch(e) {
     el.innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`;
+  }
+}
+
+// ── Desk phones (push directory / settings, install apps) ───────────────
+let _phonesState = {phones: [], ech_hosts: []};
+function _phoneAge(ts) {
+  if (!ts) return '';
+  const s = Math.round(Date.now() / 1000 - ts);
+  return s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago` : new Date(ts * 1000).toLocaleString();
+}
+function _phoneChanges(obj) {
+  const keys = Object.keys(obj || {});
+  if (!keys.length) return 'nothing to change';
+  return keys.map(k => `${esc(k)} = ${esc(obj[k])}`).join('<br>');
+}
+function renderPhones() {
+  const el = document.getElementById('phones-panel');
+  const host = (_phonesState.ech_hosts || []).find(h => h.startsWith('10.')) || location.hostname;
+  document.getElementById('phones-display-url').textContent = `http://${host}:8766/phone-display`;
+  if (!_phonesState.phones.length) {
+    el.innerHTML = 'No phones configured. Add them to config.yaml:<pre style="background:var(--bg3);padding:6px;border-radius:4px;color:var(--text)">pbx_phones:\n  phones:\n    - name: Desk phone\n      host: 192.168.1.40\n      username: admin\n      password: "…"</pre>';
+    return;
+  }
+  el.innerHTML = _phonesState.phones.map(p => {
+    const last = p.last || {}, chk = last.check, push = last.push, apk = last.file;
+    let status = '<span style="color:var(--dim)">not checked yet</span>';
+    if (chk) status = chk.ok
+      ? `<span style="color:var(--green)">● reachable</span> ${esc(chk.model || '')} fw ${esc(chk.firmware || '')} · checked ${_phoneAge(chk.checked)}`
+      : `<span style="color:var(--red)">● ${esc(chk.error)}</span>`;
+    const books = chk && chk.ok ? (chk.phonebooks || []).map(b => esc(b.name || '?')).join(', ') || 'none' : '';
+    const notes = chk && chk.ok ? (chk.notes || []).map(esc).join(' · ') : '';
+    const pend = chk && chk.ok ? `<div style="margin-top:3px">Pending: <span style="color:${Object.keys(chk.pending || {}).length ? 'var(--yellow)' : 'var(--green)'}">${_phoneChanges(chk.pending)}</span></div>` : '';
+    const pushTxt = push ? `<div style="margin-top:3px">Last push ${_phoneAge(push.at)}: ${push.ok ? esc(push.detail) + (push.backup ? ` (backup ${esc(push.backup)})` : '') + (push.notes || []).filter(n => n.startsWith('directory')).map(n => ' · ' + esc(n)).join('') : '<span style="color:var(--red)">' + esc(push.error) + '</span>'}</div>` : '';
+    const apkTxt = apk ? `<div style="margin-top:3px">Last file sent ${_phoneAge(apk.at)}: ${apk.ok ? esc(apk.detail) : '<span style="color:var(--red)">' + esc(apk.error) + '</span>'}</div>` : '';
+    return `<div style="border:1px solid var(--border);border-radius:4px;padding:6px 8px;margin-bottom:6px;color:var(--text)">
+      <div><strong>${esc(p.name)}</strong> <span style="color:var(--dim)">${esc(p.host)}</span> — ${status}</div>
+      ${books ? `<div style="margin-top:3px">Directories on phone: ${books}</div>` : ''}
+      ${notes ? `<div style="margin-top:3px;color:var(--dim)">${notes}</div>` : ''}
+      ${pend}${pushTxt}${apkTxt}
+      <div style="display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-green" style="padding:2px 7px;font-size:10px" onclick="phonesPush(false, '${esc(p.host)}')">📲 Push</button>
+        <a href="https://${esc(p.host)}/" target="_blank" rel="noopener" style="color:var(--blue);font-size:10px">phone web UI ↗</a>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center;border-top:1px dashed var(--border);padding-top:6px">
+        <span style="color:var(--dim)">Send a file:</span>
+        <label class="btn btn-blue" style="padding:2px 7px;font-size:10px;cursor:pointer" title="Choose a picture, ringtone or app on this computer">📁 Choose file…
+          <input type="file" id="phone-file-${esc(p.host)}" accept=".jpg,.jpeg,.png,.bmp,.wav,.apk" style="display:none" onchange="phonesPickFile('${esc(p.host)}', this)"></label>
+        <span id="phone-fname-${esc(p.host)}" style="color:var(--dim)">no file chosen</span>
+        <select id="phone-kind-${esc(p.host)}" style="font-family:var(--mono);font-size:10px" title="What the file is for on the phone">
+          <option value="wallpaper">as wallpaper</option>
+          <option value="screensaver">as screensaver image</option>
+          <option value="ringtone">as ringtone</option>
+          <option value="apk">as app (install)</option>
+        </select>
+        <button class="btn btn-green" id="phone-send-${esc(p.host)}" style="padding:2px 7px;font-size:10px" disabled onclick="phonesSendFile('${esc(p.host)}')">📤 Send</button>
+        <span id="phone-fstatus-${esc(p.host)}" style="flex-basis:100%"></span>
+      </div></div>`;
+  }).join('');
+}
+async function loadPhones() {
+  try {
+    _phonesState = await fetch('/api/phones').then(r => r.json());
+  } catch (e) {
+    document.getElementById('phones-panel').textContent = 'Error: ' + e.message;
+    return;
+  }
+  renderPhones();
+}
+async function phonesCheck(host) {
+  const msg = document.getElementById('phones-msg');
+  msg.textContent = 'Logging into phones and pulling their config…';
+  try {
+    await fetch('/api/phones/check', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host: host || null})}).then(r => r.json());
+    msg.textContent = '';
+  } catch (e) { msg.textContent = 'Check failed: ' + e.message; }
+  loadPhones();
+}
+async function phonesPush(_unused, host) {
+  const msg = document.getElementById('phones-msg');
+  const force = document.getElementById('phones-force').checked;
+  if (!confirm(`Push ECH settings to ${host || 'all phones'}? A phone that needs changes restarts (~40 s); calls on it drop.`)) return;
+  msg.textContent = 'Pushing… (backing up each phone first)';
+  try {
+    const d = await fetch('/api/phones/push', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host: host || null, force})}).then(r => r.json());
+    msg.textContent = (d.results || []).map(r => `${r.host}: ${r.ok ? r.detail : 'FAILED: ' + r.error}`).join('\n');
+  } catch (e) { msg.textContent = 'Push failed: ' + e.message; }
+  loadPhones();
+}
+const _phoneFiles = {};
+function phonesPickFile(host, input) {
+  const f = input.files && input.files[0];
+  _phoneFiles[host] = f || null;
+  document.getElementById('phone-fname-' + host).textContent = f ? `${f.name} (${Math.round(f.size / 1024)} KB)` : 'no file chosen';
+  document.getElementById('phone-send-' + host).disabled = !f;
+  document.getElementById('phone-fstatus-' + host).textContent = '';
+  if (f) {
+    const ext = f.name.toLowerCase().split('.').pop();
+    const kind = document.getElementById('phone-kind-' + host);
+    if (ext === 'apk') kind.value = 'apk';
+    else if (ext === 'wav') kind.value = 'ringtone';
+    else if (kind.value === 'apk' || kind.value === 'ringtone') kind.value = 'wallpaper';
+  }
+}
+async function phonesSendFile(host) {
+  const f = _phoneFiles[host];
+  if (!f) return;
+  const kind = document.getElementById('phone-kind-' + host).value;
+  const btn = document.getElementById('phone-send-' + host);
+  const st = document.getElementById('phone-fstatus-' + host);
+  btn.disabled = true;
+  st.style.color = 'var(--dim)';
+  st.textContent = `Sending ${f.name} to the phone…`;
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const d = await fetch(`/api/phones/file?host=${encodeURIComponent(host)}&kind=${encodeURIComponent(kind)}`, {method: 'POST', body: fd}).then(r => r.json());
+    st.style.color = d.ok ? 'var(--green)' : 'var(--red)';
+    st.textContent = d.ok ? '✓ ' + d.detail : '✗ ' + (d.error || 'failed');
+    if (d.ok) { _phoneFiles[host] = null; document.getElementById('phone-fname-' + host).textContent = 'no file chosen'; }
+    else btn.disabled = false;
+  } catch (e) {
+    st.style.color = 'var(--red)'; st.textContent = '✗ ' + e.message; btn.disabled = false;
   }
 }
 

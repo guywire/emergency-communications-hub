@@ -50,7 +50,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
 #pkt-container{flex:1;overflow-y:auto}
 #pkt-container::-webkit-scrollbar{width:4px}
 #pkt-container::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.pkt-row{display:grid;grid-template-columns:90px 140px 60px 1fr;gap:0;padding:3px 12px;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px;cursor:pointer;align-items:start}
+.pkt-row{display:grid;grid-template-columns:135px 140px 60px 1fr;gap:0;padding:3px 12px;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px;cursor:pointer;align-items:start}
 .pkt-row:hover{background:var(--bg2)}
 .pkt-ts{color:var(--dim)}
 .pkt-type{font-weight:500}
@@ -72,7 +72,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--m
 #enc-container{flex:1;overflow-y:auto}
 #enc-container::-webkit-scrollbar{width:4px}
 #enc-container::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.enc-row{display:grid;grid-template-columns:85px 100px 90px 80px 1fr;gap:0;padding:4px 12px;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px;align-items:center}
+.enc-row{display:grid;grid-template-columns:110px 100px 90px 80px 1fr;gap:0;padding:4px 12px;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px;align-items:center}
 .enc-row:hover{background:var(--bg2)}
 .enc-ts{color:var(--dim)}
 .enc-adapter{padding:1px 5px;border-radius:3px;font-size:10px}
@@ -238,10 +238,11 @@ function switchTab(name, el) {
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function fmtTime(ts) {
+function fmtTime(ts, ms) {
   if (!ts) return '';
   const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
-  return d.toISOString().slice(11, 23);
+  if (isNaN(d)) return String(ts).replace('T', ' ').slice(5, ms ? 23 : 19);
+  return d.toISOString().replace('T', ' ').slice(5, ms ? 23 : 19);   // MM-DD HH:MM:SS(.mmm) UTC
 }
 
 // ── App Logs ───────────────────────────────────────────────────────────────
@@ -263,7 +264,7 @@ function renderLogs() {
     return true;
   });
   container.innerHTML = filtered.map(l => {
-    const ts = l.timestamp ? l.timestamp.slice(11, 23) : '';
+    const ts = fmtTime(l.timestamp, true);
     return `<div class="log-line ${l.level}"><span class="log-ts">${ts}</span><span class="log-level">${l.level}</span><span class="log-logger">${esc(l.logger)}</span>${esc(l.message)}</div>`;
   }).join('');
   if (document.getElementById('autoscroll').checked) container.scrollTop = container.scrollHeight;
@@ -353,7 +354,7 @@ function renderPackets() {
 
   const rows = filtered.map((p, i) => {
     const cls   = PKT_CLASS[p.type] || 'ctrl';
-    const ts    = fmtTime(p.ts);
+    const ts    = fmtTime(p.ts, true);
     const hex   = p.hex || '';
     const preview = hex.slice(0, 48) + (hex.length > 48 ? '…' : '');
     const full    = hex;
@@ -509,7 +510,7 @@ function renderBotActivity() {
     const color = CMD_COLORS[a.command] || 'var(--muted)';
     const adpShort = (a.adapter || '').split('-')[0].slice(0, 10);
     const args = a.args ? ` <span style="color:var(--dim)">${esc(a.args)}</span>` : '';
-    return `<div style="display:grid;grid-template-columns:80px 140px 90px 1fr;gap:0;padding:4px 12px;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px;font-family:var(--mono);align-items:start">
+    return `<div style="display:grid;grid-template-columns:110px 140px 90px 1fr;gap:0;padding:4px 12px;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px;font-family:var(--mono);align-items:start">
       <span style="color:var(--dim)">${ts}</span>
       <span style="color:var(--text)" title="${esc(a.from_id)}">${esc(a.from_display || a.from_id || '?')}</span>
       <span><span style="color:${color};font-weight:600">${esc(a.command)}</span>${args}</span>
@@ -564,7 +565,7 @@ function connectWS() {
       const container = document.getElementById('log-container');
       const div = document.createElement('div');
       div.className = `log-line ${l.level}`;
-      const ts = l.timestamp ? l.timestamp.slice(11, 23) : '';
+      const ts = fmtTime(l.timestamp, true);
       div.innerHTML = `<span class="log-ts">${ts}</span><span class="log-level">${l.level}</span><span class="log-logger">${esc(l.logger)}</span>${esc(l.message)}`;
       container.appendChild(div);
       if (document.getElementById('autoscroll').checked) container.scrollTop = container.scrollHeight;

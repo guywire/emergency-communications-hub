@@ -249,6 +249,11 @@ class AsteriskAdapter(Adapter):
             self._endpoint_poll_loop(), name=f"{self.name}-endpoint-poll"
         )
         log.info("Asterisk AMI: logged in as %s @ %s:%d", self._username, self._host, self._port)
+        if getattr(self, "reload_dialplan_on_connect", False):
+            # ech_streams.conf (ech/core/pbx_streams.py) changed since Asterisk last loaded it
+            self.reload_dialplan_on_connect = False
+            await self._send_action({"Action": "Command", "Command": "dialplan reload"})
+            log.info("Asterisk AMI: dialplan reload requested (internet audio streams updated)")
 
     async def disconnect(self) -> None:
         self._connected = False
@@ -318,6 +323,18 @@ class AsteriskAdapter(Adapter):
                     await self._on_message_waiting(pkt)
                 elif event == "UserEvent" and pkt.get("UserEvent") == "ECHTextMessage":
                     await self._on_text_message(pkt)
+                elif event == "UserEvent" and pkt.get("UserEvent") == "ECHListen":
+                    # a desk phone dialed a live-audio extension: which hub source to play
+                    cb = getattr(self, "on_listen_request", None)
+                    if cb:
+                        # Channel = the phone's own channel (UserEvent carries its snapshot)
+                        cb(pkt.get("Uuid", ""), pkt.get("Source", ""), pkt.get("Channel", ""))
+                elif event == "UserEvent" and pkt.get("UserEvent") == "ECHWebPhone":
+                    # inbound call to the browser phone: caller ID for the AudioSocket uuid
+                    cb = getattr(self, "on_webphone_caller", None)
+                    if cb:
+                        name, num = pkt.get("Name", ""), pkt.get("Num", "")
+                        cb(pkt.get("Uuid", ""), f"{name} <{num}>" if name and name != num else (num or name))
                 elif event == "EndpointList":
                     self._on_endpoint_list_item(pkt)
                 elif event == "EndpointListComplete":
@@ -664,6 +681,74 @@ class AsteriskAdapter(Adapter):
                 for e in self._remote_exts]
 
     # ── Public PBX actions ────────────────────────────────────────────────
+
+    async def originate_app(self, channel: str, app: str, data: str, caller_id: str = "",
+                            timeout_ms: int = 30000, channel_id: str = "") -> bool:
+        """Originate `channel` into a dialplan application (e.g. Local/x@ctx -> AudioSocket).
+        channel_id sets the new channel's uniqueid, so play_dtmf() can address it later."""
+        if not self._connected:
+            return False
+        act = {"Action": "Originate", "Channel": channel, "Application": app,
+               "Data": data, "CallerID": caller_id or self._caller_id,
+               "Timeout": str(timeout_ms), "Async": "true"}
+        if channel_id:
+            act["ChannelId"] = channel_id
+        await self._send_action(act)
+        log.info("AMI Originate %s -> %s", channel, app)
+        return True
+
+    async def play_dtmf(self, channel: str, digit: str, duration_ms: int = 120) -> bool:
+        """Send one DTMF digit on `channel` (name or uniqueid). On the ;1 half of a
+        Local channel the digit arrives at the dialplan side, e.g. app_rpt's *99
+        PTT (verified on the live ASL3 PBX 2026-11-21)."""
+        if not self._connected or len(digit) != 1 or digit not in "0123456789*#ABCD":
+            return False
+        await self._send_action({"Action": "PlayDTMF", "Channel": channel, "Digit": digit,
+                                 "Duration": str(duration_ms)})
+        return True
+
+    async def set_connected_name(self, channel: str, name: str) -> None:
+        """Change the name a phone shows for its current call (a connected-line
+        update: re-INVITE to the Yealink). Used for 'who is talking' on 76x."""
+        if self._connected and channel:
+            await self._send_action({"Action": "Setvar", "Channel": channel,
+                                     "Variable": "CONNECTEDLINE(name)", "Value": name[:40]})
+
+    async def ami_command(self, command: str, timeout: float = 4.0) -> str:
+        """Run a CLI command and return its output. Uses its own short AMI
+        session, because the main connection's reader only handles events."""
+        r, w = await asyncio.wait_for(asyncio.open_connection(self._host, self._port), timeout)
+        try:
+            w.write((f"Action: Login\r\nUsername: {self._username}\r\nSecret: {self._secret}\r\n"
+                     f"Events: off\r\n\r\nAction: Command\r\nCommand: {command}\r\nActionID: echq\r\n\r\n"
+                     f"Action: Logoff\r\n\r\n").encode())
+            await w.drain()
+            buf = b""
+            end = asyncio.get_event_loop().time() + timeout
+            while True:
+                left = end - asyncio.get_event_loop().time()
+                if left <= 0:
+                    break
+                try:
+                    chunk = await asyncio.wait_for(r.read(65536), left)
+                except asyncio.TimeoutError:
+                    break
+                if not chunk:
+                    break
+                buf += chunk
+        finally:
+            w.close()
+        text = buf.decode("utf-8", "replace")
+        return "\n".join(l[8:] for l in text.splitlines() if l.startswith("Output: "))
+
+    async def db_put(self, family: str, key: str, value: str) -> None:
+        if self._connected:
+            await self._send_action({"Action": "DBPut", "Family": family, "Key": key, "Val": value})
+
+    async def cli(self, command: str) -> None:
+        """Fire-and-forget CLI command over AMI (output not read)."""
+        if self._connected:
+            await self._send_action({"Action": "Command", "Command": command})
 
     async def originate(self, destination: str, caller_extension: str | None = None) -> bool:
         """

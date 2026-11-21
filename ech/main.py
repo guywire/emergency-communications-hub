@@ -353,8 +353,20 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     } if retention_cfg.get("enabled", True) else {}
     router._archive_days = int(retention_cfg.get("archive_days", 30))
 
+    # Internet audio streams (dial 7xx): rewrite the Asterisk include if the list
+    # changed, and have the AMI adapter reload the dialplan once it logs in.
+    from ech.core.pbx_streams import sync_conf as _sync_streams
+    if _sync_streams(config):
+        for _a in router._adapters.values():
+            if _a.__class__.__name__ == "AsteriskAdapter":
+                _a.reload_dialplan_on_connect = True
+
     # Now start router (adapters already have correct pause state)
     await router.start()
+
+    # Web UI live audio + browser phone (O191): AudioSocket server for Asterisk
+    from ech.core import audio_hub as _audio_hub
+    await _audio_hub.setup(config, router)
 
     # APRS hub (O133): packet log, objects, weather, bulletins, acks/retries,
     # our own objects + beacon settings saved from the APRS page

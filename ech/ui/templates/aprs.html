@@ -195,7 +195,7 @@ function ago(ts) {
   if (s < 86400) return Math.round(s / 3600) + 'h';
   return Math.round(s / 86400) + 'd';
 }
-function hhmm(ts) { return ts ? new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}) : ''; }
+function hhmm(ts) { return ts ? new Date(ts * 1000).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'}) : ''; }
 function toast(msg, bad) {
   const t = o('toast'); t.textContent = msg; t.style.borderColor = bad ? 'var(--red)' : 'var(--border)';
   t.style.display = 'block'; clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = 'none', 4000);
@@ -299,7 +299,7 @@ async function loadBulletins() {
   const d = await api('/api/aprs/bulletins');
   o('bl-list').innerHTML = (d.bulletins || []).map(b => `<tr><td>${hhmm(b.ts)}</td><td>${esc(b.from)}</td><td>${esc(b.id)}</td><td>${esc(b.text)}</td><td class="dim">${esc(b.adapter)}</td></tr>`).join('')
     || '<tr><td colspan="5" class="empty">No BLN bulletins heard (APRS-IS only passes bulletins from stations your filter covers).</td></tr>';
-  o('nws-list').innerHTML = (d.nws || []).map(b => `<tr><td>${esc((b.received || '').slice(11, 19))}Z</td><td><span class="pill ${b.kind === 'WARN' ? 'bad' : b.kind === 'WATCH' ? 'warn' : ''}">${esc(b.kind)}</span></td>
+  o('nws-list').innerHTML = (d.nws || []).map(b => `<tr><td>${esc((b.received || '').slice(5, 19).replace('T', ' '))}Z</td><td><span class="pill ${b.kind === 'WARN' ? 'bad' : b.kind === 'WATCH' ? 'warn' : ''}">${esc(b.kind)}</span></td>
     <td>${esc(b.event)} ${b.ugcs.length ? mapLink('/map?nws=' + encodeURIComponent(b.id), 'Show the affected zones on the map') : ''}</td><td>${esc(b.office)}</td><td class="muted">${esc(b.ugcs.join(' '))}</td><td>${b.expires ? esc(new Date(b.expires).toLocaleString()) : ''}</td></tr>`).join('')
     || '<tr><td colspan="6" class="empty">No NWS bulletins yet.</td></tr>';
 }

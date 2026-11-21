@@ -97,8 +97,13 @@ Config block (config.yaml):
     mention_name: "SM"                # @name(s) that address the bot (string or list). The receiving
                                       # radio's own node name always counts too, so the MeshCore app's
                                       # "@[NodeName]" mention works without configuring it.
-    respond_all_channels: ["#bot"]    # channels where EVERY message gets an answer (unrecognized
-                                      # text gets a help reply) - a dedicated bot channel
+    respond_all_channels: ["#bot"]    # dedicated bot channels. Commands answer without a mention;
+                                      # unknown text is answered only when it @-mentions the bot
+                                      # (2026-11-21: shared #bot carries other bots' commands)
+    ignore_bot_names: true            # skip senders whose name ends a word in "bot" (EWR-BOT, Pingbot)
+                                      # and bodies shaped like bot output (multi-line, "[a1b2] ", "Pong!")
+    ignore_senders: []                # extra sender names to never answer
+    max_hops: null                    # channel requests from farther away need an @mention (DMs exempt)
 """
 from __future__ import annotations
 
@@ -166,6 +171,7 @@ _CMD_WORDS = [
     "score", "leaderboard", "lb", "mud", "adventure", "skywarn", "strip", "repeat", "again",
     "smoke", "aqi", "airquality",
     "marine", "boating", "buoy", "kayak", "fish", "fishing", "solunar", "water",
+    "localnews", "news", "headlines", "markets", "futures", "sentiment", "kalshi",
 ]
 _CMD_RE = re.compile(
     r'(?<![a-z0-9])'
@@ -189,6 +195,7 @@ _CMD_ALIASES: dict[str, str] = {
     "boating": "marine", "buoy": "marine", "kayak": "marine",
     "fishing": "fish", "solunar": "fish",
     "again": "repeat",
+    "headlines": "news", "futures": "markets", "kalshi": "sentiment",
 }
 _ICAO_RE = re.compile(r'\b([A-Z]{4})\b', re.IGNORECASE)
 APRS_FI_URL = "https://api.aprs.fi/api/get"
@@ -387,6 +394,29 @@ def _is_mentioned(body: str, name) -> bool:
     return False
 
 
+# A sender whose name says it is a bot ("EWR-BOT", "Zippy_WX_BOT", "VTRPH Pingbot",
+# "NH.PingBot"): "bot" ending a word, not inside one ("Abbott", "Bottle").
+_BOT_NAME_RE = re.compile(r"bot(?![a-z])", re.IGNORECASE)
+# Bodies that are another bot's output, whatever the sender is called.
+_BOT_BODY_RE = re.compile(
+    r"^\s*(?:\[[0-9a-f]{2,8}\]\s|[0-9a-f]{4}:\s|pong\b|bot stats\b|unrecognized command|unknown command)",
+    re.IGNORECASE)
+_MENTION_RE = re.compile(r"@\[[^\]]+\]|@[A-Za-z0-9_.-]+")
+
+
+def _is_bot_message(msg, ignore_names: list, check_names: bool = True) -> bool:
+    """True for traffic from another bot: a name on the ignore list, a name that
+    ends a word in "bot", or a body shaped like a bot reply (multi-line reports,
+    "[8875] ..." tags, "E0C8: ..." node lists, "Pong!")."""
+    who = (msg.from_display or msg.from_id or "").strip().lower()
+    if who and any(who == n or who.startswith(n + " ") for n in ignore_names):
+        return True
+    if check_names and _BOT_NAME_RE.search(who):
+        return True
+    body = msg.body or ""
+    return bool(_BOT_BODY_RE.match(body)) or body.count("\n") >= 2
+
+
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
 def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -489,6 +519,13 @@ class MeshBot:
         self._mention_name: list[str] = [str(x).strip() for x in (_mn if isinstance(_mn, list) else [_mn]) if str(x).strip()]
         # Dedicated bot channels: every message there is a request.
         self._respond_all_channels = [c.lower() for c in cfg.get("respond_all_channels", [])]
+        # Other bots share channels like #bot: never answer them (no bot-to-bot loops).
+        self._ignore_senders = [str(s).strip().lower() for s in cfg.get("ignore_senders", []) if str(s).strip()]
+        self._ignore_bot_names = bool(cfg.get("ignore_bot_names", True))
+        # Serve the local mesh: channel requests from farther than this many hops
+        # are answered only when they @-mention the bot (None = no limit). DMs unaffected.
+        mh = cfg.get("max_hops")
+        self._max_hops = int(mh) if mh not in (None, "", False) else None
 
         # Observer coordinates — priority: mesh_bot.lat/lon → weather_service.nws_lat/lon → state.base_lat/lon
         wx_cfg = config.get("weather_service", {})
@@ -655,6 +692,21 @@ class MeshBot:
                 )
                 return
 
+            # Never answer another bot on a shared channel (bot-to-bot loops and
+            # "Unrecognized command" spam under every other bot's reply).
+            if _is_bot_message(msg, self._ignore_senders, self._ignore_bot_names):
+                log.debug("MeshBot: ignored bot traffic from %r", msg.from_display or msg.from_id)
+                return
+            # "@[SomeoneElse] ..." is addressed to someone else: stay out of it.
+            if _MENTION_RE.search(msg.body or "") and not _is_mentioned(msg.body, names):
+                return
+            hops = msg.hop_count if msg.hop_count is not None else (msg.raw or {}).get("_hop_count")
+            if (self._max_hops is not None and isinstance(hops, int) and hops > self._max_hops
+                    and not _is_mentioned(msg.body, names)):
+                log.debug("MeshBot: %r is %d hops away (max_hops %d), not answering",
+                          msg.from_display or msg.from_id, hops, self._max_hops)
+                return
+
             # On some channels (e.g. general-purpose ones like Public/MaineNet,
             # as opposed to a dedicated bot-test channel), even a real command
             # word shouldn't auto-fire from ordinary conversation — "the
@@ -739,7 +791,10 @@ class MeshBot:
             # bot, so always answer — silence there looks like a dead bot. Channel
             # traffic is only answered if it @-mentions the bot; otherwise every
             # unrelated chat message on a monitored channel would get an error reply.
-            if not is_dm and not respond_all and not _is_mentioned(msg.body, names):
+            # On a shared bot channel, unknown words are usually other bots'
+            # commands ("Test", "Stats", "Cmd"), so stay quiet there too unless
+            # the message @-mentions this bot.
+            if not is_dm and not _is_mentioned(msg.body, names):
                 return
             cmd, args = "unknown", ""
 
@@ -840,6 +895,12 @@ class MeshBot:
                 reply = await self._cmd_dxcc(args)
             elif cmd == "contest":
                 reply = await self._cmd_contest()
+            elif cmd in ("news", "localnews"):
+                reply = await self._cmd_news("local" if cmd == "localnews" or args.strip().lower().startswith("local") else "world")
+            elif cmd == "markets":
+                reply = await self._cmd_markets()
+            elif cmd == "sentiment":
+                reply = await self._cmd_sentiment()
             elif cmd == "help":
                 reply = self._cmd_help()
             elif cmd == "unknown":
@@ -1265,8 +1326,23 @@ class MeshBot:
         # trivia/mud/dad/score/lb/contest/repeat commands are dropped from this
         # terse list (not disabled — just not essential enough to spend budget
         # on here) to leave room for the rest.
-        return ("Cmds: alerts aprs dxcc fcc fish grid help id marine metar moon "
-                "nodes overhead path ping satpass ships skywarn smoke solar status strip sun tide trace water wx")
+        return ("Cmds: alerts aprs dxcc fcc fish grid help id marine markets metar moon news "
+                "nodes overhead path ping satpass ships skywarn smoke solar strip sun tide trace wx")
+
+    async def _cmd_news(self, kind: str = "world") -> str:
+        from ech.core.news_markets import get_service, bot_news
+        items = await get_service(self._config).headlines(kind, 12)
+        return bot_news(items, kind, self._max_len)
+
+    async def _cmd_markets(self) -> str:
+        from ech.core.news_markets import get_service, bot_markets_all
+        svc = get_service(self._config)
+        quotes, sent = await asyncio.gather(svc.futures(), svc.sentiment())
+        return bot_markets_all(quotes, sent, self._max_len)
+
+    async def _cmd_sentiment(self) -> str:
+        from ech.core.news_markets import get_service, bot_sentiment
+        return bot_sentiment(await get_service(self._config).sentiment())[:self._max_len]
 
     def _cmd_unknown(self) -> str:
         return "Unrecognized command. Send 'help' for a list."

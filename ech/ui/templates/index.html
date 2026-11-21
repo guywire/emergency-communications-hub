@@ -3223,7 +3223,7 @@ function renderBotStatsPopover() {
   const sessionsBlock = sessions
     ? `<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)">${sessions}</div>`
     : '';
-  const last = s.last ? `<div style="color:var(--dim);margin-top:4px;font-size:10px">Last: ${s.last.from_display||s.last.from_id} · ${s.last.command} · ${(s.last.timestamp||'').slice(11,19)} UTC</div>` : '';
+  const last = s.last ? `<div style="color:var(--dim);margin-top:4px;font-size:10px">Last: ${s.last.from_display||s.last.from_id} · ${s.last.command} · ${(s.last.timestamp||'').slice(5,19).replace('T',' ')} UTC</div>` : '';
   const cmds = (s.by_command||[]).slice(0,6).map(x =>
     `<div style="display:flex;justify-content:space-between;padding:1px 0"><span>${x.command}</span><span style="color:var(--dim)">${x.cnt}</span></div>`
   ).join('');

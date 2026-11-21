@@ -496,6 +496,36 @@ class WeatherService:
 
     # ── Current conditions + forecast ────────────────────────────────────────
 
+    async def fetch_forecast_periods(self) -> list[dict]:
+        """NWS 7-day forecast periods for the base location (cached 15 min).
+        Each: name, temperature, temperatureUnit, shortForecast, windSpeed,
+        windDirection, detailedForecast. Raises on failure with no cache."""
+        import time as _time
+        cache = getattr(self, "_fc_cache", None)
+        if cache and _time.time() - cache[0] < 900:
+            return cache[1]
+        if self._lat is None or self._lon is None:
+            raise RuntimeError("base lat/lon not configured")
+        client = self._client
+        own = client is None
+        if own:
+            client = httpx.AsyncClient(headers={"User-Agent": identity.user_agent()}, timeout=10.0, follow_redirects=True)
+        try:
+            pts = await client.get(f"{NWS_API_BASE}/points/{self._lat},{self._lon}")
+            pts.raise_for_status()
+            fc = await client.get(pts.json()["properties"]["forecast"])
+            fc.raise_for_status()
+            periods = fc.json()["properties"]["periods"]
+        except Exception:
+            if cache:
+                return cache[1]
+            raise
+        finally:
+            if own:
+                await client.aclose()
+        self._fc_cache = (_time.time(), periods)
+        return periods
+
     async def fetch_conditions_and_forecast(self) -> str:
         """
         Fetch current conditions + 12h forecast from NWS for broadcast.

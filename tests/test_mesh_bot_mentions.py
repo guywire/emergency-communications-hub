@@ -74,11 +74,50 @@ def test_plain_chatter_on_public_is_ignored():
     assert calls == []
 
 
-def test_bot_channel_answers_everything():
+def test_bot_channel_answers_commands_not_chatter():
+    # 2026-11-21: #bot got "Unrecognized command" under every other bot's post
+    # and under other bots' commands ("Test", "Stats", "Cmd"). Unknown text is
+    # only answered when it @-mentions us.
     bot, _, calls = _bot()
     _run(bot, "ch2:#bot", "hello is anyone there")
+    _run(bot, "ch2:#bot", "Stats")
     _run(bot, "ch2:#bot", "tide")
-    assert [c[0] for c in calls] == ["unknown", "tide"]
+    _run(bot, "ch2:#bot", "@[SignalMatrix] hello?")
+    assert [c[0] for c in calls] == ["tide", "unknown"]
+
+
+def _run_from(bot, channel, sender, body):
+    async def go():
+        await bot.handle(NormalizedMessage(source_adapter="meshcore-usb", source_channel=channel,
+                                           from_id=sender, from_display=sender, body=body))
+        await asyncio.sleep(0)
+    asyncio.run(go())
+
+
+def test_other_bots_are_ignored():
+    # Real #bot traffic, 2026-11-19..21.
+    bot, _, calls = _bot()
+    _run_from(bot, "ch2:#bot", "EWR-BOT", "Pong!")
+    _run_from(bot, "ch2:#bot", "Zippy_WX_BOT", "@[4JMF/m] found 2 unique path(s):")
+    _run_from(bot, "ch2:#bot", "VTRPH Pingbot", "[8875] Magic 8-ball: Reply hazy")
+    _run_from(bot, "ch2:#bot", "NoWeare.NH.PingBot\U0001F6F8", "Bot Stats (24h):\nCmds: 147\nTop cmd: test")
+    _run_from(bot, "ch2:#bot", "Some Repeater", "E0C8: Unknown\n8C96: Unknown\nD910: Unknown")
+    _run_from(bot, "ch2:#bot", "FleetLynx", "@[HotWheels498] switch your companion to 2 byte path weather")
+    assert calls == []
+
+
+def test_humans_with_bot_like_letters_still_answered():
+    bot, _, calls = _bot()
+    _run_from(bot, "ch2:#bot", "Abbott", "ping")
+    _run_from(bot, "ch2:#bot", "Trenton-1", "Path")
+    assert [c[0] for c in calls] == ["ping", "path"]
+
+
+def test_ignore_senders_config():
+    bot, _, calls = _bot(ignore_senders=["Lanka Base"], ignore_bot_names=False)
+    _run_from(bot, "ch2:#bot", "lanka base", "ping")
+    _run_from(bot, "ch2:#bot", "EWR-BOT", "ping")     # name check off
+    assert [c[0] for c in calls] == ["ping"]
 
 
 def test_reply_goes_back_on_the_channel_it_came_from():
@@ -93,3 +132,19 @@ def test_dm_reply_goes_back_as_dm():
     msg = NormalizedMessage(source_adapter="meshcore-usb", source_channel="DM", from_id="A1B2C3D4E5F6", body="x")
     asyncio.run(bot._send(msg, "pong"))
     assert router.sent[0]["to_id"] == "A1B2C3D4E5F6"
+
+
+def test_max_hops_limits_channel_requests_to_the_local_mesh():
+    bot, _, calls = _bot(max_hops=4)
+
+    def run(hops, body, channel="ch2:#bot"):
+        async def go():
+            await bot.handle(NormalizedMessage(source_adapter="meshcore-usb", source_channel=channel,
+                                               from_id="N0CALL-T1", body=body, hop_count=hops))
+            await asyncio.sleep(0)
+        asyncio.run(go())
+    run(3, "wx 04841")
+    run(13, "wx 12186")                       # far away: their own bots answer
+    run(13, "@[SignalMatrix] wx 04841")       # a mention always works
+    run(None, "tide")                         # unknown distance: answered
+    assert [c[0] for c in calls] == ["weather", "weather", "tide"]
