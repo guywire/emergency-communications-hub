@@ -107,6 +107,7 @@ REAL_ADAPTER_TYPES = {
     "aprs_is":     ("ech.adapters.aprs_is",          "APRSISAdapter",      "aprslib"),
     "adsb":        ("ech.adapters.adsb_adapter",       "ADSBAdapter",        "aiohttp"),
     "opensky":     ("ech.adapters.opensky_adapter",    "OpenSkyAdapter",     "aiohttp"),
+    "adsb_lol":    ("ech.adapters.adsblol_adapter",    "ADSBLolAdapter",     "aiohttp"),
     "ais_catcher": ("ech.adapters.ais_catcher_adapter", "AISCatcherAdapter", "aiohttp"),
     "aisstream":   ("ech.adapters.aisstream_adapter",   "AISStreamAdapter",  "aiohttp"),
     "aishub":      ("ech.adapters.aishub_adapter",      "AISHubAdapter",     "aiohttp"),

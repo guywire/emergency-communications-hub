@@ -289,3 +289,62 @@ def test_phone_outlook_screens_and_generic_cfg():
     cfg = generic_cfg("10.0.0.5", 2, {"xml_key": "K"})
     assert "account.2.cid_source = 6" in cfg and "linekey.1." not in cfg and "linekey.2.type = 27" in cfg
     assert "app.hide.icon" not in cfg
+
+
+# ── Bot channels across MeshCore and Meshtastic ────────────────────────────
+
+def _bot2(**cfg):
+    from ech.core.mesh_bot import MeshBot
+    sent = []
+
+    class MeshtasticAdapter:          # type name is what the bot checks
+        pass
+
+    class MQTTAdapter:
+        pass
+
+    class Router:
+        _adapters = {"Meshtastic": MeshtasticAdapter(), "meshtastic-mqtt-me": MQTTAdapter(), "meshcore-usb": object()}
+
+        async def send(self, **kw):
+            sent.append(kw)
+            return {}
+
+        async def broadcast_ws_event(self, *a):
+            pass
+    b = MeshBot({"mesh_bot": {"enabled": True, "mention_name": "SM", "per_user_cooldown_sec": 0,
+                              "global_cooldown_sec": 0, **cfg}}, router=Router())
+    b._client = object()
+    return b, sent
+
+
+@pytest.mark.asyncio
+async def test_bot_channel_entries_per_network():
+    import asyncio
+    from ech.core.models import NormalizedMessage
+
+    def m(adapter, ch, who="Al"):
+        return NormalizedMessage(source_adapter=adapter, source_channel=ch, from_id=who, from_display=who, body="ping")
+    b, sent = _bot2(channels=["ch2", "meshtastic-mqtt-me/MaineNet", "Meshtastic/ch1"])
+    await b.handle(m("Meshtastic", "ch2", "a"))                 # MeshCore entry must not catch the radio's ch2
+    await b.handle(m("meshtastic-mqtt-me", "LongFast", "b"))    # not listed
+    await asyncio.sleep(0.05)
+    assert sent == []
+    await b.handle(m("meshcore-usb", "ch2:#bot", "c"))
+    await b.handle(m("meshtastic-mqtt-me", "MaineNet", "d"))
+    await b.handle(m("Meshtastic", "ch1", "e"))
+    await asyncio.sleep(0.05)
+    by = {s["adapter_names"][0]: s["raw"] for s in sent}
+    assert by == {"meshcore-usb": {"channel_idx": 2}, "meshtastic-mqtt-me": {"channel_name": "MaineNet"},
+                  "Meshtastic": {"channel_idx": 1}}
+
+
+@pytest.mark.asyncio
+async def test_meshtastic_dm_reply_is_a_dm():
+    import asyncio
+    from ech.core.models import NormalizedMessage
+    b, sent = _bot2(channels=[], adapters=[])
+    await b.handle(NormalizedMessage(source_adapter="meshtastic-mqtt-me", source_channel="DM", from_id="!849a8830",
+                                     from_display="Al", body="ping"))
+    await asyncio.sleep(0.05)
+    assert sent and sent[0]["to_id"] == "!849a8830"

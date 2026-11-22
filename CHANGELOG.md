@@ -8,6 +8,31 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.112 (2026-11-22)
+
+- Military / rescue layer redrawn: every marker is labeled (callsign or registration, MIL / RESCUE / HELO / EMERG, type, altitude), in colors no other layer uses (white military, magenta rescue, cyan helicopter, red emergency). Past Gloucester Hill reports are dashed, fading "◇ C130 · 2h ago" tags at the last place we tracked that aircraft, one per aircraft, hidden while it's in the air on the map; a legend explains them and picks 2 / 6 / 24 h of past reports (6 h default).
+- Aircraft popups link to FlightAware, adsb.lol, ADS-B Exchange, the FAA registry (US N-numbers) and Planespotters photos; the regular ADS-B popup also shows adsb.lol's type, registration and military flag.
+
+## v1.1.111 (2026-11-22)
+
+- New aircraft source: adsb.lol, the free community ADS-B network (`type: adsb_lol`, no key). Polls a radius around the base (default 150 nm, every 60 s) and adds aircraft the local receiver and OpenSky miss, with their ICAO type, registration and adsb.lol's military flag. Shown as map aircraft like the other feeds; nothing is added to the message feed.
+- Military / rescue layer uses that military flag and aircraft type (helicopter types such as H60, AS65, R44 count as helicopters), names the feed each aircraft came from, and prefers our receiver, then adsb.lol, then OpenSky when several report the same aircraft.
+
+## v1.1.110 (2026-11-22)
+
+- Map, Live overlays: "Military / rescue aircraft". Our ADS-B receiver's and OpenSky's aircraft classed as emergency (squawk 7500/7600/7700), military (US military ICAO block AE0000-AFFFFF, military callsigns such as RCH/SAM/PAT), rescue/medical (LifeFlight/medevac callsigns, US Coast Guard C####) or helicopter (ADS-B category A7), drawn in their own colors with a toast when a new one appears; refreshes every minute.
+- The same layer compares with NGR&S, the New Gloucester gateway's Meshtastic MQTT channel that posts only military, helicopter and LifeFlight traffic (no positions): each spot from the last 24 h is matched by ICAO hex to our own track history and drawn where we saw that aircraft; the ones only Gloucester Hill heard are listed on its label, with the 7-day overlap. NGR&S's tags also teach our classifier (a LifeFlight tail it tagged shows as rescue when we see it). `GET /api/aircraft/watch`.
+
+## v1.1.109 (2026-11-22)
+
+- Mesh bot `id` reply shows only the 4-character grid square (it showed 6, which puts the station within a few km), the same privacy line as the `grid` command.
+- Live config: the bot listens on a Meshtastic channel named `bot` on both Meshtastic adapters (default key on MQTT, slot 2 on the radio), answering every message there.
+
+## v1.1.108 (2026-11-22)
+
+- Mesh bot on Meshtastic. Meshtastic labels channels differently from MeshCore (MQTT by name, "MaineNet"; a Meshtastic radio by number only, "ch1"), so bot channel entries can now name the adapter: `meshtastic-mqtt-me/MaineNet`, `Meshtastic/ch1`. Plain number entries (`ch2`, `2`, `#bot`) apply to MeshCore only, so they no longer also catch a Meshtastic radio's channel 2. Works in `channels`, `mention_required_channels`, `respond_all_channels` and `banter_channels`.
+- Bot replies on Meshtastic MQTT go back on the channel the message came in on (they went out the adapter's default channel, LongFast), and a Meshtastic direct message (`!xxxxxxxx` sender) gets a direct reply instead of a channel broadcast.
+
 ## v1.1.107 (2026-11-22)
 
 - Hunting finds its Wildlife Management District and expanded-archery status from the base location, using MDIFW's own GIS layers (looked up once, cached in `hunt_area.json`). Seasons limited to specific WMDs (the extended muzzleloader) show only where they apply; expanded archery shows only inside an expanded archery area, with a note when one is within 10 km. `outlook.hunting.wmd` / `expanded_archery` still override.

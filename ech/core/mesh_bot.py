@@ -206,7 +206,7 @@ APRS_FI_URL = "https://api.aprs.fi/api/get"
 _ZIP_RE      = re.compile(r'\b(\d{5})\b')
 _CALL_RE     = re.compile(r'\b([AKNW][A-Z0-9]{1,2}\d[A-Z]{1,3})\b', re.IGNORECASE)
 
-_HEX_NODE_RE = re.compile(r'^[0-9a-fA-F]{8,}')
+_HEX_NODE_RE = re.compile(r'^!?[0-9a-fA-F]{8,}')   # MeshCore pubkey or Meshtastic !node id
 
 # A bare "A"/"B"/"C"/"D" (optionally with trailing punctuation) is treated as a
 # trivia answer only while that sender has a pending question — see handle().
@@ -379,6 +379,19 @@ def _parse_channel_idx(source_channel: str | None) -> int | None:
         return None
     m = re.match(r'^ch(\d+)', source_channel.lower())
     return int(m.group(1)) if m else None
+
+
+def _reply_hint(source_channel: str | None) -> dict:
+    """Where a reply goes: the channel index ("ch2:#bot" -> 2), else the channel
+    by name (Meshtastic MQTT labels channels "MaineNet"; without this the reply
+    went out the adapter's default channel, LongFast)."""
+    idx = _parse_channel_idx(source_channel)
+    if idx is not None:
+        return {"channel_idx": idx}
+    sc = (source_channel or "").strip()
+    if sc and sc.lower() not in ("dm", "outbound") and not sc.startswith("mqtt:"):
+        return {"channel_name": sc}
+    return {}
 
 
 def _is_mentioned(body: str, name) -> bool:
@@ -690,8 +703,21 @@ class MeshBot:
             # Extract bare numeric index ("ch2" → "2")
             ch_num = ch_idx_part[2:] if ch_idx_part.startswith("ch") else ""
 
+            # Meshtastic radios label channels by number only ("ch1"), so a plain
+            # "ch2"/"2"/"#bot" entry is a MeshCore one and must not also catch the
+            # Meshtastic radio's channel 2. Meshtastic channels are listed as
+            # "<adapter>/<channel>": "Meshtastic/ch1", "meshtastic-mqtt-me/MaineNet".
+            indexed_only = self._numbers_only(msg.source_adapter)
+
             def _matches(cfg_entry: str) -> bool:
-                c = cfg_entry.lstrip("#").lower()
+                c = cfg_entry.strip().lower()
+                if "/" in c:
+                    ad, _, c = c.partition("/")
+                    if ad != (msg.source_adapter or "").lower():
+                        return False
+                elif indexed_only and c != "*":
+                    return False
+                c = c.lstrip("#")
                 if c == "*":                           return True   # wildcard
                 if ch_name_part and c == ch_name_part: return True   # by name: "testing"
                 if c == ch_idx_part:                   return True   # "ch2"
@@ -856,6 +882,11 @@ class MeshBot:
         self._user_ts[msg.from_id] = now
 
         asyncio.ensure_future(self._dispatch(msg, cmd, args, mention_required))
+
+    def _numbers_only(self, adapter_name: str | None) -> bool:
+        """True for adapters whose channels are only numbered (a Meshtastic radio: "ch1")."""
+        a = (getattr(self._router, "_adapters", None) or {}).get(adapter_name or "")
+        return a is not None and type(a).__name__ == "MeshtasticAdapter"
 
     def _banter_reply(self, msg: NormalizedMessage) -> None:
         """Answer "are you a bot?" — once per banter_cooldown_sec per channel
@@ -1033,15 +1064,13 @@ class MeshBot:
                 # adapter's configured default channel — so the reply still reaches
                 # the sender instead of vanishing into whatever channel the adapter
                 # happens to be set to.
-                ch_idx = _parse_channel_idx(msg.source_channel)
-                raw = {"channel_idx": ch_idx} if ch_idx is not None else {}
+                raw = _reply_hint(msg.source_channel)
                 log.info("MeshBot: no sender pubkey for DM reply — replying on origin channel %s/%s: %s",
                          msg.source_adapter, msg.source_channel, body[:60])
         else:
             # Channel message with reply_dm=false → broadcast back on the same channel
             to_id = None
-            ch_idx = _parse_channel_idx(msg.source_channel)
-            raw = {"channel_idx": ch_idx} if ch_idx is not None else {}
+            raw = _reply_hint(msg.source_channel)
             log.info("MeshBot: channel reply on %s/%s: %s", msg.source_adapter, msg.source_channel, body[:60])
 
         await self._router.send(
@@ -1135,7 +1164,9 @@ class MeshBot:
         else:
             up_str = f"{mins}m"
         lat, lon = self._resolve_coords()
-        grid_str = self._latlon_to_grid(lat, lon) if lat is not None else "?"
+        # 4-character grid only (~100 x 200 km): the 6-character square puts the
+        # station within a few km, the same privacy line as the grid command.
+        grid_str = self._latlon_to_grid(lat, lon)[:4] if lat is not None else "?"
         return f"SM | v{ver} | up {up_str} | {grid_str}"
 
     def _cmd_path(self, msg: NormalizedMessage) -> str:

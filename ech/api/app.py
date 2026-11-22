@@ -2258,6 +2258,13 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         except Exception as exc:
             return {"cells": [], "error": f"{type(exc).__name__}"}
 
+    @app.get("/api/aircraft/watch")
+    async def aircraft_watch_api(hours: float = 24):
+        """Military / rescue / emergency / helicopter aircraft we see now, and the
+        NGR&S (Gloucester Hill) spots matched against our own ADS-B tracks."""
+        from ech.core import aircraft_watch
+        return await aircraft_watch.watch(router, db, min(max(hours, 1), 24 * 7))
+
     @app.get("/api/map/tropical")
     async def map_tropical():
         """NHC active storms (their JSON has no CORS header, so the server fetches it)."""

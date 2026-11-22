@@ -105,6 +105,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row on" id="ais-btn"  onclick="toggleVessels()"  title="Toggle AIS vessels">⚓ AIS vessels</button>
     <button class="ctrl-btn layer-row on" id="traffic-btn" onclick="toggleTraffic()" title="Live MeshCore RF traffic paths — heard packets orange, adverts amber (fade ~10s), operator traces green (stay 60s)">⚡ Live traffic</button>
     <button class="ctrl-btn layer-row" id="satellites-btn" onclick="toggleSatellites()" title="Tracked satellites: ISS, amateur satellites with CW beacons (AO-7, FO-29, AO-73, RS-44, ...), QO-100 (FT8), NOAA weather, and Starlink trains with their next passes. Click a satellite for its ground track.">🛰 Satellites (tracked)</button>
+    <button class="ctrl-btn layer-row" id="acwatch-btn" onclick="toggleAircraftWatch()" title="Military, rescue/medical, emergency-squawk and helicopter aircraft from our ADS-B receiver and OpenSky, plus the NGR&amp;S (Gloucester Hill) spots from Meshtastic MQTT matched to where we tracked them. A toast pops up when a new one appears. Refreshes every minute.">🎖 Military / rescue aircraft</button>
     <div class="layer-group-title">Panels</div>
     <button class="ctrl-btn layer-row on" id="panel-moon-btn" onclick="togglePanel('moon')" title="Show or hide the moon phase panel">🌙 Moon status</button>
     <button class="ctrl-btn layer-row on" id="panel-key-btn"  onclick="togglePanel('key')"  title="Show or hide the map key (legend)">🗝 Map key</button>
@@ -589,6 +590,9 @@ function popupContent(node, isAlert, lastMsg) {
       + `✈ ICAO: ${icao.toUpperCase()}${stats ? '  ' + stats : ''}<br>`
       + (flight ? `<a href="https://flightaware.com/live/flight/${esc(flight)}" target="_blank" rel="noopener">FlightAware (${esc(flight)})</a> &bull; ` : '')
       + `<a href="https://globe.adsbexchange.com/?icao=${icao}" target="_blank" rel="noopener">ADS-B Exchange</a>`
+      + ` &bull; <a href="https://globe.adsb.lol/?icao=${icao}" target="_blank" rel="noopener">adsb.lol</a>`
+      + (meta.aircraft_type || meta.registration || meta.military
+          ? `<br>${esc(meta.aircraft_type || '')} ${esc(meta.registration || '')}${meta.military ? ' <b style="color:#f2f2f2">MIL</b>' : ''}` : '')
       + `</div>`;
   }
 
@@ -3179,6 +3183,142 @@ async function togglePollen() {
   _envLayers.pollen = {layers: [layer]};
   _envBtn('pollen-btn', true);
   toast(`Pollen: ${k} index`);
+}
+
+
+// ── Military / rescue aircraft + NGR&S comparison (/api/aircraft/watch) ──
+// Colours picked to stay clear of the map's other layers (ADS-B amber, MeshCore
+// orange, Meshtastic green, APRS purple, blue overlays); every marker carries a
+// text label too, so colour is never the only cue.
+const _AC_COLORS = {emergency: '#ff2d55', military: '#f2f2f2', rescue: '#ff4fd8', helicopter: '#00e5ff'};
+const _AC_LABEL = {emergency: 'Emergency', military: 'Military', rescue: 'Rescue / medical', helicopter: 'Helicopter'};
+const _AC_SHORT = {emergency: 'EMERG', military: 'MIL', rescue: 'RESCUE', helicopter: 'HELO'};
+const NGRS_SITE = [43.96, -70.28];   // Gloucester Hill, New Gloucester ME (approximate)
+let _acWatch = null;
+let _acSpotHours = 6;
+function _acAgo(iso) {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h${m % 60 ? (m % 60 + '').padStart(2, '0') : ''} ago`;
+}
+function _acBadge(text, col, opacity, dashed) {
+  return `<div style="display:inline-block;white-space:nowrap;font:600 10px var(--mono);color:${col};opacity:${opacity};
+    background:rgba(13,17,23,.82);border:1px ${dashed ? 'dashed' : 'solid'} ${col};border-radius:3px;padding:0 4px;line-height:15px">${text}</div>`;
+}
+function _acLegend(on) {
+  let el = document.getElementById('acwatch-legend');
+  if (!on) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'acwatch-legend';
+    el.style.cssText = 'position:absolute;left:10px;bottom:30px;z-index:1000;background:rgba(22,27,34,.94);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font:10px var(--mono);color:var(--text);max-width:240px';
+    document.getElementById('map').appendChild(el);
+  }
+  const sw = (k) => `<div style="display:flex;align-items:center;gap:6px;margin:2px 0">${_acBadge(_AC_SHORT[k], _AC_COLORS[k], 1, false)}<span>${_AC_LABEL[k]}</span></div>`;
+  el.innerHTML = `<div style="font-weight:600;margin-bottom:4px">Military / rescue aircraft</div>
+    ${['military', 'rescue', 'helicopter', 'emergency'].map(sw).join('')}
+    <div style="margin-top:6px;color:var(--muted)">Solid label = in the air now (✈/🚁 marker).<br>Dashed, fading = where an aircraft was when Gloucester Hill (NGR&amp;S) reported it. It has probably moved on.</div>
+    <div style="margin-top:5px">Past reports: ${[2, 6, 24].map(h => `<a href="#" onclick="_acSetHours(${h});return false" style="color:${h === _acSpotHours ? 'var(--green)' : 'var(--blue)'};margin-right:6px">${h} h</a>`).join('')}</div>`;
+}
+function _acSetHours(h) { _acSpotHours = h; _acLegend(true); if (_acWatch) _acWatch.redraw(); }
+function _acLinks(hex, flight, reg) {
+  const icao = encodeURIComponent((hex || '').toLowerCase());
+  const f = (flight || '').trim(), r = (reg || '').trim();
+  const n = /^N[0-9A-Z]{1,5}$/i.test(r || f) ? (r || f).toUpperCase() : '';
+  return `<div class="node-stat" style="margin-top:4px">` +
+    (f ? `<a href="https://flightaware.com/live/flight/${encodeURIComponent(f)}" target="_blank" rel="noopener">FlightAware</a> &bull; ` : '') +
+    `<a href="https://globe.adsb.lol/?icao=${icao}" target="_blank" rel="noopener">adsb.lol</a> &bull; ` +
+    `<a href="https://globe.adsbexchange.com/?icao=${icao}" target="_blank" rel="noopener">ADS-B Exchange</a>` +
+    (n ? ` &bull; <a href="https://registry.faa.gov/AircraftInquiry/Search/NNumberResult?nNumberTxt=${encodeURIComponent(n.slice(1))}" target="_blank" rel="noopener">FAA registry</a>` : '') +
+    ` &bull; <a href="https://www.planespotters.net/hex/${encodeURIComponent((hex || '').toUpperCase())}" target="_blank" rel="noopener">Photos</a></div>`;
+}
+async function toggleAircraftWatch() {
+  if (_acWatch) {
+    _acWatch.group.remove();
+    clearInterval(_acWatch.timer);
+    _acWatch = null;
+    _acLegend(false);
+    return _envBtn('acwatch-btn', false);
+  }
+  _acWatch = {group: L.layerGroup().addTo(map), timer: null, seen: new Set(), first: true, data: null};
+  _envBtn('acwatch-btn', true);
+  _acLegend(true);
+  const render = () => {
+    const w = _acWatch, d = w && w.data;
+    if (!d) return;
+    w.group.clearLayers();
+    const liveHex = new Set((d.live || []).map(a => a.hex));
+    // in the air now
+    (d.live || []).forEach(a => {
+      const col = _AC_COLORS[a.class] || '#ccc';
+      const heli = a.class === 'helicopter' || /HELO|rotor/i.test(a.why);
+      const glyph = heli ? '🚁' : '✈';
+      const rot = !heli && a.track_deg != null ? a.track_deg - 45 : 0;
+      const label = `${esc(a.flight || a.registration || a.hex.toUpperCase())} · ${_AC_SHORT[a.class]}${a.type ? ' ' + esc(a.type) : ''}${a.alt_ft != null ? ' · ' + Math.round(a.alt_ft / 100) * 100 + 'ft' : ''}`;
+      L.marker([a.lat, a.lon], {zIndexOffset: 900, icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [11, 11],
+        html: `<div style="display:flex;align-items:center;gap:3px"><span style="font-size:18px;color:${col};display:inline-block;transform:rotate(${rot}deg);text-shadow:0 0 3px #000,0 0 6px ${col}">${glyph}</span>${_acBadge(label, col, 1, false)}</div>`})})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${esc(a.flight || a.hex.toUpperCase())}</div>
+          <div class="node-stat" style="color:${col}"><b>${_AC_LABEL[a.class]}</b>: ${esc(a.why)}</div>
+          <div class="node-stat">${a.alt_ft != null ? a.alt_ft + ' ft' : ''}${a.speed_kts != null ? ' · ' + Math.round(a.speed_kts) + ' kt' : ''}${a.squawk ? ' · squawk ' + esc(a.squawk) : ''}</div>
+          ${a.type || a.registration ? `<div class="node-stat">${esc(a.type)} ${esc(a.registration)}</div>` : ''}
+          <div class="node-stat" style="color:var(--muted)">In the air now · ICAO ${esc(a.hex.toUpperCase())} · ${a.kind === 'ADSBAdapter' ? 'our ADS-B receiver' : a.kind === 'ADSBLolAdapter' ? 'adsb.lol' : 'OpenSky'}</div>${_acLinks(a.hex, a.flight, a.registration)}</div>`)
+        .addTo(w.group);
+    });
+    // past NGR&S reports: newest per aircraft, inside the chosen window, fading with age
+    const cutoff = Date.now() - _acSpotHours * 3600e3;
+    const latest = new Map();
+    (d.ngrs || []).forEach(s => {
+      const t = new Date(s.time).getTime();
+      if (t < cutoff) return;
+      const k = s.hex;
+      if (!latest.has(k) || new Date(latest.get(k).time).getTime() < t) latest.set(k, s);
+    });
+    const only = [];
+    latest.forEach(s => {
+      if (!s.seen_by_us) { only.push(s); return; }
+      if (liveHex.has(s.hex)) return;            // it's on the map live already
+      const col = _AC_COLORS[s.class] || '#ccc';
+      const age = (Date.now() - new Date(s.time).getTime()) / 3600e3;
+      const op = Math.max(0.35, 1 - age / _acSpotHours * 0.65);
+      const name = s.call || s.type || s.hex.toUpperCase();
+      L.marker([s.lat, s.lon], {zIndexOffset: 500, icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [4, 8],
+        html: _acBadge(`◇ ${esc(name)}${s.call && s.type ? ' ' + esc(s.type) : ''} · ${_acAgo(s.time)}`, col, op, true)})})
+        .bindPopup(`<div class="node-popup"><div class="node-name">${esc(s.call || s.hex.toUpperCase())} <span style="color:var(--muted)">${_acAgo(s.time)}</span></div>
+          <div class="node-stat" style="color:${col}">Gloucester Hill (NGR&amp;S) reported: ${esc(s.label)}${s.alt_ft ? ' · ' + s.alt_ft + ' ft' : ''}</div>
+          <div class="node-stat">Shown where ${/lol/.test(s.matched_by || '') ? 'adsb.lol' : s.matched_by === 'adsb' ? 'our ADS-B receiver' : 'OpenSky'} tracked it ${Math.abs(Math.round(s.match_offset_s / 60))} min ${s.match_offset_s < 0 ? 'before' : 'after'} that report. A past position: the aircraft has probably moved on.</div>${_acLinks(s.hex, s.call)}</div>`)
+        .addTo(w.group);
+    });
+    const st = d.stats || {};
+    const pct = st.week_spots ? Math.round(100 * st.week_seen_by_us / st.week_spots) : 0;
+    L.marker(NGRS_SITE, {icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [10, 10],
+      html: `<div style="font-size:11px;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:10px;padding:2px 7px;color:var(--text);white-space:nowrap">📡 Gloucester Hill (NGR&amp;S)${only.length ? ' · ' + only.length + ' only theirs' : ''}</div>`})})
+      .bindPopup(`<div class="node-popup" style="max-width:300px"><div class="node-name">Gloucester Hill (NGR&amp;S) vs our feeds</div>
+        <div class="node-stat">Last 7 days: ${st.week_spots || 0} reports; we also tracked ${st.week_seen_by_us || 0} (${pct}%), ${st.week_only_ngrs || 0} heard only by Gloucester Hill.</div>
+        <div class="node-stat" style="margin-top:4px"><b>Only theirs, last ${_acSpotHours} h</b> (no position):</div>
+        ${only.length ? only.slice(0, 25).map(s => `<div class="node-stat" style="color:${_AC_COLORS[s.class]}">${_acAgo(s.time)} <a href="https://globe.adsb.lol/?icao=${encodeURIComponent(s.hex)}" target="_blank" rel="noopener" style="color:inherit">${esc(s.call || s.hex.toUpperCase())}</a> · ${esc(s.label)}${s.alt_ft ? ' · ' + s.alt_ft + ' ft' : ''}</div>`).join('') : '<div class="node-stat">none</div>'}
+        <div class="node-stat" style="color:var(--muted);margin-top:4px">NGR&amp;S posts only military, helicopter and LifeFlight traffic. This label's position is approximate.</div></div>`)
+      .addTo(w.group);
+  };
+  const fetchDraw = async () => {
+    const w = _acWatch;
+    if (!w) return;
+    let d;
+    try { d = await fetch(`${window.ECH_BASE_PATH || ''}/api/aircraft/watch`).then(r => r.json()); }
+    catch (e) { if (w.first) toast('Aircraft watch unavailable', 'err'); return; }
+    if (!_acWatch) return;
+    w.data = d;
+    (d.live || []).forEach(a => {
+      if (!w.first && !w.seen.has(a.hex)) toast(`${_AC_LABEL[a.class]} aircraft: ${a.flight || a.hex.toUpperCase()} (${a.why})`);
+      w.seen.add(a.hex);
+    });
+    render();
+    if (w.first) {
+      toast(`Military/rescue: ${(d.live || []).length} in the air now`);
+      w.first = false;
+    }
+  };
+  _acWatch.redraw = render;
+  await fetchDraw();
+  if (_acWatch) _acWatch.timer = setInterval(fetchDraw, 60000);
 }
 
 loadWaterBodies();
