@@ -44,6 +44,120 @@ SEVERITY_MAP = {
 }
 
 
+PUBLIC_ALERT_EVENTS = (   # life-safety warnings worth interrupting a general channel for
+    "Tornado Warning", "Severe Thunderstorm Warning", "Flash Flood Warning", "Flood Warning",
+    "Blizzard Warning", "Ice Storm Warning", "Winter Storm Warning", "High Wind Warning",
+    "Extreme Wind Warning", "Hurricane Warning", "Tropical Storm Warning", "Storm Surge Warning",
+    "Coastal Flood Warning", "Tsunami Warning", "Extreme Cold Warning", "Wind Chill Warning",
+    "Excessive Heat Warning", "Extreme Heat Warning", "Red Flag Warning", "Dust Storm Warning",
+    "Civil Emergency Message", "Evacuation Immediate", "Shelter In Place Warning",
+    "Law Enforcement Warning", "Nuclear Power Plant Warning", "Hazardous Materials Warning",
+    "Fire Warning", "Earthquake Warning", "Volcano Warning", "Avalanche Warning",
+)
+
+
+def public_alert_text(props: dict, max_len: int = 150) -> str:
+    """One short line: "NWS Blizzard Warning until Tue 7PM: Knox, Waldo. Details on #weather"."""
+    event = props.get("event") or "Alert"
+    until = ""
+    end = props.get("ends") or props.get("expires")
+    if end:
+        try:
+            dt = datetime.fromisoformat(end).astimezone()
+            hr = dt.hour % 12 or 12
+            until = f" until {dt.strftime('%a')} {hr}{'AM' if dt.hour < 12 else 'PM'}"
+        except ValueError:
+            pass
+    areas = [a.strip() for a in (props.get("areaDesc") or "").split(";") if a.strip()]
+    where = ", ".join(areas[:3]) + (" +more" if len(areas) > 3 else "")
+    text = f"NWS {event}{until}" + (f": {where}" if where else "") + ". Details on #weather"
+    return text[:max_len]
+
+
+class PublicAlertGate:
+    """Decides which NWS alerts go to a general channel such as Public.
+
+    config weather_service.public_alerts:
+      enabled: false            channel: "Public"       adapters: [meshcore-usb]
+      events: [...]             # default PUBLIC_ALERT_EVENTS (warnings, not watches/advisories)
+      max_per_day: 3            event_cooldown_sec: 43200   min_interval_sec: 1800
+      quiet_hours: "22-7"       # local hours; only Extreme alerts post then
+
+    State (alert ids sent, per-event times) is saved in the DB so a restart
+    doesn't repost every active warning.
+    """
+    KV_KEY = "wx_public_alert_state"
+
+    def __init__(self, cfg: dict):
+        self.enabled = bool(cfg.get("enabled", False))
+        self.channel = str(cfg.get("channel") or "Public")
+        self.adapters = list(cfg.get("adapters") or [])
+        self.events = {e.lower() for e in (cfg.get("events") or PUBLIC_ALERT_EVENTS)}
+        self.max_per_day = int(cfg.get("max_per_day", 3))
+        self.event_cooldown = float(cfg.get("event_cooldown_sec", 43200))
+        self.min_interval = float(cfg.get("min_interval_sec", 1800))
+        qh = str(cfg.get("quiet_hours", "22-7") or "")
+        try:
+            a, b = (int(x) for x in qh.split("-"))
+            self.quiet: tuple[int, int] | None = (a, b)
+        except ValueError:
+            self.quiet = None
+        self.sent: dict[str, float] = {}       # alert id -> time posted
+        self.by_event: dict[str, float] = {}   # event name -> time posted
+        self.loaded = False
+
+    def load(self, raw) -> None:
+        import json as _json
+        if not raw:
+            return
+        d = _json.loads(raw) if isinstance(raw, str) else raw
+        self.sent = {k: float(v) for k, v in (d.get("sent") or {}).items()}
+        self.by_event = {k: float(v) for k, v in (d.get("by_event") or {}).items()}
+
+    def dump(self) -> str:
+        import json as _json
+        cutoff = time.time() - 7 * 86400
+        self.sent = {k: v for k, v in self.sent.items() if v > cutoff}
+        return _json.dumps({"sent": self.sent, "by_event": self.by_event})
+
+    def _in_quiet(self, hour: int) -> bool:
+        if not self.quiet:
+            return False
+        a, b = self.quiet
+        return (a <= hour or hour < b) if a > b else (a <= hour < b)
+
+    def decide(self, props: dict, now: float | None = None, hour: int | None = None) -> str | None:
+        """None = post it; otherwise the reason it is held back."""
+        now = time.time() if now is None else now
+        hour = datetime.now().hour if hour is None else hour
+        event = props.get("event") or ""
+        if event.lower() not in self.events:
+            return "not a public-channel event"
+        if props.get("messageType") in ("Update", "Cancel"):
+            return f"{props['messageType'].lower()} of an earlier alert"
+        refs = [r.get("identifier") or r.get("@id") for r in (props.get("references") or [])
+                if isinstance(r, dict)]
+        if props.get("id") in self.sent or any(r in self.sent for r in refs if r):
+            return "already posted"
+        if now - self.by_event.get(event, 0) < self.event_cooldown:
+            return f"{event} posted in the last {self.event_cooldown / 3600:.0f}h"
+        recent = [v for v in self.by_event.values() if now - v < 86400]
+        if len(recent) >= self.max_per_day:
+            return f"daily cap {self.max_per_day} reached"
+        extreme = props.get("severity") == "Extreme"
+        if recent and now - max(recent) < self.min_interval and not extreme:
+            return "too soon after the last post"
+        if self._in_quiet(hour) and not extreme:
+            return "quiet hours"
+        return None
+
+    def record(self, props: dict, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        if props.get("id"):
+            self.sent[props["id"]] = now
+        self.by_event[props.get("event") or ""] = now
+
+
 class WeatherService:
     """
     Polls NWS CAP alerts and emits them as NormalizedMessages.
@@ -75,6 +189,10 @@ class WeatherService:
         self._auto_min_interval   = int(wx_cfg.get("auto_broadcast_min_interval_sec", 600))
         self._auto_event_cooldown = int(wx_cfg.get("auto_broadcast_event_cooldown_sec", 3600))
         self._auto_max_per_hour   = int(wx_cfg.get("auto_broadcast_max_per_hour", 4))
+
+        # Emergencies on the busy Public channel: warnings only, once per storm,
+        # a few a day at most (operator, 2026-11-22: "not in an annoying way").
+        self.public_gate = PublicAlertGate(wx_cfg.get("public_alerts") or {})
 
         self._router           = router
         self._db               = None   # set via set_db() so cooldown state can be persisted
@@ -438,6 +556,8 @@ class WeatherService:
                             except Exception as _e:
                                 log.debug("WeatherService: failed to persist broadcast state: %s", _e)
 
+                await self._maybe_public_alert(props)
+
             if new_count:
                 log.info("WeatherService: %d new NWS alert(s) emitted", new_count)
 
@@ -445,6 +565,31 @@ class WeatherService:
             log.warning("WeatherService: NWS poll HTTP error: %s", exc)
         except Exception as exc:
             log.error("WeatherService: poll error: %s", exc)
+
+    async def _maybe_public_alert(self, props: dict) -> None:
+        gate = self.public_gate
+        if not gate.enabled or not self._router:
+            return
+        if not gate.loaded and self._db:
+            try:
+                gate.load(await self._db.get_kv(PublicAlertGate.KV_KEY))
+            except Exception as exc:
+                log.debug("WeatherService: public alert state load failed: %s", exc)
+        gate.loaded = True
+        why = gate.decide(props)
+        if why:
+            log.info("WeatherService: not posting %r to %s (%s)", props.get("event"), gate.channel, why)
+            return
+        body = public_alert_text(props)
+        log.info("WeatherService: posting %r to %s: %s", props.get("event"), gate.channel, body)
+        await self._router.send(body=body, adapter_names=gate.adapters or None,
+                                priority=Priority.ELEVATED, raw={"channel_name": gate.channel})
+        gate.record(props)
+        if self._db:
+            try:
+                await self._db.set_kv(PublicAlertGate.KV_KEY, gate.dump())
+            except Exception as exc:
+                log.debug("WeatherService: public alert state save failed: %s", exc)
 
     # ── Manual operations ─────────────────────────────────────────────────
 

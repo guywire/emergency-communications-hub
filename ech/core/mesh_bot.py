@@ -172,6 +172,8 @@ _CMD_WORDS = [
     "smoke", "aqi", "airquality",
     "marine", "boating", "buoy", "kayak", "fish", "fishing", "solunar", "water",
     "localnews", "news", "headlines", "markets", "futures", "sentiment", "kalshi",
+    "sap", "maple", "skiing", "ski", "trains", "train", "doom", "apocalypse",
+    "tomatoes", "tomato", "garden", "hunting", "hunt", "deer",
 ]
 _CMD_RE = re.compile(
     r'(?<![a-z0-9])'
@@ -196,6 +198,8 @@ _CMD_ALIASES: dict[str, str] = {
     "fishing": "fish", "solunar": "fish",
     "again": "repeat",
     "headlines": "news", "futures": "markets", "kalshi": "sentiment",
+    "maple": "sap", "skiing": "ski", "train": "trains", "apocalypse": "doom",
+    "tomato": "garden", "tomatoes": "garden", "hunting": "hunt", "deer": "hunt",
 }
 _ICAO_RE = re.compile(r'\b([A-Z]{4})\b', re.IGNORECASE)
 APRS_FI_URL = "https://api.aprs.fi/api/get"
@@ -398,6 +402,39 @@ from ech.core.botfilter import is_bot_message as _is_bot_message   # shared with
 _MENTION_RE = re.compile(r"@\[[^\]]+\]|@[A-Za-z0-9_.-]+")
 _LEAD_MENTIONS_RE = re.compile(r"^\s*(?:(?:@\[[^\]]+\]|@[A-Za-z0-9_.-]+)[\s,:]*)+")
 
+# "Are you a bot?" and friends — answered with a railroad quip (operator, 2026-11-22).
+# Anchored and short, so "is the bot down again, it ate my reply" doesn't trigger it.
+_ARE_YOU_BOT_RE = re.compile(
+    r"^(?:(?:hey|hi|hello|yo|so|wait|um+|ok(?:ay)?|lol|serious(?:ly)?|honestly)[\s,!.]+)*"
+    r"(?:(?:are|r)\s+(?:you|u|ya|ye)(?:\s+really)?\s+(?:an?\s+|even\s+an?\s+)?"
+    r"(?:bot|robot|ai|a\.i\.|real|human|person|machine|automated|program|computer)"
+    r"|(?:is|are)\s+(?:this|that|it|these|those|there)\s+(?:an?\s+|any\s+)?(?:bot|robot)s?"
+    r"|(?:you|u|you're|youre|ur)\s+(?:an?\s+)?(?:bot|robot)"
+    r"|bot(?=\s*\?))"
+    r"(?:\s+or\s+(?:a\s+)?(?:human|person|real|not|bot|what))?\s*[?!.]*\s*$",
+    re.IGNORECASE)
+
+RAILROAD_BOT_REPLIES = (
+    "All aboard! Yes, I'm a bot: part conductor, part caboose, all narrow gauge. Next stop: 'help'.",
+    "Bot? I'm a little engine of a program. I run on timetables, not feelings. Toot toot!",
+    "Tickets, please! Yes, automated conductor here. I punch commands, not tickets. Try 'help'.",
+    "I'm a bot the way a handcar is a train: small, honest, and powered by somebody pumping hard.",
+    "Beep beep? No: choo choo. I'm the SignalMatrix dispatcher bot, keeping messages on time.",
+    "Bot confirmed. My heart is a timetable and my soul smells faintly of coal smoke.",
+    "Like a semaphore at dusk: mechanical, blinking, and here to keep things from colliding. Yes, a bot.",
+    "Raised in a switchyard. Every message is a boxcar; I just couple them up. So yes, a bot.",
+    "I'm a bot. I don't sleep, I just idle on a siding until somebody rings the bell.",
+    "Yes, a bot. Fully automatic block signaling, zero coffee breaks, occasional steam.",
+    "Real? I'm as real as a model railroad: tiny, on a loop, and very proud of my tunnels.",
+    "Human? No. Bot. I hum along at track speed and never miss a crossing whistle.",
+)
+
+
+def _is_are_you_bot(body: str, names=()) -> bool:
+    """True for a short "are you a bot?" style question (leading @mentions ignored)."""
+    text = _LEAD_MENTIONS_RE.sub("", body or "", count=1).strip()
+    return 0 < len(text) <= 60 and bool(_ARE_YOU_BOT_RE.match(text))
+
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
 def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -507,6 +544,11 @@ class MeshBot:
         # are answered only when they @-mention the bot (None = no limit). DMs unaffected.
         mh = cfg.get("max_hops")
         self._max_hops = int(mh) if mh not in (None, "", False) else None
+        # Banter-only channels (e.g. "ch0" = Public): the bot answers "are you a
+        # bot?" there and nothing else — no commands (operator, 2026-11-22).
+        self._banter_channels = [str(c).lower() for c in cfg.get("banter_channels", [])]
+        self._banter_cooldown = float(cfg.get("banter_cooldown_sec", 600))
+        self._banter_ts: dict[tuple, float] = {}   # (adapter, channel) → last banter reply
 
         # Observer coordinates — priority: mesh_bot.lat/lon → weather_service.nws_lat/lon → state.base_lat/lon
         wx_cfg = config.get("weather_service", {})
@@ -626,7 +668,7 @@ class MeshBot:
     async def handle(self, msg: NormalizedMessage) -> None:
         if not self.enabled or not self._client:
             return
-        if msg.from_id in ("local", "NWS", "wx-service", "weather-bot", "mesh-bot"):
+        if msg.from_id in ("local", "NWS", "wx-service", "weather-bot", "mesh-bot", "outlook"):
             return
         if msg.source_adapter in ("wx-service",):
             return
@@ -666,6 +708,15 @@ class MeshBot:
             else:
                 on_channel = False
 
+            if not on_channel and any(_matches(c) for c in self._banter_channels):
+                # Banter-only channel: answer "are you a bot?" and nothing else.
+                if (_is_are_you_bot(msg.body, names)
+                        and not _is_bot_message(msg, self._ignore_senders, self._ignore_bot_names)
+                        and not (_MENTION_RE.search(msg.body or "") and not _is_mentioned(msg.body, names))):
+                    hops = msg.hop_count if msg.hop_count is not None else (msg.raw or {}).get("_hop_count")
+                    if self._max_hops is None or not isinstance(hops, int) or hops <= self._max_hops:
+                        self._banter_reply(msg)
+                return
             if not on_channel:
                 log.debug(
                     "MeshBot: channel msg ignored (source=%r not in configured channels %s)",
@@ -756,6 +807,10 @@ class MeshBot:
                 asyncio.ensure_future(self._dispatch_trivia_answer(msg, am.group(1).upper()))
                 return
 
+        if _is_are_you_bot(msg.body, names):
+            self._banter_reply(msg)
+            return
+
         if mention_required and not _is_mentioned(msg.body, names):
             # This channel requires an explicit @mention for anything to fire —
             # skip command matching entirely rather than letting an ordinary
@@ -802,12 +857,30 @@ class MeshBot:
 
         asyncio.ensure_future(self._dispatch(msg, cmd, args, mention_required))
 
+    def _banter_reply(self, msg: NormalizedMessage) -> None:
+        """Answer "are you a bot?" — once per banter_cooldown_sec per channel
+        (Public must not turn into a bot playground), per-user cooldown in DMs."""
+        now = time.monotonic()
+        if (msg.source_channel or "").lower() == "dm":
+            if now - self._user_ts.get(msg.from_id, 0) < self._user_cooldown:
+                return
+            self._user_ts[msg.from_id] = now
+        else:
+            key = (msg.source_adapter, (msg.source_channel or "").lower())
+            if now - self._banter_ts.get(key, -1e9) < self._banter_cooldown:
+                log.info("MeshBot: 'are you a bot' on %s ignored (banter cooldown)", key)
+                return
+            self._banter_ts[key] = now
+        asyncio.ensure_future(self._dispatch(msg, "areyoubot", ""))
+
     async def _dispatch(self, msg: NormalizedMessage, cmd: str, args: str,
                         mention_required: bool = False) -> None:
         from_id = (msg.from_display or msg.from_id or "?")[:20]
         log.info("MeshBot: cmd=%s from=%s args=%r adapter=%s", cmd, from_id, args[:40], msg.source_adapter)
         try:
-            if cmd == "ping":
+            if cmd == "areyoubot":
+                reply = random.choice(RAILROAD_BOT_REPLIES)
+            elif cmd == "ping":
                 reply = self._cmd_ping(msg)
             elif cmd == "weather":
                 reply = await self._cmd_weather(args)
@@ -888,8 +961,12 @@ class MeshBot:
                 reply = await self._cmd_markets()
             elif cmd == "sentiment":
                 reply = await self._cmd_sentiment()
+            elif cmd in ("sap", "ski", "trains", "doom", "garden", "hunt"):
+                from ech.core.outlook import get_service as _outlook
+                svc = _outlook(self._config, state=self._state)
+                reply = await getattr(svc, f"bot_{cmd}")(self._max_len)
             elif cmd == "help":
-                reply = self._cmd_help()
+                reply = self._cmd_help(args)
             elif cmd == "unknown":
                 reply = self._cmd_unknown()
             else:
@@ -1306,17 +1383,16 @@ class MeshBot:
         itu       = d.get("itu_zone", "?")
         return f"{cs}: {name} ({pfx}) {continent} CQ{cq} ITU{itu}"
 
-    def _cmd_help(self) -> str:
-        # Kept under ~160 chars on purpose: config.yaml's default max_reply_len is
-        # 160, and this has previously silently exceeded it, hard-truncating
-        # mid-word. Per-command usage (e.g. "fcc <callsign>") is shown by that
-        # command's own error reply when called with no args, so it's dropped
-        # here to fit everything. Alphabetical so it's easy to scan; the
-        # trivia/mud/dad/score/lb/contest/repeat commands are dropped from this
-        # terse list (not disabled — just not essential enough to spend budget
-        # on here) to leave room for the rest.
-        return ("Cmds: alerts aprs dxcc fcc fish grid help id marine markets metar moon news "
-                "nodes overhead path ping satpass ships skywarn smoke solar strip sun tide trace wx")
+    HELP_PAGE_1 = ("Cmds: alerts doom fish garden grid hunt marine markets metar moon news overhead ping sap "
+                   "satpass ski smoke solar sun tide trains wx | help 2: more")
+    HELP_PAGE_2 = ("More: anomalies aprs contest dad dxcc fcc id leaderboard localnews mud nodes path repeat "
+                   "score sentiment ships skywarn status strip trace trivia water")
+
+    def _cmd_help(self, args: str = "") -> str:
+        """Two pages, each one mesh message (<= 160 chars). 'help 2' / 'help more'
+        lists what page 1 has no room for (2026-11-22: localnews was missing)."""
+        a = (args or "").strip().lower()
+        return self.HELP_PAGE_2 if a.startswith(("2", "more", "all")) else self.HELP_PAGE_1
 
     async def _cmd_news(self, kind: str = "world") -> str:
         from ech.core.news_markets import get_service, bot_news

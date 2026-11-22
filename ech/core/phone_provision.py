@@ -142,6 +142,11 @@ def plan_settings(cfg: dict[str, str], phonebooks: list[dict], ech_hosts: set[st
     vm = str(opts.get("voicemail_code") or "*98")
     for i, _ in accts:
         want[f"voice_mail.number.{i}"] = vm
+        # Caller ID from P-Asserted-Identity / Remote-Party-ID before From, so
+        # mid-call connected-line updates show (who is talking on M17/AllStar
+        # listen calls). The default (0 = From only) never changes mid-call.
+        if opts.get("cid_source", True):
+            want[f"account.{i}.cid_source"] = "6"
 
     # Line keys opening XML Browser pages (key type 27): the ECH menu, plus the
     # AllStar and M17 panels. Each reuses its own key if the phone already has
@@ -176,6 +181,19 @@ def plan_settings(cfg: dict[str, str], phonebooks: list[dict], ech_hosts: set[st
         if "Browser" in hidden:
             want["app.hide.icon"] = "/".join(a for a in hidden if a != "Browser")
     return want, notes
+
+
+def generic_cfg(server: str, account: int, opts: dict[str, Any]) -> str:
+    """ECH's settings as a .cfg for a phone ECH can't log into (Yealink T4x/T5x
+    classic web UI, not the Android JSON API): import it by hand under
+    Settings > Configuration > Import CFG. Assumes remote phonebook slots 1-3
+    and line keys from 1 are free; adjust in the file if they aren't."""
+    fake = {f"account.{account}.sip_server.1.address": server, f"account.{account}.enable": "1",
+            "linekey.1.type": "15"}          # line key 1 stays the phone's own line
+    want, _ = plan_settings(fake, [], {server}, {**opts, "show_browser": False})
+    head = (f"## For a Yealink without the Android web API (T4x/T5x): import under\n"
+            f"## Settings > Configuration > Import CFG. ECH line = account {account}, ECH = {server}.\n")
+    return render_cfg(want).replace("\n", "\n" + head, 1)
 
 
 def render_cfg(settings: dict[str, str]) -> str:

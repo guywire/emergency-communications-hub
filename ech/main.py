@@ -425,6 +425,11 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     router._weather_bot = wx_bot
     await wx_bot.start()
 
+    # Local outlook: sap runs, ski, trains, doom-o-meter (bot + Messages page + feed notes)
+    from ech.core.outlook import get_service as _outlook_service
+    outlook = _outlook_service(config, state=state, router=router, wx_service=wx_service)
+    await outlook.start()
+
     # MeshCore → MeshMapper MQTT bridge
     from ech.core.meshcore_bridge import MeshCoreMQTTBridge
     mc_bridge = MeshCoreMQTTBridge(config)

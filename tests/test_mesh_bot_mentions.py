@@ -165,3 +165,16 @@ def test_grid_without_args_never_gives_coordinates():
     bot, _, _ = _bot(lat=39.7392, lon=-104.9903)
     r = bot._cmd_grid("")
     assert "DM79" in r and "39.7" not in r and "-104" not in r and "DM79mr" not in r
+
+
+def test_help_has_two_pages_that_fit_one_message_and_cover_every_command():
+    from ech.core.mesh_bot import _CMD_WORDS, _CMD_ALIASES
+    bot, _, _ = _bot()
+    p1, p2 = bot._cmd_help(""), bot._cmd_help("2")
+    assert bot._cmd_help("more") == p2 and "help 2" in p1
+    assert len(p1) <= 160 and len(p2) <= 160
+    listed = set(p1.replace("|", " ").split()) | set(p2.split())
+    canon = {_CMD_ALIASES.get(w.rstrip("\?"), w.rstrip("\?")) for w in _CMD_WORDS} - {"help", "weather"}
+    missing = {c for c in canon if c not in listed}
+    assert missing <= {"localnews"} or "localnews" in listed
+    assert missing == set(), missing

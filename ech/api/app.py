@@ -2246,6 +2246,84 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
 
     # ── Marine / boating buoy (map marker) ──────────────────────────────────
 
+    @app.get("/api/map/mold")
+    async def map_mold():
+        """Mold-risk grid around the base (humidity/temperature estimate)."""
+        from ech.core import map_layers
+        lat, lon = getattr(ech_state, "_base_lat", None), getattr(ech_state, "_base_lon", None)
+        if lat is None or lon is None:
+            return {"cells": [], "error": "base location not set"}
+        try:
+            return await map_layers.mold_grid(lat, lon)
+        except Exception as exc:
+            return {"cells": [], "error": f"{type(exc).__name__}"}
+
+    @app.get("/api/map/tropical")
+    async def map_tropical():
+        """NHC active storms (their JSON has no CORS header, so the server fetches it)."""
+        import httpx
+        from ech.core import identity
+        try:
+            async with httpx.AsyncClient(timeout=12, headers={"User-Agent": identity.user_agent()}) as c:
+                r = await c.get("https://www.nhc.noaa.gov/CurrentStorms.json")
+                r.raise_for_status()
+                return {"activeStorms": [{k: s.get(k) for k in ("id", "name", "classification", "intensity",
+                                                                 "pressure", "latitudeNumeric", "longitudeNumeric",
+                                                                 "movementDir", "movementSpeed", "lastUpdate")}
+                                         for s in r.json().get("activeStorms") or []]}
+        except Exception as exc:
+            return {"activeStorms": [], "error": type(exc).__name__}
+
+    @app.get("/api/map/pollen/status")
+    async def map_pollen_status():
+        key = ((_cfg_now().get("map_layers") or {}).get("google_pollen_api_key") or "")
+        return {"available": bool(key)}
+
+    @app.get("/api/map/pollen/{kind}/{z}/{x}/{y}.png")
+    async def map_pollen_tile(kind: str, z: int, x: int, y: int):
+        from ech.core import map_layers
+        key = ((_cfg_now().get("map_layers") or {}).get("google_pollen_api_key") or "")
+        if not key or kind not in map_layers.POLLEN_KINDS or not (0 <= z <= 16):
+            raise HTTPException(status_code=404, detail="Not found")
+        blob = await map_layers.pollen_tile(key, kind, z, x, y)
+        if not blob:
+            raise HTTPException(status_code=404, detail="Not found")
+        return Response(content=blob, media_type="image/png", headers={"Cache-Control": "max-age=3600"})
+
+    @app.get("/api/outlook")
+    async def get_outlook():
+        """Sap runs, ski areas, nearby trains and the doom-o-meter (Messages page Outlook tab)."""
+        from ech.core.outlook import get_service as _outlook
+        from ech.core.news_markets import get_service as _news
+
+        async def safe(coro, default):
+            try:
+                return await coro
+            except Exception as exc:
+                log.info("outlook panel: %s", exc)
+                return default
+        nm = _news(_cfg_now())
+        out, panel, sent, local, world = await asyncio.gather(
+            _outlook({}, state=ech_state, wx_service=wx_service).summary(),
+            safe(nm.panel_quotes(), []), safe(nm.sentiment(), {}),
+            safe(nm.headlines("local", 10), []), safe(nm.headlines("world", 10), []))
+        out["markets"] = {"groups": panel, "sentiment": sent}
+        # Conditions: the bot's own fishing/tide/marine/AQI/sun/moon/space-weather lines
+        bot = getattr(router, "_weather_bot", None)
+        cond = {}
+        if bot is not None and getattr(bot, "_client", None) is not None:
+            calls = {"fish": bot._cmd_fish, "tide": bot._cmd_tide, "marine": bot._cmd_marine,
+                     "smoke": bot._cmd_smoke, "sun": bot._cmd_sun, "solar": bot._cmd_solar}
+            res = await asyncio.gather(*(safe(asyncio.wait_for(f(), 20), "") for f in calls.values()))
+            cond = {k: v for k, v in zip(calls, res) if v and not str(v).lower().startswith(k + ":")}
+            try:
+                cond["moon"] = bot._cmd_moon()
+            except Exception:
+                pass
+        out["conditions"] = cond
+        out["news"] = {"local": local, "world": world}
+        return out
+
     @app.get("/api/marine")
     async def get_marine():
         wx_bot = getattr(router, "_weather_bot", None)
@@ -5174,6 +5252,17 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         data = await _json_or_empty(request)
         return {"results": await (await _phone_manager_ready()).check(data.get("host") or None)}
 
+    @app.get("/api/phones/generic.cfg")
+    async def phones_generic_cfg(server: str = "", account: int = 1):
+        """ECH phone settings as a .cfg to import by hand (phones ECH can't log into, e.g. a T45)."""
+        from ech.core.phone_provision import generic_cfg
+        m = await _phone_manager_ready()
+        server = server or next(iter(sorted(m.ech_hosts)), "")
+        if not re.fullmatch(r"[0-9A-Za-z.\-:]{1,64}", server or "") or not 1 <= account <= 16:
+            raise HTTPException(status_code=400, detail="bad server or account")
+        return PlainTextResponse(generic_cfg(server, account, m.opts),
+                                 headers={"Content-Disposition": 'attachment; filename="ech-phone.cfg"'})
+
     @app.post("/api/phones/push")
     async def phones_push(request: Request):
         data = await _json_or_empty(request)
@@ -5357,6 +5446,34 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not 0 <= idx < len(items):
             return _xml(yx.text_screen("News", "That story has rolled off the list. Go back and reopen the headlines."))
         return _xml(yx.news_item(items[idx]))
+
+    @app.get("/yealink/{key}/outlook.xml")
+    async def yealink_outlook(request: Request, key: str):
+        from ech.core import yealink_xml as yx
+        base = await _xml_guard(request, key)
+        return _xml(yx.outlook_menu(base))
+
+    @app.get("/yealink/{key}/outlook/{card}.xml")
+    async def yealink_outlook_card(request: Request, key: str, card: str):
+        from ech.core import yealink_xml as yx
+        from ech.core.outlook import get_service as _outlook
+        await _xml_guard(request, key)
+        if card not in dict(yx.OUTLOOK_PAGES):
+            raise HTTPException(status_code=404, detail="Not found")
+        svc = _outlook({}, state=ech_state, wx_service=wx_service)
+        try:
+            if card == "markets":
+                from ech.core.news_markets import get_service as _news
+                nm = _news(_cfg_now())
+                groups, sent = await asyncio.gather(nm.panel_quotes(), nm.sentiment())
+                data = {"groups": groups, "sentiment": sent}
+            else:
+                fn = {"hunt": svc.hunt, "sap": svc.sap, "garden": svc.garden_outlook, "ski": svc.ski,
+                      "trains": svc.trains, "doom": svc.doom}[card]
+                data = await asyncio.wait_for(fn(), 40)
+        except Exception as exc:
+            data = {"error": type(exc).__name__}
+        return _xml(yx.outlook_screen(card, data))
 
     @app.get("/yealink/{key}/markets.xml")
     async def yealink_markets(request: Request, key: str):

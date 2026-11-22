@@ -28,6 +28,17 @@ DEFAULT_FEEDS = {
     "world": ["https://feeds.bbci.co.uk/news/world/rss.xml", "https://feeds.npr.org/1004/rss.xml"],
 }
 DEFAULT_SYMBOLS = [("NQ=F", "Nasdaq-100 futures (NQ)"), ("ES=F", "S&P 500 futures (ES)")]
+# The web Outlook panel's wider board (config markets.panel: [[group, [[sym, name], ...]], ...]).
+# Heating oil, lumber and the Canadian dollar are there for a Maine station.
+DEFAULT_PANEL = [
+    ("Index futures", [("ES=F", "S&P 500"), ("NQ=F", "Nasdaq-100"), ("YM=F", "Dow"), ("RTY=F", "Russell 2000")]),
+    ("Energy", [("CL=F", "Crude oil"), ("HO=F", "Heating oil"), ("RB=F", "Gasoline"), ("NG=F", "Natural gas")]),
+    ("Metals", [("GC=F", "Gold"), ("SI=F", "Silver"), ("HG=F", "Copper")]),
+    ("Rates & currency", [("^TNX", "10-yr Treasury yield"), ("DX-Y.NYB", "US dollar index"),
+                          ("EURUSD=X", "EUR/USD"), ("CADUSD=X", "CAD/USD")]),
+    ("Crypto", [("BTC-USD", "Bitcoin"), ("ETH-USD", "Ethereum")]),
+    ("Commodities", [("LBR=F", "Lumber"), ("ZC=F", "Corn")]),
+]
 NEWS_TTL, QUOTE_TTL = 900, 180
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=1d&interval=15m"
 _UA = {"User-Agent": "Mozilla/5.0 (ECH news)"}
@@ -129,6 +140,8 @@ class NewsMarkets:
         mk = (cfg or {}).get("markets") or {}
         self.symbols = [(str(s[0]), str(s[1])) for s in (mk.get("symbols") or DEFAULT_SYMBOLS) if s]
         self.kalshi_series = [(str(k[0]), str(k[1])) for k in (mk.get("kalshi") or DEFAULT_KALSHI) if k]
+        self.panel = [(str(g[0]), [(str(s[0]), str(s[1])) for s in g[1]]) for g in (mk.get("panel") or DEFAULT_PANEL)]
+        self._panel: tuple[float, list] = (0.0, [])
 
     async def sentiment(self) -> dict:
         return await fetch_sentiment(self)
@@ -171,6 +184,33 @@ class NewsMarkets:
         if out or not self._quotes[1]:
             self._quotes = (time.time(), out)
         return out or self._quotes[1]
+
+
+    async def panel_quotes(self) -> list[dict]:
+        """[{group, quotes: [...]}] for the web Outlook panel, fetched in parallel."""
+        hit = getattr(self, "_panel", (0.0, []))
+        if hit[1] and time.time() - hit[0] < QUOTE_TTL:
+            return hit[1]
+        import httpx
+        from urllib.parse import quote as _q
+        sem = asyncio.Semaphore(6)
+        async with httpx.AsyncClient(timeout=12, headers=_UA) as c:
+            async def one(sym, name):
+                async with sem:
+                    try:
+                        r = await c.get(CHART_URL.format(sym=_q(sym, safe="=-.")))
+                        return parse_chart(r.json(), name) if r.status_code == 200 else None
+                    except Exception as e:
+                        log.info("quote %s: %s", sym, e.__class__.__name__)
+                        return None
+            groups = []
+            for g, syms in self.panel:
+                qs = await asyncio.gather(*(one(s, n) for s, n in syms))
+                groups.append({"group": g, "quotes": [q for q in qs if q]})
+        if any(g["quotes"] for g in groups) or not hit[1]:
+            self._panel = (time.time(), groups)
+            return groups
+        return hit[1]
 
 
 # ── Sentiment: VIX + Kalshi "closes up today" odds ─────────────────────────

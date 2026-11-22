@@ -138,6 +138,10 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row" id="tides-btn" onclick="toggleTides()" title="Nearest NOAA tide stations (rising/falling, next high/low) and water temperature at the nearest sensor stations">🌊 Tides</button>
     <button class="ctrl-btn layer-row" id="river-btn" onclick="toggleRivers()" title="NOAA river and tide gauges within 80 km: stage, flow and flood category now and forecast (green no flooding, yellow action, orange minor, red moderate, purple major)">💧 River gauges</button>
     <button class="ctrl-btn layer-row" id="radar-btn" onclick="toggleImagery('radar')" title="NEXRAD weather radar (Iowa Environmental Mesonet tiles, loaded by your browser; refreshes every 5 min)">🌧 Radar</button>
+    <button class="ctrl-btn layer-row" id="storm-btn" onclick="toggleStormTracking()" title="Storm tracking: radar storm cells with their 1-hour projected path (IEM / NWS NEXRAD, red = severe signatures), today's SPC tornado/wind/hail reports, and NHC tropical cyclone cones and tracks. Refreshes every 5 min.">🌀 Storm tracking</button>
+    <button class="ctrl-btn layer-row" id="snow-btn" onclick="toggleSnowDepth()" title="Snow depth, NOAA NOHRSC daily national snow analysis">❄ Snow depth</button>
+    <button class="ctrl-btn layer-row" id="mold-btn" onclick="toggleMoldRisk()" title="Mold risk estimate around the base: share of hours with humidity 80%+ at 50-90F, past 2 days and next 2 (Open-Meteo)">🍄 Mold risk</button>
+    <button class="ctrl-btn layer-row" id="pollen-btn" onclick="togglePollen()" title="Pollen index heatmap (tree / grass / weed). Needs a Google Pollen API key in config: there is no free US pollen map.">🌼 Pollen</button>
     <button class="ctrl-btn layer-row" id="sat-btn" onclick="toggleImagery('sat')" title="GOES-East infrared satellite, day and night. From your own GOES receiver when one is configured and its latest image is recent (goes_receiver in config.yaml), otherwise Iowa Environmental Mesonet tiles loaded by your browser. Refreshes every 5 min.">🛰 Satellite IR</button>
   </div>
 </div>
@@ -3022,6 +3026,159 @@ async function toggleImagery(kind) {
   btn.style.color = on ? 'var(--green)' : '';
   btn.style.borderColor = on ? 'var(--green)' : '';
   btn.classList.toggle('on', on);
+}
+
+
+// ── Snow depth, storm tracking, mold risk, pollen (2026-11-22) ──────────
+// ArcGIS MapServer "export" as 256 px tiles (NOAA mapservices speak ArcGIS REST).
+const ArcTiles = L.TileLayer.extend({
+  getTileUrl(c) {
+    const s = this.getTileSize(), nw = c.scaleBy(s), se = nw.add(s);
+    const z = c.z, crs = this._map.options.crs;
+    const a = crs.project(this._map.unproject(nw, z)), b = crs.project(this._map.unproject(se, z));
+    const bbox = [a.x, b.y, b.x, a.y].join(',');
+    return `${this._url}/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=${s.x},${s.y}` +
+      `&layers=show:${this.options.arcLayers}&format=png32&transparent=true&f=image&_=${this.options.stamp || ''}`;
+  },
+});
+const _envLayers = {};
+function _envBtn(id, on) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.style.color = on ? 'var(--green)' : '';
+  btn.style.borderColor = on ? 'var(--green)' : '';
+  btn.classList.toggle('on', on);
+}
+function _envOff(k) {
+  const e = _envLayers[k];
+  if (!e) return false;
+  (e.layers || []).forEach(l => map.removeLayer(l));
+  clearInterval(e.timer);
+  delete _envLayers[k];
+  return true;
+}
+
+function toggleSnowDepth() {
+  if (_envOff('snow')) return _envBtn('snow-btn', false);
+  const layer = new ArcTiles('https://mapservices.weather.noaa.gov/raster/rest/services/snow/NOHRSC_Snow_Analysis/MapServer',
+    {arcLayers: '3', opacity: 0.6, zIndex: 280, stamp: new Date().toISOString().slice(0, 13),
+     attribution: 'Snow depth: NOAA NOHRSC (daily analysis)'}).addTo(map);
+  _envLayers.snow = {layers: [layer]};
+  _envBtn('snow-btn', true);
+  toast('Snow depth: NOAA NOHRSC daily analysis (blue = deeper)');
+}
+
+async function toggleStormTracking() {
+  if (_envOff('storms')) return _envBtn('storm-btn', false);
+  _envLayers.storms = {layers: [], timer: null};
+  _envBtn('storm-btn', true);
+  const draw = async () => {
+    const e = _envLayers.storms;
+    if (!e) return;
+    e.layers.forEach(l => map.removeLayer(l));
+    e.layers = [];
+    const group = L.layerGroup().addTo(map);
+    e.layers.push(group);
+    // 1. Radar storm cells with motion (IEM NEXRAD storm attributes): arrow = 1 h projected path
+    try {
+      const d = await fetch('https://mesonet.agron.iastate.edu/geojson/nexrad_attr.geojson').then(r => r.json());
+      const view = map.getBounds().pad(0.5);
+      let n = 0;
+      (d.features || []).forEach(f => {
+        const [lon, lat] = f.geometry.coordinates, p = f.properties;
+        if (!view.contains([lat, lon])) return;
+        n++;
+        const severe = (p.tvs && p.tvs !== 'NONE') || (p.meso && p.meso !== 'NONE') || p.posh >= 50 || p.max_dbz >= 60;
+        const color = severe ? '#f85149' : p.max_dbz >= 50 ? '#d29922' : '#79c0ff';
+        L.circleMarker([lat, lon], {radius: severe ? 7 : 5, color, weight: 2, fillOpacity: 0.5}).bindPopup(
+          `<div class="node-popup"><div class="node-name">Storm cell ${esc(p.storm_id)} (${esc(p.nexrad)})</div>
+           <div class="node-stat">Max ${p.max_dbz} dBZ, top ${p.top} kft, VIL ${p.vil}</div>
+           <div class="node-stat">Moving ${Math.round(p.sknt * 1.151)} mph toward ${Math.round((p.drct + 180) % 360)}°</div>
+           <div class="node-stat">Hail: ${p.poh}% chance, severe ${p.posh}%${p.max_size ? `, up to ${p.max_size}"` : ''}</div>
+           ${p.tvs !== 'NONE' ? `<div class="node-stat" style="color:#f85149">Tornado vortex signature: ${esc(p.tvs)}</div>` : ''}
+           ${p.meso !== 'NONE' ? `<div class="node-stat">Mesocyclone: ${esc(p.meso)}</div>` : ''}
+           <div class="node-stat" style="color:var(--muted)">${esc(new Date(p.valid).toLocaleTimeString())} · IEM / NWS NEXRAD</div></div>`).addTo(group);
+        if (p.sknt > 0) {   // SCIT motion is "from"; project 60 min ahead
+          const km = p.sknt * 1.852, brg = ((p.drct + 180) % 360) * Math.PI / 180;
+          const dlat = km * Math.cos(brg) / 111, dlon = km * Math.sin(brg) / (111 * Math.cos(lat * Math.PI / 180));
+          L.polyline([[lat, lon], [lat + dlat, lon + dlon]], {color, weight: 2, dashArray: '4 4', opacity: 0.9}).addTo(group);
+          L.circleMarker([lat + dlat, lon + dlon], {radius: 2, color, fillOpacity: 1}).addTo(group);
+        }
+      });
+      e.cells = n;
+    } catch (err) { e.cells = null; }
+    // 2. SPC preliminary storm reports, today (tornado / wind / hail)
+    try {
+      const csv = await fetch('https://www.spc.noaa.gov/climo/reports/today.csv').then(r => r.text());
+      let kind = '';
+      csv.split('\n').forEach(line => {
+        if (/^Time,F_Scale/.test(line)) { kind = 'Tornado'; return; }
+        if (/^Time,Speed/.test(line)) { kind = 'Wind'; return; }
+        if (/^Time,Size/.test(line)) { kind = 'Hail'; return; }
+        const c = line.match(/^(\d{4}),([^,]*),(.*),([^,]*),([A-Z]{2}),(-?[\d.]+),(-?[\d.]+),(.*)$/);
+        if (!c) return;
+        const col = kind === 'Tornado' ? '#f85149' : kind === 'Hail' ? '#3fb950' : '#58a6ff';
+        L.marker([+c[6], +c[7]], {icon: L.divIcon({className: '', iconSize: [16, 16], iconAnchor: [8, 8],
+          html: `<div style="font-size:14px;color:${col};text-shadow:0 0 3px #000">${kind === 'Tornado' ? '🌪' : kind === 'Hail' ? '🧊' : '💨'}</div>`})})
+          .bindPopup(`<div class="node-popup"><div class="node-name">${kind} report ${c[1].slice(0, 2)}:${c[1].slice(2)}Z</div>
+            <div class="node-stat">${esc(c[3])}, ${esc(c[4])} Co., ${esc(c[5])}${c[2] && c[2] !== 'UNK' ? ` · ${kind === 'Hail' ? (c[2] / 100).toFixed(2) + '"' : kind === 'Wind' ? c[2] + ' mph' : esc(c[2])}` : ''}</div>
+            <div class="node-stat" style="color:var(--muted)">${esc(c[8].slice(0, 200))}</div>
+            <div class="node-stat" style="color:var(--muted)">SPC preliminary storm reports</div></div>`).addTo(group);
+      });
+    } catch (err) {}
+    // 3. NHC tropical cyclones: forecast cones, tracks, past tracks, outlook areas
+    try {
+      const base = 'https://mapservices.weather.noaa.gov/tropical/rest/services/tropical/NHC_tropical_weather/MapServer';
+      const meta = await fetch(base + '?f=json').then(r => r.json());
+      const ids = (meta.layers || []).filter(l => /(Forecast Cone|Forecast Track|Past Track|Forecast Points|Seven-Day: Potential Development Region|Seven-Day: Current Location)$/.test(l.name)).map(l => l.id);
+      const st = await fetch(`${window.ECH_BASE_PATH || ''}/api/map/tropical`).then(r => r.json()).catch(() => ({}));
+      e.tropical = (st.activeStorms || []).map(s => `${s.classification === 'HU' ? 'Hurricane' : 'Storm'} ${s.name}`);
+      if (ids.length) e.layers.push(new ArcTiles(base, {arcLayers: ids.join(','), opacity: 0.8, zIndex: 320,
+        stamp: Date.now(), attribution: 'Tropical: NOAA NHC'}).addTo(map));
+    } catch (err) {}
+    const parts = [e.cells != null ? `${e.cells} radar storm cell(s) in view` : 'storm cells unavailable'];
+    parts.push(e.tropical && e.tropical.length ? 'tropical: ' + e.tropical.join(', ') : 'no active tropical storms');
+    if (!e.toasted) { toast('Storm tracking: ' + parts.join('; ')); e.toasted = true; }
+  };
+  await draw();
+  if (_envLayers.storms) _envLayers.storms.timer = setInterval(draw, 5 * 60000);
+}
+
+async function toggleMoldRisk() {
+  if (_envOff('mold')) return _envBtn('mold-btn', false);
+  _envLayers.mold = {layers: []};
+  _envBtn('mold-btn', true);
+  let d;
+  try { d = await fetch('/api/map/mold').then(r => r.json()); } catch (err) { d = {cells: [], error: 'unavailable'}; }
+  if (!_envLayers.mold) return;
+  if (d.error) toast('Mold risk: ' + d.error, 'err');
+  const colors = {low: '#3fb950', moderate: '#d29922', high: '#f0883e', 'very high': '#f85149'};
+  const group = L.layerGroup().addTo(map);
+  (d.cells || []).forEach(c => {
+    const b = [[c.lat - d.dlat / 2, c.lon - d.dlon / 2], [c.lat + d.dlat / 2, c.lon + d.dlon / 2]];
+    L.rectangle(b, {color: colors[c.level] || '#888', weight: 0, fillOpacity: 0.28})
+      .bindPopup(`<div class="node-popup"><div class="node-name">Mold risk: ${esc(c.level)}</div>
+        <div class="node-stat">${c.index}% of hours damp and mild enough for mold</div>
+        <div class="node-stat" style="color:var(--muted)">${esc(d.note || '')} (Open-Meteo)</div></div>`).addTo(group);
+  });
+  _envLayers.mold.layers.push(group);
+}
+
+async function togglePollen() {
+  if (_envOff('pollen')) return _envBtn('pollen-btn', false);
+  let st = {};
+  try { st = await fetch('/api/map/pollen/status').then(r => r.json()); } catch (err) {}
+  if (!st.available) {
+    toast('Pollen needs a Google Pollen API key (config map_layers.google_pollen_api_key): there is no free US pollen map', 'err');
+    return;
+  }
+  const kind = (prompt('Pollen type: tree, grass or weed', 'tree') || 'tree').toLowerCase();
+  const k = ['tree', 'grass', 'weed'].includes(kind) ? kind : 'tree';
+  const layer = L.tileLayer(`${window.ECH_BASE_PATH || ''}/api/map/pollen/${k}/{z}/{x}/{y}.png`,
+    {opacity: 0.55, zIndex: 285, maxNativeZoom: 16, attribution: 'Pollen: Google Pollen API'}).addTo(map);
+  _envLayers.pollen = {layers: [layer]};
+  _envBtn('pollen-btn', true);
+  toast(`Pollen: ${k} index`);
 }
 
 loadWaterBodies();

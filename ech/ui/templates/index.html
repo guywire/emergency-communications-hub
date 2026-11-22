@@ -71,7 +71,7 @@ body.sim-mode #app { height: calc(100vh - 26px); margin-top: 26px; }
 #app {
   display: grid;
   grid-template-rows: var(--header-h) 26px 1fr;
-  grid-template-columns: var(--sidebar-w) 1fr 280px;
+  grid-template-columns: var(--sidebar-w) 1fr var(--right-w, 380px);
   height: 100vh;
 }
 
@@ -759,15 +759,22 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
+/* drag handle on the panel's left edge (desktop) */
+@media (max-width: 900px) { .rp-grip { display: none; } }
+.rp-grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 5; }
+.rp-grip:hover, body.rp-resizing .rp-grip { background: color-mix(in srgb, var(--blue) 35%, transparent); }
+body.rp-resizing { user-select: none; cursor: col-resize; }
 .panel-tabs {
   display: flex;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 .panel-tab {
-  flex: 1;
-  padding: 8px 0;
+  flex: 1 0 auto;
+  padding: 8px 7px;
   text-align: center;
   font-family: var(--mono);
   font-size: 11px;
@@ -1023,7 +1030,7 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
   #right-panel {
     position: fixed;
     top: 0; right: 0; bottom: 0;
-    width: min(320px, 92vw);
+    width: min(420px, 92vw);
     z-index: 200;
     transform: translateX(100%);
     transition: transform 0.22s ease;
@@ -1066,6 +1073,45 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
   #broadcast-btn { font-size: 10px; padding: 0 8px; }
   #send-btn { flex-shrink: 0; }
 }
+/* Outlook tab */
+#panel-outlook { padding: 8px; }
+.ol-card { border: 1px solid var(--border); border-radius: 4px; padding: 8px; margin-bottom: 8px; background: var(--bg2, var(--bg)); }
+.ol-h { font-weight: 600; font-size: 12px; margin-bottom: 6px; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.ol-row { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; padding: 1px 0; }
+.ol-sub { font-size: 10px; color: var(--muted); font-weight: normal; }
+.ol-note { font-size: 10px; color: var(--dim, var(--muted)); margin-top: 4px; }
+.ol-note a { color: var(--blue); }
+.ol-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 4px; }
+.ol-day { font-family: var(--mono); font-size: 9px; text-align: center; padding: 3px 0; border-radius: 3px; background: var(--bg3, var(--bg)); color: var(--muted); }
+.ol-day.ol-good { background: #1f6f3f; color: #fff; }
+.ol-day.ol-fair { background: #7a5a12; color: #fff; }
+.ol-tag { font-size: 10px; padding: 0 5px; border-radius: 3px; background: var(--bg3, var(--bg)); white-space: nowrap; }
+.ol-ski-powder { background: #1f5fae; color: #fff; }
+.ol-ski-fresh { background: #2f7fbf; color: #fff; }
+.ol-ski-thaw { background: #7a5a12; color: #fff; }
+.ol-ski-snowmaking { background: #3d5a6e; color: #fff; }
+.ol-g { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 6px 0 2px; border-bottom: 1px solid var(--border); }
+.ol-q { font-family: var(--mono); }
+.ol-qv { white-space: nowrap; }
+.ol-up { color: #3fb950; }
+.ol-down { color: #f85149; }
+.ol-news { font-size: 11px; padding: 3px 0; border-bottom: 1px dotted var(--border); }
+.ol-news:last-child { border-bottom: 0; }
+.ol-news a { color: var(--text); text-decoration: none; }
+.ol-news a:hover { color: var(--blue); text-decoration: underline; }
+.ol-move { margin-left: auto; display: inline-flex; gap: 2px; }
+.ol-move button { font-size: 9px; line-height: 1; padding: 2px 5px; background: var(--bg3, var(--bg)); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 3px; cursor: pointer; }
+.ol-move button:hover:not([disabled]) { color: var(--text); }
+.ol-move button[disabled] { opacity: .35; cursor: default; }
+.ol-day.ol-deer-excellent { background: #1f6f3f; color: #fff; }
+.ol-day.ol-deer-good { background: #2f7f5f; color: #fff; }
+.ol-day.ol-deer-fair { background: #7a5a12; color: #fff; }
+.ol-cond { font-size: 11px; padding: 3px 0; border-bottom: 1px dotted var(--border); }
+.ol-cond:last-child { border-bottom: 0; }
+.ol-g2 { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.ol-meter { height: 8px; border-radius: 4px; background: var(--bg3, var(--bg)); overflow: hidden; margin-bottom: 4px; }
+.ol-meter > div { height: 100%; background: linear-gradient(90deg, #3fb950, #d29922, #f85149); }
 </style>
 </head>
 <body>
@@ -1304,6 +1350,9 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
       <div class="panel-tab" onclick="switchTab('health', this)">Adapters</div>
       <div class="panel-tab" onclick="switchTab('calls', this)">Calls</div>
       <div class="panel-tab" onclick="switchTab('winlink', this)">Winlink <span class="ch-badge" id="winlink-badge" style="margin-left:2px"></span></div>
+      <div class="panel-tab" onclick="switchTab('outlook', this)" title="Conditions, hunting, maple sap, garden, skiing, trains, doom-o-meter">Outlook</div>
+      <div class="panel-tab" onclick="switchTab('news', this)" title="Local and world headlines">News</div>
+      <div class="panel-tab" onclick="switchTab('markets', this)" title="Futures, energy, metals, rates, crypto, sentiment">Markets</div>
     </div>
     <div style="padding:6px 8px 0;display:flex;gap:6px;align-items:center">
       <input id="node-search" type="search" placeholder="Filter nodes…" oninput="filterNodes(this.value)"
@@ -1316,6 +1365,9 @@ select.wl-field option { background: var(--bg2); color: var(--text); }
     <div class="panel-content" id="panel-health" style="display:none"></div>
     <div class="panel-content" id="panel-calls" style="display:none"></div>
     <div class="panel-content" id="panel-winlink" style="display:none"></div>
+    <div class="panel-content" id="panel-outlook" style="display:none"></div>
+    <div class="panel-content" id="panel-news" style="display:none"></div>
+    <div class="panel-content" id="panel-markets" style="display:none"></div>
   </aside>
 </div>
 
@@ -3036,9 +3088,263 @@ function switchTab(tab, el) {
   document.getElementById('panel-health').style.display   = tab === 'health'   ? '' : 'none';
   document.getElementById('panel-calls').style.display    = tab === 'calls'    ? '' : 'none';
   document.getElementById('panel-winlink').style.display  = tab === 'winlink'  ? '' : 'none';
+  ['outlook', 'news', 'markets'].forEach(t =>
+    document.getElementById('panel-' + t).style.display = tab === t ? '' : 'none');
+  // the node filter bar only belongs to the Nodes tab
+  const nf = document.getElementById('node-search');
+  if (nf && nf.parentElement) nf.parentElement.style.display = tab === 'nodes' ? 'flex' : 'none';
   if (tab === 'calls') loadCallLog();
   if (tab === 'winlink') loadWinlinkPanel();
+  if (['outlook', 'news', 'markets'].includes(tab)) loadOutlook(false, false, tab);
 }
+
+// ── Outlook tab: maple sap, skiing, trains, doom-o-meter, markets, news (/api/outlook) ──
+function _olNum(v, digits) {
+  if (v == null) return '';
+  const d = digits != null ? digits : (Math.abs(v) >= 1000 ? 0 : Math.abs(v) >= 10 ? 2 : 4);
+  return Number(v).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+}
+function _olMarkets(m) {
+  const groups = (m.groups || []).filter(g => g.quotes && g.quotes.length);
+  const s = m.sentiment || {};
+  if (!groups.length && !s.vix) return '<div class="ol-card"><div class="ol-h">Markets</div><div class="ol-note">Quotes unavailable right now.</div></div>';
+  const row = q => {
+    const pct = q.pct;
+    const cls = pct == null ? '' : pct >= 0 ? 'ol-up' : 'ol-down';
+    const sign = pct != null && pct >= 0 ? '+' : '';
+    const pctTxt = pct == null ? '' : `${sign}${pct.toFixed(2)}%`;
+    const rng = q.low && q.high ? `Day range ${_olNum(q.low)} – ${_olNum(q.high)}` : '';
+    return `<div class="ol-row ol-q" title="${escHtml(q.symbol || '')} ${escHtml(rng)}"><span>${escHtml(q.name)}</span>
+      <span class="ol-qv">${_olNum(q.price)} <span class="${cls}">${pctTxt}</span></span></div>`;
+  };
+  const vix = s.vix ? `<div class="ol-row ol-q"><span>VIX (fear gauge)</span><span class="ol-qv">${s.vix.price.toFixed(1)} <span class="ol-sub">${escHtml(vixLabel(s.vix.price))}</span></span></div>` : '';
+  const kal = (s.kalshi || []).map(k => `<div class="ol-row ol-q"><span>${escHtml(k.name)} closes up today</span><span class="ol-qv">${Math.round(k.prob * 100)}% <span class="ol-sub">Kalshi</span></span></div>`).join('');
+  return `<div class="ol-card"><div class="ol-h">Markets <span class="ol-sub">delayed quotes</span></div>
+    ${groups.map(g => `<div class="ol-g">${escHtml(g.group)}</div>${g.quotes.map(row).join('')}`).join('')}
+    ${vix || kal ? `<div class="ol-g">Sentiment</div>${vix}${kal}` : ''}</div>`;
+}
+function vixLabel(v) { return v < 15 ? 'calm' : v < 20 ? 'normal' : v < 30 ? 'elevated' : 'high fear'; }
+function _olAgo(ts) {
+  if (!ts) return '';
+  const m = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
+  return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+}
+function _olNews(title, items) {
+  items = items || [];
+  const safeUrl = u => /^https?:\/\//i.test(u || '') ? u : '';
+  return `<div class="ol-card"><div class="ol-h">${escHtml(title)}</div>` +
+    (items.length ? items.map(it => {
+      const url = safeUrl(it.link);
+      const head = url ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${escHtml(it.title)}</a>` : escHtml(it.title);
+      return `<div class="ol-news">${head}<div class="ol-sub">${escHtml(it.source || '')}${it.published ? ' · ' + _olAgo(it.published) : ''}</div></div>`;
+    }).join('') : '<div class="ol-note">No headlines right now.</div>') + '</div>';
+}
+let _outlookAt = 0;
+// Which cards each right-panel tab shows (one /api/outlook fetch feeds all three).
+const _OL_TABS = {
+  outlook: ['conditions', 'hunt', 'sap', 'garden', 'ski', 'trains', 'doom'],
+  news: ['local', 'world'],
+  markets: ['markets'],
+};
+let _olLast = null;
+let _olFetching = null;
+async function loadOutlook(force, reuse, tab) {
+  tab = tab || (_OL_TABS[state.activeTab] ? state.activeTab : 'outlook');
+  const el = document.getElementById('panel-' + tab);
+  if (!el) return;
+  const fresh = Date.now() - _outlookAt < 10 * 60 * 1000;
+  if (!force && fresh && el.dataset.loaded) return;
+  if (!el.dataset.loaded) el.innerHTML = '<div class="ol-note">Loading…</div>';
+  let d;
+  if ((reuse || (!force && fresh)) && _olLast) {
+    d = _olLast;
+  } else {
+    try {
+      _olFetching = _olFetching || fetch('/api/outlook').then(r => r.json());
+      d = await _olFetching;
+    } catch (e) {
+      el.innerHTML = '<div class="ol-note">Unavailable right now.</div>';
+      return;
+    } finally {
+      _olFetching = null;
+    }
+    _outlookAt = Date.now();
+    _olLast = d;
+    // the other tabs re-render from this data next time they open
+    Object.keys(_OL_TABS).forEach(t => { if (t !== tab) { const o = document.getElementById('panel-' + t); if (o) delete o.dataset.loaded; } });
+  }
+  el.dataset.loaded = '1';
+  const cards = _olCards(d);
+  const hidden = _olHidden();
+  const all = _OL_TABS[tab].filter(k => cards[k]);
+  const keys = all.filter(k => !hidden.includes(k));
+  const nHidden = all.length - keys.length;
+  const order = _olOrder(tab, keys);
+  const help = {outlook: 'bot: hunt, sap, garden, ski, trains, doom, fish, tide', news: 'bot: news, localnews', markets: 'bot: markets, sentiment'}[tab];
+  el.innerHTML = order.map(k => `<section class="ol-item" data-k="${k}">${cards[k]}</section>`).join('') +
+    `<div class="ol-note" style="text-align:right"><a href="#" onclick="loadOutlook(true, false, '${tab}');return false">Refresh</a>` +
+    (order.length > 1 ? ` · <a href="#" onclick="_olResetOrder('${tab}');return false">Reset order</a>` : '') +
+    (nHidden ? ` · <a href="#" onclick="_olShowAll('${tab}');return false">Show ${nHidden} hidden</a>` : '') + ` · ${help}</div>`;
+  if (!order.length) el.insertAdjacentHTML('afterbegin', '<div class="ol-note">All cards on this tab are hidden.</div>');
+  el.querySelectorAll('.ol-item').forEach((sec, i) => {
+    const h = sec.querySelector('.ol-h');
+    if (!h) return;
+    const k = sec.dataset.k;
+    const moves = order.length > 1 ? `
+      <button title="Move up" ${i === 0 ? 'disabled' : ''} onclick="_olMove('${tab}', '${k}', -1)">&#9650;</button>
+      <button title="Move down" ${i === order.length - 1 ? 'disabled' : ''} onclick="_olMove('${tab}', '${k}', 1)">&#9660;</button>` : '';
+    h.insertAdjacentHTML('beforeend', `<span class="ol-move">${moves}
+      <button title="Hide this card (Show hidden at the bottom brings it back)" onclick="_olHide('${tab}', '${k}')">&#10005;</button></span>`);
+  });
+}
+
+function _olCards(d) {
+  const err = x => x && x.error ? `<div class="ol-note">${escHtml(x.error)}</div>` : '';
+  const fd = s => s ? new Date(s.length <= 10 ? s + 'T12:00:00' : s).toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) : '?';
+  const ft = s => s ? new Date(s).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'}) : '?';
+  const sap = d.sap || {};
+  const sapDays = (sap.days || []).slice(0, 7).map(x =>
+    `<span class="ol-day ol-${x.rating}" title="${escHtml(x.date)}: low ${x.lo_f}F, high ${x.hi_f}F">${escHtml(x.dow)}<br>${x.lo_f}/${x.hi_f}</span>`).join('');
+  const ski = Array.isArray(d.ski) ? d.ski.map(a => `<div class="ol-row"><span>${escHtml(a.name)}</span>
+      <span class="ol-tag ol-ski-${escHtml((a.rating || '').split(' ')[0])}">${escHtml(a.rating || '')}</span></div>
+      <div class="ol-sub">${escHtml(a.why || '')}${a.snow_7d_in ? ` · ${a.snow_7d_in}" in 7 days` : ''}</div>`).join('') : err(d.ski);
+  const trains = Array.isArray(d.trains) ? d.trains.map(s => `<div class="ol-row"><b>${escHtml(s.name.replace(' Amtrak Station', ''))}</b>
+      <span class="ol-sub">${s.distance_km != null ? Math.round(s.distance_km * 0.621) + ' mi' : ''}</span></div>` +
+      (s.next || []).map(x => `<div class="ol-row ol-sub"><span>${escHtml(x.label)} #${escHtml(x.train)}</span>
+      <span>${x.terminates ? 'arrives from ' + escHtml(x.origin.replace(/ (Amtrak )?Station$/, '')) : 'to ' + escHtml(x.headsign)}</span></div>`).join('')
+    ).join('') || '<div class="ol-note">No rail stations near the base location.</div>' : err(d.trains);
+  const dm = d.doom || {};
+  const doom = dm.error ? err(dm) : `
+      <div class="ol-meter"><div style="width:${dm.score || 0}%"></div></div>
+      <div class="ol-row"><b>${dm.score}/100</b><span class="ol-sub">${escHtml(dm.label || '')}</span></div>
+      <div class="ol-sub">Geomagnetic Kp ${dm.kp_24h_max ?? '?'} (24 h max)${dm.aurora_possible ? ' · <b>aurora possible</b>' : ''}</div>
+      ${dm.closest_asteroid ? `<div class="ol-sub">Closest asteroid in 30 days: ${escHtml(dm.closest_asteroid.name)}, ${dm.closest_asteroid.dist_ld} lunar distances${dm.closest_asteroid.size_m ? `, ~${dm.closest_asteroid.size_m} m` : ''}</div>` : ''}
+      ${dm.biggest_quake ? `<div class="ol-sub">Biggest quake this week: M${dm.biggest_quake.mag} ${escHtml(dm.biggest_quake.place)}</div>` : ''}
+      <div class="ol-sub">Local NWS warnings: ${(dm.local_warnings || []).length ? escHtml(dm.local_warnings.join(', ')) : 'none'}</div>
+      <div class="ol-sub">Doomsday Clock: ${dm.doomsday_clock ? dm.doomsday_clock.seconds : '?'} seconds to midnight</div>
+      <div class="ol-sub">Zombies: ${escHtml(dm.zombies || '')} · Alien contact: ${escHtml(dm.alien_contact || '')}</div>
+      <div class="ol-note">${escHtml(dm.note || '')}</div>`;
+  const g = d.garden || {};
+  const tom = g.tomato || {};
+  const garden = g.error && !tom.stage ? err(g) : `
+      <div class="ol-row"><span>Hardiness zone</span><b>${escHtml(g.zone || '?')}</b></div>
+      ${g.temp_range_f ? `<div class="ol-sub">Coldest winter night ${escHtml(g.temp_range_f)}°F · ${escHtml(g.source || '')}</div>` : ''}
+      <div class="ol-g">Tomatoes</div>
+      <div class="ol-row"><span>Start seeds indoors</span><span>${fd((tom.seed_start || [])[0])} – ${fd((tom.seed_start || [])[1])}</span></div>
+      <div class="ol-row"><span>Plant out</span><span>${fd((tom.plant_out || [])[0])} – ${fd((tom.plant_out || [])[1])}</span></div>
+      <div class="ol-row ol-sub"><span>Last frost (${escHtml(tom.frost_source || '')})</span><span>~${fd(tom.last_frost)}</span></div>
+      <div class="ol-row ol-sub"><span>First fall frost</span><span>~${fd(tom.first_frost)}</span></div>
+      ${tom.advice ? `<div class="ol-sub"><b>${escHtml(tom.advice)}</b></div>` : ''}
+      <div class="ol-note">Seeds 6–8 weeks before the last frost; set out 1–2 weeks after it, once nights stay at 50°F or warmer.</div>`;
+  const h = d.hunt || {};
+  const huntDays = (h.days || []).slice(0, 7).map(x =>
+    `<span class="ol-day ${x.closed ? '' : 'ol-deer-' + x.rating}" title="${escHtml(x.date)}: ${escHtml(x.closed ? 'closed' : x.rating)}${x.why ? ' · ' + escHtml(x.why) : ''}">${escHtml(x.dow)}<br>${x.closed ? 'closed' : escHtml(x.rating)}</span>`).join('');
+  const hunt = h.error ? err(h) : `
+      ${h.wmd ? `<div class="ol-row ol-sub"><span>WMD ${h.wmd}${h.archery_area ? ' · in the ' + escHtml(h.archery_area) + ' expanded archery area' : ''}</span><span>MDIFW</span></div>` : ''}
+      ${h.nearby_archery_area ? `<div class="ol-sub">The ${escHtml(h.nearby_archery_area)} expanded archery area is within 10 km (its season runs to Dec 12).</div>` : ''}
+      <div class="ol-row"><span>Open today</span><b>${h.sunday_closed ? 'Sunday: closed' : (h.open || []).length ? escHtml(h.open.join(', ')) : 'none'}</b></div>
+      ${h.legal_hours ? `<div class="ol-row"><span>Legal hours today</span><span>${ft(h.legal_hours[0])} – ${ft(h.legal_hours[1])}</span></div>` : ''}
+      ${h.next_season ? `<div class="ol-row ol-sub"><span>Next: ${escHtml(h.next_season.name)}</span><span>${fd(h.next_season.start)} – ${fd(h.next_season.end)}</span></div>` : ''}
+      <div class="ol-g">Deer movement</div><div class="ol-days">${huntDays}</div>
+      <div class="ol-note">${escHtml(h.note || '')}. Hover a day for the reasons.</div>`;
+  const c = d.conditions || {};
+  const condRows = [['Fishing', c.fish], ['Tides', c.tide], ['Marine', c.marine], ['Air quality', c.smoke],
+                    ['Sun', c.sun], ['Moon', c.moon], ['Space weather', c.solar]]
+    .filter(([, v]) => v).map(([k, v]) => `<div class="ol-cond"><span class="ol-g2">${k}</span>${escHtml(v)}</div>`).join('');
+  return {
+    conditions: condRows ? `<div class="ol-card"><div class="ol-h">Conditions</div>${condRows}</div>` : '',
+    hunt: `<div class="ol-card"><div class="ol-h">Hunting <span class="ol-sub">deer</span></div>${hunt}</div>`,
+    sap: `<div class="ol-card"><div class="ol-h">Maple sap <span class="ol-sub">${escHtml(sap.season || '')}</span></div>
+      ${sap.error ? err(sap) : `<div class="ol-days">${sapDays}</div><div class="ol-sub">${escHtml(sap.summary || '')}</div>
+      ${sap.advice ? `<div class="ol-sub"><b>${escHtml(sap.advice)}</b></div>` : ''}
+      <div class="ol-note">Sap runs after a night of 20–28°F and a day of 40–50°F. Green = good, amber = fair.</div>`}</div>`,
+    garden: `<div class="ol-card"><div class="ol-h">Garden</div>${garden}</div>`,
+    ski: `<div class="ol-card"><div class="ol-h">Skiing (7 days)</div>${ski}</div>`,
+    trains: `<div class="ol-card"><div class="ol-h">Trains <span class="ol-sub">scheduled, not live</span></div>${trains}</div>`,
+    doom: `<div class="ol-card"><div class="ol-h">Doom-o-meter</div>${doom}</div>`,
+    markets: _olMarkets(d.markets || {}),
+    local: _olNews('Local news', (d.news || {}).local),
+    world: _olNews('World news', (d.news || {}).world),
+  };
+}
+
+// Card order is a per-browser preference (localStorage), per tab; new cards join at the end.
+function _olKey(tab) { return 'ech-outlook-order' + (tab === 'outlook' ? '' : '-' + tab); }
+function _olOrder(tab, keys) {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(_olKey(tab)) || '[]'); } catch (e) { saved = []; }
+  if (!Array.isArray(saved)) saved = [];
+  return [...saved.filter(k => keys.includes(k)), ...keys.filter(k => !saved.includes(k))];
+}
+function _olMove(tab, k, dir) {
+  const keys = [...document.querySelectorAll(`#panel-${tab} .ol-item`)].map(s => s.dataset.k);
+  const i = keys.indexOf(k), j = i + dir;
+  if (i < 0 || j < 0 || j >= keys.length) return;
+  [keys[i], keys[j]] = [keys[j], keys[i]];
+  try { localStorage.setItem(_olKey(tab), JSON.stringify(keys)); } catch (e) {}
+  loadOutlook(true, true, tab);
+}
+// Hidden cards: per browser, across tabs.
+const _OL_HIDDEN_KEY = 'ech-outlook-hidden';
+function _olHidden() {
+  try { const h = JSON.parse(localStorage.getItem(_OL_HIDDEN_KEY) || '[]'); return Array.isArray(h) ? h : []; }
+  catch (e) { return []; }
+}
+function _olHide(tab, k) {
+  const h = _olHidden();
+  if (!h.includes(k)) h.push(k);
+  try { localStorage.setItem(_OL_HIDDEN_KEY, JSON.stringify(h)); } catch (e) {}
+  loadOutlook(true, true, tab);
+}
+function _olShowAll(tab) {
+  const h = _olHidden().filter(k => !_OL_TABS[tab].includes(k));
+  try { localStorage.setItem(_OL_HIDDEN_KEY, JSON.stringify(h)); } catch (e) {}
+  loadOutlook(true, true, tab);
+}
+function _olResetOrder(tab) {
+  try { localStorage.removeItem(_olKey(tab)); } catch (e) {}
+  loadOutlook(true, true, tab);
+}
+
+// Right panel width: drag its left edge (desktop), remembered per browser.
+(function () {
+  const root = document.documentElement;
+  try {
+    const w = parseInt(localStorage.getItem('ech-right-w') || '', 10);
+    if (w >= 260 && w <= 900) root.style.setProperty('--right-w', w + 'px');
+  } catch (e) {}
+  document.addEventListener('DOMContentLoaded', () => {
+    const panel = document.getElementById('right-panel');
+    if (!panel) return;
+    const grip = document.createElement('div');
+    grip.className = 'rp-grip';
+    grip.title = 'Drag to resize this panel (double-click to reset)';
+    panel.appendChild(grip);
+    let startX = 0, startW = 0;
+    const move = e => {
+      const w = Math.max(260, Math.min(Math.min(900, window.innerWidth - 420), startW + (startX - e.clientX)));
+      root.style.setProperty('--right-w', w + 'px');
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.body.classList.remove('rp-resizing');
+      try { localStorage.setItem('ech-right-w', String(parseInt(getComputedStyle(root).getPropertyValue('--right-w'), 10))); } catch (e) {}
+    };
+    grip.addEventListener('pointerdown', e => {
+      startX = e.clientX; startW = panel.getBoundingClientRect().width;
+      document.body.classList.add('rp-resizing');
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+      e.preventDefault();
+    });
+    grip.addEventListener('dblclick', () => {
+      root.style.removeProperty('--right-w');
+      try { localStorage.removeItem('ech-right-w'); } catch (e) {}
+    });
+  });
+})();
+
 
 function showNodes() {
   switchTab('nodes', document.querySelector('.panel-tab'));

@@ -281,13 +281,18 @@ class AudioSocketServer:
             idle = "M17 (quiet)" if key.startswith("m17") else "AllStar (quiet)"
             kind = "M17" if key.startswith("m17") else "AllStar"
             shown = None
+            number = kind                          # first update also sets the number (see set_connected_name)
             while not s.closed:
                 who = hub.talker(key, 2.5)
                 want = "You are transmitting" if keyer.keyed else (f"{kind}: {who}" if who else idle)
                 if want != shown:
                     shown = want
                     try:
-                        await pbx.set_connected_name(channel, want)
+                        if number:
+                            await pbx.set_connected_name(channel, want, number)
+                            number = ""
+                        else:
+                            await pbx.set_connected_name(channel, want)
                     except Exception as e:
                         log.debug("talker display: %s", e)
                 await asyncio.sleep(0.5)

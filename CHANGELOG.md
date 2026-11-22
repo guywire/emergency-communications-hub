@@ -8,6 +8,46 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.107 (2026-11-22)
+
+- Hunting finds its Wildlife Management District and expanded-archery status from the base location, using MDIFW's own GIS layers (looked up once, cached in `hunt_area.json`). Seasons limited to specific WMDs (the extended muzzleloader) show only where they apply; expanded archery shows only inside an expanded archery area, with a note when one is within 10 km. `outlook.hunting.wmd` / `expanded_archery` still override.
+
+## v1.1.106 (2026-11-22)
+
+- Outlook, News and Markets cards can be hidden (✕ on each card; "Show N hidden" at the bottom of the tab brings them back), remembered per browser alongside the card order.
+- Desk phone XML browser: new "Outlook" menu (second item on the ECH menu) with Hunting, Maple sap, Garden / tomatoes, Skiing, Trains, Doom-o-meter and the full Market board, plus "Fishing" among the bot screens.
+- Settings > Desk phones: "Download .cfg" for Yealinks ECH can't log into (T4x such as the T45, T5x: Push uses the Android phones' web API). Same keys as Push (ECH line keys from key 2, remote phonebooks, voicemail key, `cid_source = 6`), to import on the phone under Settings > Configuration > Import CFG.
+
+## v1.1.105 (2026-11-22)
+
+- Messages page right panel: wider by default (380 px), resizable by dragging its left edge (double-click resets, remembered per browser), tabs wrap instead of squeezing, and the node filter bar only shows on Nodes. News and Markets have their own tabs now; Outlook keeps the local cards.
+- Outlook gains a Conditions card (the bot's fishing, tide, marine, air-quality, sun, moon and space-weather lines) and a Hunting card plus bot `hunt` (or `deer`): which Maine 2026 deer seasons are open (MDIFW dates, including expanded archery to Dec 12 and the extended muzzleloader Dec 7-12 in WMDs 12-18 and 20-29), Sundays closed, today's legal hours (30 min before sunrise to 30 min after sunset, computed locally), and a 7-day deer-movement estimate (cold snaps, wind, rain, tracking snow, the rut, the moon). `outlook.hunting.wmd` limits the list to your WMD; `expanded_archery: false` hides that season.
+- Maple sap now needs a real winter first: the season counts only from mid January to April and after a cold spell in the last 45 days (10+ days that stayed below freezing, or 150+ freezing degree-days, from Open-Meteo's recent history). November freeze-thaw days are reported as thin fall flow, not a run.
+- Mesh bot help page 1 now lists doom, garden, hunt, sap, ski and trains; the rarer commands moved to page 2.
+- Map, Environmental layers: Storm tracking (radar storm cells with their 1-hour projected path and hail/tornado signatures from IEM's NEXRAD storm attributes, today's SPC tornado/wind/hail reports, NHC tropical cyclone cones and tracks; refreshes every 5 min), Snow depth (NOAA NOHRSC daily analysis), Mold risk (an estimate on a grid around the base: share of hours with humidity 80%+ at 50-90°F, past 2 days and next 2, from Open-Meteo), and Pollen (Google Pollen API heatmap through the server, only with `map_layers.google_pollen_api_key`: there is no free US pollen map).
+
+## v1.1.104 (2026-11-22)
+
+- Outlook tab: the cards can be put in any order (up/down arrows on each card, "Reset order"), remembered per browser.
+- Outlook tab gains Markets, Local news and World news cards. The market board (delayed Yahoo quotes) is grouped: index futures (S&P 500, Nasdaq-100, Dow, Russell 2000), energy (crude, heating oil, gasoline, natural gas), metals (gold, silver, copper), rates and currency (10-yr yield, dollar index, EUR/USD, CAD/USD), crypto (Bitcoin, Ethereum), commodities (lumber, corn), plus the VIX and Kalshi "closes up today" odds. Configurable as `markets.panel`. The bot's `markets` reply and the phone screen are unchanged.
+- Garden card and bot `garden` (or `tomato`): USDA hardiness zone for the base location (2023 map via phzmapi.org), and tomato timing: start seeds indoors 6-8 weeks before the typical last frost, plant out 1-2 weeks after it, checked against this week's forecast lows (50°F+ nights to plant, frost warnings). Frost dates are typical for the zone; set `outlook.garden.last_frost: "05-15"` (and `first_frost`) for local dates.
+
+## v1.1.103 (2026-11-22)
+
+- Mesh bot answers "are you a bot?" (and "r u a bot", "is this a bot?", "are you human?"...) with a whimsical railroad line. New `banter_channels` (live: Public, ch0): the bot answers only that question there, never commands, at most once per 10 minutes per channel (`banter_cooldown_sec`). Other bots' messages and questions addressed to someone else (`@[Bob] are you a bot?`) are ignored.
+- NWS warnings on the Public channel, without the noise (`weather_service.public_alerts`): life-safety warnings only (tornado, blizzard, flash flood, high wind, hurricane, civil emergency...; no watches or advisories), one short line per storm ("NWS Blizzard Warning until Tue 7PM: Knox, Waldo. Details on #weather"), updates and continuations not reposted, the same event type at most every 12 h, at most 3 posts a day, and only Extreme alerts during quiet hours (22-7). What was posted is saved in the DB, so a restart doesn't repost active warnings.
+- New Outlook (`ech/core/outlook.py`), on a new Outlook tab on the Messages page, at `/api/outlook`, and as bot commands:
+  - `sap` (or `maple`): freeze-thaw sap-run forecast for the base location from the NWS gridpoint forecast (good = a 20-28°F night then a 40-50°F day), with the tapping season.
+  - `ski`: 7-day outlook for Camden Snow Bowl, Sugarloaf, Sunday River and Saddleback (configurable): new snow, powder days, snowmaking weather (wet-bulb hours), rain.
+  - `trains`: scheduled Amtrak trains at the nearest rail stations (for example the Downeaster), from Amtrak's GTFS feed, refreshed weekly. Schedules, not live positions.
+  - `doom` (or `apocalypse`): a tongue-in-cheek doom-o-meter built from real data: geomagnetic Kp (with an aurora heads-up), asteroid close approaches (JPL), the week's significant earthquakes (USGS), local NWS warnings and the Doomsday Clock (85 s, Jan 2026). Zombies 0%.
+  - Operator feed notes (source "Outlook") when a sap run is coming in season, a powder day is forecast, a geomagnetic storm makes aurora possible, or an asteroid passes inside the Moon's distance.
+- Desk phone: who is talking now shows on the Yealink. Asterisk was setting the call name but never sent it to the phone: the endpoints had no identity header turned on, and the connected line had no number. Live PBX: `send_pai`, `send_rpid`, `trust_id_outbound` on 101-110. ECH now sets the number along with the name, and phone provisioning sets `account.N.cid_source = 6` (PAI/RPID before From) so the phone takes the update. Push the phone settings again from Settings to apply that.
+
+## v1.1.102 (2026-11-22)
+
+- Mesh bot help has two pages, each one message: `help` ends with "help 2: more", and `help 2` (or `help more`) lists the rest: anomalies, contest, dad, leaderboard, localnews, mud, repeat, score, sentiment, skywarn, status, strip, trivia, water. A test checks every command appears on one of them.
+
 ## v1.1.101 (2026-11-21)
 
 - Meshtastic MQTT gateway announces its NodeInfo on every channel it has a key for (LongFast and MaineNet), not only the TX channel, so MaineNet listeners see its name. `nodeinfo_interval: 0` now really means never (it used to announce back to back).

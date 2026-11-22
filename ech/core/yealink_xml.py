@@ -118,7 +118,13 @@ BOT_PAGES: dict[str, tuple[str, str]] = {
     "sun":     ("Sun and moon", "sun"),
     "nodes":   ("Mesh nodes heard", "nodes"),
     "contest": ("Contests", "contest"),
+    "fish":    ("Fishing", "fish"),
 }
+
+# The Messages page Outlook / Markets cards, as phone screens (/yealink/<key>/outlook/<card>.xml)
+OUTLOOK_PAGES = [("hunt", "Hunting (deer)"), ("sap", "Maple sap"), ("garden", "Garden / tomatoes"),
+                 ("ski", "Skiing"), ("trains", "Trains"), ("doom", "Doom-o-meter"),
+                 ("markets", "Market board")]
 
 
 def main_menu(base: str) -> str:
@@ -127,6 +133,7 @@ def main_menu(base: str) -> str:
     return text_menu("ECH", [
         ("Winlink inbox", f"{base}/winlink.xml"),
         ("Directory", f"{base}/dir.xml"),
+        ("Outlook (hunt, sap, ski, trains...)", f"{base}/outlook.xml"),
         ("Weather alerts", f"{base}/alerts.xml"),
         ("Forecast (7 day)", f"{base}/forecast.xml"),
         ("Conditions now", f"{base}/bot/weather.xml"), bot("metar"),
@@ -135,7 +142,7 @@ def main_menu(base: str) -> str:
         bot("solar"),
         bot("planes"), bot("ships"),
         ("APRS stations heard", f"{base}/aprs.xml"),
-        bot("sat"), bot("tide"), bot("marine"), bot("sun"),
+        bot("sat"), bot("tide"), bot("marine"), bot("fish"), bot("sun"),
         ("World news", f"{base}/news/world.xml"),
         ("Local news", f"{base}/news/local.xml"),
         ("Markets (NQ, ES futures)", f"{base}/markets.xml"),
@@ -146,6 +153,108 @@ def main_menu(base: str) -> str:
         ("Phones online", f"{base}/pbx.xml"),
         bot("contest"),
     ])
+
+
+def outlook_menu(base: str) -> str:
+    return text_menu("Outlook", [(label, f"{base}/outlook/{k}.xml") for k, label in OUTLOOK_PAGES])
+
+
+def _md(iso: str) -> str:
+    try:
+        d = datetime.fromisoformat(iso[:10])
+        return f"{d:%b} {d.day}"
+    except (TypeError, ValueError):
+        return "?"
+
+
+def _clock(iso: str) -> str:
+    try:
+        d = datetime.fromisoformat(iso)
+        return f"{d.hour % 12 or 12}:{d.minute:02d}{'am' if d.hour < 12 else 'pm'}"
+    except (TypeError, ValueError):
+        return "?"
+
+
+def outlook_screen(card: str, d: dict) -> str:
+    """One Outlook card as text for the phone's XML browser."""
+    title = dict(OUTLOOK_PAGES).get(card, "Outlook")
+    if not isinstance(d, (dict, list)) or (isinstance(d, dict) and d.get("error")):
+        return text_screen(title, f"Unavailable: {(d or {}).get('error', 'no data') if isinstance(d, dict) else 'no data'}")
+    lines: list[str] = []
+    if card == "hunt":
+        if d.get("wmd"):
+            lines.append(f"WMD {d['wmd']}" + (f", {d['archery_area']} expanded archery" if d.get("archery_area") else ""))
+        lines.append("Sunday: closed" if d.get("sunday_closed") else
+                     "Open: " + (", ".join(d.get("open") or []) or "no deer season"))
+        if d.get("legal_hours") and d.get("open") and not d.get("sunday_closed"):
+            lines.append(f"Legal hours {_clock(d['legal_hours'][0])} - {_clock(d['legal_hours'][1])}")
+        if d.get("next_season"):
+            ns = d["next_season"]
+            lines.append(f"Next: {ns['name']} {_md(ns['start'])}-{_md(ns['end'])}")
+        lines.append("")
+        lines.append("Deer movement:")
+        for x in d.get("days", [])[:7]:
+            lines.append(f"{x['dow']}: {'closed' if x['closed'] else x['rating']}" + (f" ({x['why']})" if x.get("why") else ""))
+        lines.append("")
+        lines.append("Estimate only. Check the MDIFW lawbook for your WMD.")
+    elif card == "sap":
+        lines += [d.get("season", ""), d.get("summary", "")]
+        if d.get("cold_days_45") is not None:
+            lines.append(f"Freezing days, last 45: {d['cold_days_45']}")
+        if d.get("advice"):
+            lines.append(d["advice"])
+        lines.append("")
+        for x in d.get("days", [])[:7]:
+            lines.append(f"{x['dow']} {x['lo_f']}/{x['hi_f']}F {x['rating']}")
+        lines.append("")
+        lines.append("Good run: 20-28F night, 40-50F day, after a deep winter freeze.")
+    elif card == "garden":
+        t = d.get("tomato") or {}
+        lines.append(f"Hardiness zone {d.get('zone') or '?'}" + (f" ({d['temp_range_f']}F)" if d.get("temp_range_f") else ""))
+        lines.append("")
+        lines.append("Tomatoes:")
+        lines.append(f"Seeds indoors {_md((t.get('seed_start') or ['', ''])[0])}-{_md((t.get('seed_start') or ['', ''])[1])}")
+        lines.append(f"Plant out {_md((t.get('plant_out') or ['', ''])[0])}-{_md((t.get('plant_out') or ['', ''])[1])}")
+        lines.append(f"Last frost ~{_md(t.get('last_frost', ''))}, first fall frost ~{_md(t.get('first_frost', ''))}")
+        if t.get("advice"):
+            lines += ["", t["advice"]]
+    elif card == "ski":
+        for a in d if isinstance(d, list) else []:
+            lines.append(f"{a['name']}: {a['rating']}")
+            lines.append(f"  {a.get('why', '')}" + (f", {a['snow_7d_in']}in in 7 days" if a.get("snow_7d_in") else ""))
+    elif card == "trains":
+        for s in d if isinstance(d, list) else []:
+            lines.append(s["name"].replace(" Amtrak Station", ""))
+            for x in s.get("next", [])[:6]:
+                lines.append(f"  {x['label']} #{x['train']} " +
+                             (f"arr from {x['origin'].replace(' Amtrak Station', '')}" if x["terminates"] else f"to {x['headsign']}"))
+        lines.append("Scheduled times, not live.")
+    elif card == "doom":
+        lines.append(f"{d.get('score')}/100: {d.get('label', '')}")
+        if d.get("kp_24h_max") is not None:
+            lines.append(f"Kp {d['kp_24h_max']} (24h max)" + (" - aurora possible" if d.get("aurora_possible") else ""))
+        if d.get("closest_asteroid"):
+            a = d["closest_asteroid"]
+            lines.append(f"Asteroid {a['name']}: {a['dist_ld']} lunar dist")
+        if d.get("biggest_quake"):
+            lines.append(f"Quake M{d['biggest_quake']['mag']} {d['biggest_quake']['place']}")
+        lines.append("Local warnings: " + (", ".join(d.get("local_warnings") or []) or "none"))
+        lines.append(f"Doomsday Clock: {(d.get('doomsday_clock') or {}).get('seconds')} s to midnight")
+        lines.append("Zombies 0%. For fun.")
+    elif card == "markets":
+        for g in d.get("groups", []) if isinstance(d, dict) else []:
+            if not g.get("quotes"):
+                continue
+            lines.append(g["group"].upper())
+            for q in g["quotes"]:
+                pct = q.get("pct")
+                lines.append(f"{q['name']}: {q['price']:,.2f}" + (f" {'+' if pct >= 0 else ''}{pct:.2f}%" if pct is not None else ""))
+            lines.append("")
+        v = (d.get("sentiment") or {}).get("vix") if isinstance(d, dict) else None
+        if v:
+            lines.append(f"VIX {v['price']:.1f}")
+        lines.append("Delayed quotes, not advice.")
+    return text_screen(title, "\n".join(lines))
 
 
 def forecast_menu(base: str, periods: list[dict]) -> str:

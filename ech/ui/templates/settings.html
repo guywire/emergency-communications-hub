@@ -918,6 +918,13 @@ textarea{resize:vertical;min-height:120px;font-size:11px}
           <button class="btn btn-green" style="padding:3px 8px;font-size:10px" onclick="phonesPush(false)" title="Import ECH's settings into every phone that needs them. The phone's full config is backed up first.">📲 Push to phones</button>
           <label style="font-size:10px;color:var(--dim)"><input type="checkbox" id="phones-force"> re-send even if up to date</label>
         </div>
+        <div style="font-size:10px;color:var(--dim);margin-top:6px">
+          Other Yealinks (T4x such as a T45, T5x): Push needs the Android phones' web API, so for these download the
+          settings and import them on the phone (Settings &gt; Configuration &gt; Import CFG):
+          ECH address the phone uses <input id="gcfg-server" placeholder="auto" style="width:110px;font-size:10px">
+          line <input id="gcfg-acct" type="number" min="1" max="16" value="1" style="width:40px;font-size:10px">
+          <button class="btn btn-blue" style="padding:2px 7px;font-size:10px" onclick="phonesGenericCfg()">⬇ Download .cfg</button>
+        </div>
         <div id="phones-msg" style="font-size:10px;color:var(--dim);margin-top:4px;white-space:pre-wrap"></div>
         <div style="margin-top:6px;font-size:10px;color:var(--dim)">
           Phone screen display: open <code id="phones-display-url"></code> in the phone's Browser app.
@@ -4765,6 +4772,14 @@ async function purgeNow() {
     setTimeout(() => msg.style.display='none', 5000);
     loadArchiveDates();
   } catch(e) { msg.textContent='Error: '+e.message; msg.style.display='inline'; }
+}
+
+function phonesGenericCfg() {
+  const s = (document.getElementById('gcfg-server').value || '').trim();
+  const a = parseInt(document.getElementById('gcfg-acct').value || '1', 10) || 1;
+  const q = new URLSearchParams({account: String(a)});
+  if (s) q.set('server', s);
+  window.location.href = `${window.ECH_BASE_PATH || ''}/api/phones/generic.cfg?` + q.toString();
 }
 </script>
 </body>

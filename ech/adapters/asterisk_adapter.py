@@ -707,10 +707,18 @@ class AsteriskAdapter(Adapter):
                                  "Duration": str(duration_ms)})
         return True
 
-    async def set_connected_name(self, channel: str, name: str) -> None:
+    async def set_connected_name(self, channel: str, name: str, number: str = "") -> None:
         """Change the name a phone shows for its current call (a connected-line
-        update: re-INVITE to the Yealink). Used for 'who is talking' on 76x."""
+        update: re-INVITE to the Yealink). Used for 'who is talking' on 76x.
+
+        Asterisk only sends the update when the endpoint has send_pai/send_rpid
+        on, and only puts identity headers in it when the connected line has a
+        valid number, so `number` (set silently with the i option) goes first
+        (2026-11-22: the name changed in Asterisk but the phone never heard)."""
         if self._connected and channel:
+            if number:
+                await self._send_action({"Action": "Setvar", "Channel": channel,
+                                         "Variable": "CONNECTEDLINE(num,i)", "Value": number[:20]})
             await self._send_action({"Action": "Setvar", "Channel": channel,
                                      "Variable": "CONNECTEDLINE(name)", "Value": name[:40]})
 

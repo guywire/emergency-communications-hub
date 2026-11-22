@@ -431,7 +431,7 @@ async def test_phone_shows_who_is_talking():
     class Pbx:
         names = []
 
-        async def set_connected_name(self, chan, name):
+        async def set_connected_name(self, chan, name, number=""):
             self.names.append((chan, name))
     pbx = Pbx()
     server = ah.AudioSocketServer("127.0.0.1", 0)
