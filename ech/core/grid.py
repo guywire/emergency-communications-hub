@@ -7,6 +7,17 @@ Maidenhead locator → latitude/longitude (centre of the square).
 from __future__ import annotations
 
 
+def latlon_to_grid(lat: float, lon: float, chars: int = 6) -> str:
+    """Maidenhead locator (4 or 6 characters) for a position. 44.104, -69.125 -> FN54kc."""
+    lon = min(max(float(lon), -180.0), 179.9999) + 180.0
+    lat = min(max(float(lat), -90.0), 89.9999) + 90.0
+    g = chr(65 + int(lon // 20)) + chr(65 + int(lat // 10))
+    g += str(int(lon % 20 // 2)) + str(int(lat % 10))
+    if chars >= 6:
+        g += chr(97 + int(lon % 2 * 12)) + chr(97 + int(lat % 1 * 24))
+    return g
+
+
 def grid_to_latlon(grid: str) -> tuple[float | None, float | None]:
     """Centre of a 4- or 6-character Maidenhead square; (None, None) if invalid.
 

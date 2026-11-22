@@ -8,6 +8,50 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.101 (2026-11-21)
+
+- Meshtastic MQTT gateway announces its NodeInfo on every channel it has a key for (LongFast and MaineNet), not only the TX channel, so MaineNet listeners see its name. `nodeinfo_interval: 0` now really means never (it used to announce back to back).
+- Live config: the gateway is now named "SignalMatrix" (short "SM").
+
+## v1.1.100 (2026-11-21)
+
+- Meshtastic MQTT: bridged posts now come from a separate virtual node, "MeshCore Bridge" (short name MCB, its own stable node id), instead of the gateway node, so the gateway's name isn't on every relayed message. It announces its own NodeInfo the first time it posts on a channel, then with the gateway's regular announcements. ECH treats its packets as its own (never re-received or re-bridged). The operator's own posts still come from the gateway. Per adapter: `bridge_node: {long_name, short_name, node_id}`, or `bridge_node: false` to turn it off.
+
+## v1.1.99 (2026-11-21)
+
+- Bridges skip other bots' messages (the same filter the mesh bot uses, now shared in `ech/core/botfilter.py`): names ending a word in "bot", "Pong!", "[a1b2] ..." tags, node lists and other multi-line reports. On by default per rule (`ignore_bots: false` turns it off), counted as `dropped_bot`.
+- Live config: the Meshtastic ch1 <-> MeshCore #test bridge is disabled.
+
+## v1.1.98 (2026-11-21)
+
+- Mesh bot privacy fix: "keep mesh off grid" in an @-mention on Public ran the `grid` command, and the bot broadcast the station position to four decimals. On channels a command now has to start the message (after any @-mention), and `grid` with no arguments gives only the 4-character square, never coordinates. Usage examples no longer point near the station.
+- Live config: the bot no longer watches Public (ch0) at all, @-mentions included.
+
+## v1.1.97 (2026-11-21)
+
+- M17 voice carries the station position as GNSS META (M17 spec 2.0 layout, same as libm17), so reflector dashboards show our grid square. Default is the centre of the 6-character square (about 5 km), not the exact hub location. Per adapter: `position: grid6 | exact | off`, or `grid: FN54kc` to set it.
+
+## v1.1.96 (2026-11-21)
+
+- Fix: real desk phones on 760/761 heard noise and sent unintelligible M17 audio. Since v1.1.90 the live-audio extension used Dial(AudioSocket/...) without a codec, so the channel took the phone's G.711 u-law and ECH read those bytes as 16-bit linear audio (noise, at half the expected rate). The dialplan now forces c(slin). Simulated test with u-law phones: correlation with the clean speech went from 0.17 to normal.
+
+## v1.1.95 (2026-11-21)
+
+- Desk phones on live audio (760/761) get a 300 ms jitter buffer played out on a steady 20 ms clock, so internet gaps from the reflector (320 ms seen) no longer cause skips. It re-buffers after running dry and never lets the delay grow past 1.5 s.
+
+## v1.1.94 (2026-11-21)
+
+- M17 transmit leveller: hot microphone audio is turned down toward -20 dBFS and peaks limited to -3 dBFS before Codec2, which garbles clipped input (a desk phone sending -6 dBFS average came back unintelligible). Quiet audio is not boosted. The transmit log line says how much it turned the audio down.
+
+## v1.1.93 (2026-11-21)
+
+- M17 transmit log also counts gap frames (40 ms the transmitter had to fill with silence because no microphone audio arrived in time), for diagnosing choppy audio.
+
+## v1.1.92 (2026-11-21)
+
+- M17 echo test from a desk phone: during a 760/761 call press *43 (the PBX echo-test code) instead of *99, talk, then #. The reflector's #PARROT plays it back to that call only.
+- The M17 transmit log line now shows the microphone level (peak and average dBFS, or "silent"), so a transmission without audio is obvious.
+
 ## v1.1.91 (2026-11-21)
 
 - Who is talking: desk phones on 760/761 now show the M17 caller's callsign as the call name ("M17: W1ABC", "M17 (quiet)", "You are transmitting"), via a connected-line update. AllStar listening on the web page shows the keyed linked node with its callsign and place from the node directory (polled from `rpt xnode` while someone listens), or "local user" when someone on our node keys up.

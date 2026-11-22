@@ -246,14 +246,33 @@ class AudioSocketServer:
         q = await hub.subscribe(key)
         keyer = PhoneKeyer(s, key)
 
-        async def pump():
+        buf = PlayoutBuffer()
+
+        async def fill():
             while not s.closed:
                 try:
-                    pcm = await q.get()
-                    if not keyer.keyed:            # no receive audio over your own transmission
-                        s.send_audio(pcm)
+                    buf.push(await q.get())
                 except Exception:
                     break
+
+        async def pump():
+            """Play out on a steady 20 ms clock from a 300 ms cushion: reflector audio
+            over the internet arrives with gaps (320 ms seen 2026-11-21) that the
+            phone's own jitter buffer doesn't cover."""
+            nxt = time.monotonic()
+            while not s.closed:
+                frame = buf.pop()
+                if frame and not keyer.keyed:      # no receive audio over your own transmission
+                    try:
+                        s.send_audio(frame)
+                    except Exception:
+                        break
+                nxt += FRAME_BYTES / 2 / RATE
+                now = time.monotonic()
+                if nxt < now - 0.2:
+                    nxt = now                      # we fell behind (busy box): don't burst to catch up
+                await asyncio.sleep(max(0.0, nxt - now))
+        filler = asyncio.ensure_future(fill())
         async def show_talker():
             """Who is talking, as the call's name on the phone screen (connected-line update)."""
             pbx = self.get_pbx() if self.get_pbx else None
@@ -278,6 +297,7 @@ class AudioSocketServer:
             await s.run()
         finally:
             task.cancel()
+            filler.cancel()
             shower.cancel()
             keyer.release()
             await hub.unsubscribe(key, q)
@@ -312,6 +332,39 @@ class AudioSocketServer:
         await s.run()
 
 
+class PlayoutBuffer:
+    """Jitter buffer for a phone listening to live audio. Waits for PREBUFFER
+    of audio before playing, re-buffers after running dry, and drops the oldest
+    audio past MAX so the delay can't grow."""
+
+    PREBUFFER = 0.3
+    MAX = 1.5
+
+    def __init__(self):
+        self.data = bytearray()
+        self.playing = False
+        self.underruns = 0
+
+    def push(self, pcm: bytes) -> None:
+        self.data += pcm
+        cap = int(self.MAX * RATE) * 2
+        if len(self.data) > cap:
+            del self.data[: len(self.data) - cap]
+
+    def pop(self) -> bytes | None:
+        if not self.playing:
+            if len(self.data) < int(self.PREBUFFER * RATE) * 2:
+                return None
+            self.playing = True
+        if len(self.data) < FRAME_BYTES:
+            self.playing = False                   # ran dry: build the cushion up again
+            self.underruns += 1
+            return None
+        frame = bytes(self.data[:FRAME_BYTES])
+        del self.data[:FRAME_BYTES]
+        return frame
+
+
 def tone(freq: float, seconds: float, level: float = 0.25) -> bytes:
     n = int(seconds * RATE)
     return b"".join(struct.pack("<h", int(level * 32767 * math.sin(2 * math.pi * freq * i / RATE)))
@@ -320,8 +373,9 @@ def tone(freq: float, seconds: float, level: float = 0.25) -> bytes:
 
 class PhoneKeyer:
     """Desk-phone push-to-talk on a live-audio call, the same keys as AllStar
-    phone mode: *99 keys up, # unkeys. Needs a source with a transmitter (M17);
-    on a receive-only source *99 gets a low "no" tone."""
+    phone mode: *99 keys up, # unkeys. *43 is an echo test (the PBX echo-test code): it keys up to
+    #PARROT, which plays the transmission back to this call only. Needs a
+    source with a transmitter (M17); otherwise a low "no" tone."""
 
     def __init__(self, s: AudioSocketSession, key: str):
         self.s, self.key = s, key
@@ -338,16 +392,18 @@ class PhoneKeyer:
                 self.beep(tone(660, 0.12) + bytes(400) + tone(440, 0.12))
             return
         self.digits = (self.digits + d)[-3:]
-        if self.digits == "*99" and not self.keyed:
+        if self.digits in ("*99", "*43") and not self.keyed:
+            dst = "#PARROT" if self.digits == "*43" else ""
             self.digits = ""
             tx = hub.tx_for(self.key)
-            err = tx.voice_start(self.s.uid, "") if tx else "this source is receive-only"
+            err = tx.voice_start(self.s.uid, dst) if tx else "this source is receive-only"
             if err:
                 log.info("AudioSocket %s: PTT refused on %s: %s", self.s.uid[:8], self.key, err)
                 self.beep(tone(300, 0.5))
                 return
             self.keyed = True
-            log.info("AudioSocket %s: phone keyed up on %s", self.s.uid[:8], self.key)
+            log.info("AudioSocket %s: phone keyed up on %s%s", self.s.uid[:8], self.key,
+                     " (echo test)" if dst else "")
             self.beep(tone(1000, 0.15))      # go-ahead beep: start talking after it
 
     def on_audio(self, pcm: bytes) -> None:

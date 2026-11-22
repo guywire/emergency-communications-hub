@@ -43,3 +43,9 @@ def test_sync_writes_once(tmp_path):
     assert ps.sync_conf({}, str(f)) is True
     assert ps.sync_conf({}, str(f)) is False
     assert "MP3Player" in f.read_text()
+
+
+def test_m17_listen_dial_forces_slin():
+    from ech.core.pbx_streams import render_audio_conf
+    conf = render_audio_conf({"enabled": True, "allstar_node": "", "port": 9093, "webphone_ext": "111", "m17_ext": "760"})
+    assert "Dial(AudioSocket/127.0.0.1:9093/${ECHU}/c(slin))" in conf

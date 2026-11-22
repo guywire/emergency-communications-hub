@@ -148,3 +148,20 @@ def test_max_hops_limits_channel_requests_to_the_local_mesh():
     run(13, "@[SignalMatrix] wx 04841")       # a mention always works
     run(None, "tide")                         # unknown distance: answered
     assert [c[0] for c in calls] == ["weather", "weather", "tide"]
+
+
+def test_command_word_mid_sentence_is_not_a_command_on_channels():
+    # 2026-11-21 on Public: "@[SignalMatrix] does bridged mean internet? If so, we need
+    # to keep mesh off grid." ran `grid` and broadcast the station position.
+    bot, _, calls = _bot()
+    _run(bot, "ch0:Public", "@[SignalMatrix] does bridged mean internet? If so, we need to keep mesh off grid.")
+    _run(bot, "ch2:#bot", "is the weather nice")
+    _run(bot, "ch2:#bot", "@[SignalMatrix] weather 04841")
+    _run(bot, "ch2:#bot", "@[SignalMatrix], grid FN54")
+    assert [c[0] for c in calls] == ["unknown", "weather", "grid"]
+
+
+def test_grid_without_args_never_gives_coordinates():
+    bot, _, _ = _bot(lat=39.7392, lon=-104.9903)
+    r = bot._cmd_grid("")
+    assert "DM79" in r and "39.7" not in r and "-104" not in r and "DM79mr" not in r

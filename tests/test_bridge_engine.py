@@ -206,3 +206,23 @@ async def test_echo_heard_back_on_a_different_radio_is_not_rebridged():
     sent_before = len(ad["mc"].sent)
     await eng.apply(mesh_msg("Bob: anyone on the coast tonight", ch=0, sender="ECH", src="usb"), ad)
     assert len(ad["mc"].sent) == sent_before
+
+
+@pytest.mark.asyncio
+async def test_other_bots_are_not_bridged():
+    # 2026-11-21: #test relayed bot output ("ack @[...] hops", node lists, Pong!) onto Meshtastic.
+    eng, ad = setup()
+    await eng.apply(mesh_msg("Pong!", sender="EWR-BOT"), ad)
+    await eng.apply(mesh_msg("[8875] Magic 8-ball: Reply hazy", sender="VTRPH Pingbot"), ad)
+    await eng.apply(mesh_msg("DDAA: Periwig South\n2F2B: Winslow\n5348: Signals", sender="Signals.2"), ad)
+    await eng.apply(mesh_msg("net check in from Abbott", sender="Abbott"), ad)
+    assert [m.body for m in ad["aprs"].sent] == ["Abbott: net check in from Abbott"]
+    assert eng.rules[0].counters["dropped_bot"] == 3
+
+
+@pytest.mark.asyncio
+async def test_bot_filter_can_be_turned_off_per_rule():
+    eng, ad = setup({**RULE, "ignore_bots": False})
+    await eng.apply(mesh_msg("Pong!", sender="EWR-BOT"), ad)
+    assert [m.body for m in ad["aprs"].sent] == ["EWR-BOT: Pong!"]
+    assert eng.rules[0].to_dict()["ignore_bots"] is False

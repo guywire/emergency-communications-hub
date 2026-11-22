@@ -350,3 +350,44 @@ def test_json_dm_between_other_nodes_gets_its_own_channel():
     m = out[0]
     assert m.source_channel == "Other DMs" and m.body == "[to Example Station] your weather"
     assert m.raw["channel_idx"] is None and "PKI" not in a._mt_channel_names[:2]
+
+
+# -- bridge node (2026-11-21): bridged posts don't carry the gateway's name -----
+
+def test_bridged_post_comes_from_the_bridge_node_with_its_own_nodeinfo():
+    a, out = _pub_adapter(bridge_node={"long_name": "MeshCore Bridge", "short_name": "MCB", "node_id": "!ec0000b1"})
+    a._mt_roots["MaineNet"] = {"msh/US/ME"}
+    keys = {"MaineNet": codec.expand_psk("Vg==")}
+    bridged = NormalizedMessage(source_adapter="meshcore-usb", source_channel="outbound", from_id="local",
+                                from_display="op", body="Alice: hello from MeshCore",
+                                raw={"channel_name": "MaineNet", "_bridged_by": "MaineNet rule"})
+    assert asyncio.run(a.send(bridged)) is True
+    pkts = [codec.decode_envelope(p, keys) for _, p in a._client.published]
+    info, text = pkts[0], pkts[1]
+    assert info["portnum"] == "NODEINFO_APP" and info["from_id"] == "!ec0000b1"
+    user = mesh_pb2.User(); user.ParseFromString(info["payload"])
+    assert (user.long_name, user.short_name, user.id) == ("MeshCore Bridge", "MCB", "!ec0000b1")
+    assert text["from_id"] == "!ec0000b1" and text["payload"] == b"Alice: hello from MeshCore"
+    # the uplinking gateway is still ours (topic + envelope), only the sender changes
+    assert a._client.published[1][0].endswith("/!ec000001")
+    # second bridged post: no second NodeInfo; an operator post still comes from the gateway
+    a.send and asyncio.run(a.send(NormalizedMessage(source_adapter="m", source_channel="o", from_id="local",
+                                                    from_display="op", body="again",
+                                                    raw={"channel_name": "MaineNet", "_bridged_by": "r"})))
+    asyncio.run(a.send(NormalizedMessage(source_adapter="x", source_channel="o", from_id="local",
+                                         from_display="op", body="operator", raw={"channel_name": "MaineNet"})))
+    froms = [codec.decode_envelope(p, keys)["from_id"] for _, p in a._client.published]
+    assert froms == ["!ec0000b1", "!ec0000b1", "!ec0000b1", "!ec000001"]
+    # the bridge node's own packets coming back are ours, not new messages
+    asyncio.run(a._handle_message(TOPIC, _envelope(portnums_pb2.TEXT_MESSAGE_APP, b"echo",
+                                                   from_num=0xEC0000B1, gateway="!gw999999", pid=77)))
+    assert out == [] and a._mt_stats["own_heard"] == 1
+
+
+def test_bridge_node_can_be_turned_off():
+    a, _ = _pub_adapter(bridge_node=False)
+    a._mt_roots["MaineNet"] = {"msh/US/ME"}
+    asyncio.run(a.send(NormalizedMessage(source_adapter="m", source_channel="o", from_id="local", from_display="op",
+                                         body="x", raw={"channel_name": "MaineNet", "_bridged_by": "r"})))
+    pkt = codec.decode_envelope(a._client.published[0][1], {"MaineNet": codec.expand_psk("Vg==")})
+    assert len(a._client.published) == 1 and pkt["from_id"] == "!ec000001"

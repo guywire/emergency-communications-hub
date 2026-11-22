@@ -20,6 +20,7 @@ Rule (config.yaml `bridge_rules:` / POST /api/bridge-rules):
       prefix: true               # "<sender>: " attribution on the far side
       max_len: null              # default per target (APRS 67, MeshCore 140, …)
       require_callsign: false    # only forward senders whose name has a callsign
+      ignore_bots: true          # never carry other bots' output (EWR-BOT, "Pong!", node lists)
       dry_run: false             # log "would forward" without sending
 
 Endpoint keys:
@@ -49,6 +50,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from ech.core.models import NormalizedMessage
+from ech.core.botfilter import is_bot_message
 
 log = logging.getLogger(__name__)
 
@@ -140,10 +142,11 @@ class BridgeRule:
     require_callsign: bool = False
     dry_run: bool = False
     enabled: bool = True
+    ignore_bots: bool = True
     counters: dict = field(default_factory=lambda: {
         "forwarded": 0, "dropped_rate": 0, "dropped_loop": 0,
         "dropped_duplicate": 0, "dropped_no_callsign": 0, "would_forward": 0,
-        "dropped_already_heard": 0})
+        "dropped_already_heard": 0, "dropped_bot": 0})
 
     @classmethod
     def parse(cls, d: dict, idx: int = 0) -> "BridgeRule":
@@ -187,7 +190,8 @@ class BridgeRule:
                    prefix=bool(d.get("prefix", True)), max_len=max_len,
                    require_callsign=bool(d.get("require_callsign", False)),
                    dry_run=bool(d.get("dry_run", False)),
-                   enabled=bool(d.get("enabled", True)))
+                   enabled=bool(d.get("enabled", True)),
+                   ignore_bots=bool(d.get("ignore_bots", True)))
 
     def to_dict(self) -> dict:
         return {"name": self.name, "enabled": self.enabled,
@@ -195,7 +199,7 @@ class BridgeRule:
                 "direction": self.direction, "types": list(self.types),
                 "rate_per_min": self.rate_per_min, "prefix": self.prefix,
                 "max_len": self.max_len, "require_callsign": self.require_callsign,
-                "dry_run": self.dry_run}
+                "dry_run": self.dry_run, "ignore_bots": self.ignore_bots}
 
     def legs(self):
         """(source, target, label) pairs this rule forwards along."""
@@ -369,6 +373,10 @@ class BridgeEngine:
                     self._record(rule, leg, "dropped: echo of bridged text", msg, text)
                     continue
                 sender = msg.from_display or msg.from_id
+                if rule.ignore_bots and is_bot_message(msg):
+                    rule.counters["dropped_bot"] = rule.counters.get("dropped_bot", 0) + 1
+                    self._record(rule, leg, "dropped: another bot's message", msg, text)
+                    continue
                 if rule.require_callsign and not _CALLSIGN_RE.search(f"{sender} {msg.from_id}"):
                     rule.counters["dropped_no_callsign"] += 1
                     self._record(rule, leg, "dropped: sender has no callsign", msg, text)

@@ -384,7 +384,7 @@ async def test_desk_phone_star99_keys_m17_and_hash_unkeys():
             return True
 
         def voice_start(self, owner, dst):
-            self.log.append("start")
+            self.log.append("start" + (":" + dst if dst else ""))
 
         def voice_push(self, owner, pcm):
             self.log.append(len(pcm))
@@ -455,3 +455,119 @@ async def test_phone_shows_who_is_talking():
     finally:
         ah.hub.unregister("m17:test-show")
         await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_desk_phone_star43_is_an_echo_test():
+    class Tx:
+        dsts = []
+
+        def can_transmit(self):
+            return True
+
+        def voice_start(self, owner, dst):
+            self.dsts.append(dst)
+
+        def voice_push(self, owner, pcm):
+            return True
+
+        def voice_end(self, owner):
+            pass
+    tx = Tx()
+    server = ah.AudioSocketServer("127.0.0.1", 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+    ah.hub.register("m17:test-echo", "M17 test", "m17", tx=tx)
+    try:
+        uid = str(uuid.uuid4())
+        server.note_listen(uid, "m17")
+        r, w = await _asterisk_connect(port, uid)
+        for d in b"*43":
+            w.write(_frame(ah.KIND_DTMF, bytes([d])))
+        await w.drain()
+        for _ in range(50):
+            if tx.dsts:
+                break
+            await asyncio.sleep(0.02)
+        assert tx.dsts == ["#PARROT"]
+        w.close()
+    finally:
+        ah.hub.unregister("m17:test-echo")
+        await server.stop()
+
+
+def test_voice_tx_level_text():
+    from ech.adapters.m17_reflector import _VoiceTx
+    v = _VoiceTx("o", bytes([0xFF]) * 6, None)
+    assert v.level_text() == "no audio"
+    v.level(bytes(640))
+    assert "silent" in v.level_text()
+    v.level(struct.pack("<2h", 16384, -16384))
+    assert v.level_text().startswith("peak -6 dBFS")
+
+
+def test_leveller_turns_hot_audio_down_and_leaves_normal_audio_alone():
+    import math
+    from ech.adapters.m17_reflector import Leveller
+    tone = lambda amp: struct.pack("<320h", *[int(amp * math.sin(2 * math.pi * 400 * i / 8000)) for i in range(320)])
+    rms = lambda b: math.sqrt(sum(x * x for x in struct.unpack("<320h", b)) / 320)
+    normal = Leveller()
+    pcm = tone(4000)                                   # about -21 dBFS RMS
+    assert normal.process(pcm) == pcm and normal.text() == "no level change"
+    hot = Leveller()
+    for _ in range(20):
+        out = hot.process(tone(32000))                 # clipping-hot, like the 2026-11-21 phone
+    assert max(abs(x) for x in struct.unpack("<320h", out)) <= 32768 * 10 ** (-3 / 20) + 1
+    assert 20 * math.log10(rms(out) / 32768) < -15
+    assert hot.text().startswith("turned down")
+
+
+def test_playout_buffer_waits_for_cushion_and_rebuffers():
+    b = ah.PlayoutBuffer()
+    b.push(bytes(640))                     # 40 ms: not enough to start
+    assert b.pop() is None
+    b.push(bytes(320) * 14)                # now 320 ms
+    frames = [b.pop() for _ in range(16)]
+    assert all(f is not None and len(f) == 320 for f in frames)
+    assert b.pop() is None and b.underruns == 1 and not b.playing
+    b.push(bytes(320) * 200)               # 4 s burst: capped at MAX
+    assert len(b.data) == int(b.MAX * 8000) * 2
+
+
+def test_grid_square_roundtrip():
+    from ech.core.grid import latlon_to_grid, grid_to_latlon
+    assert latlon_to_grid(44.104, -69.125) == "FN54kc"
+    assert latlon_to_grid(44.104, -69.125, 4) == "FN54"
+    assert latlon_to_grid(*grid_to_latlon("FN54kc")) == "FN54kc"
+    assert latlon_to_grid(-33.86, 151.21) == "QF56od"
+
+
+def test_gnss_meta_matches_libm17_layout():
+    from ech.adapters.m17_reflector import gnss_meta
+    m = gnss_meta(45.0, -90.0)
+    assert len(m) == 14 and m[0] == 0x00 and m[1] == 0x80 and m[2] == 0
+    assert int.from_bytes(m[3:6], "big") == int(0.5 * 8388607)              # +45 deg = half of 90
+    lo = int.from_bytes(m[6:9], "big")
+    assert lo - (1 << 24) == int(-0.5 * 8388607)                           # -90 deg = minus half of 180
+    assert m[9:] == bytes(5)
+
+
+@pytest.mark.asyncio
+async def test_voice_tx_carries_grid_centre_position(monkeypatch):
+    from ech.core.grid import latlon_to_grid
+    a = _m17_adapter(monkeypatch)
+    a.set_base_location(40.7128, -74.0060)                  # an exact position (New York)
+    lat, lon = a.position()
+    assert latlon_to_grid(lat, lon) == "FN20xr" and (lat, lon) != (40.7128, -74.0060)
+    assert a.voice_start("w") is None
+    a.voice_push("w", bytes(640))
+    a.voice_end("w")
+    for _ in range(100):
+        if a._vtx is None:
+            break
+        await asyncio.sleep(0.02)
+    f = a._transport.sent[0]
+    assert int.from_bytes(f[18:20], "big") == 0x0025 and f[20:22] == b"\x00\x80"
+    assert ah.parse_m17_stream(f)["data_type"] == 2                         # still voice to receivers
+    a._position_mode = "off"
+    assert a.position() is None

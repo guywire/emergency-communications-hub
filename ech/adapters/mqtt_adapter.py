@@ -49,6 +49,10 @@ Config keys:
   long_name         str     NodeInfo long name announced on the TX channel (default: "ECH <name>")
   short_name        str     NodeInfo short name, max 4 chars (default: "ECH")
   nodeinfo_interval int     seconds between NodeInfo announcements, 0 = never (default: 10800)
+  bridge_node       dict|false  a second virtual node that bridged messages come from, so the
+                            gateway's own name isn't on every relayed post:
+                            {long_name: "MeshCore Bridge", short_name: "MCB", node_id: "!ec..."}
+                            (default: on with those names, id derived from the gateway; false = off)
   allow_dm          bool    let send() publish channel-key DMs to a !node id (default: False — modern
                             firmware expects PKI DMs, so these are normally dropped)
   dedup_with        list   other Meshtastic MQTT adapter names (same ECH process) this one defers to:
@@ -221,6 +225,18 @@ class MQTTAdapter(Adapter):
         self._mt_gateway_id = codec.node_id_str(num)
         self._mt_long_name = str(config.get("long_name") or f"ECH {self.name}")[:39]
         self._mt_short_name = str(config.get("short_name") or "ECH")[:4]
+        bn = config.get("bridge_node", {})
+        self._mt_bridge_num: int | None = None
+        if bn is not False and bn is not None:
+            bn = bn if isinstance(bn, dict) else {}
+            bnum = codec.parse_node_id(bn["node_id"]) if bn.get("node_id") else None
+            if bnum is None:
+                bnum = 0xEC000000 | (zlib.crc32(f"ech-{self.name}-{self._host}-bridge".encode()) & 0x00FFFFFF)
+            if bnum != num:
+                self._mt_bridge_num = bnum
+            self._mt_bridge_long = str(bn.get("long_name") or "MeshCore Bridge")[:39]
+            self._mt_bridge_short = str(bn.get("short_name") or "MCB")[:4]
+        self._mt_bridge_announced: set[str] = set()     # channels the bridge node has introduced itself on
         self._mt_nodeinfo_interval = int(config.get("nodeinfo_interval", 10800))
         tx = str(config.get("tx_channel") or "")
         self._mt_tx_idx = self._mt_channel_names.index(tx) if tx in self._mt_channel_names else 0
@@ -661,9 +677,9 @@ class MQTTAdapter(Adapter):
         if channel and channel != "PKI":   # PKI = the DM topic, not a channel
             self._mt_roots.setdefault(channel, set()).add(root)
             self._mt_channel_idx(channel)
-        if any(p._mt_node_num == pkt["from_num"] for p in self._mt_peers()):
+        if any(p._mt_is_own(pkt["from_num"]) for p in self._mt_peers()):
             return   # another ECH adapter's own gateway node (our posts relayed between brokers)
-        if pkt["from_num"] == self._mt_node_num:
+        if self._mt_is_own(pkt["from_num"]):
             # Our own publish coming back. From our own gateway id it's just the
             # broker echo; from anyone else's it was transmitted on RF and heard.
             gw = pkt["gateway_id"]
@@ -717,7 +733,7 @@ class MQTTAdapter(Adapter):
         if channel and channel != "PKI":   # PKI = the DM topic, not a channel
             self._mt_roots.setdefault(channel, set()).add(root)
             self._mt_channel_idx(channel)
-        if from_num == self._mt_node_num or any(p._mt_node_num == from_num for p in self._mt_peers()):
+        if self._mt_is_own(from_num) or any(p._mt_is_own(from_num) for p in self._mt_peers()):
             return
         pid = int(data.get("id") or 0) & 0xFFFFFFFF
         if self._mt_is_duplicate(from_num, pid):
@@ -868,7 +884,25 @@ class MQTTAdapter(Adapter):
     def _mt_roots_for(self, channel: str) -> list[str]:
         return self._mt_publish_roots or sorted(self._mt_roots.get(channel, ())) or ["msh/US"]
 
-    async def _mt_publish_packet(self, channel: str, to_num: int, portnum: int, payload: bytes) -> int | None:
+    def _mt_is_own(self, num) -> bool:
+        """Our gateway node or our bridge node."""
+        return num is not None and (num == self._mt_node_num or num == self._mt_bridge_num)
+
+    async def _mt_announce_bridge(self, channel: str) -> None:
+        from meshtastic.protobuf import mesh_pb2
+        from ech.adapters import meshtastic_mqtt_codec as codec
+        if self._mt_bridge_num is None or self._client is None or channel not in self._mt_keys:
+            return
+        user = mesh_pb2.User(id=codec.node_id_str(self._mt_bridge_num), long_name=self._mt_bridge_long,
+                             short_name=self._mt_bridge_short, hw_model=255)
+        await self._mt_publish_packet(channel, codec.BROADCAST, 4, user.SerializeToString(),
+                                      from_num=self._mt_bridge_num)
+        self._mt_bridge_announced.add(channel)
+        log.info("MQTT %s: announced bridge NodeInfo %s %r on %s", self.name,
+                 codec.node_id_str(self._mt_bridge_num), self._mt_bridge_long, channel)
+
+    async def _mt_publish_packet(self, channel: str, to_num: int, portnum: int, payload: bytes,
+                                 from_num: int | None = None) -> int | None:
         from ech.adapters import meshtastic_mqtt_codec as codec
         client = self._client
         if client is None:
@@ -876,7 +910,7 @@ class MQTTAdapter(Adapter):
             return None
         key = self._mt_keys.get(channel)
         pid = random.getrandbits(32) or 1
-        env = codec.encode_envelope(from_num=self._mt_node_num, to_num=to_num, packet_id=pid,
+        env = codec.encode_envelope(from_num=from_num or self._mt_node_num, to_num=to_num, packet_id=pid,
                                     channel=channel, key=key, gateway_id=self._mt_gateway_id,
                                     portnum=portnum, payload=payload)
         for root in self._mt_roots_for(channel):
@@ -909,8 +943,18 @@ class MQTTAdapter(Adapter):
         text = message.body.encode("utf-8")
         if len(text) > 200:
             text = text[:200].decode("utf-8", errors="ignore").encode("utf-8")
+        # Bridged channel posts come from the bridge node, not the gateway, so the
+        # gateway's own name isn't on every relayed message (operator, 2026-11-21).
+        sender = None
+        if raw.get("_bridged_by") and self._mt_bridge_num is not None and not message.to_id:
+            sender = self._mt_bridge_num
+            if channel not in self._mt_bridge_announced:
+                try:
+                    await self._mt_announce_bridge(channel)
+                except Exception as exc:
+                    log.warning("MQTT %s: bridge NodeInfo publish failed: %s", self.name, exc)
         try:
-            pid = await self._mt_publish_packet(channel, to_num, 1, text)   # 1 = TEXT_MESSAGE_APP
+            pid = await self._mt_publish_packet(channel, to_num, 1, text, from_num=sender)   # 1 = TEXT_MESSAGE_APP
         except Exception as exc:
             log.error("MQTT %s: publish error: %s", self.name, exc)
             return False
@@ -921,25 +965,33 @@ class MQTTAdapter(Adapter):
         message.raw = {**raw, "channel_idx": self._mt_channel_names.index(channel),
                        "channel_name": channel, "packet_id": pid, "mqtt": True}
         self._mark_tx(message)
-        log.info("MQTT %s: published text %08x to %s on %s", self.name, pid,
-                 "DM " + codec.node_id_str(to_num) if message.to_id else "channel", channel)
+        log.info("MQTT %s: published text %08x to %s on %s%s", self.name, pid,
+                 "DM " + codec.node_id_str(to_num) if message.to_id else "channel", channel,
+                 " as the bridge node" if sender else "")
         return True
 
     async def _mt_announce_loop(self) -> None:
         """Announce our NodeInfo so Meshtastic users see a name, not !ecxxxxxx."""
         from meshtastic.protobuf import mesh_pb2
         from ech.adapters import meshtastic_mqtt_codec as codec
+        if self._mt_nodeinfo_interval <= 0:
+            return                           # nodeinfo_interval: 0 = never announce
         try:
             await asyncio.sleep(20)          # let the connection come up and roots be learned
             while self._connected:
-                channel = self._mt_resolve_channel({})
-                if self._client is not None and channel in self._mt_keys:
+                # Every channel we hold a key for (= every channel we can post on), so
+                # listeners on MaineNet learn the name too, not just the TX channel.
+                channels = [c for c in self._mt_keys if c] if self._client is not None else []
+                if channels:
                     user = mesh_pb2.User(id=self._mt_gateway_id, long_name=self._mt_long_name,
                                          short_name=self._mt_short_name, hw_model=255)  # PRIVATE_HW
                     try:
-                        await self._mt_publish_packet(channel, codec.BROADCAST, 4, user.SerializeToString())
-                        log.info("MQTT %s: announced NodeInfo %s %r on %s", self.name,
-                                 self._mt_gateway_id, self._mt_long_name, channel)
+                        for channel in channels:
+                            await self._mt_publish_packet(channel, codec.BROADCAST, 4, user.SerializeToString())
+                            log.info("MQTT %s: announced NodeInfo %s %r on %s", self.name,
+                                     self._mt_gateway_id, self._mt_long_name, channel)
+                        for ch in sorted(self._mt_bridge_announced):
+                            await self._mt_announce_bridge(ch)
                     except Exception as exc:
                         log.warning("MQTT %s: NodeInfo publish failed: %s", self.name, exc)
                     await asyncio.sleep(self._mt_nodeinfo_interval)

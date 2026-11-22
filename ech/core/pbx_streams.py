@@ -134,7 +134,9 @@ def render_audio_conf(audio: dict) -> str:
                   "exten => m17,1,Answer()",
                   " same => n,Set(ECHU=${UUID()})",
                   " same => n,UserEvent(ECHListen,Uuid: ${ECHU},Source: m17#${ECHM17})",
-                  f" same => n,Dial(AudioSocket/{svc}/${{ECHU}})",
+                  # c(slin): without it the driver takes the caller's codec, and a real
+                  # phone's G.711 u-law bytes arrived as "16-bit" noise at half rate (2026-11-21)
+                  f" same => n,Dial(AudioSocket/{svc}/${{ECHU}}/c(slin))",
                   " same => n,Hangup()"]
         lines += ["; inbound calls to the web phone: ring the browsers if one is available",
                   'exten => webphone,1,GotoIf($["${DB(ech/webphone)}" = "1"]?ring)',

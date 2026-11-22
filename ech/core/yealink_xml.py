@@ -351,6 +351,8 @@ TALK_HELP = {
             "1. Dial 760 (761 = second link), or pick Listen / talk.\n"
             "2. Press *99 to transmit. Talk after the high beep.\n"
             "3. Press # to stop (two falling beeps).\n\n"
+            "Echo test: during the call press *43 instead of *99, talk, then #. "
+            "The reflector plays you back and nobody else hears it.\n\n"
             "A low tone means you can't transmit: someone else is talking, or the "
             "link is listen-only. You don't hear the reflector while you transmit.\n\n"
             "3 minute limit. Your audio goes out under the station callsign; "

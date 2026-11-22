@@ -204,13 +204,64 @@ TX_IDLE_S = 1.0               # no mic audio this long = the talker let go
 BUSY_S = 1.0                  # someone else's stream heard this recently = channel busy
 
 
+class Leveller:
+    """Transmit level control in front of Codec2, which garbles clipped input.
+    Hot audio is turned down toward TARGET (fast attack, slow release); quiet
+    audio is left alone (no boost, so background noise isn't raised). A final
+    limiter keeps peaks under LIMIT. 2026-11-21: a desk phone sent -6 dBFS
+    average / 0 dBFS peaks and the M17 echo came back unintelligible."""
+
+    TARGET = 32768 * 10 ** (-20 / 20)       # -20 dBFS RMS
+    LIMIT = 32768 * 10 ** (-3 / 20)         # -3 dBFS peak
+    ATTACK, RELEASE = 0.5, 0.03             # per 40 ms block
+
+    def __init__(self):
+        self.gain = 1.0
+        self.min_gain = 1.0
+
+    def process(self, pcm: bytes) -> bytes:
+        import array
+        import math
+        a = array.array("h", pcm[: len(pcm) // 2 * 2])
+        if not a:
+            return pcm
+        rms = math.sqrt(sum(x * x for x in a) / len(a))
+        want = min(1.0, self.TARGET / rms) if rms > 0 else 1.0
+        k = self.ATTACK if want < self.gain else self.RELEASE
+        self.gain += (want - self.gain) * k
+        self.min_gain = min(self.min_gain, self.gain)
+        peak = max(abs(x) for x in a) * self.gain
+        g = self.gain * (self.LIMIT / peak if peak > self.LIMIT else 1.0)
+        if g >= 0.999:
+            return pcm
+        return array.array("h", (int(x * g) for x in a)).tobytes()
+
+    def text(self) -> str:
+        import math
+        return "no level change" if self.min_gain > 0.99 else f"turned down up to {-20 * math.log10(self.min_gain):.0f} dB"
+
+
+META_GNSS = 1 << 5            # TYPE bits 5-6 (META type, no encryption): 01 = GNSS position
+
+
+def gnss_meta(lat: float, lon: float) -> bytes:
+    """14-byte META, GNSS position (M17 spec 2.0 "GNSS Data", same as libm17's
+    set_LSF_meta_position): data source 0 = M17 client, station type 0 = fixed,
+    validity = lat/lon only (altitude, velocity and radius zeroed, as the spec
+    requires for invalid fields), 24-bit two's complement fractions of 90 / 180 deg."""
+    la = int(max(-90.0, min(90.0, lat)) / 90.0 * 8388607)
+    lo = int(max(-180.0, min(180.0, lon)) / 180.0 * 8388607)
+    return (bytes([0x00, 0x80, 0x00]) + (la & 0xFFFFFF).to_bytes(3, "big")
+            + (lo & 0xFFFFFF).to_bytes(3, "big") + bytes(5))
+
+
 def build_stream_frame(sid: int, dst: bytes, src: bytes, fn: int, payload: bytes,
-                       last: bool = False, type_field: int = VOICE_TYPE) -> bytes:
+                       last: bool = False, type_field: int = VOICE_TYPE, meta: bytes = b"") -> bytes:
     """54-byte M17-over-IP stream frame: 'M17 ' + stream id + LSF (dst, src, type,
     14-byte meta) + frame number (bit 15 = last) + 16-byte payload + CRC-16 over
     everything before it."""
     body = (b"M17 " + (sid & 0xFFFF).to_bytes(2, "big") + dst + src + type_field.to_bytes(2, "big")
-            + b"\x00" * 14 + (((fn & 0x7FFF) | (0x8000 if last else 0)).to_bytes(2, "big"))
+            + meta[:14].ljust(14, b"\x00") + (((fn & 0x7FFF) | (0x8000 if last else 0)).to_bytes(2, "big"))
             + payload[:16].ljust(16, b"\x00"))
     return body + _crc16_m17(body).to_bytes(2, "big")
 
@@ -227,6 +278,29 @@ class _VoiceTx:
         self.started = self.last_audio = time.monotonic()
         self.ending = False
         self.task: asyncio.Task | None = None
+        self.underruns = 0          # 40 ms frames we had to fill with silence (gaps)
+        self.leveller = Leveller()
+        self.meta = b""
+        self.type_field = VOICE_TYPE
+        self.peak = 0               # mic level, for the log: silence vs speech
+        self.sumsq = 0
+        self.nsamp = 0
+
+    def level(self, pcm: bytes) -> None:
+        import array
+        a = array.array("h", pcm[: len(pcm) // 2 * 2])
+        if a:
+            self.peak = max(self.peak, max(abs(x) for x in a))
+            self.sumsq += sum(x * x for x in a)
+            self.nsamp += len(a)
+
+    def level_text(self) -> str:
+        import math
+        if not self.nsamp:
+            return "no audio"
+        rms = math.sqrt(self.sumsq / self.nsamp)
+        db = lambda v: f"{20 * math.log10(v / 32768):.0f} dBFS" if v > 0 else "silent"
+        return f"peak {db(self.peak)}, average {db(rms)}"
 
 
 class _M17Protocol(asyncio.DatagramProtocol):
@@ -279,6 +353,17 @@ class M17ReflectorAdapter(Adapter):
         self._rx_voice_at = 0.0               # last time someone else's voice stream arrived
         self._rx_voice_who = ""
         self._voice_tx_count = 0
+        # Position sent with voice (dashboards show it as a grid square):
+        # position: grid6 (default; centre of the 6-character square, about 5 km),
+        # exact, or off. grid: "FN54kc" overrides the hub location.
+        self._position_mode = str(config.get("position", "grid6")).lower()
+        self._base = None
+        if config.get("grid"):
+            from ech.core.grid import grid_to_latlon
+            la, lo = grid_to_latlon(str(config["grid"]))
+            if la is not None:
+                self._base = (la, lo)
+                self._position_mode = "exact"     # an explicit grid is already the precision wanted
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -440,6 +525,19 @@ class M17ReflectorAdapter(Adapter):
                   message.to_id or "BROADCAST", self._tx_count)
         return True
 
+    def set_base_location(self, lat: float, lon: float) -> None:
+        if not self.config.get("grid") and lat is not None and lon is not None:
+            self._base = (float(lat), float(lon))
+
+    def position(self) -> tuple[float, float] | None:
+        """What voice transmissions report, or None (no position, or position: off)."""
+        if not self._base or self._position_mode == "off":
+            return None
+        if self._position_mode == "exact":
+            return self._base
+        from ech.core.grid import latlon_to_grid, grid_to_latlon
+        return grid_to_latlon(latlon_to_grid(*self._base, 6))
+
     # ── Voice transmit (push-to-talk from the web page or a desk phone) ──
     # Callers: audio_hub.PhoneKeyer (*99 / # on 76x) and app.py /ws/audio (hold-to-talk).
 
@@ -472,6 +570,9 @@ class M17ReflectorAdapter(Adapter):
         except RuntimeError as exc:
             return str(exc)
         v = self._vtx = _VoiceTx(owner, dst_addr, enc)
+        pos = self.position()
+        if pos:
+            v.meta, v.type_field = gnss_meta(*pos), VOICE_TYPE | META_GNSS
         v.task = asyncio.ensure_future(self._voice_pacer(v))
         log.info("M17 %s: voice TX start (stream %04x, dst=%s, owner=%s)", self.name, v.sid,
                  dst or "BROADCAST", owner[:12])
@@ -487,10 +588,11 @@ class M17ReflectorAdapter(Adapter):
             self.voice_end(owner)
             return False
         v.last_audio = time.monotonic()
+        v.level(pcm)
         v.pcm += pcm
         while len(v.pcm) >= VOICE_FRAME_PCM:
             chunk, v.pcm = bytes(v.pcm[:VOICE_FRAME_PCM]), v.pcm[VOICE_FRAME_PCM:]
-            v.frames.append(v.enc.encode(chunk))
+            v.frames.append(v.enc.encode(v.leveller.process(chunk)))
         return True
 
     def voice_end(self, owner: str) -> None:
@@ -512,6 +614,8 @@ class M17ReflectorAdapter(Adapter):
                     v.ending = True
                 if v.ending and not v.frames:
                     break
+                if not v.frames and not v.ending:
+                    v.underruns += 1
                 payload = v.frames.popleft() if v.frames else silence
                 self._send_voice_frame(v, payload, last=False)
                 nxt += VOICE_FRAME_S
@@ -525,12 +629,13 @@ class M17ReflectorAdapter(Adapter):
             if self._vtx is v:
                 self._vtx = None
             self._voice_tx_count += 1
-            log.info("M17 %s: voice TX end (stream %04x, %d frames, %.1f s)", self.name, v.sid,
-                     v.fn, v.fn * VOICE_FRAME_S)
+            log.info("M17 %s: voice TX end (stream %04x, %d frames, %.1f s, %d gap frames, mic %s)", self.name,
+                     v.sid, v.fn, v.fn * VOICE_FRAME_S, v.underruns, v.level_text() + ", " + v.leveller.text())
 
     def _send_voice_frame(self, v: _VoiceTx, payload: bytes, last: bool) -> None:
         try:
-            self._transport.sendto(build_stream_frame(v.sid, v.dst, self._own_addr, v.fn, payload, last))
+            self._transport.sendto(build_stream_frame(v.sid, v.dst, self._own_addr, v.fn, payload, last,
+                                                      v.type_field, v.meta))
         except OSError as exc:
             self._last_error = str(exc)
         v.fn = (v.fn + 1) & 0x7FFF

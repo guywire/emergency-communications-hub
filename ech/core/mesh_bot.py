@@ -394,28 +394,9 @@ def _is_mentioned(body: str, name) -> bool:
     return False
 
 
-# A sender whose name says it is a bot ("EWR-BOT", "Zippy_WX_BOT", "VTRPH Pingbot",
-# "NH.PingBot"): "bot" ending a word, not inside one ("Abbott", "Bottle").
-_BOT_NAME_RE = re.compile(r"bot(?![a-z])", re.IGNORECASE)
-# Bodies that are another bot's output, whatever the sender is called.
-_BOT_BODY_RE = re.compile(
-    r"^\s*(?:\[[0-9a-f]{2,8}\]\s|[0-9a-f]{4}:\s|pong\b|bot stats\b|unrecognized command|unknown command)",
-    re.IGNORECASE)
+from ech.core.botfilter import is_bot_message as _is_bot_message   # shared with the bridges
 _MENTION_RE = re.compile(r"@\[[^\]]+\]|@[A-Za-z0-9_.-]+")
-
-
-def _is_bot_message(msg, ignore_names: list, check_names: bool = True) -> bool:
-    """True for traffic from another bot: a name on the ignore list, a name that
-    ends a word in "bot", or a body shaped like a bot reply (multi-line reports,
-    "[8875] ..." tags, "E0C8: ..." node lists, "Pong!")."""
-    who = (msg.from_display or msg.from_id or "").strip().lower()
-    if who and any(who == n or who.startswith(n + " ") for n in ignore_names):
-        return True
-    if check_names and _BOT_NAME_RE.search(who):
-        return True
-    body = msg.body or ""
-    return bool(_BOT_BODY_RE.match(body)) or body.count("\n") >= 2
-
+_LEAD_MENTIONS_RE = re.compile(r"^\s*(?:(?:@\[[^\]]+\]|@[A-Za-z0-9_.-]+)[\s,:]*)+")
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
@@ -781,7 +762,13 @@ class MeshBot:
             # sentence that happens to contain a trigger word dispatch a reply.
             return
 
-        m = _CMD_RE.search(msg.body)
+        if is_dm:
+            m = _CMD_RE.search(msg.body)
+        else:
+            # On a channel the command must START the message (after any @mentions):
+            # "@bot does bridged mean internet? ... keep mesh off grid" is a question,
+            # not the grid command (it broadcast the station position, 2026-11-21).
+            m = _CMD_RE.match(_LEAD_MENTIONS_RE.sub("", msg.body or "", count=1))
         if m:
             word = m.group(1).lower().rstrip("?")   # normalise "weather?" → "weather"
             cmd  = _CMD_ALIASES.get(word, word)
@@ -1024,12 +1011,14 @@ class MeshBot:
 
     def _cmd_grid(self, args: str) -> str:
         a = args.strip()
-        # No args → own grid from configured lat/lon
+        # No args → the station's 4-character square only. Never coordinates or a
+        # 6-character square: 2026-11-21 "keep mesh off grid" on Public triggered this
+        # and the old reply broadcast the station position to about 10 m.
         if not a:
             lat, lon = self._resolve_coords()
             if lat is None:
-                return "grid: observer position not set (configure base location in Settings)"
-            return f"grid: {self._latlon_to_grid(lat, lon)} ({lat:.4f}, {lon:.4f})"
+                return "grid: use grid FN20 or grid 40.7 -74.0"
+            return f"grid: station is in {self._latlon_to_grid(lat, lon)[:4]}. Use grid FN20 or grid 40.7 -74.0"
         # Two numbers → encode lat lon
         parts = a.split()
         if len(parts) == 2:
@@ -1046,7 +1035,7 @@ class MeshBot:
                 return f"grid: {token.upper()} → {lat:.3f}, {lon:.3f}"
             except Exception:
                 pass
-        return f"grid: '{a}' — use: grid | grid FN43 | grid 44.0 -69.1"
+        return f"grid: '{a}' — use: grid FN20 | grid 40.7 -74.0"
 
     # ── id ────────────────────────────────────────────────────────────────────
 
