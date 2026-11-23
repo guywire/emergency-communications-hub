@@ -5,7 +5,7 @@ A MeshPhone network map where the WT0F MeshPhone database is only the guide
 (which offices and trunks to look for) and the facts are polled from the mesh:
 the PBXs themselves and the AREDN nodes they sit behind.
 
-Every few hours (map_refresh_hours, default 6):
+Once a day (map_refresh_hours, default 24):
 
   1. Mesh host list. The local AREDN node's sysinfo (hosts=1&services=1)
      lists every host on the mesh, grouped by the node it sits behind, and
@@ -34,7 +34,7 @@ Every few hours (map_refresh_hours, default 6):
 
 Config (radio_directory.meshphone in config.yaml):
   map_enabled        bool   default true
-  map_refresh_hours  float  default 6, minimum 1
+  map_refresh_hours  float  default 24, minimum 1
   own_office         str    this PBX's office name (e.g. MYTOWN)
   hosts_url          str    sysinfo URL of a local AREDN node (default:
                             radio_directory.aredn_discovery.sysinfo_url)
@@ -59,7 +59,7 @@ import time
 
 log = logging.getLogger(__name__)
 
-REFRESH_S = 6 * 3600
+REFRESH_S = 24 * 3600
 RETRY_S = 600
 FIRST_DELAY_S = 120
 IAX_PORT = 4569

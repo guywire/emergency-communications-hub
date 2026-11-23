@@ -63,7 +63,8 @@ HOIP_BASE = "https://hamsoverip.github.io/wiki/reference/"
 ASL_NODES_URL = "https://snodes.allstarlink.org/gennodes.php"
 USER_AGENT = "ECH-directory-refresh/1.0"
 MIN_INTERVAL_S = 15 * 60
-MANUAL_MIN_GAP_S = 5 * 60   # AllStarLink's stated cache time for the node list
+MANUAL_MIN_GAP_S = 5 * 60
+MESHPHONE_REFRESH_S = 24 * 3600   # MeshPhone offices + white pages: once a day over the mesh   # AllStarLink's stated cache time for the node list
 
 # page -> function(ext) -> category; mirrors radio_directory.py's categories
 _PAGES = {
@@ -331,6 +332,12 @@ class DirectoryStatus:
         from ech.core import meshphone_directory as mp
         cfg = mp.settings(self._config)
         if not cfg["enabled"]:
+            return []
+        # once a day: skip while both lists are fresh (a failed fetch retries next pass)
+        now = time.time()
+        if (self.mp_offices and self.mp_people
+                and now - (self.mp_offices_refreshed_at or 0) < MESHPHONE_REFRESH_S
+                and now - (self.mp_people_refreshed_at or 0) < MESHPHONE_REFRESH_S):
             return []
         errors = []
         try:

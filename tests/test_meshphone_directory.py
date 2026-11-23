@@ -316,3 +316,22 @@ async def test_meshphone_map_from_the_internet_needs_a_login():
         assert r.status_code == 302 and r.headers["location"] == "/login?next=/cameras/"
     finally:
         cams.data = None
+
+
+def test_meshphone_refresh_once_a_day(live):
+    import time
+    live.mp_offices = [{"name": "KEEP"}]
+    live.mp_people = [{"callsign": "KEEP", "number": "5554101"}]
+    live.mp_offices_refreshed_at = live.mp_people_refreshed_at = time.time() - 3 * 3600
+
+    class Boom:
+        async def get(self, *a, **k):
+            raise AssertionError("fresh lists must not be fetched again")
+    assert asyncio.run(live._refresh_meshphone(Boom())) == []
+
+    live.mp_offices_refreshed_at = time.time() - 25 * 3600   # a day old: due
+
+    class Down:
+        async def get(self, url, headers=None):
+            raise RuntimeError("no route to host")
+    assert asyncio.run(live._refresh_meshphone(Down()))

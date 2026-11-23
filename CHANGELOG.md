@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.138 (2026-11-23)
+
+- **MeshPhone polls once a day.** The mesh measurement (host list, PBX IAX2 pokes,
+  phone SIP pings, trunk reports) now runs every 24 h instead of every 6 h, and the
+  MeshPhone offices and white pages are fetched over the mesh once a day instead of
+  hourly. Cameras and services were already daily. `map_refresh_hours` still overrides.
+
 ## v1.1.137 (2026-11-23)
 
 - Map: icons instead of text labels, with the label on hover (click still opens the details). POTA a pine, SOTA a mountain, On the Air a flag, DX Cluster an antenna, PSK Reporter signal bars, each in its layer colour; military / rescue aircraft just the plane or helicopter; Gloucester Hill (NGR&S) reports a dashed diamond fading with age, and its site an antenna; MeshPhone offices just the phone. The Map key shows the icons, including what the military / rescue colours mean.
