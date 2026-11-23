@@ -8,6 +8,11 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.129 (2026-11-23)
+
+- Messages: mute individual channels on any adapter from a "🔇 Mute…" menu at the end of the adapter's channel bar (works on phones; right-click a channel still works too). Muted channels show struck through, stay out of "All ch", "All traffic" and the unread count, and can still be opened by clicking them. Display only: they're still received, logged and bridged.
+- Adapter and channel mutes are saved to your ECH account instead of the browser, so they follow you between devices. Mutes already set in a browser are carried over the first time it loads.
+
 ## v1.1.128 (2026-11-23)
 
 - MeshPhone map page (/meshphone/, shared with the mesh): the AREDN cameras are on it too, as a map layer you can switch on and off next to the MeshPhone offices and trunks, and a Cameras tab with a searchable table (status, what it is, software, which app views it, link). /cameras/ opens the same page as an "AREDN Camera Map", cameras on and the phone layers off. Same access as the MeshPhone page: no login on the mesh and LAN, ECH login from anywhere else.

@@ -1531,7 +1531,9 @@ function handleInbound(msg) {
   const a = msg.source_adapter;
   const _tf = state.filter.adapter === a ? state.filter.msgType
     : ((_adapterFilterMemory[a] || {}).msgType || 'all');
-  const _hiddenType = _tf !== 'all' && msgTypePrefix(msg) !== _tf;
+  // ...nor for muted adapters / channels
+  const _hiddenType = (_tf !== 'all' && msgTypePrefix(msg) !== _tf)
+    || state.mutedAdapters.has(a) || _isChanMuted(a, msg.source_channel);
   if (!_hiddenType) state.unread[a] = (state.unread[a] || 0) + 1;
   const badge = document.getElementById(`badge-${a}`);
   if (badge && !_hiddenType) {
@@ -2284,16 +2286,79 @@ function filterAdapter(adapter, el) {
 let _mutedChans = {};
 try { _mutedChans = JSON.parse(localStorage.getItem('ech.mutedChannels') || '{}') || {}; } catch (e) { _mutedChans = {}; }
 function _isChanMuted(adapter, channel) { return !!(channel && _mutedChans[`${adapter}|${channel}`]); }
-function toggleChanMute(channel, ev) {
+// Mutes are saved to the logged-in user's account (/api/user/muted), so they
+// follow you between devices; localStorage is only the offline fallback.
+// Display only: muted traffic is still received, stored and bridged.
+function _saveMutes() {
+  try {
+    localStorage.setItem('ech.mutedChannels', JSON.stringify(_mutedChans));
+    localStorage.setItem('ech_muted', JSON.stringify([...state.mutedAdapters]));
+  } catch (e) { /* storage blocked */ }
+  fetch('/api/user/muted', {method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({adapters: [...state.mutedAdapters], channels: Object.keys(_mutedChans)})})
+    .then(r => { if (!r.ok) toast('Mute saved on this device only (server refused)', 'err'); })
+    .catch(() => toast('Mute saved on this device only (offline)', 'err'));
+}
+async function _loadMutes() {
+  let d = null;
+  try { d = await fetch('/api/user/muted').then(r => r.ok ? r.json() : null); } catch (e) { return; }
+  if (!d) return;
+  if (!d.saved) {                      // first visit since mutes moved to the account: keep this browser's
+    if (Object.keys(_mutedChans).length || state.mutedAdapters.size) _saveMutes();
+    return;
+  }
+  _mutedChans = Object.fromEntries((d.channels || []).map(k => [k, true]));
+  state.mutedAdapters = new Set(d.adapters || []);
+  try {
+    localStorage.setItem('ech.mutedChannels', JSON.stringify(_mutedChans));
+    localStorage.setItem('ech_muted', JSON.stringify([...state.mutedAdapters]));
+  } catch (e) { /* storage blocked */ }
+  document.querySelectorAll('.ch-mute-btn[id^="mute-"]').forEach(b => {
+    const n = b.id.slice(5), on = state.mutedAdapters.has(n);
+    b.classList.toggle('muted', on);
+    b.title = (on ? 'Unmute' : 'Mute') + ' messages from ' + n;
+  });
+  buildChanSubBar();
+  renderAll();
+}
+function toggleChanMute(channel, ev, adapter) {
   if (ev) ev.preventDefault();
-  const k = `${state.filter.adapter}|${channel}`;
+  const k = `${adapter || state.filter.adapter}|${channel}`;
   if (_mutedChans[k]) delete _mutedChans[k]; else _mutedChans[k] = true;
-  try { localStorage.setItem('ech.mutedChannels', JSON.stringify(_mutedChans)); } catch (e) { /* storage blocked: mute lasts this session */ }
-  toast(_mutedChans[k] ? `${channel} muted — hidden from "All ch" (right-click again to unmute)` : `${channel} unmuted`, 'ok');
+  _saveMutes();
+  toast(_mutedChans[k] ? `${channel} muted: hidden from "All ch" and unread counts (click it to read it anyway)` : `${channel} unmuted`, 'ok');
   buildChanSubBar();
   renderAll();
   return false;
 }
+// "🔇 Mute…" pill: a checklist of this adapter's channels (works on touch screens,
+// where the right-click shortcut doesn't exist)
+let _chanBarChannels = [];
+function openMuteMenu(ev) {
+  ev.stopPropagation();
+  let m = document.getElementById('mute-menu');
+  if (m) { m.remove(); return; }
+  const adapter = state.filter.adapter;
+  m = document.createElement('div');
+  m.id = 'mute-menu';
+  m.style.cssText = 'position:fixed;z-index:3000;background:var(--bg2,#161b22);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font:11px var(--mono);max-height:60vh;overflow:auto;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+  m.innerHTML = `<div style="color:var(--muted);margin-bottom:4px">Mute channels on ${escHtml(adapter)}</div>` +
+    _chanBarChannels.map(ch => `<label style="display:flex;gap:6px;align-items:center;padding:3px 0;cursor:pointer;white-space:nowrap">
+      <input type="checkbox" data-ch="${escHtml(ch)}"${_isChanMuted(adapter, ch) ? ' checked' : ''}> ${escHtml(ch)}</label>`).join('') +
+    `<div style="color:var(--dim);margin-top:4px;max-width:220px;white-space:normal">Muted channels stay out of "All ch", "All traffic" and the unread count. Still received, logged and bridged.</div>`;
+  m.querySelectorAll('input').forEach(i => i.onchange = () => toggleChanMute(i.dataset.ch, null, adapter));
+  document.body.appendChild(m);
+  const r = ev.currentTarget.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - m.offsetWidth - 8)) + 'px';
+  m.style.top = Math.min(r.bottom + 4, window.innerHeight - m.offsetHeight - 8) + 'px';
+  setTimeout(() => document.addEventListener('click', function close(e) {
+    const mm = document.getElementById('mute-menu');
+    if (mm && mm.contains(e.target)) return;
+    if (mm) mm.remove();
+    document.removeEventListener('click', close);
+  }), 0);
+}
+_loadMutes();
 
 function filterChannel(channel, el) {
   state.filter.channel = channel;
@@ -2351,9 +2416,11 @@ function buildChanSubBar() {
       const jsCh = escHtml(JSON.stringify(ch));
       return `<span class="chan-pill${state.filter.channel === ch ? ' active' : ''}" onclick='filterChannel(${jsCh}, this)' oncontextmenu='return toggleChanMute(${jsCh}, event)'`
         + ` title="Click: show only ${escHtml(ch)} · Right-click: ${muted ? 'unmute' : 'mute (hide from All ch)'}"`
-        + `${muted ? ' style="opacity:.45;text-decoration:line-through"' : ''}>${escHtml(ch)}</span>`;
+        + `${muted ? ' style="opacity:.45;text-decoration:line-through"' : ''}>${muted ? '🔇 ' : ''}${escHtml(ch)}</span>`;
     }),
+    `<span class="chan-pill" onclick="openMuteMenu(event)" title="Choose channels to mute on this adapter">🔇 Mute…</span>`,
   ].join('');
+  _chanBarChannels = channels;
 }
 
 // Per-type filter (MSG/OBJ/POS/STATUS) — same pill UX as the channel sub-bar,
@@ -2776,7 +2843,7 @@ function toggleMuteAdapter(name) {
     state.mutedAdapters.add(name);
     if (btn) { btn.classList.add('muted'); btn.title = 'Unmute messages from ' + name; }
   }
-  localStorage.setItem('ech_muted', JSON.stringify([...state.mutedAdapters]));
+  _saveMutes();
   renderAll();
 }
 

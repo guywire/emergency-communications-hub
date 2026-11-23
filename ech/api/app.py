@@ -387,6 +387,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             "/api/hamlog/",              # logging a QSO isn't transmitting
             "/api/ping",                 # trace probe — diagnostic, not a composed message
             "/api/user/map-profiles",    # a user's own map-layer preferences
+            "/api/user/muted",           # a user's own muted adapters / channels
         )
         if session.get("role") == "viewer" and method in ("POST", "PUT", "DELETE"):
             if not any(path == p or path.startswith(p) for p in VIEWER_ALLOWED_MUTATIONS):
@@ -1734,6 +1735,41 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             default = None
         await db.set_kv(f"map_profiles:{user}", _json.dumps({"default": default, "profiles": clean}))
         return {"status": "ok", "default": default, "profiles": clean}
+
+    # ── Per-user mutes: adapters and individual channels hidden from the feed ──
+    # Display only: muted traffic is still received, stored, bridged and
+    # searchable; it just stays out of "All" views and unread counts.
+    @app.get("/api/user/muted")
+    async def get_muted(request: Request):
+        import json as _json
+        user = await _map_prof_user(request)
+        raw = await db.get_kv(f"muted:{user}")
+        try:
+            data = _json.loads(raw) if raw else None
+        except Exception:
+            data = None
+        if not isinstance(data, dict):
+            return {"adapters": [], "channels": [], "saved": False}
+        return {"adapters": data.get("adapters", []), "channels": data.get("channels", []), "saved": True}
+
+    @app.put("/api/user/muted")
+    async def put_muted(request: Request):
+        """Replace the caller's mutes: {adapters: [name], channels: ["adapter|channel"]}."""
+        import json as _json
+        from fastapi.responses import JSONResponse
+        user = await _map_prof_user(request)
+        body = await request.json()
+        out = {}
+        for key, limit in (("adapters", 100), ("channels", 500)):
+            vals = body.get(key) or []
+            if not isinstance(vals, list) or len(vals) > limit:
+                return JSONResponse({"detail": f"{key} must be a list of at most {limit}"}, status_code=400)
+            clean = sorted({str(v)[:200] for v in vals if isinstance(v, str) and v.strip()})
+            if key == "channels" and any("|" not in v for v in clean):
+                return JSONResponse({"detail": "channels are 'adapter|channel'"}, status_code=400)
+            out[key] = clean
+        await db.set_kv(f"muted:{user}", _json.dumps(out))
+        return {"status": "ok", **out}
 
     @app.get("/api/map/tracks")
     async def map_tracks(hours: float = 24.0):
