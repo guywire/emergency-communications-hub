@@ -9,12 +9,14 @@
 :root {
   --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e;
   --accent: #58a6ff; --up: #3fb950; --verified: #2ea043; --both: #58a6ff; --down: #f85149;
-  --unknown: #8b949e; --self: #e3b341; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --unknown: #8b949e; --self: #e3b341;
+  --lat1: #3fb950; --lat2: #a5d64c; --lat3: #f0883e; --lat4: #db61a2; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: light) {
   :root { --bg: #f6f8fa; --panel: #ffffff; --border: #d0d7de; --text: #1f2328; --muted: #59636e;
     --accent: #0969da; --up: #1a7f37; --verified: #1a7f37; --both: #0969da; --down: #cf222e;
-    --unknown: #6e7781; --self: #9a6700; }
+    --unknown: #6e7781; --self: #9a6700;
+    --lat1: #1a7f37; --lat2: #6b8e00; --lat3: #bc4c00; --lat4: #bf3989; }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
@@ -63,6 +65,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
   <button class="on" data-v="map">Map</button>
   <button data-v="offices">Offices</button>
   <button data-v="people">People</button>
+  <button data-v="cameras">Cameras</button>
   <button data-v="about">About</button>
 </nav>
 
@@ -73,6 +76,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
 
 <section class="view" id="v-offices"><div class="wrap">
   <input type="search" id="q-off" placeholder="Search offices: name, place, admin, callsign, office code…">
+  <label class="note" style="display:inline-flex;gap:6px;align-items:center;margin:0 0 10px 12px"><input type="checkbox" id="f-mesh"> Only PBXs not in the directory</label>
   <div class="tbl"><table id="t-off"><thead><tr>
     <th data-k="name">Office</th><th data-k="location">Location</th><th data-k="codes">Codes</th>
     <th data-k="admin">Admin</th><th data-k="state">Measured</th><th data-k="pbx" class="hide-sm">PBX</th>
@@ -80,18 +84,29 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
 </div></section>
 
 <section class="view" id="v-people"><div class="wrap">
-  <input type="search" id="q-ppl" placeholder="Search people: callsign, name, number, PBX…">
+  <input type="search" id="q-ppl" placeholder="Search people: callsign, name, number, PBX, place…">
   <div class="note" id="ppl-note"></div>
   <div class="tbl"><table id="t-ppl"><thead><tr>
-    <th data-k="callsign">Callsign</th><th data-k="name">Name</th><th data-k="number">MeshPhone</th><th data-k="pbx">PBX</th>
+    <th data-k="callsign">Callsign</th><th data-k="name">Name</th><th data-k="number">MeshPhone</th><th data-k="pbx">PBX</th><th data-k="location">Location</th><th data-k="status">Status</th>
+  </tr></thead><tbody></tbody></table></div>
+</div></section>
+
+<section class="view" id="v-cameras"><div class="wrap">
+  <input type="search" id="q-cam" placeholder="Search cameras: name, node, place, software, status…">
+  <div class="note" id="cam-note"></div>
+  <div class="tbl"><table id="t-cam"><thead><tr>
+    <th data-k="name">Camera</th><th data-k="node">Node / place</th><th data-k="status">Checked</th>
+    <th data-k="kind">What it is</th><th data-k="view" class="hide-sm">View with</th><th data-k="link">Link</th>
   </tr></thead><tbody></tbody></table></div>
 </div></section>
 
 <section class="view" id="v-about"><div class="wrap note" style="font-size:13.5px;color:var(--text)">
   <h3>What this map shows</h3>
-  <p>Offices, codes, number patterns and trunk lists come from the WT0F MeshPhone Database
-  (<span class="mono">wt0f-meshphone.local.mesh</span>). Everything marked <b>measured</b> was checked from
-  one PBX on the mesh, named at the top of the page, every few hours:</p>
+  <p>The WT0F MeshPhone Database (<span class="mono">wt0f-meshphone.local.mesh</span>) is used as a guide: office
+  names, codes, number patterns and trunk lists. The facts are polled from the mesh every few hours by the PBX
+  named at the top of the page: whether each PBX answers, from the PBXs themselves, and where it is, from the
+  AREDN node it sits behind (its published coordinates and grid square). PBXs that look like a phone system by
+  host name or advertised service but aren't in the directory are added too.</p>
   <ul>
     <li><b>PBX up</b>: the PBX answered an IAX2 POKE with a PONG. Asterisk answers this before any login, so it
       proves the PBX is running and reachable over the mesh. The time is the round trip from the measuring PBX.</li>
@@ -101,35 +116,62 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
       against IAX from unknown addresses.</li>
     <li><b>No address</b>: the directory has no IP and no PBX-like host was found for the admin's callsign.</li>
   </ul>
-  <p>Links:</p>
+  <p>Trunks (lines), best evidence first:</p>
   <ul>
-    <li><b>Verified</b>: a trunk of the measuring PBX itself, qualified by Asterisk, with its latency.</li>
-    <li><b>Both ends up</b>: listed in the directory, and both PBXs answer. The trunk can work; whether it is
-      configured on both sides can only be seen from those PBXs.</li>
-    <li><b>One end down</b>: at least one end didn't answer.</li>
-    <li><b>Unknown</b>: at least one end has no address to test.</li>
-    <li>A thin line means only one of the two offices lists the trunk.</li>
+    <li><b>Our trunk (verified)</b>: a trunk of the measuring PBX itself, qualified by its Asterisk, with latency.</li>
+    <li><b>Reported</b>: PBXs running the MeshPhone generator scripts report their own trunks' Asterisk qualify
+      result (latency or DOWN) when they check in to the WT0F database. Each direction is shown separately with
+      the date of that PBX's last check-in; the line colour is the average latency. Up one way and DOWN the other
+      usually means the trunk is only configured on one side.</li>
+    <li><b>Not reported</b>: neither PBX reports this trunk. All that can be checked from here is whether both
+      PBXs answer IAX (dotted blue), one doesn't (dotted red), or one has no address (dotted grey).</li>
   </ul>
   <p>The white pages come from the last copy of the MeshPhone WhitePages served on the mesh.</p>
+  <h3>Cameras</h3>
+  <p>Every camera or video stream advertised as a service anywhere on the mesh (tagged camera or video by its
+  owner, or named like one), placed at the AREDN node that advertises it. Once a day each one gets the same single
+  request a viewer would make: a web page or snapshot fetch, or an RTSP DESCRIBE. <b>Open</b> means it answered
+  without a password (beyond any the owner put in the advertised link), <b>password needed</b> means it asked for a
+  login. A camera host that isn't the node itself is also checked for the ports camera apps use (RTSP 554/8554,
+  Hikvision 8000, Dahua 37777, Reolink 9000, XMEye 34567), so the table can say which app views it.
+  Passwords in advertised links are masked in the text; the link itself is the owner's, unchanged.
+  <span class="mono">/cameras/</span> opens this page on the cameras.</p>
 </div></section>
 
 <script src="../static/leaflet/leaflet.js"></script>
 <script>
 'use strict';
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+// Offices past the date line (Australia, New Zealand, Hawaii's west, Asia) are
+// drawn at lon-360 so they sit west of the Americas on the same copy of the world
+// instead of on the next one, with their trunk lines straight across the Pacific.
+const plon = lon => lon > 100 ? lon - 360 : lon;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt7 = n => /^\d{7}$/.test(n || '') ? n.slice(0, 3) + '-' + n.slice(3) : (n || '');
 const ago = t => { if (!t) return 'never'; const m = Math.round((Date.now() / 1000 - t) / 60);
   return m < 60 ? m + ' min ago' : m < 2880 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; };
 const mail = (o, bare) => o.admin_email ? `${bare ? '' : ' · '}<a href="mailto:${encodeURIComponent(o.admin_email).replace(/%40/g, '@')}">${esc(o.admin_email)}</a>` : '';
 const STATE_LABEL = {up: 'PBX up', self: 'measuring PBX', no_answer: 'no answer', no_address: 'no address'};
+// Links with a real trunk measurement (ours, or reported by the PBXs) are
+// coloured by latency; the rest show only what can be inferred from their ends.
+const LAT = [[50, '--lat1', '< 50 ms'], [100, '--lat2', '50-100 ms'], [150, '--lat3', '100-150 ms'], [1e9, '--lat4', '> 150 ms']];
+const latCol = ms => (LAT.find(([lim]) => ms < lim) || LAT[3])[1];
 const LINK = {
-  verified: {label: 'Verified trunk', col: '--verified', w: 4, dash: null},
-  both_up:  {label: 'Both ends up', col: '--both', w: 2.5, dash: null},
-  end_down: {label: 'One end down', col: '--down', w: 2, dash: '6 5'},
-  down:     {label: 'Trunk down', col: '--down', w: 3.5, dash: null},
-  unknown:  {label: 'Unknown (no address)', col: '--unknown', w: 1.5, dash: '2 5'},
+  verified:       {label: 'Our trunk (verified)', w: 4.5, dash: null, measured: true},
+  reported_up:    {label: 'Trunk up (reported)', w: 3.5, dash: null, measured: true},
+  reported_mixed: {label: 'Up one way, DOWN the other', col: '--self', w: 3, dash: '8 4', measured: true},
+  reported_down:  {label: 'Trunk DOWN (reported)', col: '--down', w: 3, dash: null},
+  down:           {label: 'Our trunk DOWN', col: '--down', w: 4, dash: null},
+  both_up:        {label: 'Not reported, both PBXs up', col: '--both', w: 1.5, dash: '3 4'},
+  end_down:       {label: 'Not reported, a PBX is down', col: '--down', w: 1.2, dash: '1 5'},
+  unknown:        {label: 'Not reported, no address', col: '--unknown', w: 1, dash: '1 6'},
 };
+const linkCol = l => { const st = LINK[l.state] || LINK.unknown;
+  return st.col ? st.col : (l.rtt_ms != null ? latCol(l.rtt_ms) : '--both'); };
+function repText(l) {
+  return (l.reports || []).map(x => `${esc(x.by)} &rarr; ${esc(x.to)}: <b>${x.down ? 'DOWN' : x.ms + ' ms'}</b>` +
+    `<span class="muted"> &middot; reported ${x.at ? esc(x.at.slice(0, 10)) : '(date unknown)'}</span>`).join('<br>');
+}
 let DATA = null, map = null;
 
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
@@ -146,57 +188,96 @@ function statePill(o) {
          (o.ip_moved ? ` <span class="pill" style="color:var(--self);border-color:var(--self)" title="directory says ${esc(o.listed_ip)}">moved</span>` : '');
 }
 
+// AREDN node page: by name on the mesh (http://NODE.local.mesh/), the IP as a fallback
+const nodeLink = o => o.node ? `<a href="http://${encodeURIComponent(o.node)}.local.mesh/" target="_blank" rel="noopener" class="mono">${esc(o.node)}</a>` +
+  (o.node_ip ? ` <a href="http://${esc(o.node_ip)}/" target="_blank" rel="noopener" class="muted mono">${esc(o.node_ip)}</a>` : '') : '';
+function placeLine(o) {
+  const bits = [];
+  if (o.node) bits.push(`AREDN node ${nodeLink(o)}${o.grid ? ' &middot; ' + esc(o.grid) : ''}`);
+  if (o.loc_source === 'directory') bits.push('<span class="muted">location from the directory</span>');
+  if ((o.shares_pbx_with || []).length) bits.push(`Same PBX also serves: ${esc(o.shares_pbx_with.join(', '))}`);
+  if (o.hosted) bits.push(`<span class="muted">Hosted office: the PBX is here; the directory lists the office's area as ${esc(o.location)} (${o.loc_off_km} km away)</span>`);
+  else if (o.loc_off_km) bits.push(`<span style="color:var(--self)">directory says ${esc(o.location || 'elsewhere')}, ${o.loc_off_km} km away</span>`);
+  return bits.join('<br>');
+}
+
 function officePopup(o) {
   const codes = (o.office_codes || []).join(', ');
-  return `<b>${esc(o.name)}</b> <span class="muted">${esc(o.location)}</span><br>
-    ${statePill(o)}<br>
+  return `<b>${esc(o.name)}</b> <span class="muted">${esc(o.place || o.location)}</span><br>
+    ${statePill(o)}${o.in_directory ? '' : ' <span class="pill" style="color:var(--accent);border-color:var(--accent)">found on the mesh, not in the directory</span>'}<br>
+    ${placeLine(o) ? placeLine(o) + '<br>' : ''}
+    ${(o.numbers || []).length ? `Advertised numbers: <span class="mono">${esc(o.numbers.join(' '))}</span><br>` : ''}
+    ${o.number_range ? `Number block: <span class="mono">${esc(o.number_range)}</span> <span class="muted">(from its white-pages listings)</span><br>` : ''}
+    ${(o.people_at || []).length ? `<details><summary>${o.people_count} listed ${o.people_count === 1 ? 'person' : 'people'}</summary>` +
+      o.people_at.slice(0, 15).map(p => `<div><span class="mono">${esc(fmt7(p.number))}</span> ${esc(p.callsign)} ${esc(p.name)}</div>`).join('') +
+      (o.people_count > 15 ? `<div class="muted">&hellip; see the People tab</div>` : '') + '</details>' : ''}
+    ${o.in_directory ? '' : `<div style="margin-top:3px">Not dialable by MeshPhone number${o.answering_ip ? ` &middot; dial by IP <span class="mono">${esc(o.answering_ip)}</span>` : ''}</div>`}
     ${codes ? `Office code: <span class="mono">${esc(codes)}</span><br>` : ''}
     ${(o.dialplans || []).length ? `Numbers: <span class="mono">${esc(o.dialplans.join(' '))}</span><br>` : ''}
-    Admin: ${o.admin_name ? esc(o.admin_name) + ' ' : ''}${esc(o.admin_callsign)}${o.admin_phone ? ` · <span class="mono">${esc(fmt7(o.admin_phone))}</span>` : ''}${mail(o)}<br>
+    ${o.admin_callsign || o.admin_name ? 'Admin: ' : ''}${o.admin_name ? esc(o.admin_name) + ' ' : ''}${esc(o.admin_callsign)}${o.admin_phone ? ` · <span class="mono">${esc(fmt7(o.admin_phone))}</span>` : ''}${mail(o)}<br>
     ${o.answering_ip ? `Answered at <span class="mono">${esc(o.answering_ip)}</span>${o.ip_moved ? ` (directory: <span class="mono">${esc(o.listed_ip)}</span>)` : ''}<br>`
       : o.tried && o.tried.length ? `Tried <span class="mono">${esc(o.tried.join(', '))}</span><br>` : ''}
-    <span class="muted">Directory: ${esc(o.listed_status || '?')}${o.pbx_type && o.pbx_type !== 'Unknown' ? ' · ' + esc(o.pbx_type) : ''}
-    · check-in ${o.checkin_at ? esc(o.checkin_at.slice(0, 10)) : 'never'}</span>
+    ${(o.hostnames || []).length ? `<span class="muted">Host: <span class="mono">${esc(o.hostnames.join(', '))}</span></span><br>` : ''}
+    ${o.in_directory ? `<span class="muted">Directory: ${esc(o.listed_status || '?')}${o.pbx_type && o.pbx_type !== 'Unknown' ? ' &middot; ' + esc(o.pbx_type) : ''}</span>` : ''}
     ${(o.trunks_listed || []).length ? `<br>Trunks listed: ${esc(o.trunks_listed.join(', '))}` : ''}`;
 }
 
-function drawMap(m) {
-  map = L.map('map', {worldCopyJump: true, preferCanvas: true}).setView([39, -96], 4);
+// /cameras/ opens here with ?show=cameras: the camera layer on, the phone layers off
+const CAM_MODE = new URLSearchParams(location.search).get('show') === 'cameras';
+const phoneLayer = L.layerGroup(), camLayer = L.layerGroup();
+function initMap() {
+  map = L.map('map', {preferCanvas: true}).setView([39, -110], 3);
   const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     {maxZoom: 18, attribution: '&copy; OpenStreetMap contributors'}).addTo(map);
   let tileErr = 0;
-  tiles.on('tileerror', () => { if (++tileErr === 4) L.control.attribution({prefix: 'Map tiles need internet; offices and links still show'}).addTo(map); });
+  tiles.on('tileerror', () => { if (++tileErr === 4) L.control.attribution({prefix: 'Map tiles need internet; markers still show'}).addTo(map); });
+  if (CAM_MODE) camLayer.addTo(map);
+  else { phoneLayer.addTo(map); camLayer.addTo(map); }
+  L.control.layers(null, {'MeshPhone offices &amp; trunks': phoneLayer, 'Cameras': camLayer},
+    {collapsed: false, position: 'topright'}).addTo(map);
+}
+
+function drawMap(m) {
   const byName = Object.fromEntries(m.offices.map(o => [o.name, o]));
-  const order = ['unknown', 'end_down', 'both_up', 'down', 'verified'];
+  const order = ['unknown', 'end_down', 'both_up', 'reported_down', 'reported_mixed', 'reported_up', 'down', 'verified'];
   [...m.links].sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state)).forEach(l => {
     const a = byName[l.a], b = byName[l.b];
     if (!a || !b || a.lat == null || b.lat == null) return;
     const st = LINK[l.state] || LINK.unknown;
-    // shortest way round (NZ <-> US)
-    let blon = b.lon; if (blon - a.lon > 180) blon -= 360; else if (a.lon - blon > 180) blon += 360;
-    L.polyline([[a.lat, a.lon], [b.lat, blon]], {color: css(st.col), weight: l.mutual || l.state === 'verified' ? st.w : Math.max(1, st.w - 1.2),
-      opacity: l.state === 'unknown' ? 0.5 : 0.85, dashArray: st.dash})
-      .bindPopup(`<b>${esc(l.a)} ↔ ${esc(l.b)}</b><br>${esc(st.label)}${l.rtt_ms != null ? ' · ' + l.rtt_ms + ' ms' : ''}
-        ${l.peer ? `<br><span class="muted">IAX peer "${esc(l.peer)}" on ${esc(m.measured_from)}</span>` : ''}
-        <br>${l.mutual ? 'Listed by both offices' : l.listed_by.length ? 'Listed only by ' + esc(l.listed_by.join(', ')) : 'Not in the directory (seen in Asterisk)'}`)
-      .addTo(map);
+    const far = l.a === m.measured_from ? l.b : l.a;
+    const note = l.state === 'both_up' ? 'both PBXs answer IAX from ' + esc(m.measured_from)
+      : l.state === 'end_down' ? 'at least one PBX does not answer' : 'at least one PBX has no address';
+    L.polyline([[a.lat, plon(a.lon)], [b.lat, plon(b.lon)]], {color: css(linkCol(l)), weight: st.w,
+      opacity: ['unknown', 'end_down', 'both_up'].includes(l.state) ? 0.55 : 0.9, dashArray: st.dash})
+      .bindPopup(`<b>${esc(l.a)} &harr; ${esc(l.b)}</b><br>${esc(st.label)}${l.rtt_ms != null ? ' &middot; <b>' + l.rtt_ms + ' ms</b>' : ''}
+        ${l.peer ? `<br>${esc(m.measured_from)} &rarr; ${esc(far)}: <b>${l.state === 'verified' ? l.rtt_ms + ' ms' : 'DOWN'}</b>` +
+          `<span class="muted"> &middot; Asterisk qualify, ${ago(m.generated_at)}</span>` : ''}
+        ${(l.reports || []).length ? '<br>' + repText(l) : ''}
+        ${['both_up', 'end_down', 'unknown'].includes(l.state) ? `<br><span class="muted">Neither PBX reports this trunk's status; ${note}.</span>` : ''}
+        <br><span class="muted">${l.mutual ? 'Listed by both offices' : l.listed_by.length ? 'Listed only by ' + esc(l.listed_by.join(', ')) : "Not in the directory's trunk lists"}</span>`)
+      .addTo(phoneLayer);
   });
   m.offices.forEach(o => {
     if (o.lat == null) return;
     const col = css(o.state === 'up' ? '--up' : o.state === 'self' ? '--self' : o.state === 'no_answer' ? '--down' : '--unknown');
-    L.circleMarker([o.lat, o.lon], {radius: o.state === 'self' ? 9 : 6, color: col, weight: 2,
+    const meshOnly = !o.in_directory;
+    L.circleMarker([o.lat, plon(o.lon)], {radius: o.state === 'self' ? 9 : meshOnly ? 7 : 6,
+      color: meshOnly ? css('--accent') : col, weight: meshOnly ? 3 : 2, dashArray: meshOnly ? '3 2' : null,
       fillColor: col, fillOpacity: o.state === 'no_address' ? 0.1 : o.state === 'no_answer' ? 0.35 : 0.85})
       .bindTooltip(o.name, {direction: 'top', offset: [0, -6]})
-      .bindPopup(officePopup(o), {maxWidth: 320}).addTo(map);
+      .bindPopup(officePopup(o), {maxWidth: 320}).addTo(phoneLayer);
   });
   const lg = L.control({position: 'bottomleft'});
   lg.onAdd = () => {
     const d = L.DomUtil.create('div', 'legend');
     const dot = (v, l, fill) => `<div class="row"><span class="sw-dot" style="border-color:var(${v});background:${fill ? `var(${v})` : 'transparent'}"></span>${l}</div>`;
-    const ln = k => `<div class="row"><span class="sw-line" style="border-top-color:var(${LINK[k].col});border-top-style:${LINK[k].dash ? 'dashed' : 'solid'}"></span>${LINK[k].label}</div>`;
-    d.innerHTML = `<b>PBX (measured)</b>${dot('--up', 'Answers IAX', true)}${dot('--down', 'No answer', false)}${dot('--unknown', 'No address', false)}${dot('--self', 'Measuring PBX', true)}
-      <b style="display:block;margin-top:4px">Links</b>${['verified', 'both_up', 'end_down', 'unknown'].map(ln).join('')}
-      <div class="muted" style="margin-top:3px">Thin = listed by one office only</div>`;
+    const ln = k => `<div class="row"><span class="sw-line" style="border-top-color:var(${LINK[k].col});border-top-style:${LINK[k].dash ? (LINK[k].w < 2 ? 'dotted' : 'dashed') : 'solid'}"></span>${LINK[k].label}</div>`;
+    d.innerHTML = `<b>PBX (measured)</b>${dot('--up', 'Answers IAX', true)}${dot('--down', 'No answer', false)}${dot('--self', 'Measuring PBX', true)}
+      <div class="row"><span class="sw-dot" style="border-color:var(--accent);border-style:dashed;background:var(--up)"></span>Found on the mesh, not in the directory</div>
+      <b style="display:block;margin-top:4px">Trunk latency</b>${LAT.map(([, v, t]) => `<div class="row"><span class="sw-line" style="border-top-color:var(${v})"></span>${t}</div>`).join('')}
+      ${['reported_mixed', 'reported_down'].map(ln).join('')}
+      <b style="display:block;margin-top:4px">No status reported</b>${['both_up', 'end_down', 'unknown'].map(ln).join('')}
+      <b style="display:block;margin-top:4px">Cameras (checked daily)</b>${['open', 'password', 'closed'].map(k => `<div class="row"><span class="pill" style="color:${CAM_ST[k][0]};border-color:${CAM_ST[k][0]}">📷</span>${CAM_ST[k][1]}</div>`).join('')}`;
     L.DomEvent.disableClickPropagation(d);
     return d;
   };
@@ -207,44 +288,145 @@ function sortable(tbl, rows, render, keyFn) {
   let key = null, dir = 1;
   tbl.querySelectorAll('th').forEach(th => th.onclick = () => {
     dir = key === th.dataset.k ? -dir : 1; key = th.dataset.k;
-    rows.sort((a, b) => String(keyFn(a, key)).localeCompare(String(keyFn(b, key)), undefined, {numeric: true}) * dir);
+    rows.sort((a, b) => String(keyFn(a, key) ?? '').localeCompare(String(keyFn(b, key)), undefined, {numeric: true}) * dir);
     render();
   });
+}
+
+function trunkBadges(m, o) {
+  return m.links.filter(l => l.a === o.name || l.b === o.name).map(l => {
+    const other = l.a === o.name ? l.b : l.a, st = LINK[l.state] || LINK.unknown, col = linkCol(l);
+    const txt = l.rtt_ms != null ? l.rtt_ms + ' ms' : ['reported_down', 'down'].includes(l.state) ? 'DOWN' : '';
+    return `<span class="pill" title="${esc(st.label)}" style="color:var(${col});border-color:var(${col});margin:1px 2px 1px 0;font-weight:${txt ? 600 : 400}">${esc(other)}${txt ? ' &middot; ' + txt : ''}</span>`;
+  }).join('');
 }
 
 function offices(m) {
   const rows = [...m.offices];
   const body = document.querySelector('#t-off tbody'), q = document.getElementById('q-off');
-  const key = (o, k) => ({name: o.name, location: o.location, codes: (o.office_codes || []).join(' '), admin: o.admin_callsign,
+  const key = (o, k) => ({name: o.name, location: o.place || o.location, codes: (o.office_codes || []).join(' '), admin: o.admin_callsign,
     state: ({self: 0, up: 1, no_answer: 2, no_address: 3}[o.state]) + String(o.rtt_ms ?? '').padStart(6, '0'),
     pbx: o.pbx_type, trunks: (o.trunks_listed || []).length}[k]);
   const render = () => {
     const s = q.value.trim().toLowerCase();
-    body.innerHTML = rows.filter(o => !s || [o.name, o.location, o.admin_callsign, o.admin_name, ...(o.office_codes || []), ...(o.dialplans || [])]
+    const meshOnly = document.getElementById('f-mesh').checked;
+    body.innerHTML = rows.filter(o => !meshOnly || !o.in_directory).filter(o => !s || [o.name, o.place, o.location, o.node, o.grid, o.admin_callsign, o.admin_name, ...(o.office_codes || []), ...(o.dialplans || []), ...(o.numbers || [])]
       .join(' ').toLowerCase().includes(s)).map(o => `<tr>
-        <td><b>${esc(o.name)}</b></td><td>${esc(o.location)}</td>
-        <td class="mono">${esc((o.office_codes || []).join(', '))}<div class="muted">${esc((o.dialplans || []).slice(0, 4).join(' '))}</div></td>
+        <td><b>${esc(o.name)}</b>${o.in_directory ? '' : `<div class="muted">mesh only${o.answering_ip ? ` &middot; IP <span class="mono">${esc(o.answering_ip)}</span>` : ''}</div>`}</td>
+        <td>${esc(o.place || o.location)}${o.node ? `<div style="font-size:12px">${nodeLink(o)}</div>` : ''}${o.grid ? `<div class="mono muted">${esc(o.grid)}</div>` : ''}${o.hosted ? `<div class="muted" style="font-size:12px">hosted; serves ${esc(o.location)}</div>` : o.loc_off_km ? `<div style="color:var(--self);font-size:12px">directory: ${esc(o.location)} (${o.loc_off_km} km off)</div>` : o.loc_source === 'directory' ? '<div class="muted" style="font-size:12px">from directory</div>' : ''}</td>
+        <td class="mono">${esc((o.office_codes || []).join(', '))}<div class="muted">${esc([...(o.dialplans || []).slice(0, 4), ...(o.numbers || []).slice(0, 3), ...(o.number_range && !(o.dialplans || []).length ? [o.number_range] : [])].join(' '))}</div>${o.people_count ? `<div class="muted" style="font-size:12px">${o.people_count} listed</div>` : ''}</td>
         <td>${esc(o.admin_callsign)}${o.admin_name ? `<div>${esc(o.admin_name)}</div>` : ''}${o.admin_email ? `<div>${mail(o, true)}</div>` : ''}${o.admin_phone ? `<div class="mono muted">${esc(fmt7(o.admin_phone))}</div>` : ''}</td>
         <td>${statePill(o)}</td>
         <td class="hide-sm">${esc(o.pbx_type && o.pbx_type !== 'Unknown' ? o.pbx_type : '')}</td>
-        <td class="hide-sm">${esc((o.trunks_listed || []).join(', '))}</td></tr>`).join('');
+        <td class="hide-sm">${trunkBadges(m, o)}</td></tr>`).join('');
   };
-  q.oninput = render; sortable(document.getElementById('t-off'), rows, render, key); render();
+  q.oninput = render; document.getElementById('f-mesh').onchange = render;
+  sortable(document.getElementById('t-off'), rows, render, key); render();
+}
+
+const PSTAT = {online: ['online', '--up', 'Registered on its PBX now'],
+               offline: ['offline', '--unknown', 'Its phone is not registered right now'],
+               phone_up: ['phone answers', '--up', 'Their phone on the mesh answered a SIP ping'],
+               on_mesh: ['on the mesh', '--accent', 'Its owner advertises this phone on the mesh, and that node is up'],
+               pbx_up: ['PBX up', '--accent', 'Their PBX answers; it doesn\'t publish which phones are registered'],
+               pbx_down: ['PBX down', '--down', 'Their PBX isn\'t answering']};
+const PORDER = {online: 0, phone_up: 1, on_mesh: 2, pbx_up: 3, offline: 4, pbx_down: 5};
+function pstat(p) {
+  const s = PSTAT[p.status];
+  const src = p.source && p.source !== 'white pages' ? `<div class="muted" style="font-size:11px">${esc(p.source)}</div>` : '';
+  return (s ? `<span class="pill" title="${esc(p.status_note || s[2])}" style="color:var(${s[1]});border-color:var(${s[1]})">${s[0]}</span>` : '') + src;
 }
 
 function people(list, created) {
   const rows = [...list];
   const body = document.querySelector('#t-ppl tbody'), q = document.getElementById('q-ppl');
-  document.getElementById('ppl-note').textContent = `${rows.length} listings${created ? ' · white pages dated ' + created : ''}`;
+  const n = st => rows.filter(p => p.status === st).length;
+  const none = rows.filter(p => !PSTAT[p.status]).length;
+  document.getElementById('ppl-note').textContent = `${rows.length} listings${created ? ' · white pages dated ' + created : ''}` +
+    ` · ${n('online')} online on ${DATA && DATA.map ? DATA.map.measured_from : 'this PBX'}, ${n('phone_up')} phones answering on the mesh,` +
+    ` ${n('on_mesh')} advertised on the mesh, ${n('pbx_up')} behind a PBX that answers, ${n('pbx_down')} behind one that doesn't.` +
+    ' Other PBXs don\'t publish who is registered, so "PBX up" is the office, not the phone.' +
+    (none ? ` ${none} are listed on a PBX that is no longer on the mesh or in the directory.` : '');
+  rows.sort((a, b) => (PORDER[a.status] ?? 9) - (PORDER[b.status] ?? 9));
   const render = () => {
     const s = q.value.trim().toLowerCase();
-    const hit = rows.filter(p => !s || `${p.callsign} ${p.name} ${p.number} ${fmt7(p.number)} ${p.pbx}`.toLowerCase().includes(s));
+    const hit = rows.filter(p => !s || `${p.callsign} ${p.name} ${p.number} ${fmt7(p.number)} ${p.pbx} ${p.office || ''} ${p.location || ''}`.toLowerCase().includes(s));
     body.innerHTML = hit.slice(0, 400).map(p => `<tr><td><b>${esc(p.callsign)}</b></td><td>${esc(p.name)}</td>
-      <td class="mono">${esc(fmt7(p.number))}</td><td>${esc(p.pbx)}</td></tr>`).join('') +
-      (hit.length > 400 ? `<tr><td colspan="4" class="muted">${hit.length - 400} more — narrow the search</td></tr>` : '');
+      <td class="mono">${esc(fmt7(p.number))}</td><td>${esc(p.pbx)}${p.office && p.office !== p.pbx ? `<div class="muted" style="font-size:11px">number is ${esc(p.office)}'s</div>` : ''}</td><td>${esc(p.location || '')}</td><td>${pstat(p)}</td></tr>`).join('') +
+      (hit.length > 400 ? `<tr><td colspan="6" class="muted">${hit.length - 400} more — narrow the search</td></tr>` : '');
   };
   q.oninput = render; sortable(document.getElementById('t-ppl'), rows, render, (p, k) => p[k] || ''); render();
 }
+
+// ── cameras advertised on the mesh (cameras.json, checked once a day) ──
+const CAM_ST = {open: ['#3fb950', 'open'], password: ['#e3b341', 'password needed'], blocked: ['#e3b341', 'forbidden'],
+  no_reply: ['#f85149', 'no reply'], closed: ['#f85149', 'not answering'], unreachable: ['#8b949e', 'host not on the mesh'],
+  error: ['#f85149', 'error']};
+const CAM_KIND = {snapshot: 'still image', mjpeg: 'live MJPEG', page: 'web page', login: 'login page', rtsp: 'RTSP stream',
+  redirect: 'web page', forbidden: 'web page'};
+const CAM_RANK = {open: 0, password: 1, blocked: 2, no_reply: 3, closed: 4, error: 5, unreachable: 6};
+const camPill = c => { const s = CAM_ST[c.status] || ['#8b949e', c.status || '?'];
+  return `<span class="pill" style="color:${s[0]};border-color:${s[0]}">${esc(s[1])}</span>`; };
+const camWhat = c => [CAM_KIND[c.kind] || c.kind, c.software].filter(Boolean).join(' · ');
+const camView = c => [c.view, ...(c.other_apps || [])].filter(Boolean).join('; also ');
+const camLink = c => `<a href="${esc(c.href)}" target="_blank" rel="noopener" style="word-break:break-all">${esc(c.link)}</a>`;
+
+function drawCameras(d) {
+  const cams = d.cameras || [];
+  const byNode = new Map();
+  cams.forEach(c => {
+    if (c.lat == null || c.lon == null) return;
+    const k = `${c.lat},${c.lon}`;
+    if (!byNode.has(k)) byNode.set(k, []);
+    byNode.get(k).push(c);
+  });
+  byNode.forEach(list => {
+    list.sort((a, b) => (CAM_RANK[a.status] ?? 9) - (CAM_RANK[b.status] ?? 9));
+    const n = list[0], col = (CAM_ST[n.status] || ['#8b949e'])[0];
+    const nOpen = list.filter(c => c.status === 'open').length;
+    L.marker([n.lat, plon(n.lon)], {icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [8, 8],
+      html: `<div style="display:inline-block;white-space:nowrap;font:600 10px var(--mono);color:${col};background:var(--panel);border:1px solid ${col};border-radius:3px;padding:0 4px;line-height:15px">📷${list.length > 1 ? ' ' + nOpen + '/' + list.length : ''}</div>`})})
+      .bindTooltip(`${esc(n.node || n.node_ip)}: ${list.length} camera${list.length > 1 ? 's' : ''}`, {direction: 'top'})
+      .bindPopup(`<b>📷 ${esc(n.node || n.node_ip)}</b><br><span class="muted">${esc(n.place || '')}${n.grid ? ' · ' + esc(n.grid) : ''}</span>` +
+        list.map(c => `<div style="margin-top:6px;padding-top:4px;border-top:1px solid var(--border)"><b>${esc(c.name || 'Camera')}</b> ${camPill(c)}
+          ${camWhat(c) ? `<br>${esc(camWhat(c))}` : ''}${camView(c) ? `<br>View with: ${esc(camView(c))}` : ''}
+          <br><span class="mono muted">${esc(c.scheme)}:${c.port || ''}</span> ${camLink(c)}
+          ${(c.open_ports || []).length ? `<br><span class="muted">Also open: ${c.open_ports.join(', ')}</span>` : ''}</div>`).join('') +
+        `<div class="muted" style="margin-top:6px">Checked ${ago(d.generated_at)}, once a day.</div>`,
+        {maxWidth: 340, maxHeight: 380})
+      .addTo(camLayer);
+  });
+}
+
+function camerasTable(d) {
+  const rows = (d.cameras || []).map(c => ({...c, view: camView(c), what: camWhat(c)}));
+  const body = document.querySelector('#t-cam tbody'), q = document.getElementById('q-cam');
+  const sm = (d.summary || {}).status || {};
+  const unplaced = rows.filter(c => c.lat == null).length;
+  document.getElementById('cam-note').textContent = rows.length
+    ? `${rows.length} cameras advertised on the mesh · ${sm.open || 0} open, ${sm.password || 0} need a password, ` +
+      `${(sm.closed || 0) + (sm.no_reply || 0) + (sm.error || 0)} didn't answer · checked ${ago(d.generated_at)}` +
+      (unplaced ? ` · ${unplaced} not on the map (their node has no location)` : '') + '. Links work from a computer on the mesh.'
+    : (d.running ? 'The first camera check is running; reload in a few minutes.' : 'No camera check yet' + (d.error ? ` (${d.error})` : '') + '.');
+  rows.sort((a, b) => (CAM_RANK[a.status] ?? 9) - (CAM_RANK[b.status] ?? 9) || (a.node || '').localeCompare(b.node || ''));
+  const render = () => {
+    const s = q.value.trim().toLowerCase();
+    const hit = rows.filter(c => !s || `${c.name} ${c.node} ${c.place} ${c.software} ${c.what} ${c.view} ${(CAM_ST[c.status] || [, c.status])[1]}`.toLowerCase().includes(s));
+    body.innerHTML = hit.map(c => `<tr><td><b>${esc(c.name || 'Camera')}</b></td>
+      <td>${esc(c.node || c.node_ip)}${c.place ? `<div class="muted">${esc(c.place)}</div>` : ''}</td>
+      <td>${camPill(c)}${c.ms != null ? `<div class="muted mono">${c.ms} ms</div>` : ''}</td>
+      <td>${esc(c.what)}${(c.open_ports || []).length ? `<div class="muted">also open: ${c.open_ports.join(', ')}</div>` : ''}</td>
+      <td class="hide-sm">${esc(c.view)}</td><td class="mono" style="font-size:11px">${camLink(c)}</td></tr>`).join('');
+  };
+  q.oninput = render;
+  sortable(document.getElementById('t-cam'), rows, render, (c, k) => k === 'status' ? (CAM_RANK[c.status] ?? 9) : k === 'kind' ? c.what : c[k] || '');
+  render();
+}
+
+initMap();
+if (CAM_MODE) { document.querySelector('header h1').textContent = 'AREDN Camera Map'; document.title = 'AREDN Camera Map'; }
+fetch('cameras.json', {cache: 'no-store'}).then(r => r.json()).then(d => { drawCameras(d); camerasTable(d); })
+  .catch(e => { document.getElementById('cam-note').textContent = 'Could not load cameras: ' + e; });
 
 fetch('map.json', {cache: 'no-store'}).then(r => r.json()).then(d => {
   DATA = d;
@@ -260,9 +442,11 @@ fetch('map.json', {cache: 'no-store'}).then(r => r.json()).then(d => {
     `<span><b>${s.offices}</b> offices</span>`,
     `<span class="st-up"><b>${(os.up || 0) + (os.self || 0)}</b> answer IAX</span>`,
     `<span><b>${s.moved}</b> moved address</span>`,
+    `<span><b>${s.mesh_only || 0}</b> found only on the mesh</span>`,
+    `<span><b>${s.node_located || 0}</b> located by their AREDN node${s.location_off ? ` (${s.location_off} differ from the directory)` : ''}${s.hosted ? `, ${s.hosted} hosted offices` : ''}</span>`,
     `<span class="st-no_answer"><b>${os.no_answer || 0}</b> no answer</span>`,
     `<span><b>${os.no_address || 0}</b> no address</span>`,
-    `<span>· <b>${s.links}</b> links: ${ls.verified || 0} verified, ${ls.both_up || 0} both ends up, ${ls.end_down || 0} one end down, ${ls.unknown || 0} unknown</span>`,
+    `<span>&middot; <b>${s.links}</b> trunks: <b>${(ls.verified || 0) + (ls.reported_up || 0)}</b> up with latency, ${ls.reported_mixed || 0} one-way, ${(ls.reported_down || 0) + (ls.down || 0)} DOWN, ${(ls.both_up || 0) + (ls.end_down || 0) + (ls.unknown || 0)} not reported</span>`,
   ].join('');
   drawMap(m); offices(m); people(d.people || [], d.people_created);
 }).catch(e => { document.getElementById('sub').textContent = 'Could not load map data: ' + e; });

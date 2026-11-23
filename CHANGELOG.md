@@ -8,6 +8,62 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.128 (2026-11-23)
+
+- MeshPhone map page (/meshphone/, shared with the mesh): the AREDN cameras are on it too, as a map layer you can switch on and off next to the MeshPhone offices and trunks, and a Cameras tab with a searchable table (status, what it is, software, which app views it, link). /cameras/ opens the same page as an "AREDN Camera Map", cameras on and the phone layers off. Same access as the MeshPhone page: no login on the mesh and LAN, ECH login from anywhere else.
+
+## v1.1.127 (2026-11-23)
+
+- Map: search areas 1.75x wider. PSK Reporter 525 km, DX Cluster 875 km, river gauges 140 km, tides 105 km (10 stations), water temperature 265 km. On this station's config: adsb.lol 250 nm (its maximum), OpenSky, AISHub and Winlink boxes 1.75x each way (OpenSky polled every 7.5 min so the bigger box stays inside the anonymous credit limit), APRS-IS 105 km, AirNow stations / fires / smoke and water bodies 1.75x.
+
+## v1.1.126 (2026-11-23)
+
+- AREDN cameras: web cameras are checked by IP with their mesh name as the Host header (this server doesn't resolve .local.mesh names, so the first check marked nearly every web camera "not answering"). A redirect to a login page counts as "password needed".
+
+## v1.1.125 (2026-11-23)
+
+- Map: new "AREDN mesh" layers. **MeshPhone offices** places each MeshPhone PBX at its AREDN node, coloured by whether it answered the last check, with the trunks between them (same data as /meshphone/). **AREDN cameras** shows the cameras and video streams advertised on the mesh, at the node that advertises them, checked once a day: open / password needed / not answering, what it is (still image, live MJPEG, RTSP stream, web page), the software where it can tell (motionEye, Frigate, Hikvision, Dahua, Reolink ...), which app views it, and the other camera-app ports the camera answers on. Passwords in advertised links are masked in the text.
+- Map: the military / rescue aircraft key is now a short section of the regular Map key instead of its own box (the markers are labelled).
+
+## v1.1.124 (2026-11-23)
+
+- MeshPhone map (/meshphone/): viewable from the internet too when logged in to ECH. On the mesh and the LAN it still needs no login; from anywhere else it sends you to the login page first.
+
+## v1.1.123 (2026-11-23)
+
+- MeshPhone People: status for far more people, not just this PBX's phones and the ~33 advertised as AREDN services. Phones on the mesh named for their owner (e.g. "N0CALL-phone", "N0CALL-SIP-T26P") and advertised phones that link to a host get a SIP OPTIONS ping each refresh: "phone answers" when one replies. Everyone else shows whether their office's PBX answers ("PBX up" / "PBX down"), with the office found by name or, for white-pages entries listed under an old PBX name, by the office code / dialplan that covers their number (which also fills in their location). People on a PBX that's no longer on the mesh or in the directory still show no status.
+
+## v1.1.122 (2026-11-22)
+
+- MeshPhone map: every office links to its AREDN node (by name on the mesh, and by IP). PBXs not in the directory show the numbers they list and the IP to dial, marked "not dialable by MeshPhone number", without the long explanation.
+- The mesh host list fetch retries, and a failed refresh is retried after 10 minutes instead of 6 hours.
+
+## v1.1.121 (2026-11-22)
+
+- MeshPhone People: the only white pages on the mesh is a copy frozen in October 2025, so each directory office's admin is added where it's missing (operators who joined since were absent). People on this PBX show online / offline from Asterisk's registrations; people whose phone is advertised as an AREDN service show "on the mesh". Online people sort first.
+
+## v1.1.120 (2026-11-22)
+
+- MeshPhone map: PBXs found on the mesh but not in the directory get their own marker (dashed blue ring) and legend entry, and an Offices filter. Every office shows its white-pages people with their numbers and the number block they share (e.g. 937-10xx), and mesh-only PBXs say how they can be reached: they aren't in the routing guide, so their numbers work only from PBXs that trunk to them.
+
+## v1.1.119 (2026-11-22)
+
+- MeshPhone map: a PBX reached only through one of our qualified trunks is located by its AREDN node too (its node's location wasn't fetched).
+
+## v1.1.118 (2026-11-22)
+
+- MeshPhone map: when the host list can't place a PBX under a node it verifies (or the PBX isn't in any node's device list), a traceroute finds the node: the hop before the PBX. Directory offices that don't answer and have no host left on the mesh aren't shown (listed in the summary as dropped), nor are trunks to them. Offices past the date line (Australia, New Zealand) are drawn west of the Americas on the same map instead of on the next copy of the world.
+
+## v1.1.117 (2026-11-22)
+
+- MeshPhone map: a PBX's AREDN node is matched on its LAN (/27, AREDN's largest) and checked against the node's own LAN address before its location is used, so a PBX is no longer placed at an unrelated node whose mesh address happens to share a /24. Generic directory hostnames ("freepbx", "raspbx") no longer match other people's hosts. AllStar-only nodes aren't added as MeshPhone PBXs. Offices served by one PBX are shown as hosted (PBX location vs the area the office serves) instead of as wrong locations.
+
+## v1.1.116 (2026-11-22)
+
+- MeshPhone map rebuilt around the mesh: the WT0F directory is only the guide (offices, codes, trunk lists); the facts are polled from the PBXs and the AREDN nodes they sit behind. Locations come from each PBX's parent node (its published coordinates and grid square, turned into a place name once and cached), so offices whose directory location is wrong are placed correctly and flagged with the distance. PBXs found on the mesh by host name or advertised service but missing from the directory are added, named from their admin's white-pages listing, with numbers from their node's services. White pages are fetched from the PBXs themselves (newest copy wins), and each person shows their office's location.
+- Trunk status and latency: per direction from what PBXs report about their own trunks (with the report date), our own trunks from Asterisk, lines coloured by latency; trunks no one reports are drawn faintly with what can be checked from here. The Offices list shows each trunk's status.
+- `radio_directory.meshphone.hosts_url` names the local AREDN node's sysinfo (no built-in default).
+
 ## v1.1.115 (2026-11-22)
 
 - MeshPhone map: an office this PBX has a working trunk to now shows as up at the trunk's address, even when its directory address and mesh host names don't answer (one showed "no answer" beside a verified trunk).

@@ -264,7 +264,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                     "/api/health", "/ws", "/static", "/favicon.ico",
                     "/ca.crt", "/tls-setup", "/phonebook.xml",
                     "/phonebook-meshphone.xml", "/phonebook-streams.xml",
-                    "/meshphone", "/meshphone/", "/meshphone/map.json"}
+                    "/meshphone", "/meshphone/", "/meshphone/map.json", "/meshphone/cameras.json",
+                    "/cameras", "/cameras/"}
 
     def _is_loopback(request) -> bool:
         try:
@@ -2258,6 +2259,16 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return await map_layers.mold_grid(lat, lon)
         except Exception as exc:
             return {"cells": [], "error": f"{type(exc).__name__}"}
+
+    @app.get("/api/aredn/cameras")
+    async def aredn_cameras_api():
+        """Cameras / video streams advertised on the AREDN mesh, checked once a
+        day (ech/core/aredn_cameras.py). Login required (middleware)."""
+        from ech.core.aredn_cameras import service as cams
+        d = cams.data or {}
+        return {"cameras": d.get("cameras", []), "generated_at": d.get("generated_at"),
+                "summary": d.get("summary", {}), "error": cams.last_error, "running": cams.running,
+                "enabled": cams.enabled}
 
     @app.get("/api/aircraft/watch")
     async def aircraft_watch_api(hours: float = 24):
@@ -5021,35 +5032,71 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         return local and not request.headers.get("x-forwarded-for") and not request.headers.get("forwarded")
 
     # ── MeshPhone map + directory, shared with the whole AREDN mesh ─────────
-    # No login (mesh users have no ECH account), mesh/LAN addresses only, and
+    # No login on mesh/LAN addresses (mesh users have no ECH account), and
     # read-only: the page is a static file and the JSON holds only what the
     # public MeshPhone directory and white pages already publish on the mesh,
     # plus this station's own measurements (ech/core/meshphone_map.py).
+    # From anywhere else (the internet through the reverse proxy) it needs an
+    # ECH login, like every other page.
+    async def _meshphone_ok(request) -> bool:
+        if _direct_local(request) or not auth:
+            return True
+        from ech.core.auth import SESSION_COOKIE
+        session = await auth.get_session(request.cookies.get(SESSION_COOKIE, ""))
+        return bool(session) and not session.get("must_change_pw")
+
     @app.get("/meshphone")
     async def meshphone_map_redirect(request: Request):
-        if not _direct_local(request):
-            raise HTTPException(status_code=403, detail="Only served on the mesh / local network")
         from fastapi.responses import RedirectResponse
+        if not await _meshphone_ok(request):
+            return RedirectResponse(url="/login?next=/meshphone/", status_code=302)
         return RedirectResponse(url="/meshphone/", status_code=302)
+
+    # /cameras/: the same page, opened on the AREDN cameras layer
+    @app.get("/cameras")
+    @app.get("/cameras/")
+    async def aredn_cameras_alias(request: Request):
+        from fastapi.responses import RedirectResponse
+        if not await _meshphone_ok(request):
+            return RedirectResponse(url="/login?next=/cameras/", status_code=302)
+        return RedirectResponse(url="/meshphone/?show=cameras", status_code=302)
+
+    @app.get("/meshphone/cameras.json")
+    async def meshphone_cameras_json(request: Request):
+        """Cameras advertised on the mesh (ech/core/aredn_cameras.py): only what
+        their owners advertise mesh-wide, plus this station's daily check."""
+        if not await _meshphone_ok(request):
+            raise HTTPException(status_code=401, detail="Log in to ECH, or open this on the mesh / local network")
+        from ech.core.aredn_cameras import service as cams
+        d = cams.data or {}
+        return {"cameras": d.get("cameras", []), "generated_at": d.get("generated_at"),
+                "summary": d.get("summary", {}), "error": cams.last_error, "running": cams.running}
 
     @app.get("/meshphone/", response_class=HTMLResponse)
     async def meshphone_map_page(request: Request):
-        if not _direct_local(request):
-            raise HTTPException(status_code=403, detail="Only served on the mesh / local network")
+        if not await _meshphone_ok(request):
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url="/login?next=/meshphone/", status_code=302)
         html = (UI_DIR / "templates" / "meshphone_map.html").read_text(encoding="utf-8")
         return HTMLResponse(content=html, headers=_NO_CACHE)
 
     @app.get("/meshphone/map.json")
     async def meshphone_map_json(request: Request):
-        if not _direct_local(request):
-            raise HTTPException(status_code=403, detail="Only served on the mesh / local network")
+        if not await _meshphone_ok(request):
+            raise HTTPException(status_code=401, detail="Log in to ECH, or open this on the mesh / local network")
         from ech.core.directory_status import status as live
         from ech.core.meshphone_map import service as mp_map
-        d = live.meshphone()
-        people = [{k: p.get(k, "") for k in ("callsign", "name", "number", "pbx")} for p in d["people"]]
-        st = d["status"]
-        return {"map": mp_map.data, "map_error": mp_map.last_error, "people": people,
-                "people_created": st.get("meshphone_people_created") or live.mp_people_created,
+        m = mp_map.data
+        if m and m.get("people"):
+            # located by their office PBX's AREDN node (meshphone_map.py)
+            people, created = m["people"], m.get("people_created", "")
+        else:
+            d = live.meshphone()
+            loc = {o["name"].upper(): o.get("location", "") for o in d["offices"]}
+            people = [{**{k: p.get(k, "") for k in ("callsign", "name", "number", "pbx")},
+                       "location": loc.get((p.get("pbx") or "").upper(), "")} for p in d["people"]]
+            created = live.mp_people_created
+        return {"map": m, "map_error": mp_map.last_error, "people": people, "people_created": created,
                 "offices_refreshed_at": live.mp_offices_refreshed_at}
 
     @app.get("/phonebook-meshphone.xml")

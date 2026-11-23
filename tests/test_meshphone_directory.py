@@ -262,12 +262,57 @@ async def test_meshphone_map_page_and_json_mesh_only(live):
     from ech.core.meshphone_map import service as mp_map, build_map
     live.mp_people, _ = mp.parse_whitepages(WP_XML)
     live.mp_offices = mp.parse_offices(OFFICES_JSON)
-    mp_map.data = build_map(live.mp_offices, {}, {}, "TESTVILLE", generated_at=1.0)
+    mp_map.data = build_map(live.mp_offices, [], [], {}, {}, {}, {}, set(), "TESTVILLE",
+                            people=live.mp_people, generated_at=1.0)
     page = await _get("/meshphone/", "10.99.0.86")                 # an AREDN mesh client, no login
     assert page.status_code == 200 and "MeshPhone Network Map" in page.text
     d = (await _get("/meshphone/map.json", "10.99.0.86")).json()
     assert d["map"]["measured_from"] == "TESTVILLE"
-    assert d["people"][0] == {"callsign": "N0AAA", "name": "A Person", "number": "5554101", "pbx": "TESTVILLE"}
-    assert (await _get("/meshphone/map.json", "8.8.8.8")).status_code == 403
-    assert (await _get("/meshphone/", "192.168.1.50", {"X-Forwarded-For": "8.8.8.8"})).status_code == 403
+    p0 = d["people"][0]
+    assert (p0["callsign"], p0["name"], p0["number"], p0["pbx"]) == ("N0AAA", "A Person", "5554101", "TESTVILLE")
+    assert p0["location"] == "Testville, ZZ"          # from the person's home office
     mp_map.data = None
+
+
+@pytest.mark.asyncio
+async def test_meshphone_map_from_the_internet_needs_a_login():
+    from ech.core.database import Database
+    from ech.core.router import Router
+    from ech.core.anomaly import AnomalyEngine
+    from ech.core.auth import AuthManager, SESSION_COOKIE
+    from ech.api.app import create_app
+    from httpx import AsyncClient, ASGITransport
+    db = Database(":memory:")
+    await db.connect()
+    auth = AuthManager(db)
+    await auth.create_user("op", "pw-123456", "viewer")
+    await auth.create_user("new", "pw-123456", "viewer", must_change_pw=True)
+    app = create_app(Router(db, anomaly_engine=AnomalyEngine({})), db, auth=auth)
+
+    async def get(path, ip, headers=None, user=None):
+        cookies = {SESSION_COOKIE: await auth.login(user, "pw-123456")} if user else {}
+        async with AsyncClient(transport=ASGITransport(app=app, client=(ip, 5000)), base_url="http://test",
+                               cookies=cookies) as c:
+            return await c.get(path, headers=headers or {})
+    proxied = {"X-Forwarded-For": "8.8.8.8"}
+    assert (await get("/meshphone/map.json", "10.99.0.86")).status_code == 200      # mesh: no login
+    assert (await get("/meshphone/map.json", "8.8.8.8")).status_code == 401
+    r = await get("/meshphone/", "192.168.1.50", proxied)
+    assert r.status_code == 302 and r.headers["location"] == "/login?next=/meshphone/"
+    assert (await get("/meshphone/", "192.168.1.50", proxied, user="op")).status_code == 200
+    assert (await get("/meshphone/map.json", "192.168.1.50", proxied, user="op")).status_code == 200
+    assert (await get("/meshphone/map.json", "192.168.1.50", proxied, user="new")).status_code == 401
+    # the cameras data and the /cameras/ alias follow the same rule
+    from ech.core.aredn_cameras import service as cams
+    cams.data = {"generated_at": 1.0, "summary": {}, "cameras": [{"name": "Yard", "status": "open", "lat": 44.0, "lon": -69.0}]}
+    try:
+        r = await get("/meshphone/cameras.json", "10.99.0.86")
+        assert r.status_code == 200 and r.json()["cameras"][0]["name"] == "Yard"
+        assert (await get("/meshphone/cameras.json", "192.168.1.50", proxied)).status_code == 401
+        assert (await get("/meshphone/cameras.json", "192.168.1.50", proxied, user="op")).status_code == 200
+        r = await get("/cameras/", "10.99.0.86")
+        assert r.status_code == 302 and r.headers["location"] == "/meshphone/?show=cameras"
+        r = await get("/cameras", "192.168.1.50", proxied)
+        assert r.status_code == 302 and r.headers["location"] == "/login?next=/cameras/"
+    finally:
+        cams.data = None
