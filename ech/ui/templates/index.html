@@ -2326,7 +2326,7 @@ function toggleChanMute(channel, ev, adapter) {
   const k = `${adapter || state.filter.adapter}|${channel}`;
   if (_mutedChans[k]) delete _mutedChans[k]; else _mutedChans[k] = true;
   _saveMutes();
-  toast(_mutedChans[k] ? `${channel} muted: hidden from "All ch" and unread counts (click it to read it anyway)` : `${channel} unmuted`, 'ok');
+  toast(_mutedChans[k] ? `${channel} muted: hidden from "All ch" and unread counts (click it to read it, double-click to unmute)` : `${channel} unmuted`, 'ok');
   buildChanSubBar();
   renderAll();
   return false;
@@ -2414,8 +2414,8 @@ function buildChanSubBar() {
     ...channels.map(ch => {
       const muted = _isChanMuted(adapter, ch);
       const jsCh = escHtml(JSON.stringify(ch));
-      return `<span class="chan-pill${state.filter.channel === ch ? ' active' : ''}" onclick='filterChannel(${jsCh}, this)' oncontextmenu='return toggleChanMute(${jsCh}, event)'`
-        + ` title="Click: show only ${escHtml(ch)} · Right-click: ${muted ? 'unmute' : 'mute (hide from All ch)'}"`
+      return `<span class="chan-pill${state.filter.channel === ch ? ' active' : ''}" onclick='filterChannel(${jsCh}, this)' ondblclick='return toggleChanMute(${jsCh}, event)' oncontextmenu='return toggleChanMute(${jsCh}, event)'`
+        + ` title="Click: show only ${escHtml(ch)} · Double-click: ${muted ? 'unmute' : 'mute (hide from All ch)'}"`
         + `${muted ? ' style="opacity:.45;text-decoration:line-through"' : ''}>${muted ? '🔇 ' : ''}${escHtml(ch)}</span>`;
     }),
     `<span class="chan-pill" onclick="openMuteMenu(event)" title="Choose channels to mute on this adapter">🔇 Mute…</span>`,

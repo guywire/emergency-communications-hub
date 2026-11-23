@@ -66,6 +66,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
   <button data-v="offices">Offices</button>
   <button data-v="people">People</button>
   <button data-v="cameras">Cameras</button>
+  <button data-v="services">Services</button>
   <button data-v="about">About</button>
 </nav>
 
@@ -97,6 +98,16 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
   <div class="tbl"><table id="t-cam"><thead><tr>
     <th data-k="name">Camera</th><th data-k="node">Node / place</th><th data-k="status">Checked</th>
     <th data-k="kind">What it is</th><th data-k="view" class="hide-sm">View with</th><th data-k="link">Link</th>
+  </tr></thead><tbody></tbody></table></div>
+</div></section>
+
+<section class="view" id="v-services"><div class="wrap">
+  <input type="search" id="q-svc" placeholder="Search services: name, node, place, link…">
+  <select id="c-svc" style="padding:7px 8px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--text);font:inherit;margin:0 0 10px 6px"></select>
+  <div class="note" id="svc-note"></div>
+  <div class="tbl"><table id="t-svc"><thead><tr>
+    <th data-k="category">Kind</th><th data-k="name">Service</th><th data-k="node">Node / place</th>
+    <th data-k="status">Checked</th><th data-k="link">Link</th>
   </tr></thead><tbody></tbody></table></div>
 </div></section>
 
@@ -136,6 +147,12 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
   Hikvision 8000, Dahua 37777, Reolink 9000, XMEye 34567), so the table can say which app views it.
   Passwords in advertised links are masked in the text; the link itself is the owner's, unchanged.
   <span class="mono">/cameras/</span> opens this page on the cameras.</p>
+  <h3>Services</h3>
+  <p>Everything else advertised on the mesh, by kind: ADS-B and AIS receivers, satellite receivers, packet / BBS,
+  Winlink, APRS, TAK, Meshtastic / MeshCore gateways, radio / SDR / AllStar, chat, weather, time servers, mail,
+  internet gateways, power / solar, maps and wikis (phones are on the MeshPhone layers). Each gets one request a
+  day: a page fetch for web links, a TCP connect for others. ADS-B and AIS receivers are also checked for a public
+  data file (aircraft.json / ships.json). <span class="mono">/aredn/</span> opens this page on the services.</p>
 </div></section>
 
 <script src="../static/leaflet/leaflet.js"></script>
@@ -223,18 +240,79 @@ function officePopup(o) {
 }
 
 // /cameras/ opens here with ?show=cameras: the camera layer on, the phone layers off
-const CAM_MODE = new URLSearchParams(location.search).get('show') === 'cameras';
-const phoneLayer = L.layerGroup(), camLayer = L.layerGroup();
+const SHOW = new URLSearchParams(location.search).get('show');
+const CAM_MODE = SHOW === 'cameras', SVC_MODE = SHOW === 'services';
+const phoneLayer = L.layerGroup(), camLayer = L.layerGroup(), svcLayer = L.layerGroup();
 function initMap() {
   map = L.map('map', {preferCanvas: true}).setView([39, -110], 3);
   const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     {maxZoom: 18, attribution: '&copy; OpenStreetMap contributors'}).addTo(map);
   let tileErr = 0;
   tiles.on('tileerror', () => { if (++tileErr === 4) L.control.attribution({prefix: 'Map tiles need internet; markers still show'}).addTo(map); });
-  if (CAM_MODE) camLayer.addTo(map);
-  else { phoneLayer.addTo(map); camLayer.addTo(map); }
-  L.control.layers(null, {'MeshPhone offices &amp; trunks': phoneLayer, 'Cameras': camLayer},
-    {collapsed: false, position: 'topright'}).addTo(map);
+  if (!CAM_MODE && !SVC_MODE) phoneLayer.addTo(map);
+  if (!SVC_MODE) camLayer.addTo(map);
+  svcLayer.addTo(map);                    // which service kinds show is the checklist's job
+  // One "Services" checklist: MeshPhone, cameras and every other service kind
+  const c = L.control({position: 'topright'});
+  c.onAdd = () => {
+    const d = L.DomUtil.create('div', 'legend');
+    d.id = 'layers-ctl';
+    L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d);
+    return d;
+  };
+  c.addTo(map);
+  layersRender();
+}
+
+function layersRender() {
+  const d = document.getElementById('layers-ctl');
+  if (!d) return;
+  const open = d.querySelector('details') ? d.querySelector('details').open : window.innerWidth > 640;
+  const row = (k, checked, icon, label, count) =>
+    `<label class="row" style="cursor:pointer"><input type="checkbox" data-k="${k}"${checked ? ' checked' : ''}> ${icon} ${esc(label)}${count != null ? ` <span class="muted">${count}</span>` : ''}</label>`;
+  // One flat list of service kinds: MeshPhone offices and cameras are kinds too
+  // (they keep their own richer markers), the rest from services.json in its order.
+  const kinds = [{key: '_phone', icon: '☎', label: 'MeshPhone offices & trunks', count: null},
+    ...((SVC || {}).categories || []).filter(c => c.count || c.key === 'camera')];
+  if (!kinds.some(k => k.key === 'camera')) kinds.splice(1, 0, {key: 'camera', icon: '📷', label: 'Cameras', count: null});
+  const shown = k => k === '_phone' ? map.hasLayer(phoneLayer) : k === 'camera' ? map.hasLayer(camLayer) : !!(svcOn && svcOn.has(k));
+  const set = (k, on) => {
+    if (k === '_phone' || k === 'camera') {
+      const layer = k === '_phone' ? phoneLayer : camLayer;
+      if (on) layer.addTo(map); else map.removeLayer(layer);
+      return;
+    }
+    if (!svcOn) svcOn = new Set();
+    if (on) svcOn.add(k); else svcOn.delete(k);
+  };
+  const save = () => { try { localStorage.setItem('mp.svcCats', JSON.stringify([...(svcOn || [])])); } catch (e) { /* per session */ } };
+  d.innerHTML = `<details${open ? ' open' : ''}><summary style="cursor:pointer"><b>Services</b></summary>` +
+    kinds.map(k => row(k.key, shown(k.key), k.icon, k.label, k.count)).join('') +
+    `<div style="display:flex;gap:6px;margin-top:4px"><a href="#" data-all="1">all</a><a href="#" data-all="0">none</a></div></details>`;
+  d.querySelectorAll('input').forEach(i => i.onchange = () => { set(i.dataset.k, i.checked); save(); drawServices(); });
+  d.querySelectorAll('a[data-all]').forEach(a => a.onclick = e => {
+    e.preventDefault();
+    kinds.forEach(k => set(k.key, a.dataset.all === '1' && k.key !== 'other'));
+    save(); drawServices(); layersRender();
+  });
+}
+
+// A classic rotary desk phone as the PBX marker: filled with the PBX's colour,
+// outlined so it reads on any map tile, transparent around the shape.
+function phoneSvg(fill, {size = 20, outline = '#0d1117', ow = 1.3, opacity = 1} = {}) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" style="display:block;overflow:visible">
+    <g fill="${fill}" fill-opacity="${opacity}" stroke="${outline}" stroke-width="${ow}" stroke-linejoin="round">
+      <path d="M2.5 7.2C2.5 4.4 6.3 3 12 3s9.5 1.4 9.5 4.2v1.3c0 .9-.7 1.5-1.5 1.5h-3c-.8 0-1.5-.6-1.5-1.5V7.6c-1.2-.4-2.4-.5-3.5-.5s-2.3.1-3.5.5v.9c0 .9-.7 1.5-1.5 1.5H4c-.8 0-1.5-.6-1.5-1.5z"/>
+      <path d="M8.2 10.6h7.6l4.3 8.8c.4.9-.1 1.6-1.1 1.6H5c-1 0-1.5-.7-1.1-1.6z"/>
+    </g>
+    <circle cx="12" cy="15.6" r="3.1" fill="none" stroke="${outline}" stroke-width="1.1"/>
+    <circle cx="12" cy="15.6" r="1" fill="${outline}"/>
+  </svg>`;
+}
+function phoneIcon(fill, opts = {}) {
+  const s = opts.size || 20;
+  return L.divIcon({className: '', iconSize: [s, s], iconAnchor: [s / 2, s / 2],
+    html: `<div style="filter:drop-shadow(0 0 1px rgba(255,255,255,.6))">${phoneSvg(fill, opts)}</div>`});
 }
 
 function drawMap(m) {
@@ -261,19 +339,20 @@ function drawMap(m) {
     if (o.lat == null) return;
     const col = css(o.state === 'up' ? '--up' : o.state === 'self' ? '--self' : o.state === 'no_answer' ? '--down' : '--unknown');
     const meshOnly = !o.in_directory;
-    L.circleMarker([o.lat, plon(o.lon)], {radius: o.state === 'self' ? 9 : meshOnly ? 7 : 6,
-      color: meshOnly ? css('--accent') : col, weight: meshOnly ? 3 : 2, dashArray: meshOnly ? '3 2' : null,
-      fillColor: col, fillOpacity: o.state === 'no_address' ? 0.1 : o.state === 'no_answer' ? 0.35 : 0.85})
-      .bindTooltip(o.name, {direction: 'top', offset: [0, -6]})
+    const size = o.state === 'self' ? 26 : 20;
+    L.marker([o.lat, plon(o.lon)], {zIndexOffset: o.state === 'self' ? 1000 : o.state === 'up' ? 500 : 0,
+      icon: phoneIcon(col, {size, outline: meshOnly ? css('--accent') : '#0d1117', ow: meshOnly ? 2 : 1.3,
+        opacity: o.state === 'no_address' ? 0.15 : o.state === 'no_answer' ? 0.4 : 1})})
+      .bindTooltip(o.name, {direction: 'top', offset: [0, -size / 2]})
       .bindPopup(officePopup(o), {maxWidth: 320}).addTo(phoneLayer);
   });
   const lg = L.control({position: 'bottomleft'});
   lg.onAdd = () => {
     const d = L.DomUtil.create('div', 'legend');
-    const dot = (v, l, fill) => `<div class="row"><span class="sw-dot" style="border-color:var(${v});background:${fill ? `var(${v})` : 'transparent'}"></span>${l}</div>`;
+    const dot = (v, l, fill) => `<div class="row">${phoneSvg(css(v), {size: 16, opacity: fill ? 1 : 0.4})}${l}</div>`;
     const ln = k => `<div class="row"><span class="sw-line" style="border-top-color:var(${LINK[k].col});border-top-style:${LINK[k].dash ? (LINK[k].w < 2 ? 'dotted' : 'dashed') : 'solid'}"></span>${LINK[k].label}</div>`;
     d.innerHTML = `<b>PBX (measured)</b>${dot('--up', 'Answers IAX', true)}${dot('--down', 'No answer', false)}${dot('--self', 'Measuring PBX', true)}
-      <div class="row"><span class="sw-dot" style="border-color:var(--accent);border-style:dashed;background:var(--up)"></span>Found on the mesh, not in the directory</div>
+      <div class="row">${phoneSvg(css('--up'), {size: 16, outline: css('--accent'), ow: 2})}Found on the mesh, not in the directory</div>
       <b style="display:block;margin-top:4px">Trunk latency</b>${LAT.map(([, v, t]) => `<div class="row"><span class="sw-line" style="border-top-color:var(${v})"></span>${t}</div>`).join('')}
       ${['reported_mixed', 'reported_down'].map(ln).join('')}
       <b style="display:block;margin-top:4px">No status reported</b>${['both_up', 'end_down', 'unknown'].map(ln).join('')}
@@ -423,8 +502,80 @@ function camerasTable(d) {
   render();
 }
 
+// ── every other service advertised on the mesh (services.json, checked once a day) ──
+let SVC = null, svcOn = null;
+try { const v = JSON.parse(localStorage.getItem('mp.svcCats') || 'null'); if (Array.isArray(v) && v.length) svcOn = new Set(v); } catch (e) { /* per session */ }
+const svcCats = () => Object.fromEntries(((SVC || {}).categories || []).map((c, i) => [c.key, {...c, i}]));
+const svcPill = s => { const st = CAM_ST[s.status] || (s.status === 'listed' ? ['#8b949e', 'listed'] : ['#8b949e', s.status || '?']);
+  return `<span class="pill" style="color:${st[0]};border-color:${st[0]}">${esc(st[1])}</span>`; };
+const svcLink = s => s.href ? `<a href="${esc(s.href)}" target="_blank" rel="noopener" style="word-break:break-all">${esc(s.link)}</a>`
+  : `<span class="mono" style="word-break:break-all">${esc(s.link || '')}</span>`;
+const svcFeed = s => s.feed ? `<div style="color:var(--up)">data feed: ${s.feed.count} ${s.category === 'ais' ? 'ships' : 'aircraft'} now</div>` : '';
+// The services' kinds join the "Services" checklist once services.json arrives.
+// /aredn/ starts with every kind but "other"; /cameras/ with none; the plain
+// page with what you last chose (none at first).
+function svcControl() {
+  const cats = ((SVC || {}).categories || []).filter(c => c.count && c.key !== 'camera');
+  if (CAM_MODE) svcOn = new Set();
+  else if (SVC_MODE && !svcOn) svcOn = new Set(cats.map(c => c.key).filter(k => k !== 'other'));
+  else if (!svcOn) svcOn = new Set();
+  layersRender();
+}
+function drawServices() {
+  svcLayer.clearLayers();
+  const cats = svcCats(), byNode = new Map();
+  ((SVC || {}).services || []).forEach(s => {
+    if (s.lat == null || s.category === 'camera' || !svcOn.has(s.category)) return;
+    const k = `${s.lat},${s.lon}`;
+    if (!byNode.has(k)) byNode.set(k, []);
+    byNode.get(k).push(s);
+  });
+  byNode.forEach(list => {
+    list.sort((a, b) => (cats[a.category] || {i: 99}).i - (cats[b.category] || {i: 99}).i || (CAM_RANK[a.status] ?? 9) - (CAM_RANK[b.status] ?? 9));
+    const f = list[0], icons = [...new Set(list.map(s => (cats[s.category] || {}).icon || '•'))];
+    const col = list.some(s => s.status === 'open' || s.status === 'password') ? css('--accent') : css('--unknown');
+    L.marker([f.lat, plon(f.lon)], {icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [8, 8],
+      html: `<div style="display:inline-block;white-space:nowrap;font:600 10px var(--mono);color:${col};background:var(--panel);border:1px solid ${col};border-radius:3px;padding:0 3px;line-height:15px">${icons.slice(0, 4).join('')}${list.length > 1 ? ' ' + list.length : ''}</div>`})})
+      .bindTooltip(`${esc(f.node || f.node_ip)}: ${list.length} service${list.length > 1 ? 's' : ''}`, {direction: 'top'})
+      .bindPopup(`<b>${esc(f.node || f.node_ip)}</b><br><span class="muted">${esc(f.place || '')}${f.grid ? ' · ' + esc(f.grid) : ''}</span>` +
+        list.map(s => `<div style="margin-top:6px;padding-top:4px;border-top:1px solid var(--border)">${(cats[s.category] || {}).icon || ''} <b>${esc(s.name)}</b> ${svcPill(s)}
+          ${s.software ? `<br>${esc(s.software)}` : ''}${svcFeed(s)}<br>${svcLink(s)}</div>`).join('') +
+        `<div class="muted" style="margin-top:6px">Checked ${ago(SVC.generated_at)}, once a day.</div>`, {maxWidth: 340, maxHeight: 380})
+      .addTo(svcLayer);
+  });
+}
+function servicesTable() {
+  const cats = svcCats(), sel = document.getElementById('c-svc');
+  const rows = ((SVC || {}).services || []).slice();
+  sel.innerHTML = `<option value="">All kinds (${rows.length})</option>` + ((SVC || {}).categories || []).filter(c => c.count)
+    .map(c => `<option value="${c.key}">${c.icon} ${esc(c.label)} (${c.count})</option>`).join('');
+  const sm = (SVC || {}).summary || {}, st = sm.status || {};
+  document.getElementById('svc-note').textContent = rows.length
+    ? `${rows.length} services advertised on the mesh (phones are on the MeshPhone layers) · ${st.open || 0} open, ${st.password || 0} need a password` +
+      `${sm.feeds ? ` · ${sm.feeds} ADS-B / AIS receivers publish a data feed` : ''} · checked ${ago(SVC.generated_at)}. Links work from a computer on the mesh.`
+    : (SVC && SVC.running ? 'The first services check is running; reload in a few minutes.' : 'No services check yet.');
+  rows.sort((a, b) => (cats[a.category] || {i: 99}).i - (cats[b.category] || {i: 99}).i || (CAM_RANK[a.status] ?? 9) - (CAM_RANK[b.status] ?? 9));
+  const body = document.querySelector('#t-svc tbody'), q = document.getElementById('q-svc');
+  const render = () => {
+    const s = q.value.trim().toLowerCase(), k = sel.value;
+    const hit = rows.filter(r => (!k || r.category === k) && (!s || `${r.name} ${r.node} ${r.place} ${r.link} ${r.software}`.toLowerCase().includes(s)));
+    body.innerHTML = hit.slice(0, 600).map(r => `<tr><td style="white-space:nowrap">${(cats[r.category] || {}).icon || ''} ${esc((cats[r.category] || {}).label || r.category)}</td>
+      <td><b>${esc(r.name)}</b>${r.software ? `<div class="muted">${esc(r.software)}</div>` : ''}${svcFeed(r)}</td>
+      <td>${esc(r.node || r.node_ip)}${r.place ? `<div class="muted">${esc(r.place)}</div>` : ''}</td>
+      <td>${svcPill(r)}${r.ms != null ? `<div class="muted mono">${r.ms} ms</div>` : ''}</td>
+      <td class="mono" style="font-size:11px">${svcLink(r)}</td></tr>`).join('') +
+      (hit.length > 600 ? `<tr><td colspan="5" class="muted">${hit.length - 600} more: narrow the search</td></tr>` : '');
+  };
+  q.oninput = render; sel.onchange = render;
+  sortable(document.getElementById('t-svc'), rows, render, (r, key) => key === 'status' ? (CAM_RANK[r.status] ?? 9) : key === 'category' ? (cats[r.category] || {i: 99}).i : r[key] || '');
+  render();
+}
+
 initMap();
 if (CAM_MODE) { document.querySelector('header h1').textContent = 'AREDN Camera Map'; document.title = 'AREDN Camera Map'; }
+if (SVC_MODE) { document.querySelector('header h1').textContent = 'AREDN Services Map'; document.title = 'AREDN Services Map'; }
+fetch('services.json', {cache: 'no-store'}).then(r => r.json()).then(d => { SVC = d; svcControl(); drawServices(); servicesTable(); })
+  .catch(e => { document.getElementById('svc-note').textContent = 'Could not load services: ' + e; });
 fetch('cameras.json', {cache: 'no-store'}).then(r => r.json()).then(d => { drawCameras(d); camerasTable(d); })
   .catch(e => { document.getElementById('cam-note').textContent = 'Could not load cameras: ' + e; });
 

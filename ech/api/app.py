@@ -265,7 +265,7 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                     "/ca.crt", "/tls-setup", "/phonebook.xml",
                     "/phonebook-meshphone.xml", "/phonebook-streams.xml",
                     "/meshphone", "/meshphone/", "/meshphone/map.json", "/meshphone/cameras.json",
-                    "/cameras", "/cameras/"}
+                    "/cameras", "/cameras/", "/meshphone/services.json", "/aredn", "/aredn/"}
 
     def _is_loopback(request) -> bool:
         try:
@@ -2305,6 +2305,19 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         return {"cameras": d.get("cameras", []), "generated_at": d.get("generated_at"),
                 "summary": d.get("summary", {}), "error": cams.last_error, "running": cams.running,
                 "enabled": cams.enabled}
+
+    def _services_payload() -> dict:
+        from ech.core.aredn_services import service as svc
+        d = svc.data or {}
+        return {"services": d.get("services", []), "categories": d.get("categories", []),
+                "generated_at": d.get("generated_at"), "summary": d.get("summary", {}),
+                "error": svc.last_error, "running": svc.running, "enabled": svc.enabled}
+
+    @app.get("/api/aredn/services")
+    async def aredn_services_api():
+        """Everything advertised as a service on the AREDN mesh, by category,
+        checked once a day (ech/core/aredn_services.py). Login required."""
+        return _services_payload()
 
     @app.get("/api/aircraft/watch")
     async def aircraft_watch_api(hours: float = 24):
@@ -5096,6 +5109,23 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not await _meshphone_ok(request):
             return RedirectResponse(url="/login?next=/cameras/", status_code=302)
         return RedirectResponse(url="/meshphone/?show=cameras", status_code=302)
+
+    # /aredn/: the same page, opened on all AREDN services
+    @app.get("/aredn")
+    @app.get("/aredn/")
+    async def aredn_services_alias(request: Request):
+        from fastapi.responses import RedirectResponse
+        if not await _meshphone_ok(request):
+            return RedirectResponse(url="/login?next=/aredn/", status_code=302)
+        return RedirectResponse(url="/meshphone/?show=services", status_code=302)
+
+    @app.get("/meshphone/services.json")
+    async def meshphone_services_json(request: Request):
+        """Services advertised on the mesh: what their owners advertise mesh-wide,
+        plus this station's daily check."""
+        if not await _meshphone_ok(request):
+            raise HTTPException(status_code=401, detail="Log in to ECH, or open this on the mesh / local network")
+        return _services_payload()
 
     @app.get("/meshphone/cameras.json")
     async def meshphone_cameras_json(request: Request):

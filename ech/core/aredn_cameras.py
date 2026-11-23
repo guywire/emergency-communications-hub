@@ -249,7 +249,7 @@ class ArednCameras:
                 wait = RETRY_S
             await asyncio.sleep(wait)
 
-    async def _check(self, client, s: dict, hosts: list[dict]) -> dict:
+    async def _check(self, client, s: dict, hosts: list[dict], probe_ports: bool = True) -> dict:
         link = str(s.get("link") or "")
         scheme, ip, port = link_target(link, hosts)
         res: dict = {"status": "unreachable" if not ip else "", "kind": "", "software": "", "view": ""}
@@ -285,7 +285,7 @@ class ArednCameras:
                     res["kind"] = scheme
         # a dedicated camera host: which camera-app ports it answers on
         ports = []
-        if ip and ip != s.get("ip"):
+        if probe_ports and ip and ip != s.get("ip"):
             opens = await asyncio.gather(*(port_open(ip, p) for p in CAMERA_PORTS if p != port))
             ports = [p for p, ok in zip([p for p in CAMERA_PORTS if p != port], opens) if ok]
         apps = []

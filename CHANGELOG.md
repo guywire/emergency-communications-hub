@@ -8,6 +8,41 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.137 (2026-11-23)
+
+- Map: icons instead of text labels, with the label on hover (click still opens the details). POTA a pine, SOTA a mountain, On the Air a flag, DX Cluster an antenna, PSK Reporter signal bars, each in its layer colour; military / rescue aircraft just the plane or helicopter; Gloucester Hill (NGR&S) reports a dashed diamond fading with age, and its site an antenna; MeshPhone offices just the phone. The Map key shows the icons, including what the military / rescue colours mean.
+
+## v1.1.136 (2026-11-23)
+
+- Map: aircraft are an SVG plane turned to their track (helicopters, ADS-B category A7, get a helicopter), on the map and in the military / rescue layer; the Map key shows the plane. The common APRS symbols are drawn the same way in the APRS colour: digipeaters as a star with their overlay letter, house, house with yagi, weather station, car. Other APRS symbols keep the standard symbol image.
+
+## v1.1.135 (2026-11-23)
+
+- Map: Meshtastic, MeshCore, Winlink RMS and AIS markers are SVG icons in their network colour, outlined and transparent around the shape, like the MeshPhone phones: Meshtastic's "/Λ" mark, MeshCore as three linked nodes, Winlink as an envelope, AIS as a hull turned to its course (an anchor when stopped). Repeaters are drawn a little bigger; offline nodes still fade. The Map key shows the same icons and follows your colour settings; Winlink has its own key entry.
+
+## v1.1.134 (2026-11-23)
+
+- MeshPhone PBXs are drawn as a small rotary-phone icon in their status colour (transparent around the shape, outlined; blue outline = found only on the mesh, faded = not answering) instead of dots, on the MeshPhone page, its legend and the map's MeshPhone layer.
+
+## v1.1.133 (2026-11-23)
+
+- AREDN checklists (map panel and shared mesh page) are one flat "Services" list: MeshPhone offices and cameras are kinds like the rest, and All / None covers them too.
+
+## v1.1.132 (2026-11-23)
+
+- Map: one "🛰 AREDN mesh…" checklist for MeshPhone offices, cameras and every service kind, in its own panel that stays open while you tick boxes (the kind chips in the Layers menu closed it on every click). Saved layer profiles still switch these layers.
+- Shared mesh page: one "Map layers" checklist (MeshPhone, cameras, service kinds with all / none) instead of two controls.
+
+## v1.1.131 (2026-11-23)
+
+- AREDN services: time servers get a real NTP query (UDP) and show their stratum; the first pass tested them over TCP, so most showed "not answering".
+
+## v1.1.130 (2026-11-23)
+
+- AREDN services: everything advertised on the mesh, sorted by kind (ADS-B and AIS receivers, satellite receivers, cameras, packet / BBS, Winlink, APRS, TAK, Meshtastic / MeshCore, radio / SDR / AllStar, chat, weather, time servers, mail, internet gateways, power / solar, maps, wikis), checked once a day and placed at the node that advertises it. ADS-B and AIS receivers are also checked for a public data feed (aircraft.json / ships.json). Phones stay on the MeshPhone map.
+- Map: "AREDN services" layer with a chip per kind. Shared mesh page (/meshphone/): an "Other AREDN services" layer with a kind checklist, a Services tab, and /aredn/ to open it on the services.
+- Messages: double-click a channel to mute or unmute it (single click still focuses it).
+
 ## v1.1.129 (2026-11-23)
 
 - Messages: mute individual channels on any adapter from a "🔇 Mute…" menu at the end of the adapter's channel bar (works on phones; right-click a channel still works too). Muted channels show struck through, stay out of "All ch", "All traffic" and the unread count, and can still be opened by clicking them. Display only: they're still received, logged and bridged.

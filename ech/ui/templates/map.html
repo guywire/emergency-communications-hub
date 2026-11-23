@@ -58,6 +58,7 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 #moon-panel .moon-x{position:absolute;top:2px;right:6px;cursor:pointer;color:var(--muted);font-size:12px}
 .legend-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
 .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.legend-svg{display:inline-flex;margin-right:6px;flex-shrink:0}
 #node-count{font-size:11px;color:var(--muted)}
 .trk-tbl{border-collapse:collapse;margin-top:4px;font-size:10px}
 .trk-tbl td{padding:1px 8px 1px 0;vertical-align:top}
@@ -107,8 +108,11 @@ body.sim-mode #map{height:calc(100vh - 70px)}
     <button class="ctrl-btn layer-row" id="satellites-btn" onclick="toggleSatellites()" title="Tracked satellites: ISS, amateur satellites with CW beacons (AO-7, FO-29, AO-73, RS-44, ...), QO-100 (FT8), NOAA weather, and Starlink trains with their next passes. Click a satellite for its ground track.">🛰 Satellites (tracked)</button>
     <button class="ctrl-btn layer-row" id="acwatch-btn" onclick="toggleAircraftWatch()" title="Military, rescue/medical, emergency-squawk and helicopter aircraft from our ADS-B receiver and OpenSky, plus the NGR&amp;S (Gloucester Hill) spots from Meshtastic MQTT matched to where we tracked them. A toast pops up when a new one appears. Refreshes every minute.">🎖 Military / rescue aircraft</button>
     <div class="layer-group-title">AREDN mesh</div>
-    <button class="ctrl-btn layer-row" id="meshphone-btn" onclick="toggleMeshPhone()" title="MeshPhone offices (PBXs) placed at their AREDN node, coloured by whether they answered our last check, with the trunks between them. From the MeshPhone map (/meshphone/), re-measured every 6 hours.">☎ MeshPhone offices</button>
-    <button class="ctrl-btn layer-row" id="aredncam-btn" onclick="toggleArednCameras()" title="Cameras and video streams advertised on the AREDN mesh, at the node that advertises them. Checked once a day: open, password needed, or not answering, what software it runs and which app views it. Links open only from a computer on the mesh.">📷 AREDN cameras</button>
+    <button class="ctrl-btn layer-row" id="aredn-open-btn" onclick="openArednPanel(event)" title="MeshPhone offices, cameras and every kind of service advertised on the AREDN mesh, in one checklist that stays open until you close it.">🛰 AREDN mesh…</button>
+    <!-- the checklist drives these; kept (hidden) so saved layer profiles still switch them -->
+    <button class="ctrl-btn layer-row" style="display:none" id="meshphone-btn" onclick="toggleMeshPhone()" title="MeshPhone offices (PBXs) placed at their AREDN node, coloured by whether they answered our last check, with the trunks between them. From the MeshPhone map (/meshphone/), re-measured every 6 hours.">☎ MeshPhone offices</button>
+    <button class="ctrl-btn layer-row" style="display:none" id="aredncam-btn" onclick="toggleArednCameras()" title="Cameras and video streams advertised on the AREDN mesh, at the node that advertises them. Checked once a day: open, password needed, or not answering, what software it runs and which app views it. Links open only from a computer on the mesh.">📷 AREDN cameras</button>
+    <button class="ctrl-btn layer-row" style="display:none" id="arednsvc-btn" onclick="toggleArednServices()" title="Everything advertised on the AREDN mesh, by kind: ADS-B and AIS receivers (and whether they publish a data feed), satellite receivers, packet / BBS, Winlink, APRS, TAK, Meshtastic / MeshCore gateways, radio / SDR / AllStar, chat, weather, time servers, mail, internet gateways, power / solar, maps, wikis. Placed at the node that advertises it and checked once a day. Choose kinds with the chips below.">🛰 AREDN services</button>
     <div class="layer-group-title">Panels</div>
     <button class="ctrl-btn layer-row on" id="panel-moon-btn" onclick="togglePanel('moon')" title="Show or hide the moon phase panel">🌙 Moon status</button>
     <button class="ctrl-btn layer-row on" id="panel-key-btn"  onclick="togglePanel('key')"  title="Show or hide the map key (legend)">🗝 Map key</button>
@@ -163,14 +167,15 @@ body.sim-mode #map{height:calc(100vh - 70px)}
 <div id="moon-panel"></div>
 <div id="legend">
   <div style="font-weight:500;margin-bottom:6px;font-size:11px">Node Types</div>
-  <div class="legend-item"><div class="legend-dot" id="legend-dot-meshtastic" style="background:#3fb950"></div>Meshtastic</div>
-  <div class="legend-item"><div class="legend-dot" id="legend-dot-meshcore" style="background:#f78c6c"></div>MeshCore</div>
+  <div class="legend-item"><span class="legend-svg" id="legend-dot-meshtastic" data-kind="meshtastic" data-color="#3fb950"></span>Meshtastic</div>
+  <div class="legend-item"><span class="legend-svg" id="legend-dot-meshcore" data-kind="meshcore" data-color="#f78c6c"></span>MeshCore</div>
   <div class="legend-item"><div class="legend-dot" id="legend-dot-aprs" style="background:#7c3aed"></div>APRS</div>
   <div class="legend-item"><div class="legend-dot" id="legend-dot-reticulum" style="background:#c792ea"></div>Reticulum</div>
   <div class="legend-item"><div class="legend-dot" id="legend-dot-mqtt" style="background:#e2a44f"></div>MQTT</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Alert / WL</div>
-  <div class="legend-item"><span id="legend-dot-adsb" style="color:#f0b429;font-size:13px;line-height:1;margin-right:6px">✈</span>ADS-B Aircraft</div>
-  <div class="legend-item"><span id="legend-dot-ais" style="color:#56d3c8;font-size:13px;line-height:1;margin-right:6px">⚓</span>AIS Vessels</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Alert</div>
+  <div class="legend-item"><span class="legend-svg" id="legend-dot-adsb" data-kind="plane" data-color="#f0b429"></span>ADS-B aircraft</div>
+  <div class="legend-item"><span class="legend-svg" id="legend-dot-ais" data-kind="ship" data-color="#56d3c8"></span>AIS vessels (⚓ when stopped)</div>
+  <div class="legend-item"><span class="legend-svg" id="legend-dot-winlink" data-kind="winlink" data-color="#f85149"></span>Winlink RMS</div>
   <div id="legend-spots" style="display:none;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><div style="font-weight:500;margin-bottom:4px;font-size:11px">Spot layers</div><div id="legend-spots-items"></div></div>
   <div class="legend-item" id="legend-hamlog" style="display:none"><div class="legend-dot" style="background:#ffd700;border:1px solid #997a00"></div>Ham Log QSO</div>
   <div id="legend-acwatch" style="display:none;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"></div>
@@ -385,39 +390,22 @@ function makeNodeIcon(node, color, size=12) {
     });
   }
   if (id.startsWith('icao:')) {
-    const sz = size + 4;
-    // ✈ emoji points right (≈90° compass); rotate so it faces track_deg
-    const track = (node.meta && node.meta.track_deg != null) ? node.meta.track_deg : null;
-    const rot = track != null ? (track - 90) : -45;
-    return L.divIcon({
-      className: 'node-dot',
-      html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center;transform:rotate(${rot}deg)">✈</div>`,
-      iconSize: [sz, sz],
-      iconAnchor: [sz/2, sz/2],
-    });
+    const m = node.meta || {};
+    if (m.category === 'A7') return svgNodeIcon('heli', color, size + 8);
+    return svgNodeIcon('plane', color, size + 8, m.track_deg != null ? m.track_deg : 0);
   }
   if (nodeIsVessel(node)) {
-    const sz = size + 2;
     const course = (node.meta && node.meta.course_deg != null) ? node.meta.course_deg : null;
-    if (course != null) {
-      // Moving vessel: show directional arrow rotated by COG (▲ points North at 0°)
-      return L.divIcon({
-        className: 'node-dot',
-        html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center;transform:rotate(${course}deg)">▲</div>`,
-        iconSize: [sz, sz],
-        iconAnchor: [sz/2, sz/2],
-      });
-    }
-    // No COG (at anchor / stationary): show anchor icon
-    return L.divIcon({
-      className: 'node-dot',
-      html: `<div style="font-size:${sz}px;line-height:1;color:${color};text-shadow:0 0 5px ${color};display:flex;align-items:center;justify-content:center">⚓</div>`,
-      iconSize: [sz, sz],
-      iconAnchor: [sz/2, sz/2],
-    });
+    // under way: a hull pointing along its course over ground; no course: an anchor
+    return course != null ? svgNodeIcon('ship', color, size + 8, course) : svgNodeIcon('anchor', color, size + 6);
   }
   const aprsSym = node.meta && node.meta.aprs_symbol;
   if (aprsSym && aprsSym.length === 2) return makeAprsIcon(aprsSym, color);
+  // Winlink RMS, Meshtastic and MeshCore get their own drawings (repeaters a little bigger)
+  const big = _REPEATER_TYPES.has(node.node_type || '') ? 2 : 0;
+  if (node.node_type === 'RMS' || /winlink|pat/i.test(node._adapter || '')) return svgNodeIcon('winlink', color, size + 6 + big);
+  const proto = nodeProtocol(node);
+  if (proto === 'meshtastic' || proto === 'meshcore') return svgNodeIcon(proto, color, size + 6 + big);
   return makeIcon(color, size);
 }
 
@@ -453,8 +441,20 @@ function _aprsSpriteDiv(sheet, code) {
   const base = (window.ECH_BASE_PATH || '') + '/static/aprs-symbols/aprs-symbols-48-';
   return `<div style="position:absolute;inset:0;background:url('${base}${sheet}.png') -${(i % 16) * 24}px -${Math.floor(i / 16) * 24}px / 384px 144px no-repeat"></div>`;
 }
+// APRS symbols whose meaning is certain, drawn like the other map icons
+function _aprsSvgKind(table, code) {
+  const overlay = /[0-9A-Z]/.test(table) ? table : '';
+  if (code === '#') return 'digi' + (overlay ? ':' + overlay : '');      // digipeater (any table)
+  if (table === '/' && code === '-') return 'house';
+  if (table === '/' && code === 'y') return 'yagi';                     // house with a yagi
+  if (code === '_' && (table === '/' || table === '\\' || overlay)) return 'wx';   // weather station
+  if (table === '/' && code === '>') return 'car';
+  return null;
+}
 function makeAprsIcon(sym, color) {
   const table = sym[0], code = sym[1];
+  const kind = _aprsSvgKind(table, code);
+  if (kind) return svgNodeIcon(kind, color, 20);
   let html = _aprsSpriteDiv(table === '/' ? 0 : 1, code);
   if (table !== '/' && table !== '\\' && /[0-9A-Z]/.test(table)) html += _aprsSpriteDiv(2, table);
   if (!html) return makeIcon(color);
@@ -465,6 +465,74 @@ function makeAprsIcon(sym, color) {
     iconSize: [24, 24],
     iconAnchor: [12, 12],
   });
+}
+
+// Map icons drawn as SVG: the status / network colour inside, a dark outline so
+// they read on any tile, transparent around the shape. 24x24 drawings.
+const _ICON_OUT = '#0d1117';
+// a stroke-drawn shape: a wider dark stroke underneath gives it an outline
+function _duo(d, color, w) {
+  return `<path d="${d}" fill="none" stroke="${_ICON_OUT}" stroke-width="${w + 2.2}" stroke-linecap="round" stroke-linejoin="round"/>` +
+         `<path d="${d}" fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+const MAP_SVG = {
+  // Meshtastic: the bold "/Λ" of its logo
+  meshtastic: c => _duo('M3.5 19.5L9.5 6.5', c, 3.4) + _duo('M9.5 19.5L15.5 6.5L21 19.5', c, 3.4),
+  // MeshCore: three linked mesh nodes
+  meshcore: c => _duo('M6 18L18 18L12 6.5Z', c, 1.8) +
+    [[6, 18], [18, 18], [12, 6.5]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="3.4" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.3"/>`).join(''),
+  // Winlink RMS: an envelope
+  winlink: c => `<rect x="2.5" y="5.5" width="19" height="13.5" rx="2" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.3"/>` +
+    `<path d="M3.5 7l8.5 6.5L20.5 7" fill="none" stroke="${_ICON_OUT}" stroke-width="1.5" stroke-linejoin="round"/>`,
+  // AIS, under way: a hull seen from above, bow up (rotated to the course)
+  ship: c => `<path d="M12 1.8c3 3.6 4.4 7.4 4.4 11V20c0 1.2-.8 2.2-2 2.2H9.6c-1.2 0-2-1-2-2.2v-7.2c0-3.6 1.4-7.4 4.4-11z" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.3"/>` +
+    `<rect x="9.6" y="13" width="4.8" height="4.2" rx=".8" fill="${_ICON_OUT}" fill-opacity=".55"/>`,
+  // AIS, stationary: an anchor
+  anchor: c => _duo('M12 7.5V20.5M7.5 10.5h9M4.5 14c.4 4.3 3.6 6.5 7.5 6.5s7.1-2.2 7.5-6.5', c, 2.2) +
+    `<circle cx="12" cy="4.8" r="2.4" fill="none" stroke="${_ICON_OUT}" stroke-width="4"/><circle cx="12" cy="4.8" r="2.4" fill="none" stroke="${c}" stroke-width="1.9"/>`,
+};
+function mapSvg(kind, color, size = 18, rot = 0) {
+  const body = kind.startsWith('digi') ? _digiSvg(color, kind.split(':')[1] || '') : MAP_SVG[kind](color);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" style="display:block;overflow:visible${rot ? `;transform:rotate(${rot}deg)` : ''}">${body}</svg>`;
+}
+// aircraft, top-down, nose up (rotated to the track)
+MAP_SVG.plane = c => `<path d="M12 1.4c.9 0 1.5 1 1.5 2.4v5.4l7.8 4.6v2.1l-7.8-2.4v5.2l2.3 1.7v1.6L12 20.9l-3.8 1.1v-1.6l2.3-1.7V13l-7.8 2.4v-2.1l7.8-4.6V3.8c0-1.4.6-2.4 1.5-2.4z" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.2" stroke-linejoin="round"/>`;
+MAP_SVG.heli = c => _duo('M4 4.5L20 19.5M20 4.5L4 19.5', c, 1.5) + _duo('M12 15.5V22M9.8 21.8h4.4', c, 1.8) +
+  `<ellipse cx="12" cy="11.5" rx="3.4" ry="4.8" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.2"/>`;
+// APRS: the common symbols whose meaning is certain; others keep the standard sprite
+MAP_SVG.house = c => `<path d="M4.5 11.2L12 4.5l7.5 6.7V20H4.5z" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.3" stroke-linejoin="round"/>` +
+  `<rect x="10.2" y="14.2" width="3.6" height="5.8" fill="${_ICON_OUT}" fill-opacity=".55"/>`;
+MAP_SVG.yagi = c => MAP_SVG.house(c).replace('M4.5 11.2', 'M2.5 12.2').replace('l7.5 6.7V20H4.5z', 'l7 6.2V21h-14z') +
+  _duo('M19 13V2.5M16 4.5h6M16.5 7h5', c, 1.4);
+MAP_SVG.wx = c => `<circle cx="9" cy="8.5" r="4" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.2"/>` +
+  `<path d="M7.5 20.5h10a3.8 3.8 0 0 0 .3-7.6 5.2 5.2 0 0 0-10-.4 4 4 0 0 0-.3 8z" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.3"/>`;
+MAP_SVG.car = c => `<path d="M2.5 15.5v-3.2c0-.8.6-1.5 1.4-1.6l2.4-.4 2.2-3.4c.4-.6 1-.9 1.7-.9h5c.7 0 1.3.4 1.6 1l1.6 3.1 1.9.4c.8.2 1.3.8 1.3 1.6v3.4z" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.2" stroke-linejoin="round"/>` +
+  [7, 17].map(x => `<circle cx="${x}" cy="16" r="2.3" fill="${_ICON_OUT}"/><circle cx="${x}" cy="16" r=".9" fill="${c}"/>`).join('');
+function _digiSvg(c, letter) {
+  return `<path d="M12 1.8l2.9 6.4 7 .7-5.3 4.7 1.6 6.9L12 16.9l-6.2 3.6 1.6-6.9L2.1 8.9l7-.7z" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.2" stroke-linejoin="round"/>` +
+    (letter ? `<text x="12" y="14.6" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="7.5" fill="${_ICON_OUT}">${letter}</text>` : '');
+}
+
+// activity spot layers
+MAP_SVG.pota = c => `<path d="M12 1.8L5 10.6h3L4.2 16.2h6.3V21h3v-4.8h6.3L16 10.6h3z" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.2" stroke-linejoin="round"/>`;
+MAP_SVG.sota = c => `<path d="M1.8 20.5L9.4 6.4l3.7 6.3 2.5-3.9 6.6 11.7z" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.2" stroke-linejoin="round"/>` +
+  `<path d="M9.4 6.4l2.2 3.8-1.2-.5-1 1.2-1.1-1.1-1.1.4z" fill="#fff" fill-opacity=".85"/>`;
+MAP_SVG.ota = c => _duo('M5.5 21.5V2.8', c, 1.8) +
+  `<path d="M6.3 3.3h12.4l-3 4.1 3 4.1H6.3z" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.2" stroke-linejoin="round"/>`;
+MAP_SVG.dx = c => _duo('M12 10V21.5M8.6 21.5h6.8', c, 1.8) + _duo('M7.3 3.4a6.4 6.4 0 0 0 0 8M16.7 3.4a6.4 6.4 0 0 1 0 8', c, 1.5) +
+  `<circle cx="12" cy="7.4" r="2.3" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.2"/>`;
+MAP_SVG.psk = c => [[2.6, 14, 6.4], [9.5, 9, 11.4], [16.4, 3.6, 16.8]].map(([x, y, h]) =>
+  `<rect x="${x}" y="${y}" width="5" height="${h}" rx="1" fill="${c}" stroke="${_ICON_OUT}" stroke-width="1.2"/>`).join('');
+// a past position report (NGR&S): dashed diamond
+MAP_SVG.pastspot = c => `<path d="M12 3.5l8.5 8.5-8.5 8.5L3.5 12z" fill="${c}" fill-opacity=".3" stroke="${_ICON_OUT}" stroke-width="3.4"/>` +
+  `<path d="M12 3.5l8.5 8.5-8.5 8.5L3.5 12z" fill="none" stroke="${c}" stroke-width="1.8" stroke-dasharray="2.6 1.8"/>`;
+
+function _legendSvgs() {
+  document.querySelectorAll('.legend-svg[data-kind]').forEach(el => { el.innerHTML = mapSvg(el.dataset.kind, el.dataset.color, 14); });
+}
+function svgNodeIcon(kind, color, size, rot = 0) {
+  return L.divIcon({className: 'node-dot', iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+    html: `<div style="filter:drop-shadow(0 0 1px rgba(255,255,255,.55)) drop-shadow(0 0 3px ${color}66)">${mapSvg(kind, color, size, rot)}</div>`});
 }
 
 function makeIcon(color, size=12) {
@@ -1531,7 +1599,8 @@ async function loadPSKReporter() {
       st.reports.sort((a, b) => (b.flowStartSeconds || 0) - (a.flowStartSeconds || 0));
       const latest = st.reports[0];
       const band = _band((latest.frequency || 0) / 1000);
-      const m = L.marker([st.lat, st.lon], {icon: spotIcon('psk', st.call, [band, latest.mode].filter(Boolean).join(' '))})
+      const m = L.marker([st.lat, st.lon], {icon: spotIcon('psk')})
+        .bindTooltip(spotTip('psk', st.call, [band, latest.mode].filter(Boolean).join(' ')), {direction: 'top', offset: [0, -10]})
         .bindPopup(() => _pskPopup(st), {maxWidth: 340})
         .addTo(map);
       m.on('popupopen', () => _pskShowLinks(st));
@@ -1589,12 +1658,11 @@ function _band(khz) {
   return b ? b[2] : '';
 }
 
-function spotIcon(kind, call, extra) {
-  const s = SPOT_STYLE[kind];
-  const html = `<div style="font-family:monospace;font-size:9px;color:${s.color};background:rgba(0,0,0,.75);` +
-    `padding:1px 4px;border-radius:2px;border:1px solid ${s.color};white-space:nowrap">` +
-    `${s.icon} <b>${s.tag}</b> ${esc(call || '?')}${extra ? ' ' + esc(extra) : ''}</div>`;
-  return L.divIcon({className: '', html, iconSize: [120, 16], iconAnchor: [60, 8]});
+function spotIcon(kind) {
+  return svgNodeIcon(kind, SPOT_STYLE[kind].color, 20);
+}
+function spotTip(kind, call, extra) {
+  return `${SPOT_STYLE[kind].tag} ${esc(call || '?')}${extra ? ' · ' + esc(extra) : ''}`;
 }
 
 function spotPopup(kind, title, rows) {
@@ -1614,9 +1682,7 @@ function setSpotLegend(kind, on) {
   el.style.display = _spotLegendOn.size ? '' : 'none';
   document.getElementById('legend-spots-items').innerHTML = [..._spotLegendOn].map(k => {
     const s = SPOT_STYLE[k];
-    return `<div class="legend-item" title="${esc(s.label)}"><span style="font-family:monospace;font-size:9px;` +
-      `color:${s.color};border:1px solid ${s.color};padding:0 3px;border-radius:2px;margin-right:6px">` +
-      `${s.icon} ${s.tag}</span>${esc(s.label)}</div>`;
+    return `<div class="legend-item" title="${esc(s.label)}"><span class="legend-svg">${mapSvg(k, s.color, 14)}</span>${esc(s.label)}</div>`;
   }).join('');
 }
 
@@ -1632,7 +1698,8 @@ async function _loadSpotLayer(kind, url, state, build, emptyNote) {
     (data.spots || []).forEach(spot => {
       if (spot.lat == null || spot.lon == null) return;
       const [call, extra, title, rows] = build(spot);
-      state.markers.push(L.marker([spot.lat, spot.lon], {icon: spotIcon(kind, call, extra)})
+      state.markers.push(L.marker([spot.lat, spot.lon], {icon: spotIcon(kind)})
+        .bindTooltip(spotTip(kind, call, extra), {direction: 'top', offset: [0, -10]})
         .bindPopup(spotPopup(kind, title, rows)).addTo(map));
     });
     const n = state.markers.length;
@@ -2498,7 +2565,8 @@ fetch('/api/map-colors').then(r => r.json()).then(d => {
   for (const [mode, color] of Object.entries(_mapColorOverrides)) {
     const el = document.getElementById(`legend-dot-${mode}`);
     if (!el) continue;
-    if (el.classList.contains('legend-dot')) el.style.background = color;
+    if (el.dataset.kind) { el.dataset.color = color; _legendSvgs(); }
+    else if (el.classList.contains('legend-dot')) el.style.background = color;
     else el.style.color = color;
   }
   // Color the MSHT/MSHC/APRS toggle buttons to match their marker color —
@@ -3056,6 +3124,7 @@ function _envBtn(id, on) {
   btn.style.color = on ? 'var(--green)' : '';
   btn.style.borderColor = on ? 'var(--green)' : '';
   btn.classList.toggle('on', on);
+  if (id === 'meshphone-btn' || id === 'aredncam-btn' || id === 'arednsvc-btn') _arednPanelSync();
 }
 function _envOff(k) {
   const e = _envLayers[k];
@@ -3204,19 +3273,17 @@ function _acAgo(iso) {
   const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
   return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h${m % 60 ? (m % 60 + '').padStart(2, '0') : ''} ago`;
 }
-function _acBadge(text, col, opacity, dashed) {
-  return `<div style="display:inline-block;white-space:nowrap;font:600 10px var(--mono);color:${col};opacity:${opacity};
-    background:rgba(13,17,23,.82);border:1px ${dashed ? 'dashed' : 'solid'} ${col};border-radius:3px;padding:0 4px;line-height:15px">${text}</div>`;
-}
-// Its markers are labelled, so the regular Map key gets just a short section
-// (dashed = past NGR&S report) and the past-report window.
+// The markers are icons (details on hover), so the regular Map key says what
+// the colours and the dashed diamond mean, and holds the past-report window.
 function _acLegend(on) {
   const el = document.getElementById('legend-acwatch');
   if (!el) return;
   el.style.display = on ? '' : 'none';
   if (!on) return;
+  const row = (kind, col, text) => `<div class="legend-item"><span class="legend-svg">${mapSvg(kind, col, 14)}</span>${text}</div>`;
   el.innerHTML = `<div style="font-weight:500;margin-bottom:4px;font-size:11px">Military / rescue aircraft</div>
-    <div style="font-size:10px;color:var(--muted);max-width:200px">Solid label: in the air now. Dashed, fading: where Gloucester Hill (NGR&amp;S) reported one; it has probably moved on.</div>
+    ${['military', 'rescue', 'helicopter', 'emergency'].map(k => row(k === 'helicopter' ? 'heli' : 'plane', _AC_COLORS[k], _AC_LABEL[k])).join('')}
+    ${row('pastspot', '#f2f2f2', 'Gloucester Hill (NGR&amp;S) report, fading with age')}
     <div style="font-size:10px;margin-top:3px">Past reports: ${[2, 6, 24].map(h => `<a href="#" onclick="_acSetHours(${h});return false" style="color:${h === _acSpotHours ? 'var(--green)' : 'var(--blue)'};margin-right:6px">${h} h</a>`).join('')}</div>`;
 }
 function _acSetHours(h) { _acSpotHours = h; _acLegend(true); if (_acWatch) _acWatch.redraw(); }
@@ -3251,11 +3318,11 @@ async function toggleAircraftWatch() {
     (d.live || []).forEach(a => {
       const col = _AC_COLORS[a.class] || '#ccc';
       const heli = a.class === 'helicopter' || /HELO|rotor/i.test(a.why);
-      const glyph = heli ? '🚁' : '✈';
-      const rot = !heli && a.track_deg != null ? a.track_deg - 45 : 0;
+      const rot = !heli && a.track_deg != null ? a.track_deg : 0;
       const label = `${esc(a.flight || a.registration || a.hex.toUpperCase())} · ${_AC_SHORT[a.class]}${a.type ? ' ' + esc(a.type) : ''}${a.alt_ft != null ? ' · ' + Math.round(a.alt_ft / 100) * 100 + 'ft' : ''}`;
       L.marker([a.lat, a.lon], {zIndexOffset: 900, icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [11, 11],
-        html: `<div style="display:flex;align-items:center;gap:3px"><span style="font-size:18px;color:${col};display:inline-block;transform:rotate(${rot}deg);text-shadow:0 0 3px #000,0 0 6px ${col}">${glyph}</span>${_acBadge(label, col, 1, false)}</div>`})})
+        html: `<div style="filter:drop-shadow(0 0 1px rgba(255,255,255,.55)) drop-shadow(0 0 4px ${col})">${mapSvg(heli ? 'heli' : 'plane', col, 22, rot)}</div>`})})
+        .bindTooltip(label, {direction: 'top', offset: [0, -12]})
         .bindPopup(`<div class="node-popup"><div class="node-name">${esc(a.flight || a.hex.toUpperCase())}</div>
           <div class="node-stat" style="color:${col}"><b>${_AC_LABEL[a.class]}</b>: ${esc(a.why)}</div>
           <div class="node-stat">${a.alt_ft != null ? a.alt_ft + ' ft' : ''}${a.speed_kts != null ? ' · ' + Math.round(a.speed_kts) + ' kt' : ''}${a.squawk ? ' · squawk ' + esc(a.squawk) : ''}</div>
@@ -3280,8 +3347,8 @@ async function toggleAircraftWatch() {
       const age = (Date.now() - new Date(s.time).getTime()) / 3600e3;
       const op = Math.max(0.35, 1 - age / _acSpotHours * 0.65);
       const name = s.call || s.type || s.hex.toUpperCase();
-      L.marker([s.lat, s.lon], {zIndexOffset: 500, icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [4, 8],
-        html: _acBadge(`◇ ${esc(name)}${s.call && s.type ? ' ' + esc(s.type) : ''} · ${_acAgo(s.time)}`, col, op, true)})})
+      L.marker([s.lat, s.lon], {zIndexOffset: 500, opacity: op, icon: svgNodeIcon('pastspot', col, 18)})
+        .bindTooltip(`${esc(name)}${s.call && s.type ? ' ' + esc(s.type) : ''} · Gloucester Hill report ${_acAgo(s.time)}`, {direction: 'top', offset: [0, -9]})
         .bindPopup(`<div class="node-popup"><div class="node-name">${esc(s.call || s.hex.toUpperCase())} <span style="color:var(--muted)">${_acAgo(s.time)}</span></div>
           <div class="node-stat" style="color:${col}">Gloucester Hill (NGR&amp;S) reported: ${esc(s.label)}${s.alt_ft ? ' · ' + s.alt_ft + ' ft' : ''}</div>
           <div class="node-stat">Shown where ${/lol/.test(s.matched_by || '') ? 'adsb.lol' : s.matched_by === 'adsb' ? 'our ADS-B receiver' : 'OpenSky'} tracked it ${Math.abs(Math.round(s.match_offset_s / 60))} min ${s.match_offset_s < 0 ? 'before' : 'after'} that report. A past position: the aircraft has probably moved on.</div>${_acLinks(s.hex, s.call)}</div>`)
@@ -3289,8 +3356,8 @@ async function toggleAircraftWatch() {
     });
     const st = d.stats || {};
     const pct = st.week_spots ? Math.round(100 * st.week_seen_by_us / st.week_spots) : 0;
-    L.marker(NGRS_SITE, {icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [10, 10],
-      html: `<div style="font-size:11px;background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:10px;padding:2px 7px;color:var(--text);white-space:nowrap">📡 Gloucester Hill (NGR&amp;S)${only.length ? ' · ' + only.length + ' only theirs' : ''}</div>`})})
+    L.marker(NGRS_SITE, {icon: svgNodeIcon('dx', '#e6edf3', 22)})
+      .bindTooltip(`Gloucester Hill (NGR&amp;S)${only.length ? ' · ' + only.length + ' heard only by them' : ''}`, {direction: 'top', offset: [0, -11]})
       .bindPopup(`<div class="node-popup" style="max-width:300px"><div class="node-name">Gloucester Hill (NGR&amp;S) vs our feeds</div>
         <div class="node-stat">Last 7 days: ${st.week_spots || 0} reports; we also tracked ${st.week_seen_by_us || 0} (${pct}%), ${st.week_only_ngrs || 0} heard only by Gloucester Hill.</div>
         <div class="node-stat" style="margin-top:4px"><b>Only theirs, last ${_acSpotHours} h</b> (no position):</div>
@@ -3328,6 +3395,18 @@ const _MP_LINK = {verified: ['#2ea043', 'our trunk, up', null], down: ['#f85149'
   reported_mixed: ['#e3b341', 'reported up by one end, down by the other', null],
   both_up: ['#58a6ff', 'not reported; both PBXs answer', '4 4'], end_down: ['#f85149', 'not reported; a PBX is down', '1 5'],
   unknown: ['#8b949e', 'not reported', '1 5'], unlisted_end: ['#8b949e', 'one end not listed', '1 5']};
+// Classic rotary desk phone (same drawing as the MeshPhone page): status colour,
+// dark outline, transparent around the shape.
+function phoneSvg(fill, {size = 20, outline = '#0d1117', ow = 1.3, opacity = 1} = {}) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" style="display:block;overflow:visible">
+    <g fill="${fill}" fill-opacity="${opacity}" stroke="${outline}" stroke-width="${ow}" stroke-linejoin="round">
+      <path d="M2.5 7.2C2.5 4.4 6.3 3 12 3s9.5 1.4 9.5 4.2v1.3c0 .9-.7 1.5-1.5 1.5h-3c-.8 0-1.5-.6-1.5-1.5V7.6c-1.2-.4-2.4-.5-3.5-.5s-2.3.1-3.5.5v.9c0 .9-.7 1.5-1.5 1.5H4c-.8 0-1.5-.6-1.5-1.5z"/>
+      <path d="M8.2 10.6h7.6l4.3 8.8c.4.9-.1 1.6-1.1 1.6H5c-1 0-1.5-.7-1.1-1.6z"/>
+    </g>
+    <circle cx="12" cy="15.6" r="3.1" fill="none" stroke="${outline}" stroke-width="1.1"/>
+    <circle cx="12" cy="15.6" r="1" fill="${outline}"/>
+  </svg>`;
+}
 let _mpLayer = null;
 async function toggleMeshPhone() {
   if (_mpLayer) { _mpLayer.remove(); _mpLayer = null; return _envBtn('meshphone-btn', false); }
@@ -3353,8 +3432,9 @@ async function toggleMeshPhone() {
   Object.values(at).forEach(o => {
     const s = _MP_OFF[o.state] || ['#8b949e', o.state || 'unknown'];
     const nums = [...(o.office_codes || []).map(c => c + 'xx'), ...(o.number_range ? [o.number_range] : [])].join(', ');
-    L.marker([o.lat, o.lon], {zIndexOffset: 300, icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [6, 8],
-      html: `<div style="display:inline-flex;align-items:center;gap:3px;white-space:nowrap;font:600 10px var(--mono);color:${s[0]};background:rgba(13,17,23,.82);border:1px ${o.in_directory ? 'solid' : 'dashed'} ${s[0]};border-radius:3px;padding:0 4px;line-height:15px">☎ ${esc(o.name)}</div>`})})
+    L.marker([o.lat, o.lon], {zIndexOffset: 300, icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [9, 9],
+      html: `<div style="filter:drop-shadow(0 0 1px rgba(255,255,255,.6))">${phoneSvg(s[0], {size: 18, outline: o.in_directory ? '#0d1117' : '#58a6ff', ow: o.in_directory ? 1.3 : 2, opacity: o.state === 'no_answer' ? 0.45 : 1})}</div>`})})
+      .bindTooltip(`${esc(o.name)} · ${s[1]}`, {direction: 'top', offset: [0, -9]})
       .bindPopup(`<div class="node-popup"><div class="node-name">☎ ${esc(o.name)} <span style="color:${s[0]}">${s[1]}${o.rtt_ms != null ? ' · ' + Math.round(o.rtt_ms) + ' ms' : ''}</span></div>
         <div class="node-stat">${esc(o.place || o.location || '')}${o.node ? ' · node ' + esc(o.node) : ''}</div>
         ${nums ? `<div class="node-stat">Numbers: <span class="mono">${esc(nums)}</span></div>` : ''}
@@ -3426,6 +3506,141 @@ async function toggleArednCameras() {
   toast(`AREDN cameras: ${cams.length} advertised · ${sm.open || 0} open, ${sm.password || 0} password${unplaced ? ` · ${unplaced} not placed (node has no location)` : ''}`);
 }
 
+// ── AREDN mesh: every advertised service, by category (/api/aredn/services, checked daily) ──
+let _svcLayer = null, _svcData = null;
+let _svcOn = null;     // category keys shown; remembered per browser
+try { _svcOn = new Set(JSON.parse(localStorage.getItem('ech.arednSvcCats') || 'null') || []); if (!_svcOn.size) _svcOn = null; } catch (e) { _svcOn = null; }
+const _SVC_ST = {open: ['#3fb950', 'open'], password: ['#e3b341', 'password needed'], blocked: ['#e3b341', 'forbidden'],
+  no_reply: ['#f85149', 'no reply'], closed: ['#f85149', 'not answering'], unreachable: ['#8b949e', 'host not on the mesh'],
+  error: ['#f85149', 'error'], listed: ['#8b949e', 'listed (no link to check)']};
+const _SVC_RANK = {open: 0, password: 1, blocked: 2, listed: 3, no_reply: 4, closed: 5, error: 6, unreachable: 7};
+function _svcChips() { _arednPanelSync(); }
+
+// One AREDN checklist (MeshPhone offices, cameras, every service kind) in its
+// own panel: it stays open while you tick boxes, until you close it.
+function openArednPanel(ev) {
+  if (ev) ev.stopPropagation();
+  document.getElementById('layers-menu').classList.remove('open');
+  document.getElementById('layers-btn').classList.remove('on');
+  let p = document.getElementById('aredn-panel');
+  if (p) { p.remove(); return; }
+  p = document.createElement('div');
+  p.id = 'aredn-panel';
+  p.style.cssText = 'position:absolute;top:48px;right:10px;z-index:1500;background:rgba(22,27,34,.97);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:11px;min-width:220px;max-height:calc(100vh - 70px);overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.5)';
+  document.body.appendChild(p);
+  L.DomEvent.disableClickPropagation(p); L.DomEvent.disableScrollPropagation(p);
+  _arednPanelSync();
+  if (!_svcData) {
+    fetch(`${window.ECH_BASE_PATH || ''}/api/aredn/services`).then(r => r.json())
+      .then(d => { _svcData = d; _arednPanelSync(); }).catch(() => {});
+  }
+}
+function _arednPanelSync() {
+  const p = document.getElementById('aredn-panel');
+  if (!p) return;
+  const row = (id, checked, icon, label, count, onch) =>
+    `<label style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;white-space:nowrap">
+      <input type="checkbox" data-id="${id}"${checked ? ' checked' : ''} onchange="${onch}"> ${icon} ${esc(label)}${count != null ? ` <span style="color:var(--muted)">${count}</span>` : ''}</label>`;
+  // One flat list of service kinds; MeshPhone offices and cameras are kinds too
+  const cats = ((_svcData || {}).categories || []).filter(c => c.count || c.key === 'camera');
+  if (!cats.some(c => c.key === 'camera')) cats.unshift({key: 'camera', icon: '📷', label: 'Cameras', count: null});
+  const on = k => !!_svcLayer && _svcOn && _svcOn.has(k);
+  p.innerHTML = `<div style="display:flex;align-items:center;margin-bottom:4px"><b style="flex:1">AREDN services</b>
+      <button class="ctrl-btn" style="padding:0 6px" onclick="openArednPanel()" title="Close">✕</button></div>` +
+    row('mp', !!_mpLayer, '☎', 'MeshPhone offices & trunks', null, 'toggleMeshPhone()') +
+    cats.map(c => c.key === 'camera'
+      ? row('cam', !!_camLayer, c.icon, c.label, c.count, 'toggleArednCameras()')
+      : row(c.key, on(c.key), c.icon, c.label, c.count, `_svcSetKind('${c.key}', this.checked)`)).join('') +
+    (_svcData && !(_svcData.categories || []).length ? '<div style="color:var(--muted)">Services not checked yet (runs once a day)</div>' : '') +
+    (!_svcData ? '<div style="color:var(--muted)">Loading…</div>' : '') +
+    `<div style="display:flex;gap:4px;margin-top:5px"><button class="ctrl-btn" style="flex:1" onclick="_arednAll(true)">All</button>
+      <button class="ctrl-btn" style="flex:1" onclick="_arednAll(false)">None</button></div>` +
+    `<div style="color:var(--muted);margin-top:6px;max-width:240px;white-space:normal">Checked once a day. Links open only from a computer on the mesh.</div>`;
+}
+// All / None covers MeshPhone and cameras too
+async function _arednAll(want) {
+  if (!!_mpLayer !== want) await toggleMeshPhone();
+  if (!!_camLayer !== want) await toggleArednCameras();
+  _svcSetAll(want);
+}
+async function _svcSetKind(k, want) {
+  if (!_svcOn) _svcOn = new Set();
+  if (!_svcLayer) _svcOn.clear();         // switching the layer on starts from what you tick
+  if (want) _svcOn.add(k); else _svcOn.delete(k);
+  try { localStorage.setItem('ech.arednSvcCats', JSON.stringify([..._svcOn])); } catch (e) { /* per session */ }
+  if (_svcOn.size && !_svcLayer) return toggleArednServices();
+  if (!_svcOn.size && _svcLayer) return toggleArednServices();
+  _svcDraw(); _arednPanelSync();
+}
+function _svcSetAll(want) {
+  const keys = ((_svcData || {}).categories || []).filter(c => c.count && c.key !== 'camera' && c.key !== 'other').map(c => c.key);
+  _svcOn = new Set(want ? keys : []);
+  try { localStorage.setItem('ech.arednSvcCats', JSON.stringify([..._svcOn])); } catch (e) { /* per session */ }
+  if (want && !_svcLayer) return toggleArednServices();
+  if (!want && _svcLayer) return toggleArednServices();
+  _svcDraw(); _arednPanelSync();
+}
+function _svcDraw() {
+  if (!_svcLayer || !_svcData) return;
+  _svcLayer.clearLayers();
+  const cats = Object.fromEntries((_svcData.categories || []).map(c => [c.key, c]));
+  const byNode = new Map();
+  (_svcData.services || []).forEach(s => {
+    if (s.lat == null || s.lon == null || !_svcOn.has(s.category)) return;
+    const k = `${s.lat},${s.lon}`;
+    if (!byNode.has(k)) byNode.set(k, []);
+    byNode.get(k).push(s);
+  });
+  let n = 0;
+  byNode.forEach(list => {
+    n += list.length;
+    list.sort((a, b) => CATEGORY_ORDER(a) - CATEGORY_ORDER(b) || (_SVC_RANK[a.status] ?? 9) - (_SVC_RANK[b.status] ?? 9));
+    const icons = [...new Set(list.map(s => (cats[s.category] || {}).icon || '•'))];
+    const anyOpen = list.some(s => s.status === 'open' || s.status === 'password');
+    const col = anyOpen ? '#58a6ff' : '#8b949e';
+    const f = list[0];
+    const rows = list.map(s => {
+      const st = _SVC_ST[s.status] || ['#8b949e', s.status || '?'];
+      const feed = s.feed ? `<div class="node-stat" style="color:var(--green)">Publishes a data feed: ${s.feed.count} ${s.category === 'ais' ? 'ships' : 'aircraft'} now (<span class="mono">${esc(s.feed.path)}</span>)</div>` : '';
+      const what = [s.kind && !/^(https?|page|listed)$/.test(s.kind) ? s.kind : '', s.software].filter(Boolean).join(' · ');
+      return `<div style="margin-top:5px;padding-top:4px;border-top:1px solid var(--border)">
+        <div class="node-stat">${(cats[s.category] || {}).icon || ''} <b>${esc(s.name || '?')}</b> <span style="color:${st[0]}">${st[1]}</span>${s.ms != null ? ` <span style="color:var(--muted)">${s.ms} ms</span>` : ''}</div>
+        ${what ? `<div class="node-stat">${esc(what)}</div>` : ''}${feed}
+        ${s.link ? `<div class="node-stat" style="word-break:break-all">${s.href ? `<a href="${esc(s.href)}" target="_blank" rel="noopener">${esc(s.link)}</a>` : `<span class="mono">${esc(s.link)}</span>`}</div>` : ''}</div>`;
+    }).join('');
+    L.marker([f.lat, f.lon], {zIndexOffset: 200, icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [8, 8],
+      html: `<div style="display:inline-block;white-space:nowrap;font:600 10px var(--mono);color:${col};background:rgba(13,17,23,.82);border:1px solid ${col};border-radius:3px;padding:0 3px;line-height:15px">${icons.slice(0, 4).join('')}${list.length > 1 ? ' ' + list.length : ''}</div>`})})
+      .bindPopup(`<div class="node-popup" style="max-width:330px;max-height:380px;overflow:auto"><div class="node-name">${esc(f.node || f.node_ip)}</div>
+        <div class="node-stat">${esc(f.place || '')}${f.grid ? ' · ' + esc(f.grid) : ''}</div>${rows}
+        <div class="node-stat" style="color:var(--muted);margin-top:6px">Checked once a day. Links work only from a computer on the AREDN mesh.</div></div>`)
+      .addTo(_svcLayer);
+  });
+  return n;
+}
+function CATEGORY_ORDER(s) {
+  const i = (_svcData.categories || []).findIndex(c => c.key === s.category);
+  return i < 0 ? 99 : i;
+}
+async function toggleArednServices() {
+  if (_svcLayer) { _svcLayer.remove(); _svcLayer = null; _svcChips(); return _envBtn('arednsvc-btn', false); }
+  _svcLayer = L.layerGroup().addTo(map);
+  _envBtn('arednsvc-btn', true);
+  try { _svcData = await fetch(`${window.ECH_BASE_PATH || ''}/api/aredn/services`).then(r => r.json()); }
+  catch (e) { toast('AREDN services unavailable', 'err'); return; }
+  if (!_svcLayer) return;
+  if (!(_svcData.services || []).length) {
+    toast(_svcData.running ? 'AREDN services: the daily check is running, try again in a few minutes'
+      : `AREDN services: not checked yet${_svcData.error ? ' (' + _svcData.error + ')' : ''}`);
+    return;
+  }
+  if (!_svcOn) _svcOn = new Set((_svcData.categories || []).map(c => c.key).filter(k => k !== 'other' && k !== 'camera'));
+  _svcChips();
+  const n = _svcDraw();
+  const sm = _svcData.summary || {};
+  toast(`AREDN services: ${n} shown of ${sm.services || 0}${sm.feeds ? ` · ${sm.feeds} ADS-B/AIS feeds` : ''}`);
+}
+
+_legendSvgs();
 loadWaterBodies();
 connectWS();
 updateMoon();
