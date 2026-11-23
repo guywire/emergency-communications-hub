@@ -263,7 +263,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
     PUBLIC_PATHS = {"/login", "/change-password", "/api/auth/login", "/api/auth/change-password",
                     "/api/health", "/ws", "/static", "/favicon.ico",
                     "/ca.crt", "/tls-setup", "/phonebook.xml",
-                    "/phonebook-meshphone.xml", "/phonebook-streams.xml"}
+                    "/phonebook-meshphone.xml", "/phonebook-streams.xml",
+                    "/meshphone", "/meshphone/", "/meshphone/map.json"}
 
     def _is_loopback(request) -> bool:
         try:
@@ -5006,6 +5007,50 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             if o.get("dial"):
                 rows.append((f"[OFFICE] {o['name']} {o.get('admin_callsign') or ''}".strip(), o["dial"]))
         return rows
+
+    def _direct_local(request) -> bool:
+        """A direct request (no reverse proxy) from a private or loopback
+        address: the LAN or the AREDN mesh (10/8), never the internet."""
+        try:
+            addr = ipaddress.ip_address(request.client.host)
+            if addr.version == 6 and addr.ipv4_mapped:
+                addr = addr.ipv4_mapped
+            local = addr.is_private or addr.is_loopback
+        except (AttributeError, TypeError, ValueError):
+            return False
+        return local and not request.headers.get("x-forwarded-for") and not request.headers.get("forwarded")
+
+    # ── MeshPhone map + directory, shared with the whole AREDN mesh ─────────
+    # No login (mesh users have no ECH account), mesh/LAN addresses only, and
+    # read-only: the page is a static file and the JSON holds only what the
+    # public MeshPhone directory and white pages already publish on the mesh,
+    # plus this station's own measurements (ech/core/meshphone_map.py).
+    @app.get("/meshphone")
+    async def meshphone_map_redirect(request: Request):
+        if not _direct_local(request):
+            raise HTTPException(status_code=403, detail="Only served on the mesh / local network")
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/meshphone/", status_code=302)
+
+    @app.get("/meshphone/", response_class=HTMLResponse)
+    async def meshphone_map_page(request: Request):
+        if not _direct_local(request):
+            raise HTTPException(status_code=403, detail="Only served on the mesh / local network")
+        html = (UI_DIR / "templates" / "meshphone_map.html").read_text(encoding="utf-8")
+        return HTMLResponse(content=html, headers=_NO_CACHE)
+
+    @app.get("/meshphone/map.json")
+    async def meshphone_map_json(request: Request):
+        if not _direct_local(request):
+            raise HTTPException(status_code=403, detail="Only served on the mesh / local network")
+        from ech.core.directory_status import status as live
+        from ech.core.meshphone_map import service as mp_map
+        d = live.meshphone()
+        people = [{k: p.get(k, "") for k in ("callsign", "name", "number", "pbx")} for p in d["people"]]
+        st = d["status"]
+        return {"map": mp_map.data, "map_error": mp_map.last_error, "people": people,
+                "people_created": st.get("meshphone_people_created") or live.mp_people_created,
+                "offices_refreshed_at": live.mp_offices_refreshed_at}
 
     @app.get("/phonebook-meshphone.xml")
     async def pbx_phonebook_meshphone(request: Request):

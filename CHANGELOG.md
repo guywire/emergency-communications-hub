@@ -8,6 +8,18 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.115 (2026-11-22)
+
+- MeshPhone map: an office this PBX has a working trunk to now shows as up at the trunk's address, even when its directory address and mesh host names don't answer (one showed "no answer" beside a verified trunk).
+
+## v1.1.114 (2026-11-22)
+
+- MeshPhone network map, shared with the whole AREDN mesh at `/meshphone/` (no login; mesh and LAN addresses only, read-only). Unlike the directory's own map, it is measured: every 6 hours (`radio_directory.meshphone.map_refresh_hours`) this PBX sends each office an IAX2 POKE, which any Asterisk answers before login, so each PBX shows as answering (with round-trip time), not answering, or no address. Offices whose listed IP is dead are also tried at PBX-named mesh hosts of the admin's callsign, and shown as "moved" when one answers. Our own trunks are verified from Asterisk with its latency; other links are "both ends up", "one end down" or "unknown", thin when only one office lists them. Includes a searchable office directory (codes, number patterns, admin name, callsign, phone and email) and the MeshPhone white pages. Set `radio_directory.meshphone.own_office` to this PBX's office name.
+
+## v1.1.113 (2026-11-22)
+
+- Meshtastic MQTT: bot replies go back on the exact channel the question came in on. Channel names are case-sensitive in Meshtastic ("Bot" and "bot" are different channels), and a question on "Bot" was being answered on "bot", where the sender never saw it and the reply was filed under a different channel pill. A channel ECH has no key for by that name but opens with a fallback key now remembers that key, so replies to it are encrypted the same way.
+
 ## v1.1.112 (2026-11-22)
 
 - Military / rescue layer redrawn: every marker is labeled (callsign or registration, MIL / RESCUE / HELO / EMERG, type, altitude), in colors no other layer uses (white military, magenta rescue, cyan helicopter, red emergency). Past Gloucester Hill reports are dashed, fading "◇ C130 · 2h ago" tags at the last place we tracked that aircraft, one per aircraft, hidden while it's in the air on the map; a legend explains them and picks 2 / 6 / 24 h of past reports (6 h default).

@@ -22,10 +22,12 @@ are looked up directly against the mesh node's DNS server: either the
 configured `dns_server`, or (`auto`) the domain-name-servers of the DHCP
 lease whose domain is local.mesh.
 
-Only what the directory needs is kept: office name, location, codes, number
-patterns, trunks, status, admin callsign + MeshPhone number; for people the
-callsign, name, MeshPhone number and home PBX. Admin emails/names, notes and
-MeshMail addresses are dropped. This is personal contact data published for
+Only what the directory needs is kept: office name, location (and its map
+coordinates), codes, number patterns, trunks, status, IP/hostname/PBX type,
+admin callsign, name + MeshPhone number; for people the
+callsign, name, MeshPhone number and home PBX (callsigns and names are public
+on the AREDN mesh, as is the admin email the office published for MeshPhone
+contact). People's notes and MeshMail addresses are dropped. This is personal contact data published for
 MeshPhone users: it lives in the server-side cache file only, never in the
 repo.
 
@@ -168,6 +170,18 @@ def _digits(v) -> str:
     return re.sub(r"\D", "", str(v or ""))
 
 
+_EMAIL_RE = re.compile(r"^[^@\s<>\"']+@[^@\s<>\"']+\.[A-Za-z0-9.-]+$")
+_IP_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+
+
+def _coord(v, limit: float) -> float | None:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return round(f, 4) if -limit <= f <= limit and f != 0 else None
+
+
 def parse_offices(data) -> list[dict]:
     if not isinstance(data, list):
         raise ValueError("office list is not a JSON array")
@@ -194,7 +208,17 @@ def parse_offices(data) -> list[dict]:
             "pbx_status": _s(o.get("pbx_status"), 20),
             "checkin_at": _s(o.get("checkin_at"), 40),
             "admin_callsign": _s(o.get("admin_callsign"), 12).upper(),
+            "admin_name": _s(o.get("admin_name"), 60),   # public on the mesh, like the callsign
+            "admin_email": _s(o.get("admin_email"), 80) if _EMAIL_RE.match(_s(o.get("admin_email"), 80)) else "",
             "admin_phone": admin_phone if _NUMBER_RE.match(admin_phone) else "",
+            # for the MeshPhone map (meshphone_map.py): where it is and how to reach it
+            "lat": _coord(o.get("latitude"), 90),
+            "lon": _coord(o.get("longitude"), 180),
+            "ip": _s(o.get("ip_address"), 15) if _IP_RE.match(_s(o.get("ip_address"), 15)) else "",
+            "hostname": _s(o.get("hostname"), 63),
+            "pbx_type": _s(o.get("pbx_type"), 20),
+            "network": _s(o.get("network"), 20),
+            "updated_at": _s(o.get("updated_at"), 40),
         })
     out.sort(key=lambda o: o["name"])
     return out

@@ -401,6 +401,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     await goes_service.start()
     from ech.core.directory_status import status as directory_status
     await directory_status.start(config)
+    from ech.core.meshphone_map import service as meshphone_map
+    await meshphone_map.start(config, router)
     from ech.core.track_history import TrackHistory
     track_history = TrackHistory(router, db, config)
     await track_history.start()

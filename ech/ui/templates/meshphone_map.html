@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeshPhone Network Map</title>
+<link rel="stylesheet" href="../static/leaflet/leaflet.css">
+<style>
+:root {
+  --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e;
+  --accent: #58a6ff; --up: #3fb950; --verified: #2ea043; --both: #58a6ff; --down: #f85149;
+  --unknown: #8b949e; --self: #e3b341; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root { --bg: #f6f8fa; --panel: #ffffff; --border: #d0d7de; --text: #1f2328; --muted: #59636e;
+    --accent: #0969da; --up: #1a7f37; --verified: #1a7f37; --both: #0969da; --down: #cf222e;
+    --unknown: #6e7781; --self: #9a6700; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel);
+  display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; }
+header h1 { font-size: 17px; margin: 0; }
+header .sub { color: var(--muted); font-size: 12px; }
+nav { display: flex; gap: 4px; padding: 8px 16px 0; background: var(--panel); border-bottom: 1px solid var(--border); }
+nav button { background: none; border: 1px solid transparent; border-bottom: none; color: var(--muted);
+  padding: 6px 12px; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit; }
+nav button.on { color: var(--text); border-color: var(--border); background: var(--bg); margin-bottom: -1px; }
+.view { display: none; } .view.on { display: block; }
+#map { height: calc(100vh - 150px); min-height: 360px; background: var(--bg); }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 8px 16px; font-size: 12px; color: var(--muted); }
+.stats b { color: var(--text); font-variant-numeric: tabular-nums; }
+.legend { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; font-size: 12px; line-height: 1.6; max-width: 250px; }
+.legend .row { display: flex; align-items: center; gap: 7px; }
+.sw-line { display: inline-block; width: 26px; height: 0; border-top: 3px solid; }
+.sw-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 2px solid; }
+.wrap { padding: 12px 16px 40px; max-width: 1200px; }
+input[type=search] { width: 100%; max-width: 420px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text); font: inherit; margin-bottom: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; position: sticky; top: 0; background: var(--bg); }
+td.mono, .mono { font-family: var(--mono); font-size: 12px; }
+.tbl { overflow-x: auto; }
+.pill { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 11px; font-weight: 600; white-space: nowrap; border: 1px solid; }
+.st-up { color: var(--up); } .st-self { color: var(--self); } .st-no_answer { color: var(--down); } .st-no_address { color: var(--unknown); }
+.muted { color: var(--muted); }
+.note { color: var(--muted); font-size: 12px; max-width: 900px; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+.leaflet-popup-content { font-size: 12.5px; line-height: 1.5; margin: 10px 12px; }
+.leaflet-container a { color: var(--accent); }
+@media (max-width: 640px) { td.hide-sm, th.hide-sm { display: none; } #map { height: calc(100vh - 190px); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>MeshPhone Network Map</h1>
+  <span class="sub" id="sub">loading…</span>
+</header>
+<nav>
+  <button class="on" data-v="map">Map</button>
+  <button data-v="offices">Offices</button>
+  <button data-v="people">People</button>
+  <button data-v="about">About</button>
+</nav>
+
+<section class="view on" id="v-map">
+  <div class="stats" id="stats"></div>
+  <div id="map"></div>
+</section>
+
+<section class="view" id="v-offices"><div class="wrap">
+  <input type="search" id="q-off" placeholder="Search offices: name, place, admin, callsign, office code…">
+  <div class="tbl"><table id="t-off"><thead><tr>
+    <th data-k="name">Office</th><th data-k="location">Location</th><th data-k="codes">Codes</th>
+    <th data-k="admin">Admin</th><th data-k="state">Measured</th><th data-k="pbx" class="hide-sm">PBX</th>
+    <th data-k="trunks" class="hide-sm">Trunks</th></tr></thead><tbody></tbody></table></div>
+</div></section>
+
+<section class="view" id="v-people"><div class="wrap">
+  <input type="search" id="q-ppl" placeholder="Search people: callsign, name, number, PBX…">
+  <div class="note" id="ppl-note"></div>
+  <div class="tbl"><table id="t-ppl"><thead><tr>
+    <th data-k="callsign">Callsign</th><th data-k="name">Name</th><th data-k="number">MeshPhone</th><th data-k="pbx">PBX</th>
+  </tr></thead><tbody></tbody></table></div>
+</div></section>
+
+<section class="view" id="v-about"><div class="wrap note" style="font-size:13.5px;color:var(--text)">
+  <h3>What this map shows</h3>
+  <p>Offices, codes, number patterns and trunk lists come from the WT0F MeshPhone Database
+  (<span class="mono">wt0f-meshphone.local.mesh</span>). Everything marked <b>measured</b> was checked from
+  one PBX on the mesh, named at the top of the page, every few hours:</p>
+  <ul>
+    <li><b>PBX up</b>: the PBX answered an IAX2 POKE with a PONG. Asterisk answers this before any login, so it
+      proves the PBX is running and reachable over the mesh. The time is the round trip from the measuring PBX.</li>
+    <li><b>Moved</b>: the directory's IP address didn't answer, but a PBX-named mesh host of the same admin callsign
+      did (found in the AREDN mesh-wide host list). The directory entry is probably out of date.</li>
+    <li><b>No answer</b>: none of the addresses tried answered. The PBX may be off, off the mesh, or firewalled
+      against IAX from unknown addresses.</li>
+    <li><b>No address</b>: the directory has no IP and no PBX-like host was found for the admin's callsign.</li>
+  </ul>
+  <p>Links:</p>
+  <ul>
+    <li><b>Verified</b>: a trunk of the measuring PBX itself, qualified by Asterisk, with its latency.</li>
+    <li><b>Both ends up</b>: listed in the directory, and both PBXs answer. The trunk can work; whether it is
+      configured on both sides can only be seen from those PBXs.</li>
+    <li><b>One end down</b>: at least one end didn't answer.</li>
+    <li><b>Unknown</b>: at least one end has no address to test.</li>
+    <li>A thin line means only one of the two offices lists the trunk.</li>
+  </ul>
+  <p>The white pages come from the last copy of the MeshPhone WhitePages served on the mesh.</p>
+</div></section>
+
+<script src="../static/leaflet/leaflet.js"></script>
+<script>
+'use strict';
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt7 = n => /^\d{7}$/.test(n || '') ? n.slice(0, 3) + '-' + n.slice(3) : (n || '');
+const ago = t => { if (!t) return 'never'; const m = Math.round((Date.now() / 1000 - t) / 60);
+  return m < 60 ? m + ' min ago' : m < 2880 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; };
+const mail = (o, bare) => o.admin_email ? `${bare ? '' : ' · '}<a href="mailto:${encodeURIComponent(o.admin_email).replace(/%40/g, '@')}">${esc(o.admin_email)}</a>` : '';
+const STATE_LABEL = {up: 'PBX up', self: 'measuring PBX', no_answer: 'no answer', no_address: 'no address'};
+const LINK = {
+  verified: {label: 'Verified trunk', col: '--verified', w: 4, dash: null},
+  both_up:  {label: 'Both ends up', col: '--both', w: 2.5, dash: null},
+  end_down: {label: 'One end down', col: '--down', w: 2, dash: '6 5'},
+  down:     {label: 'Trunk down', col: '--down', w: 3.5, dash: null},
+  unknown:  {label: 'Unknown (no address)', col: '--unknown', w: 1.5, dash: '2 5'},
+};
+let DATA = null, map = null;
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + b.dataset.v));
+  if (b.dataset.v === 'map' && map) setTimeout(() => map.invalidateSize(), 50);
+});
+
+function statePill(o) {
+  const s = o.state, col = s === 'up' ? '--up' : s === 'self' ? '--self' : s === 'no_answer' ? '--down' : '--unknown';
+  let t = STATE_LABEL[s] || s;
+  if (s === 'up' && o.rtt_ms != null) t += ' · ' + Math.round(o.rtt_ms) + ' ms';
+  return `<span class="pill" style="color:var(${col});border-color:var(${col})">${esc(t)}</span>` +
+         (o.ip_moved ? ` <span class="pill" style="color:var(--self);border-color:var(--self)" title="directory says ${esc(o.listed_ip)}">moved</span>` : '');
+}
+
+function officePopup(o) {
+  const codes = (o.office_codes || []).join(', ');
+  return `<b>${esc(o.name)}</b> <span class="muted">${esc(o.location)}</span><br>
+    ${statePill(o)}<br>
+    ${codes ? `Office code: <span class="mono">${esc(codes)}</span><br>` : ''}
+    ${(o.dialplans || []).length ? `Numbers: <span class="mono">${esc(o.dialplans.join(' '))}</span><br>` : ''}
+    Admin: ${o.admin_name ? esc(o.admin_name) + ' ' : ''}${esc(o.admin_callsign)}${o.admin_phone ? ` · <span class="mono">${esc(fmt7(o.admin_phone))}</span>` : ''}${mail(o)}<br>
+    ${o.answering_ip ? `Answered at <span class="mono">${esc(o.answering_ip)}</span>${o.ip_moved ? ` (directory: <span class="mono">${esc(o.listed_ip)}</span>)` : ''}<br>`
+      : o.tried && o.tried.length ? `Tried <span class="mono">${esc(o.tried.join(', '))}</span><br>` : ''}
+    <span class="muted">Directory: ${esc(o.listed_status || '?')}${o.pbx_type && o.pbx_type !== 'Unknown' ? ' · ' + esc(o.pbx_type) : ''}
+    · check-in ${o.checkin_at ? esc(o.checkin_at.slice(0, 10)) : 'never'}</span>
+    ${(o.trunks_listed || []).length ? `<br>Trunks listed: ${esc(o.trunks_listed.join(', '))}` : ''}`;
+}
+
+function drawMap(m) {
+  map = L.map('map', {worldCopyJump: true, preferCanvas: true}).setView([39, -96], 4);
+  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {maxZoom: 18, attribution: '&copy; OpenStreetMap contributors'}).addTo(map);
+  let tileErr = 0;
+  tiles.on('tileerror', () => { if (++tileErr === 4) L.control.attribution({prefix: 'Map tiles need internet; offices and links still show'}).addTo(map); });
+  const byName = Object.fromEntries(m.offices.map(o => [o.name, o]));
+  const order = ['unknown', 'end_down', 'both_up', 'down', 'verified'];
+  [...m.links].sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state)).forEach(l => {
+    const a = byName[l.a], b = byName[l.b];
+    if (!a || !b || a.lat == null || b.lat == null) return;
+    const st = LINK[l.state] || LINK.unknown;
+    // shortest way round (NZ <-> US)
+    let blon = b.lon; if (blon - a.lon > 180) blon -= 360; else if (a.lon - blon > 180) blon += 360;
+    L.polyline([[a.lat, a.lon], [b.lat, blon]], {color: css(st.col), weight: l.mutual || l.state === 'verified' ? st.w : Math.max(1, st.w - 1.2),
+      opacity: l.state === 'unknown' ? 0.5 : 0.85, dashArray: st.dash})
+      .bindPopup(`<b>${esc(l.a)} ↔ ${esc(l.b)}</b><br>${esc(st.label)}${l.rtt_ms != null ? ' · ' + l.rtt_ms + ' ms' : ''}
+        ${l.peer ? `<br><span class="muted">IAX peer "${esc(l.peer)}" on ${esc(m.measured_from)}</span>` : ''}
+        <br>${l.mutual ? 'Listed by both offices' : l.listed_by.length ? 'Listed only by ' + esc(l.listed_by.join(', ')) : 'Not in the directory (seen in Asterisk)'}`)
+      .addTo(map);
+  });
+  m.offices.forEach(o => {
+    if (o.lat == null) return;
+    const col = css(o.state === 'up' ? '--up' : o.state === 'self' ? '--self' : o.state === 'no_answer' ? '--down' : '--unknown');
+    L.circleMarker([o.lat, o.lon], {radius: o.state === 'self' ? 9 : 6, color: col, weight: 2,
+      fillColor: col, fillOpacity: o.state === 'no_address' ? 0.1 : o.state === 'no_answer' ? 0.35 : 0.85})
+      .bindTooltip(o.name, {direction: 'top', offset: [0, -6]})
+      .bindPopup(officePopup(o), {maxWidth: 320}).addTo(map);
+  });
+  const lg = L.control({position: 'bottomleft'});
+  lg.onAdd = () => {
+    const d = L.DomUtil.create('div', 'legend');
+    const dot = (v, l, fill) => `<div class="row"><span class="sw-dot" style="border-color:var(${v});background:${fill ? `var(${v})` : 'transparent'}"></span>${l}</div>`;
+    const ln = k => `<div class="row"><span class="sw-line" style="border-top-color:var(${LINK[k].col});border-top-style:${LINK[k].dash ? 'dashed' : 'solid'}"></span>${LINK[k].label}</div>`;
+    d.innerHTML = `<b>PBX (measured)</b>${dot('--up', 'Answers IAX', true)}${dot('--down', 'No answer', false)}${dot('--unknown', 'No address', false)}${dot('--self', 'Measuring PBX', true)}
+      <b style="display:block;margin-top:4px">Links</b>${['verified', 'both_up', 'end_down', 'unknown'].map(ln).join('')}
+      <div class="muted" style="margin-top:3px">Thin = listed by one office only</div>`;
+    L.DomEvent.disableClickPropagation(d);
+    return d;
+  };
+  lg.addTo(map);
+}
+
+function sortable(tbl, rows, render, keyFn) {
+  let key = null, dir = 1;
+  tbl.querySelectorAll('th').forEach(th => th.onclick = () => {
+    dir = key === th.dataset.k ? -dir : 1; key = th.dataset.k;
+    rows.sort((a, b) => String(keyFn(a, key)).localeCompare(String(keyFn(b, key)), undefined, {numeric: true}) * dir);
+    render();
+  });
+}
+
+function offices(m) {
+  const rows = [...m.offices];
+  const body = document.querySelector('#t-off tbody'), q = document.getElementById('q-off');
+  const key = (o, k) => ({name: o.name, location: o.location, codes: (o.office_codes || []).join(' '), admin: o.admin_callsign,
+    state: ({self: 0, up: 1, no_answer: 2, no_address: 3}[o.state]) + String(o.rtt_ms ?? '').padStart(6, '0'),
+    pbx: o.pbx_type, trunks: (o.trunks_listed || []).length}[k]);
+  const render = () => {
+    const s = q.value.trim().toLowerCase();
+    body.innerHTML = rows.filter(o => !s || [o.name, o.location, o.admin_callsign, o.admin_name, ...(o.office_codes || []), ...(o.dialplans || [])]
+      .join(' ').toLowerCase().includes(s)).map(o => `<tr>
+        <td><b>${esc(o.name)}</b></td><td>${esc(o.location)}</td>
+        <td class="mono">${esc((o.office_codes || []).join(', '))}<div class="muted">${esc((o.dialplans || []).slice(0, 4).join(' '))}</div></td>
+        <td>${esc(o.admin_callsign)}${o.admin_name ? `<div>${esc(o.admin_name)}</div>` : ''}${o.admin_email ? `<div>${mail(o, true)}</div>` : ''}${o.admin_phone ? `<div class="mono muted">${esc(fmt7(o.admin_phone))}</div>` : ''}</td>
+        <td>${statePill(o)}</td>
+        <td class="hide-sm">${esc(o.pbx_type && o.pbx_type !== 'Unknown' ? o.pbx_type : '')}</td>
+        <td class="hide-sm">${esc((o.trunks_listed || []).join(', '))}</td></tr>`).join('');
+  };
+  q.oninput = render; sortable(document.getElementById('t-off'), rows, render, key); render();
+}
+
+function people(list, created) {
+  const rows = [...list];
+  const body = document.querySelector('#t-ppl tbody'), q = document.getElementById('q-ppl');
+  document.getElementById('ppl-note').textContent = `${rows.length} listings${created ? ' · white pages dated ' + created : ''}`;
+  const render = () => {
+    const s = q.value.trim().toLowerCase();
+    const hit = rows.filter(p => !s || `${p.callsign} ${p.name} ${p.number} ${fmt7(p.number)} ${p.pbx}`.toLowerCase().includes(s));
+    body.innerHTML = hit.slice(0, 400).map(p => `<tr><td><b>${esc(p.callsign)}</b></td><td>${esc(p.name)}</td>
+      <td class="mono">${esc(fmt7(p.number))}</td><td>${esc(p.pbx)}</td></tr>`).join('') +
+      (hit.length > 400 ? `<tr><td colspan="4" class="muted">${hit.length - 400} more — narrow the search</td></tr>` : '');
+  };
+  q.oninput = render; sortable(document.getElementById('t-ppl'), rows, render, (p, k) => p[k] || ''); render();
+}
+
+fetch('map.json', {cache: 'no-store'}).then(r => r.json()).then(d => {
+  DATA = d;
+  const m = d.map;
+  if (!m) {
+    document.getElementById('sub').textContent = 'The first measurement hasn’t run yet' + (d.map_error ? ` (${d.map_error})` : '') + '. Try again in a few minutes.';
+    people(d.people || [], d.people_created);
+    return;
+  }
+  const s = m.summary, os = s.office_states || {}, ls = s.link_states || {};
+  document.getElementById('sub').textContent = `Measured from ${m.measured_from || 'this PBX'} · ${ago(m.generated_at)}`;
+  document.getElementById('stats').innerHTML = [
+    `<span><b>${s.offices}</b> offices</span>`,
+    `<span class="st-up"><b>${(os.up || 0) + (os.self || 0)}</b> answer IAX</span>`,
+    `<span><b>${s.moved}</b> moved address</span>`,
+    `<span class="st-no_answer"><b>${os.no_answer || 0}</b> no answer</span>`,
+    `<span><b>${os.no_address || 0}</b> no address</span>`,
+    `<span>· <b>${s.links}</b> links: ${ls.verified || 0} verified, ${ls.both_up || 0} both ends up, ${ls.end_down || 0} one end down, ${ls.unknown || 0} unknown</span>`,
+  ].join('');
+  drawMap(m); offices(m); people(d.people || [], d.people_created);
+}).catch(e => { document.getElementById('sub').textContent = 'Could not load map data: ' + e; });
+</script>
+</body>
+</html>

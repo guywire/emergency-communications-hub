@@ -46,7 +46,11 @@ def test_parse_offices_keeps_only_directory_fields():
     assert t["trunks"] == ["OTHERTOWN"] and t["admin_callsign"] == "N0AAA"
     assert t["admin_phone"] == "5554111"
     flat = repr(offs)
-    assert "example.com" not in flat and "A Person" not in flat and "10.1.2.3" not in flat
+    assert t["admin_email"] == "a@example.com"        # the contact the office published
+    assert t["admin_name"] == "A Person"              # names are public on the mesh, like callsigns
+    # the PBX address is kept: the MeshPhone map (meshphone_map.py) measures it,
+    # and WT0F's own map already publishes it to the whole mesh
+    assert t["ip"] == "10.1.2.3"
 
 
 def test_parse_offices_rejects_non_list():
@@ -251,3 +255,19 @@ async def test_api_pbx_meshphone(live):
     d = (await _get("/api/pbx/meshphone", "127.0.0.1")).json()
     assert d["people"][0]["callsign"] == "N0AAA" and d["people"][0]["dial"] == "785554101"
     assert d["status"]["meshphone_people"] == 2
+
+
+@pytest.mark.asyncio
+async def test_meshphone_map_page_and_json_mesh_only(live):
+    from ech.core.meshphone_map import service as mp_map, build_map
+    live.mp_people, _ = mp.parse_whitepages(WP_XML)
+    live.mp_offices = mp.parse_offices(OFFICES_JSON)
+    mp_map.data = build_map(live.mp_offices, {}, {}, "TESTVILLE", generated_at=1.0)
+    page = await _get("/meshphone/", "10.99.0.86")                 # an AREDN mesh client, no login
+    assert page.status_code == 200 and "MeshPhone Network Map" in page.text
+    d = (await _get("/meshphone/map.json", "10.99.0.86")).json()
+    assert d["map"]["measured_from"] == "TESTVILLE"
+    assert d["people"][0] == {"callsign": "N0AAA", "name": "A Person", "number": "5554101", "pbx": "TESTVILLE"}
+    assert (await _get("/meshphone/map.json", "8.8.8.8")).status_code == 403
+    assert (await _get("/meshphone/", "192.168.1.50", {"X-Forwarded-For": "8.8.8.8"})).status_code == 403
+    mp_map.data = None

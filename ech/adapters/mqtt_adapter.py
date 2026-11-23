@@ -214,6 +214,7 @@ class MQTTAdapter(Adapter):
         # Index order is stable: configured channels first (bridge rules refer to
         # these indexes), channels discovered on the broker appended after.
         self._mt_channel_names: list[str] = list(self._mt_keys)
+        self._mt_learned_keys: dict[str, bytes] = {}   # discovered channel -> fallback key that opened it
         self._mt_roots: dict[str, set[str]] = {}          # channel -> topic roots seen
         self._mt_undecodable: dict[str, int] = {}         # channel -> packets we had no key for
         self._mt_publish = bool(config.get("meshtastic_publish", False))
@@ -674,6 +675,12 @@ class MQTTAdapter(Adapter):
                 self._mt_undecodable[topic_channel] = self._mt_undecodable.get(topic_channel, 0) + 1
             return
         channel = pkt["channel"] or topic_channel
+        if channel and channel != "PKI" and channel not in self._mt_keys and pkt.get("key"):
+            # A channel we have no key for by that exact name, opened by a fallback key
+            # (e.g. "Bot" when only "bot" is configured). Meshtastic channel names are
+            # case-sensitive (the name is part of the channel hash), so remember the key
+            # to be able to reply on "Bot" itself rather than on our "bot".
+            self._mt_learned_keys.setdefault(channel, pkt["key"])
         if channel and channel != "PKI":   # PKI = the DM topic, not a channel
             self._mt_roots.setdefault(channel, set()).add(root)
             self._mt_channel_idx(channel)
@@ -865,9 +872,12 @@ class MQTTAdapter(Adapter):
         hinted = str(raw.get("channel_name") or "").strip()
         if hinted:
             # "ch1:MaineNet" (native label) / "#MaineNet" / "MaineNet"
-            want = hinted.split(":", 1)[-1].lstrip("#").lower()
+            want = hinted.split(":", 1)[-1].lstrip("#")
+            # Exact name first: "Bot" and "bot" are different Meshtastic channels.
+            if want in self._mt_channel_names and self._mt_has_key(want):
+                return want
             for n in self._mt_channel_names:
-                if n.lower() == want:
+                if n.lower() == want.lower() and self._mt_has_key(n):
                     return n
         if raw.get("channel_idx") is not None:
             try:
@@ -881,6 +891,14 @@ class MQTTAdapter(Adapter):
             return None
         return self._mt_channel_names[min(self._mt_tx_idx, len(self._mt_channel_names) - 1)]
 
+    def _mt_has_key(self, channel: str) -> bool:
+        return channel in self._mt_keys or channel in self._mt_learned_keys
+
+    def _mt_key(self, channel: str) -> bytes | None:
+        if channel in self._mt_keys:
+            return self._mt_keys[channel]
+        return self._mt_learned_keys.get(channel)
+
     def _mt_roots_for(self, channel: str) -> list[str]:
         return self._mt_publish_roots or sorted(self._mt_roots.get(channel, ())) or ["msh/US"]
 
@@ -891,7 +909,7 @@ class MQTTAdapter(Adapter):
     async def _mt_announce_bridge(self, channel: str) -> None:
         from meshtastic.protobuf import mesh_pb2
         from ech.adapters import meshtastic_mqtt_codec as codec
-        if self._mt_bridge_num is None or self._client is None or channel not in self._mt_keys:
+        if self._mt_bridge_num is None or self._client is None or not self._mt_has_key(channel):
             return
         user = mesh_pb2.User(id=codec.node_id_str(self._mt_bridge_num), long_name=self._mt_bridge_long,
                              short_name=self._mt_bridge_short, hw_model=255)
@@ -908,7 +926,7 @@ class MQTTAdapter(Adapter):
         if client is None:
             log.warning("MQTT %s: not connected to broker, can't publish", self.name)
             return None
-        key = self._mt_keys.get(channel)
+        key = self._mt_key(channel)
         pid = random.getrandbits(32) or 1
         env = codec.encode_envelope(from_num=from_num or self._mt_node_num, to_num=to_num, packet_id=pid,
                                     channel=channel, key=key, gateway_id=self._mt_gateway_id,
@@ -923,7 +941,7 @@ class MQTTAdapter(Adapter):
         channel = self._mt_resolve_channel(raw)
         if not channel:
             return False
-        if channel not in self._mt_keys:
+        if not self._mt_has_key(channel):
             log.warning("MQTT %s: no key configured for channel %r - add it to channel_keys", self.name, channel)
             return False
         to_num = codec.BROADCAST

@@ -391,3 +391,26 @@ def test_bridge_node_can_be_turned_off():
                                          body="x", raw={"channel_name": "MaineNet", "_bridged_by": "r"})))
     pkt = codec.decode_envelope(a._client.published[0][1], {"MaineNet": codec.expand_psk("Vg==")})
     assert len(a._client.published) == 1 and pkt["from_id"] == "!ec000001"
+
+
+def test_reply_goes_back_on_the_exact_case_channel_it_came_from():
+    # "Bot" and "bot" are different Meshtastic channels (the name is in the hash).
+    # Only "bot" is configured; a message on "Bot" opens with the default fallback key
+    # and the reply must go back on "Bot", not on our "bot".
+    a, out = _adapter(meshtastic_publish=True, node_id="!ec000001",
+                      channel_keys={"LongFast": "AQ==", "bot": "AQ=="})
+    a._client = _FakeClient()
+    asyncio.run(a._handle_message("msh/US/ME/2/e/Bot/!gw",
+                                  _envelope(portnums_pb2.TEXT_MESSAGE_APP, b"wx", channel="Bot", gateway="!gw")))
+    assert out and out[0].source_channel == "Bot"
+    reply = NormalizedMessage(source_adapter="x", source_channel="outbound", from_id="local",
+                              from_display="op", body="WX base", raw={"channel_name": "Bot"})
+    assert asyncio.run(a.send(reply)) is True
+    assert a._client.published[-1][0] == "msh/US/ME/2/e/Bot/!ec000001"
+    assert reply.source_channel == "Bot"
+    pkt = codec.decode_envelope(a._client.published[-1][1], {"Bot": codec.DEFAULT_PSK})
+    assert pkt["payload"] == b"WX base" and pkt["channel"] == "Bot"
+    # the lower-case channel still gets lower-case replies
+    lower = NormalizedMessage(source_adapter="x", source_channel="outbound", from_id="local",
+                              from_display="op", body="hi", raw={"channel_name": "bot"})
+    assert asyncio.run(a.send(lower)) is True and lower.source_channel == "bot"

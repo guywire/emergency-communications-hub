@@ -145,7 +145,8 @@ def decode_envelope(payload: bytes, keys: dict[str, bytes | None], fallback_keys
 
     Returns None for undecodable / undecryptable payloads, else a dict:
       packet_id, from_num, from_id, to_num, to_id, is_broadcast, channel, gateway_id,
-      portnum (name), payload (bytes), hop_start, hop_limit, rx_snr, rx_rssi, rx_time, decoded (protobuf obj)
+      portnum (name), payload (bytes), hop_start, hop_limit, rx_snr, rx_rssi, rx_time, decoded (protobuf obj),
+      key (the key that decrypted it, None if it was unencrypted)
     """
     from meshtastic.protobuf import mqtt_pb2, portnums_pb2
 
@@ -160,6 +161,7 @@ def decode_envelope(payload: bytes, keys: dict[str, bytes | None], fallback_keys
     channel = env.channel_id or ""
 
     data = None
+    used_key: bytes | None = None
     if pkt.HasField("decoded"):
         data = pkt.decoded
     elif pkt.encrypted:
@@ -172,6 +174,7 @@ def decode_envelope(payload: bytes, keys: dict[str, bytes | None], fallback_keys
         for k in candidates:
             data = decrypt_packet(pkt, k)
             if data is not None:
+                used_key = k
                 break
         if data is None:
             return None
@@ -202,6 +205,7 @@ def decode_envelope(payload: bytes, keys: dict[str, bytes | None], fallback_keys
         "rx_rssi": pkt.rx_rssi or None,
         "rx_time": pkt.rx_time or None,
         "decoded": data,
+        "key": used_key,   # the key that decrypted it (None = sent in the clear)
     }
 
 
