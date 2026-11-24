@@ -8,6 +8,24 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.139 (2026-11-24)
+
+- **AREDN services checked by region and shared between stations.** The mesh is
+  split into four regions by the second octet of the advertising node's address;
+  one region is checked every 6 h, so each is checked once a day and the load is
+  spread out. ECH now speaks the same exchange as the standalone AREDN Services
+  Map: a region another copy checked within 4 h is used instead of re-checking,
+  but only if its Ed25519 signature verifies (key pinned per station), it lists
+  only services our own node lists, it covers 90% of them, and a random 5% (8-30)
+  re-checked from here mostly agrees (else that signer is distrusted for 7 days).
+  Peer endpoints `/peer/v1/...` answer mesh / LAN addresses only.
+- **Map tiles for the mesh page without internet.** `/meshphone/` now gets its
+  tiles from ECH: an optional offline MBTiles file, ECH's cache (200 MB), the
+  internet, or other copies on the mesh. Other copies are served from the file
+  and cache only, never fetched from the internet on their behalf.
+- **AMPRNet addresses count as the mesh** for the no-login mesh pages: 44.0.0.0/9
+  and 44.128.0.0/10 only (44.192.0.0/10 was sold in 2019).
+
 ## v1.1.138 (2026-11-23)
 
 - **MeshPhone polls once a day.** The mesh measurement (host list, PBX IAX2 pokes,

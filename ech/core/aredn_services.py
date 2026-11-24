@@ -16,9 +16,14 @@ day, nothing more than a visitor would make:
 
 Results also feed aredn_cameras.service (the camera layer and /cameras/).
 
+The mesh is checked one region (a quarter of the address space) at a time, one
+region every refresh_hours / 4, and a region another instance checked within
+the last 4 hours is taken from it after verification: see aredn_sharing.py (the same exchange as the
+standalone aredn-services-map, so ECH and its copies share with each other).
+
 Config (radio_directory.aredn_services, all optional):
   enabled         bool   default true
-  refresh_hours   float  default 24 (at least 6)
+  refresh_hours   float  default 24 (at least 6): each region once per refresh
   hosts_url       str    default radio_directory.meshphone.hosts_url, else
                          radio_directory.aredn_discovery.sysinfo_url
 """
@@ -33,6 +38,7 @@ import time
 from urllib.parse import urlsplit
 
 from ech.core import aredn_cameras as cams
+from ech.core import aredn_sharing as sharing
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +46,9 @@ REFRESH_S = 24 * 3600
 FIRST_DELAY_S = 300
 RETRY_S = 1800
 MAX_SERVICES = 2500
+# The name other copies see when `station` isn't set (plus a key fingerprint,
+# so two copies reading the same node never share a name). "" = the node's name.
+DEFAULT_STATION = "SignalMatrix"
 
 # (key, label, icon). Order = precedence when a service matches several.
 CATEGORIES = [
@@ -189,6 +198,19 @@ async def tcp_check(ip: str, port: int, timeout: float = 6.0) -> dict:
     return {"status": "open" if ok else "closed", "ms": round((time.monotonic() - t0) * 1000) if ok else None}
 
 
+def base_record(s: dict, hosts: list[dict], cat: str) -> dict:
+    """Who and where a service is, from our own copy of the mesh's list (never
+    from a peer): its id, name, link, address and category."""
+    link = str(s.get("link") or "")
+    scheme, ip, port = cams.link_target(link, hosts) if "://" in link else ("", "", 0)
+    if cat == "time" and "://" in link and (scheme in ("http", "https") or not port):
+        port = 123
+    return {"id": sharing.svc_id(s), "name": _TAG_RE.sub("", str(s.get("name") or "")).strip()[:80],
+            "tag": tag_of(s), "link": cams.mask_secrets(link)[:300],
+            "href": link[:500] if re.match(r"(https?|rtsp)://", link, re.I) else "",
+            "scheme": scheme, "ip": ip, "port": port, "node_ip": s.get("ip") or "", "category": cat}
+
+
 class ArednServices:
     def __init__(self) -> None:
         self.data: dict | None = None
@@ -197,9 +219,22 @@ class ArednServices:
         self._config: dict = {}
         self._task: asyncio.Task | None = None
         self.cache_path: str | None = None
+        self.region_dir: str | None = None
         self.refresh_s = REFRESH_S
         self.running = False
+        self.running_region: int | None = None
         self._cam = cams.ArednCameras()          # its per-camera check
+        self.regions: dict[int, dict] = {}       # region -> its last result (own or shared)
+        self.identity: sharing.Identity | None = None
+        self.trust: sharing.Trust | None = None
+        self.station = ""
+        self._node_name = ""
+        self.share = {"enabled": True, "max_age_s": sharing.MAX_AGE_S, "peers": []}
+        self.peer_log: list[dict] = []
+        self.peer_targets: list[tuple[str, str]] = []   # other copies found on the mesh (tiles use them too)
+        self._targets_path: str | None = None
+        self._last_pass = 0.0
+        self._fail_until: dict[int, float] = {}
 
     def configure(self, config: dict) -> None:
         self._config = config or {}
@@ -210,6 +245,14 @@ class ArednServices:
             self.refresh_s = max(6 * 3600, int(float(cfg.get("refresh_hours", REFRESH_S / 3600)) * 3600))
         except (TypeError, ValueError):
             self.refresh_s = REFRESH_S
+        sh = cfg.get("sharing") or self._config.get("sharing") or {}
+        try:
+            max_age = min(24.0, max(0.5, float(sh.get("max_age_hours", sharing.MAX_AGE_S / 3600)))) * 3600
+        except (TypeError, ValueError):
+            max_age = sharing.MAX_AGE_S
+        self.share = {"enabled": bool(sh.get("enabled", True)), "max_age_s": max_age,
+                      "peers": [str(p) for p in (sh.get("peers") or []) if p]}
+        self.station = str(cfg.get("station") or self._config.get("station") or "")[:63]
         cams.service.configure(config)          # camera cache path + last cameras for the camera layer
         db_path = (self._config.get("database") or {}).get("path", "ech.db")
         base = os.path.dirname(os.path.abspath(db_path)) if db_path != ":memory:" else os.getcwd()
@@ -221,6 +264,26 @@ class ArednServices:
                 self.data = d
         except (OSError, ValueError):
             pass
+        self.region_dir = os.path.join(base, "aredn_regions")
+        os.makedirs(self.region_dir, exist_ok=True)
+        self.regions = {}
+        for k in range(sharing.REGIONS):
+            try:
+                with open(os.path.join(self.region_dir, f"r{k + 1}.json"), encoding="utf-8") as f:
+                    st = json.load(f)
+                if isinstance(st, dict) and isinstance(st.get("services"), list):
+                    self.regions[k] = st
+            except (OSError, ValueError):
+                pass
+        self._last_pass = max([float(st.get("done_at") or 0) for st in self.regions.values()] or [0.0])
+        self.identity = sharing.Identity(os.path.join(base, "aredn_identity.key"))
+        self.trust = sharing.Trust(os.path.join(base, "aredn_peers.json"))
+        self._targets_path = os.path.join(base, "aredn_peer_targets.json")
+        try:
+            with open(self._targets_path, encoding="utf-8") as f:
+                self.peer_targets = [tuple(t) for t in json.load(f) if isinstance(t, list) and len(t) == 2]
+        except (OSError, ValueError, TypeError):
+            self.peer_targets = []
 
     def _hosts_url(self) -> str:
         rd = self._config.get("radio_directory") or {}
@@ -233,20 +296,40 @@ class ArednServices:
         if self.enabled and self._task is None:
             self._task = asyncio.create_task(self._loop())
 
-    async def _loop(self) -> None:
-        age = time.time() - float((self.data or {}).get("generated_at") or 0)
-        await asyncio.sleep(max(FIRST_DELAY_S, self.refresh_s - age))
-        while True:
-            wait = self.refresh_s
-            try:
-                await self.refresh()
-            except Exception as exc:
-                self.last_error = f"{exc.__class__.__name__}: {exc}"
-                cams.service.last_error = self.last_error
-                log.warning("AREDN services refresh failed (retrying in 30 min): %s", self.last_error)
-                wait = RETRY_S
-            await asyncio.sleep(wait)
+    # ── schedule: one region at a time, spread over the day ─────────────────
+    def next_region(self) -> tuple[int, float]:
+        """(region, when): the region due soonest, no sooner than refresh/4
+        after the last pass (a failed pass retries after RETRY_S)."""
+        best = None
+        for k in range(sharing.REGIONS):
+            st = self.regions.get(k) or {}
+            due = max(float(st.get("scanned_at") or 0) + self.refresh_s, self._fail_until.get(k, 0.0))
+            if best is None or due < best[1]:
+                best = (k, due)
+        k, due = best
+        if k not in self._fail_until:
+            due = max(due, self._last_pass + self.refresh_s / sharing.REGIONS)
+        return k, due
 
+    async def _loop(self) -> None:
+        first = True
+        while True:
+            k, due = self.next_region()
+            wait = max(0.0, due - time.time())
+            if first:
+                wait, first = max(wait, FIRST_DELAY_S), False
+            await asyncio.sleep(wait)
+            try:
+                await self.refresh_region(k)
+                self._fail_until.pop(k, None)
+            except Exception as exc:
+                self.last_error = f"region {k + 1}: {exc.__class__.__name__}: {exc}"
+                cams.service.last_error = self.last_error
+                log.warning("AREDN services: %s (retrying in 30 min)", self.last_error)
+                self._fail_until[k] = time.time() + RETRY_S
+                await asyncio.sleep(RETRY_S)          # nothing else until then either
+
+    # ── checking ────────────────────────────────────────────────────────────
     async def _feed(self, client, link: str, ip: str, port: int, kind: str) -> dict | None:
         u = urlsplit(link)
         host = u.hostname or ""
@@ -299,9 +382,61 @@ class ArednServices:
                 c["feed"] = f
         return c
 
-    async def refresh(self) -> dict | None:
-        import httpx
+    @staticmethod
+    def items(mesh_services: list[dict]) -> list[tuple[dict, str]]:
+        """(service, category) for every service to check, phones left out."""
+        todo, seen = [], set()
+        for s in mesh_services:
+            if not isinstance(s, dict):
+                continue
+            cat = categorize(s)
+            key = (str(s.get("name") or ""), str(s.get("link") or ""))
+            if cat is None or key in seen:
+                continue
+            if cat == "camera" and not re.match(r"(https?|rtsp)://", key[1], re.I):
+                cat = "other"
+            seen.add(key)
+            todo.append((s, cat))
+        return todo[:MAX_SERVICES]
+
+    async def _check_and_locate(self, client, todo: list[tuple[dict, str]], hosts: list[dict]) -> list[dict]:
+        sem = asyncio.Semaphore(12)
+
+        async def one(s, cat):
+            async with sem:
+                try:
+                    return {**await self._check(client, s, hosts, cat), **base_record(s, hosts, cat)}
+                except Exception as exc:
+                    log.debug("AREDN services: check of %s failed: %s", s.get("name"), exc)
+                    return None
+        checked = [c for c in await asyncio.gather(*(one(s, c) for s, c in todo)) if c]
+        return await self._locate(client, checked, hosts)
+
+    async def _locate(self, client, recs: list[dict], hosts: list[dict]) -> list[dict]:
         from ech.core.meshphone_map import service as mp_map
+        node_names = {str(h.get("ip") or ""): str(h.get("name") or "") for h in hosts}
+        sem = asyncio.Semaphore(8)
+
+        async def ninfo(ip):
+            async with sem:
+                return ip, await mp_map._node_info(client, ip)
+        nodes = dict(await asyncio.gather(*(ninfo(ip) for ip in {c["node_ip"] for c in recs if c["node_ip"]})))
+        for n in nodes.values():
+            if n.get("lat") is not None:
+                n["place"] = await mp_map._place(client, n["lat"], n["lon"])
+        out = []
+        for c in recs:
+            n = nodes.get(c["node_ip"]) or {}
+            out.append({**c, "node": n.get("name") or node_names.get(c["node_ip"], ""),
+                        "lat": n.get("lat"), "lon": n.get("lon"), "grid": n.get("grid", ""),
+                        "place": n.get("place", "")})
+        return out
+
+    # ── one region ──────────────────────────────────────────────────────────
+    async def refresh_region(self, k: int) -> dict:
+        """Region k: a fresh, verified result from another instance if there is
+        one, else checked from here. Updates the merged services and cameras."""
+        import httpx
         url = self._hosts_url()
         if not url:
             raise RuntimeError("set radio_directory.meshphone.hosts_url (or aredn_discovery.sysinfo_url)")
@@ -309,73 +444,172 @@ class ArednServices:
             if q not in url:
                 url += ("&" if "?" in url else "?") + q
         self.running = cams.service.running = True
+        self.running_region = k
         try:
             async with httpx.AsyncClient(follow_redirects=True, verify=False,
                                          headers={"User-Agent": "SignalMatrix"}) as client:
                 j = (await client.get(url, timeout=60)).json()
                 hosts = [h for h in j.get("hosts") or [] if isinstance(h, dict)]
-                todo, seen = [], set()
-                for s in j.get("services") or []:
-                    if not isinstance(s, dict):
-                        continue
-                    cat = categorize(s)
-                    key = (str(s.get("name") or ""), str(s.get("link") or ""))
-                    if cat is None or key in seen:
-                        continue
-                    if cat == "camera" and not re.match(r"(https?|rtsp)://", key[1], re.I):
-                        cat = "other"
-                    seen.add(key)
-                    todo.append((s, cat))
-                todo = todo[:MAX_SERVICES]
-                sem = asyncio.Semaphore(12)
-
-                async def one(s, cat):
-                    async with sem:
-                        try:
-                            return await self._check(client, s, hosts, cat)
-                        except Exception as exc:
-                            log.debug("AREDN services: check of %s failed: %s", s.get("name"), exc)
-                            return None
-                checked = [c for c in await asyncio.gather(*(one(s, c) for s, c in todo)) if c]
-                node_names = {str(h.get("ip") or ""): str(h.get("name") or "") for h in hosts}
-                sem2 = asyncio.Semaphore(8)
-
-                async def ninfo(ip):
-                    async with sem2:
-                        return ip, await mp_map._node_info(client, ip)
-                nodes = dict(await asyncio.gather(*(ninfo(ip) for ip in {c["node_ip"] for c in checked if c["node_ip"]})))
-                for n in nodes.values():
-                    if n.get("lat") is not None:
-                        n["place"] = await mp_map._place(client, n["lat"], n["lon"])
+                mesh_services = [s for s in j.get("services") or [] if isinstance(s, dict)]
+                if not hosts or not mesh_services:
+                    raise RuntimeError(f"the node's sysinfo listed {len(hosts)} hosts and {len(mesh_services)} services")
+                mine = [(s, c) for s, c in self.items(mesh_services) if sharing.region_of(s.get("ip")) == k]
+                self._set_targets(sharing.peer_targets(mesh_services, hosts, self.share["peers"]))
+                before = int((self.regions.get(k) or {}).get("count") or 0)
+                if not mine and before >= 5:
+                    raise RuntimeError(f"the node's list has none of the region's {before} services now; kept the last result")
+                self._node_name = str(j.get("node") or "")
+                station = self.station_name()
+                now = time.time()
+                got = None
+                if self.share["enabled"] and mine:
+                    got = await self._from_peers(client, k, mine, hosts, mesh_services, now)
+                if got:
+                    recs, state = got
+                else:
+                    recs = await self._check_and_locate(client, mine, hosts)
+                    state = {"doc": sharing.make_doc(self.identity, station, k, now, recs), "scanned_at": now,
+                             "station": station, "own": True, "note": f"checked here: {len(recs)} services"}
         finally:
             self.running = cams.service.running = False
+            self.running_region = None
+        state.update(region=k, services=recs, count=len(recs), done_at=time.time())
+        self.regions[k] = state
+        self._last_pass = state["done_at"]
+        if self.region_dir:
+            try:
+                path = os.path.join(self.region_dir, f"r{k + 1}.json")
+                with open(path + ".tmp", "w", encoding="utf-8") as f:
+                    json.dump(state, f)
+                os.replace(path + ".tmp", path)
+            except OSError as exc:
+                log.debug("AREDN services: region file write failed: %s", exc)
+        self.last_error = None
+        log.info("AREDN services, region %d (%s): %s", k + 1, sharing.region_label(k), state["note"])
+        self._rebuild()
+        return state
+
+    def station_name(self) -> str:
+        """`station` as set, else the default name plus a key fingerprint."""
+        if self.station:
+            return self.station
+        import hashlib
+        fp = hashlib.sha256((self.identity.key if self.identity else "").encode()).hexdigest()[:6]
+        base = re.sub(r"[^\w.-]", "", DEFAULT_STATION or self._node_name)[:50] or "map"
+        return f"{base}/{fp}"
+
+    def _set_targets(self, targets: list[tuple[str, str]]) -> None:
+        self.peer_targets = targets
+        if self._targets_path:
+            try:
+                with open(self._targets_path, "w", encoding="utf-8") as f:
+                    json.dump(targets, f)
+            except OSError:
+                pass
+
+    def _note(self, k: int, peer: str, msg: str) -> None:
+        self.peer_log = (self.peer_log + [{"at": time.time(), "region": k + 1, "peer": peer, "note": msg}])[-50:]
+        log.info("AREDN services, region %d: %s: %s", k + 1, peer, msg)
+
+    async def _from_peers(self, client, k, mine, hosts, mesh_services, now):
+        """A shared result for region k that passes every check, as
+        (records, state); None to check the region from here."""
+        ours, byid = {}, {}
+        for s, cat in mine:
+            b = base_record(s, hosts, cat)
+            ours[b["id"]], byid[b["id"]] = b, (s, cat)
+        targets = self.peer_targets
+        if not targets:
+            return None
+        infos = await asyncio.gather(*(sharing.get_json(client, b, h, sharing.INFO_PATH, sharing.MAX_INFO_BYTES)
+                                       for b, h in targets))
+        cands = []
+        for (b, h), info in zip(targets, infos):
+            if (not isinstance(info, dict) or info.get("app") != sharing.APP or info.get("proto") != sharing.PROTO
+                    or info.get("key") == self.identity.key):
+                continue
+            lay = (info.get("layers") or {}).get(sharing.LAYER)
+            if not isinstance(lay, dict) or lay.get("scheme") != sharing.SCHEME:
+                continue
+            r = (lay.get("regions") or {}).get(str(k + 1)) or {}
+            at = r.get("scanned_at") if isinstance(r, dict) else None
+            if isinstance(at, (int, float)) and -sharing.FUTURE_SKEW_S <= now - at <= self.share["max_age_s"]:
+                cands.append((at, b, h))
+        cands.sort(reverse=True)
+        for at, b, h in cands[:3]:
+            doc = await sharing.get_json(client, b, h, sharing.REGION_PATH.format(k=k + 1), sharing.MAX_DOC_BYTES)
+            try:
+                p = sharing.open_doc(doc, k, now, self.share["max_age_s"], self.identity.key)
+                st, key = p["scanner"]["station"], p["scanner"]["key"]
+                self.trust.check(st, key, now)
+                meas = sharing.measured_from(p, ours)
+                if len(meas) < sharing.MIN_COVERAGE * len(ours):
+                    raise sharing.Rejected(f"covers {len(meas)} of the region's {len(ours)} services")
+            except sharing.Rejected as exc:
+                self._note(k, b, f"not used: {exc}")
+                continue
+            # check a random sample again from here
+            checkable = [i for i in meas if ours[i]["ip"] or ours[i]["node_ip"]]
+            sample = sharing.sample_ids(checkable) if checkable else []
+            fresh = {c["id"]: c for c in await self._check_and_locate(client, [byid[i] for i in sample], hosts)}
+            agree = sum(1 for i in sample if i in fresh and sharing.agrees(meas[i], fresh[i]))
+            if sample and agree < sharing.MIN_AGREE * len(sample):
+                reason = f"spot check: only {agree} of {len(sample)} agree"
+                self.trust.reject(st, key, now, reason)
+                self._note(k, b, f"not used, {st} not trusted for 7 days: {reason}")
+                continue
+            missing = [byid[i] for i in ours if i not in meas]
+            own = await self._check_and_locate(client, missing, hosts) if missing else []
+            recs = [{**ours[i], **meas[i]} for i in ours if i in meas] + own
+            note = (f"from {st}, checked {(now - p['scanned_at']) / 3600:.1f} h earlier: {agree} of {len(sample)} "
+                    f"spot checks agree" + (f", {len(missing)} checked here" if missing else ""))
+            self.trust.accept(st, key, now, note)
+            self._note(k, b, note)
+            return recs, {"doc": doc, "scanned_at": p["scanned_at"], "station": st, "own": False, "note": note}
+        return None
+
+    async def refresh(self) -> dict | None:
+        """Every region now (one after the other)."""
+        for k in range(sharing.REGIONS):
+            await self.refresh_region(k)
+        return self.data
+
+    # ── the merged view ─────────────────────────────────────────────────────
+    def regions_meta(self) -> list[dict]:
         out = []
-        for c in checked:
-            n = nodes.get(c["node_ip"]) or {}
-            out.append({**c, "node": n.get("name") or node_names.get(c["node_ip"], ""),
-                        "lat": n.get("lat"), "lon": n.get("lon"), "grid": n.get("grid", ""),
-                        "place": n.get("place", "")})
-        now = time.time()
+        for k in range(sharing.REGIONS):
+            st = self.regions.get(k) or {}
+            out.append({"region": k + 1, "range": sharing.region_label(k), "scanned_at": st.get("scanned_at"),
+                        "station": st.get("station", ""), "own": st.get("own"), "note": st.get("note", ""),
+                        "count": st.get("count", 0), "running": self.running_region == k})
+        return out
+
+    def _rebuild(self) -> None:
+        out = []
+        for k in sorted(self.regions):
+            out += self.regions[k]["services"]
+        # until every region has had its turn, keep the last full pass for the rest
+        out += [c for c in (self.data or {}).get("services", [])
+                if sharing.region_of(c.get("node_ip")) not in self.regions]
 
         def summary(items):
             st: dict[str, int] = {}
             for c in items:
                 st[c.get("status") or "unknown"] = st.get(c.get("status") or "unknown", 0) + 1
-            return {"status": st, "located": sum(1 for c in items if c["lat"] is not None)}
-        by_cat = {k: sum(1 for c in out if c["category"] == k) for k in CATEGORY_KEYS}
-        data = {"generated_at": now, "services": out,
+            return {"status": st, "located": sum(1 for c in items if c.get("lat") is not None)}
+        by_cat = {k: sum(1 for c in out if c.get("category") == k) for k in CATEGORY_KEYS}
+        times = [st["scanned_at"] for st in self.regions.values() if st.get("scanned_at")]
+        now = max(times) if times else time.time()
+        data = {"generated_at": now, "services": out, "regions": self.regions_meta(),
                 "categories": [{"key": k, "label": l, "icon": i, "count": by_cat[k]} for k, l, i in CATEGORIES],
                 "summary": {**summary(out), "services": len(out),
                             "feeds": sum(1 for c in out if c.get("feed"))}}
-        self.data, self.last_error = data, None
-        cam_list = [c for c in out if c["category"] == "camera"]
+        self.data = data
+        cam_list = [c for c in out if c.get("category") == "camera"]
         cams.service.data = {"generated_at": now, "cameras": cam_list,
                              "summary": {"cameras": len(cam_list), "located": summary(cam_list)["located"],
                                          "status": summary(cam_list)["status"]}}
         cams.service.last_error = None
-        log.info("AREDN services: %d checked, %d located, %d data feeds, by category %s",
-                 len(out), data["summary"]["located"], data["summary"]["feeds"],
-                 {k: v for k, v in by_cat.items() if v})
         for path, obj in ((self.cache_path, data), (cams.service.cache_path, cams.service.data)):
             if path:
                 try:
@@ -385,7 +619,19 @@ class ArednServices:
                     os.replace(tmp, path)
                 except OSError as exc:
                     log.debug("AREDN services: cache write failed: %s", exc)
-        return data
+
+    def layer_info(self) -> dict:
+        """The services layer's entry in /peer/v1/info."""
+        return {"scheme": sharing.SCHEME,
+                "regions": {str(k + 1): {"scanned_at": st.get("scanned_at"), "station": st.get("station", ""),
+                                         "count": st.get("count", 0)}
+                            for k, st in self.regions.items() if st.get("doc")}}
+
+
+def peer_info(version: str, layers: dict) -> dict:
+    """What /peer/v1/info tells the other copies: who this is and its layers."""
+    return {"app": sharing.APP, "proto": sharing.PROTO, "version": version, "station": service.station_name(),
+            "key": service.identity.key if service.identity else "", "layers": layers}
 
 
 service = ArednServices()

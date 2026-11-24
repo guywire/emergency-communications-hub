@@ -346,7 +346,9 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             path in PUBLIC_PATHS or
             path.startswith("/static/") or
             path.startswith("/api/auth/") or
-            path.startswith("/yealink/")      # desk-phone XML pages: own key + LAN check per route
+            path.startswith("/yealink/") or   # desk-phone XML pages: own key + LAN check per route
+            path.startswith("/peer/v1/") or   # the exchange with other map copies: mesh/LAN check per route
+            path.startswith("/meshphone/tiles/")   # map tiles for the mesh page: same check as the page
         )
         if is_public:
             return await call_next(request)
@@ -2311,7 +2313,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         d = svc.data or {}
         return {"services": d.get("services", []), "categories": d.get("categories", []),
                 "generated_at": d.get("generated_at"), "summary": d.get("summary", {}),
-                "error": svc.last_error, "running": svc.running, "enabled": svc.enabled}
+                "regions": svc.regions_meta(), "error": svc.last_error, "running": svc.running,
+                "enabled": svc.enabled}
 
     @app.get("/api/aredn/services")
     async def aredn_services_api():
@@ -5069,13 +5072,16 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         return rows
 
     def _direct_local(request) -> bool:
-        """A direct request (no reverse proxy) from a private or loopback
-        address: the LAN or the AREDN mesh (10/8), never the internet."""
+        """A direct request (no reverse proxy) from a private, loopback or
+        amateur 44-net address: the LAN or the AREDN mesh (10/8; AMPRNet 44.0/9
+        and 44.128/10; 44.192/10 was sold in 2019), never the internet."""
         try:
             addr = ipaddress.ip_address(request.client.host)
             if addr.version == 6 and addr.ipv4_mapped:
                 addr = addr.ipv4_mapped
-            local = addr.is_private or addr.is_loopback
+            local = (addr.is_private or addr.is_loopback
+                     or any(addr in n for n in (ipaddress.ip_network("44.0.0.0/9"),
+                                                 ipaddress.ip_network("44.128.0.0/10"))))
         except (AttributeError, TypeError, ValueError):
             return False
         return local and not request.headers.get("x-forwarded-for") and not request.headers.get("forwarded")
@@ -5145,6 +5151,51 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
             return RedirectResponse(url="/login?next=/meshphone/", status_code=302)
         html = (UI_DIR / "templates" / "meshphone_map.html").read_text(encoding="utf-8")
         return HTMLResponse(content=html, headers=_NO_CACHE)
+
+    # ── the exchange with other copies of the AREDN map on the mesh ─────────
+    # (ech/core/aredn_sharing.py; the same protocol as guywire/aredn-services-map)
+    # Machine-to-machine and read-only: mesh / LAN addresses only, no login.
+    def _tile_response(t):
+        from fastapi.responses import Response
+        if not t:
+            return Response(status_code=404)
+        return Response(t[0], media_type=t[1], headers={"Cache-Control": "max-age=86400"})
+
+    @app.get("/meshphone/tiles/{z}/{x}/{y}.png")
+    async def meshphone_tile(z: int, x: int, y: int, request: Request):
+        if not await _meshphone_ok(request):
+            raise HTTPException(status_code=401, detail="Log in to ECH, or open this on the mesh / local network")
+        from ech.core.tile_cache import tiles as tile_cache
+        return _tile_response(await tile_cache.get(z, x, y))
+
+    @app.get("/peer/v1/info")
+    async def peer_info_api(request: Request):
+        from ech.core.aredn_services import service as svc, peer_info
+        from ech.core.tile_cache import tiles as tile_cache
+        if not _direct_local(request) or not svc.share["enabled"]:
+            raise HTTPException(status_code=404)
+        layers = {"services": svc.layer_info()}
+        if tile_cache.share:
+            layers["tiles"] = tile_cache.layer_info()
+        from fastapi.responses import JSONResponse
+        return JSONResponse(peer_info(ECH_VERSION, layers), headers=_NO_CACHE)
+
+    @app.get("/peer/v1/services/region/{n}")
+    async def peer_region_api(n: int, request: Request):
+        from ech.core.aredn_services import service as svc
+        st = svc.regions.get(n - 1) if _direct_local(request) and svc.share["enabled"] else None
+        if not st or not st.get("doc"):
+            raise HTTPException(status_code=404, detail="no result for that region")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(st["doc"], headers=_NO_CACHE)       # exactly as signed
+
+    @app.get("/peer/v1/tiles/{z}/{x}/{y}.png")
+    async def peer_tile_api(z: int, x: int, y: int, request: Request):
+        from ech.core.aredn_services import service as svc
+        from ech.core.tile_cache import tiles as tile_cache
+        if not _direct_local(request) or not svc.share["enabled"]:
+            raise HTTPException(status_code=404)
+        return _tile_response(await tile_cache.get(z, x, y, for_peer=True))
 
     @app.get("/meshphone/map.json")
     async def meshphone_map_json(request: Request):

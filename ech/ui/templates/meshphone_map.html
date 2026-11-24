@@ -105,6 +105,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
   <input type="search" id="q-svc" placeholder="Search services: name, node, place, link…">
   <select id="c-svc" style="padding:7px 8px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--text);font:inherit;margin:0 0 10px 6px"></select>
   <div class="note" id="svc-note"></div>
+  <div class="note" id="svc-regions" style="margin:6px 0 10px"></div>
   <div class="tbl"><table id="t-svc"><thead><tr>
     <th data-k="category">Kind</th><th data-k="name">Service</th><th data-k="node">Node / place</th>
     <th data-k="status">Checked</th><th data-k="link">Link</th>
@@ -114,7 +115,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
 <section class="view" id="v-about"><div class="wrap note" style="font-size:13.5px;color:var(--text)">
   <h3>What this map shows</h3>
   <p>The WT0F MeshPhone Database (<span class="mono">wt0f-meshphone.local.mesh</span>) is used as a guide: office
-  names, codes, number patterns and trunk lists. The facts are polled from the mesh every few hours by the PBX
+  names, codes, number patterns and trunk lists. The facts are polled from the mesh once a day by the PBX
   named at the top of the page: whether each PBX answers, from the PBXs themselves, and where it is, from the
   AREDN node it sits behind (its published coordinates and grid square). PBXs that look like a phone system by
   host name or advertised service but aren't in the directory are added too.</p>
@@ -153,6 +154,16 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
   internet gateways, power / solar, maps and wikis (phones are on the MeshPhone layers). Each gets one request a
   day: a page fetch for web links, a TCP connect for others. ADS-B and AIS receivers are also checked for a public
   data file (aircraft.json / ships.json). <span class="mono">/aredn/</span> opens this page on the services.</p>
+  <h3>Regions and sharing</h3>
+  <p>Cameras and services are checked a quarter of the mesh at a time, by the second number of the advertising
+  node's address (10.0-63, 10.64-127, 10.128-191, 10.192-255; amateur 44-net addresses the same way), one quarter
+  every 6 hours, so each is checked once a day and the traffic is spread out. Other copies of this map on the mesh
+  (AREDN Services Map) share their results: if one checked a quarter in the last 4 hours, its result is used instead
+  of checking again. It is used only if it is signed by the copy that made it, covers the services this station's
+  own node lists there and nothing else, and a random sample checked again from here agrees.</p>
+  <h3>Map tiles</h3>
+  <p>The map's tiles come from this station: from its cache, from the internet when it has it, or from other copies
+  of this map on the mesh. So the map works for anyone on the mesh, with or without internet.</p>
 </div></section>
 
 <script src="../static/leaflet/leaflet.js"></script>
@@ -245,10 +256,10 @@ const CAM_MODE = SHOW === 'cameras', SVC_MODE = SHOW === 'services';
 const phoneLayer = L.layerGroup(), camLayer = L.layerGroup(), svcLayer = L.layerGroup();
 function initMap() {
   map = L.map('map', {preferCanvas: true}).setView([39, -110], 3);
-  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  const tiles = L.tileLayer('tiles/{z}/{x}/{y}.png',
     {maxZoom: 18, attribution: '&copy; OpenStreetMap contributors'}).addTo(map);
   let tileErr = 0;
-  tiles.on('tileerror', () => { if (++tileErr === 4) L.control.attribution({prefix: 'Map tiles need internet; markers still show'}).addTo(map); });
+  tiles.on('tileerror', () => { if (++tileErr === 4) L.control.attribution({prefix: 'No map tiles for this area here or on the mesh yet; markers still show'}).addTo(map); });
   if (!CAM_MODE && !SVC_MODE) phoneLayer.addTo(map);
   if (!SVC_MODE) camLayer.addTo(map);
   svcLayer.addTo(map);                    // which service kinds show is the checklist's job
@@ -471,7 +482,7 @@ function drawCameras(d) {
           ${camWhat(c) ? `<br>${esc(camWhat(c))}` : ''}${camView(c) ? `<br>View with: ${esc(camView(c))}` : ''}
           <br><span class="mono muted">${esc(c.scheme)}:${c.port || ''}</span> ${camLink(c)}
           ${(c.open_ports || []).length ? `<br><span class="muted">Also open: ${c.open_ports.join(', ')}</span>` : ''}</div>`).join('') +
-        `<div class="muted" style="margin-top:6px">Checked ${ago(d.generated_at)}, once a day.</div>`,
+        `<div class="muted" style="margin-top:6px">${checkedBy(n) || `Checked ${ago(d.generated_at)}, once a day.`}</div>`,
         {maxWidth: 340, maxHeight: 380})
       .addTo(camLayer);
   });
@@ -540,11 +551,30 @@ function drawServices() {
       .bindPopup(`<b>${esc(f.node || f.node_ip)}</b><br><span class="muted">${esc(f.place || '')}${f.grid ? ' · ' + esc(f.grid) : ''}</span>` +
         list.map(s => `<div style="margin-top:6px;padding-top:4px;border-top:1px solid var(--border)">${(cats[s.category] || {}).icon || ''} <b>${esc(s.name)}</b> ${svcPill(s)}
           ${s.software ? `<br>${esc(s.software)}` : ''}${svcFeed(s)}<br>${svcLink(s)}</div>`).join('') +
-        `<div class="muted" style="margin-top:6px">Checked ${ago(SVC.generated_at)}, once a day.</div>`, {maxWidth: 340, maxHeight: 380})
+        `<div class="muted" style="margin-top:6px">${checkedBy(f) || `Checked ${ago(SVC.generated_at)}, once a day.`}</div>`, {maxWidth: 340, maxHeight: 380})
       .addTo(svcLayer);
   });
 }
+// The mesh is checked a quarter at a time (by the address's second octet), one
+// quarter every 6 h; a quarter another copy checked lately may come from it.
+const regionOf = ip => { const o = String(ip || '').split('.'); return o.length === 4 ? Math.floor(+o[1] * 4 / 256) : -1; };
+function checkedBy(s) {
+  const r = (((SVC || {}).regions) || [])[regionOf(s.node_ip)];
+  if (!r || !r.scanned_at) return '';
+  return `Checked ${ago(r.scanned_at)} ` + (r.own ? 'from here' : `by ${esc(r.station)} (shared, spot-checked here)`) +
+    ` · region ${r.region} of 4, once a day.`;
+}
+function regionsNote() {
+  const rs = (SVC || {}).regions || [];
+  document.getElementById('svc-regions').innerHTML = rs.map(r =>
+    `<div><b>Region ${r.region}</b> <span class="mono">${esc(r.range)}</span>: ` +
+    (r.running ? 'being checked now' : r.scanned_at
+      ? `${r.count} services, checked ${ago(r.scanned_at)} ${r.own ? 'from here' : `by <b>${esc(r.station)}</b>`}` +
+        (r.own ? '' : ` <span title="${esc(r.note)}">(shared, verified)</span>`)
+      : 'not checked yet (its turn comes within the day)') + '</div>').join('');
+}
 function servicesTable() {
+  regionsNote();
   const cats = svcCats(), sel = document.getElementById('c-svc');
   const rows = ((SVC || {}).services || []).slice();
   sel.innerHTML = `<option value="">All kinds (${rows.length})</option>` + ((SVC || {}).categories || []).filter(c => c.count)
@@ -552,7 +582,7 @@ function servicesTable() {
   const sm = (SVC || {}).summary || {}, st = sm.status || {};
   document.getElementById('svc-note').textContent = rows.length
     ? `${rows.length} services advertised on the mesh (phones are on the MeshPhone layers) · ${st.open || 0} open, ${st.password || 0} need a password` +
-      `${sm.feeds ? ` · ${sm.feeds} ADS-B / AIS receivers publish a data feed` : ''} · checked ${ago(SVC.generated_at)}. Links work from a computer on the mesh.`
+      `${sm.feeds ? ` · ${sm.feeds} ADS-B / AIS receivers publish a data feed` : ''}. Links work from a computer on the mesh.`
     : (SVC && SVC.running ? 'The first services check is running; reload in a few minutes.' : 'No services check yet.');
   rows.sort((a, b) => (cats[a.category] || {i: 99}).i - (cats[b.category] || {i: 99}).i || (CAM_RANK[a.status] ?? 9) - (CAM_RANK[b.status] ?? 9));
   const body = document.querySelector('#t-svc tbody'), q = document.getElementById('q-svc');

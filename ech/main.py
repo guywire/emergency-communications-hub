@@ -406,6 +406,16 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
     # one daily pass over the mesh's advertised services; it also fills the camera layer
     from ech.core.aredn_services import service as aredn_services
     await aredn_services.start(config)
+    # map tiles for the mesh page: offline file, cache, internet, or other copies on the mesh
+    from ech.core import aredn_sharing
+    from ech.core.tile_cache import tiles as tile_cache
+    from ech import __version__ as _ver
+    _tcfg = dict(config.get("map_tiles") or {})
+    _tcfg.setdefault("cache_mb", 200)               # the server's root is a small flash drive
+    tile_cache.configure(_tcfg, str(Path(db_path).resolve().parent) if db_path != ":memory:" else ".",
+                         peers_fn=lambda: aredn_services.peer_targets
+                         or aredn_sharing.peer_targets([], [], aredn_services.share["peers"]),
+                         user_agent=f"SignalMatrix/{_ver} (+https://github.com/guywire/emergency-communications-hub)")
     from ech.core.track_history import TrackHistory
     track_history = TrackHistory(router, db, config)
     await track_history.start()

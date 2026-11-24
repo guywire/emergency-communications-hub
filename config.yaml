@@ -930,6 +930,34 @@ mesh_bot:
 #   # up separately.
 #   aredn_discovery:
 #     sysinfo_url: "http://192.168.x.x/cgi-bin/sysinfo.json"
+#   # AREDN services and cameras (/aredn/, /cameras/): checked a quarter of the
+#   # mesh at a time, one quarter every refresh_hours / 4, and shared with other
+#   # copies of the AREDN map on the mesh (guywire/aredn-services-map, or another
+#   # ECH): a quarter one of them checked in the last 4 hours is used after
+#   # verification (signature, our own service list only, random spot check).
+#   # Others find this station when its AREDN node advertises a service named
+#   # "AREDN Services Map" linking to http://<this box>:8766/meshphone/.
+#   aredn_services:
+#     refresh_hours: 24
+#     station: ""               # the name others see; empty = "SignalMatrix/<key fingerprint>"
+#     sharing:
+#       enabled: true
+#       max_age_hours: 4
+#       peers: []               # e.g. ["http://10.1.2.3:8088"]
+
+# ── Map tiles for the mesh page (/meshphone/) ──────────────────────────────────
+# The page's tiles come from ECH: an offline MBTiles file, ECH's cache, the
+# internet (when ECH has it), or other copies of the AREDN map on the mesh, in
+# that order, so people on the mesh without internet still get a map. Other
+# copies are answered from the file and cache only.
+# map_tiles:
+#   url: https://tile.openstreetmap.org/{z}/{x}/{y}.png
+#   mbtiles: ""                 # e.g. /mnt/usb/maps/maine.mbtiles
+#   internet: true
+#   share: true
+#   cache_mb: 200               # default 200 on ECH (small root drive)
+#   cache_days: 30
+#   max_zoom: 19
 
 # ── CAT radio control (rigctld / Hamlib) ──────────────────────────────────────
 # ECH connects to a running rigctld process over TCP and polls freq/mode every
