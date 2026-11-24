@@ -100,3 +100,47 @@ def test_http_check_goes_by_ip_with_the_mesh_name_as_host():
     assert seen["url"] == "http://10.1.0.5:80/snap.jpg" and seen["headers"] == {"Host": "n0cam-ptz"}
     assert seen["follow_redirects"] is False
     assert (c["status"], c["kind"], c["ip"]) == ("open", "snapshot", "10.1.0.5")
+
+
+def test_rtsp_probe_finds_an_open_stream_on_the_brands_path():
+    async def run():
+        seen = []
+
+        async def handle(r, w):
+            req = await r.readuntil(b"\r\n\r\n")
+            seen.append(req.split(b" ")[1].decode())
+            w.write(b"RTSP/1.0 200 OK\r\nCSeq: 2\r\n\r\n" if b"/h264Preview_01_main" in req
+                    else b"RTSP/1.0 404 Not Found\r\nCSeq: 2\r\n\r\n")
+            await w.drain()
+            w.close()
+        srv = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = srv.sockets[0].getsockname()[1]
+        try:
+            found = await ac.rtsp_probe("127.0.0.1", port, "Reolink")
+        finally:
+            srv.close()
+        return found, seen
+    found, seen = asyncio.run(run())
+    assert found == {"port": found["port"], "path": "/h264Preview_01_main", "status": "open"}
+    assert len(seen) == 1                                   # stops at the first stream that plays
+
+
+def test_rtsp_probe_reports_a_password_and_tries_at_most_three_paths():
+    async def run():
+        n = []
+
+        async def handle(r, w):
+            await r.readuntil(b"\r\n\r\n")
+            n.append(1)
+            w.write(b"RTSP/1.0 401 Unauthorized\r\nCSeq: 2\r\n\r\n")
+            await w.drain()
+            w.close()
+        srv = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = srv.sockets[0].getsockname()[1]
+        try:
+            found = await ac.rtsp_probe("127.0.0.1", port, "")
+        finally:
+            srv.close()
+        return found, len(n)
+    found, tries = asyncio.run(run())
+    assert found["status"] == "password" and found["path"] == "/" and tries == ac.MAX_RTSP_TRIES

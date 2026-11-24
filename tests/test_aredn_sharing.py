@@ -371,3 +371,17 @@ async def test_ech_peer_and_tile_routes(tmp_path):
                 assert (await c.get("/peer/v1/services/region/1")).status_code == 404
     finally:
         asv.service.regions.clear()
+        await db.close()                    # its worker thread would keep pytest from exiting
+
+
+def test_stream_must_be_a_known_rtsp_path_on_a_camera():
+    s = {"ip": "10.1.0.5", "name": "Cam", "link": "http://10.1.0.6/"}
+    base = asv.base_record(s, HOSTS, "camera")
+    m = {**sharing.shareable({**_svc(5)[1], "id": base["id"]}),
+         "stream": {"port": 554, "path": "/h264Preview_01_main", "status": "open"}}
+    assert sharing.clean_measured(m, base)["stream"] == {"port": 554, "path": "/h264Preview_01_main", "status": "open"}
+    for bad in ({"port": 554, "path": "/../evil", "status": "open"}, {"port": 80, "path": "/", "status": "open"},
+                {"port": 554, "path": "/", "status": "pwned"}, "rtsp://elsewhere/"):
+        assert sharing.clean_measured({**m, "stream": bad}, base) is None, bad
+    other = asv.base_record(s, HOSTS, "other")
+    assert sharing.clean_measured({**m, "id": other["id"]}, other) is None   # only cameras have streams

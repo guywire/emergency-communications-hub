@@ -8,6 +8,15 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.141 (2026-11-24)
+
+- Cameras: a camera host whose RTSP port is open gets up to three RTSP DESCRIBEs
+  (no login) on its brand's usual stream paths (Reolink, Hikvision, Dahua /
+  Amcrest, Axis, then generic). A stream that plays without a password shows
+  "stream open" and links: Open in VLC (an .m3u playlist), the rtsp:// link, copy.
+  rtsp:// cameras get the same links. Streams are shared between copies, checked
+  against the known paths.
+
 ## v1.1.140 (2026-11-24)
 
 - Mesh map (/meshphone/, /aredn/, /cameras/): the map key shows only the parts

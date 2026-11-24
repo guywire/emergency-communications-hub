@@ -16,6 +16,9 @@ Each camera gets one check per refresh, nothing more than a viewer would do:
   * a dedicated camera host (not the AREDN node itself): a TCP connect to the
     handful of ports camera apps use (RTSP 554/8554, Hikvision 8000, Dahua
     37777, Reolink 9000, XMEye 34567), so the map can say which app views it.
+    If its RTSP port is open, up to three RTSP DESCRIBEs (no login) on that
+    brand's usual stream paths: a stream published without a password gets a
+    link that opens it in VLC.
 
 Config (radio_directory.aredn_cameras, all optional):
   enabled         bool   default true
@@ -72,6 +75,26 @@ _SOFTWARE = [
     (r"go2rtc", "go2rtc", "browser"),
     (r"mediamtx|rtsp-simple-server", "MediaMTX", "browser or VLC"),
 ]
+
+# Usual RTSP stream paths by camera software, tried (DESCRIBE, no login) on a
+# camera host whose RTSP port is open. Peers' results are checked against these.
+RTSP_PATHS = {
+    "Reolink": ("/h264Preview_01_main", "/Preview_01_main"),
+    "Hikvision": ("/Streaming/Channels/101",),
+    "Dahua": ("/cam/realmonitor?channel=1&subtype=0",),
+    "Amcrest": ("/cam/realmonitor?channel=1&subtype=0",),
+    "Axis": ("/axis-media/media.amp",),
+}
+GENERIC_RTSP = ("/", "/live", "/stream1")
+MAX_RTSP_TRIES = 3
+
+
+def rtsp_paths(software: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(RTSP_PATHS.get(software, ()) + GENERIC_RTSP))[:MAX_RTSP_TRIES]
+
+
+def all_rtsp_paths() -> set[str]:
+    return {p for v in RTSP_PATHS.values() for p in v} | set(GENERIC_RTSP)
 
 
 def is_camera(service: dict) -> bool:
@@ -187,6 +210,22 @@ async def rtsp_check(ip: str, port: int, link: str, timeout: float = 6.0) -> dic
     return out
 
 
+
+async def rtsp_probe(ip: str, port: int, software: str) -> dict | None:
+    """The camera's stream on its open RTSP port: {port, path, status} with
+    status open (plays without a password) or password; None if none found."""
+    found = None
+    for path in rtsp_paths(software):
+        r = await rtsp_check(ip, port, f"rtsp://{ip}:{port}{path}")
+        if r["status"] == "open":
+            return {"port": port, "path": path, "status": "open"}
+        if r["status"] == "password" and not found:
+            found = {"port": port, "path": path, "status": "password"}
+        if r["status"] in ("closed", "no_reply"):
+            break
+    return found
+
+
 async def port_open(ip: str, port: int, timeout: float = 3.0) -> bool:
     try:
         _, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout)
@@ -300,6 +339,15 @@ class ArednCameras:
         for p in ports:
             if CAMERA_PORTS[p][1] not in apps and not (res.get("view") or "").startswith(CAMERA_PORTS[p][1]):
                 apps.append(CAMERA_PORTS[p][1])
+        stream = None
+        if scheme != "rtsp" and ip:
+            for p in (554, 8554):
+                if p in ports:
+                    stream = await rtsp_probe(ip, p, res.get("software") or "")
+                    if stream:
+                        break
+        if stream:
+            res["stream"] = stream
         name = _TAG_RE.sub("", str(s.get("name") or "")).strip()[:80]
         m = _TAG_RE.search(str(s.get("name") or ""))
         return {"name": name, "tag": m.group(1).lower() if m else "", "link": mask_secrets(link)[:300],

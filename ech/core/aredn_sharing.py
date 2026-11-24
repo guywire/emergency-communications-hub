@@ -164,7 +164,7 @@ def verify(key_b64: str, data: bytes, sig_b64: str) -> bool:
 
 
 # ── what is shared ───────────────────────────────────────────────────────────
-MEASURED = ("status", "kind", "software", "view", "ms", "open_ports", "other_apps", "feed",
+MEASURED = ("status", "kind", "software", "view", "ms", "open_ports", "other_apps", "feed", "stream",
             "node", "lat", "lon", "grid", "place")
 
 
@@ -229,6 +229,14 @@ def clean_measured(m: dict, base: dict) -> dict | None:
         return None
     out = {"status": st, "kind": kind, "software": sw, "view": view,
            "ms": None if ms is None else int(ms), "open_ports": list(op), "other_apps": list(oa)}
+    stream = m.get("stream")
+    if stream is not None:
+        from ech.core import aredn_cameras as cams
+        if (not isinstance(stream, dict) or base.get("category") != "camera"
+                or stream.get("port") not in (554, 8554) or stream.get("path") not in cams.all_rtsp_paths()
+                or stream.get("status") not in ("open", "password")):
+            return None
+        out["stream"] = {"port": stream["port"], "path": stream["path"], "status": stream["status"]}
     feed = m.get("feed")
     if feed is not None:
         from ech.core.aredn_services import feed_paths

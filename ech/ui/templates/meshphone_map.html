@@ -434,10 +434,44 @@ const CAM_KIND = {snapshot: 'still image', mjpeg: 'live MJPEG', page: 'web page'
   redirect: 'web page', forbidden: 'web page'};
 const CAM_RANK = {open: 0, password: 1, blocked: 2, no_reply: 3, closed: 4, error: 5, unreachable: 6};
 const camPill = c => { const s = CAM_ST[c.status] || ['#8b949e', c.status || '?'];
-  return `<span class="pill" style="color:${s[0]};border-color:${s[0]}">${esc(s[1])}</span>`; };
+  return `<span class="pill" style="color:${s[0]};border-color:${s[0]}">${esc(s[1])}</span>` +
+    (c.status !== 'open' && camOpen(c) ? ` <span class="pill" style="color:${CAM_ST.open[0]};border-color:${CAM_ST.open[0]}">stream open</span>` : ''); };
 const camWhat = c => [CAM_KIND[c.kind] || c.kind, c.software].filter(Boolean).join(' · ');
 const camView = c => [c.view, ...(c.other_apps || [])].filter(Boolean).join('; also ');
 const camLink = c => `<a href="${esc(c.href)}" target="_blank" rel="noopener" style="word-break:break-all">${esc(c.link)}</a>`;
+// A camera's RTSP stream: its rtsp:// link, or the stream found on its host.
+const camHost = c => { try { return new URL(c.href || '').hostname; } catch (e) { return ''; } };
+const camStream = c => c.scheme === 'rtsp' ? {url: c.href, status: c.status}
+  : c.stream && camHost(c) ? {url: `rtsp://${camHost(c)}:${c.stream.port}${c.stream.path}`, status: c.stream.status} : null;
+const camOpen = c => c.status === 'open' || (camStream(c) || {}).status === 'open';
+// Links that open the stream in a player: the .m3u playlist opens in VLC on any
+// computer; the rtsp:// link opens VLC where it handles rtsp (phones, most desktops).
+function streamLinks(c) {
+  const s = camStream(c);
+  if (!s) return '';
+  if (s.status !== 'open') return c.scheme === 'rtsp' ? '' : '<span class="muted">RTSP stream: password needed</span>';
+  const name = c.name || 'Camera';
+  return `▶ <a href="#" data-m3u="${esc(s.url)}" data-name="${esc(name)}">Open in VLC</a>` +
+    ` · <a href="${esc(s.url)}">rtsp link</a> · <a href="#" data-copy="${esc(s.url)}">copy</a>`;
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-m3u],[data-copy]');
+  if (!a) return;
+  e.preventDefault();
+  if (a.dataset.m3u) {
+    const blob = new Blob([`#EXTM3U\n#EXTINF:-1,${a.dataset.name}\n${a.dataset.m3u}\n`], {type: 'audio/x-mpegurl'});
+    const d = document.createElement('a');
+    d.href = URL.createObjectURL(blob);
+    d.download = a.dataset.name.replace(/[^\w.-]+/g, '_') + '.m3u';
+    document.body.appendChild(d); d.click(); d.remove();
+    setTimeout(() => URL.revokeObjectURL(d.href), 5000);
+    return;
+  }
+  const t = document.createElement('textarea');
+  t.value = a.dataset.copy; document.body.appendChild(t); t.select();
+  try { document.execCommand('copy'); a.textContent = 'copied'; } catch (err) { prompt('Copy the stream link:', a.dataset.copy); }
+  t.remove();
+});
 
 function drawCameras(d) {
   const cams = d.cameras || [];
@@ -450,15 +484,15 @@ function drawCameras(d) {
   });
   byNode.forEach(list => {
     list.sort((a, b) => (CAM_RANK[a.status] ?? 9) - (CAM_RANK[b.status] ?? 9));
-    const n = list[0], col = (CAM_ST[n.status] || ['#8b949e'])[0];
-    const nOpen = list.filter(c => c.status === 'open').length;
+    const n = list[0], nOpen = list.filter(camOpen).length;
+    const col = nOpen ? CAM_ST.open[0] : (CAM_ST[n.status] || ['#8b949e'])[0];
     L.marker([n.lat, plon(n.lon)], {icon: L.divIcon({className: '', iconSize: [0, 0], iconAnchor: [8, 8],
       html: `<div style="display:inline-block;white-space:nowrap;font:600 10px var(--mono);color:${col};background:var(--panel);border:1px solid ${col};border-radius:3px;padding:0 4px;line-height:15px">📷${list.length > 1 ? ' ' + nOpen + '/' + list.length : ''}</div>`})})
       .bindTooltip(`${esc(n.node || n.node_ip)}: ${list.length} camera${list.length > 1 ? 's' : ''}`, {direction: 'top'})
       .bindPopup(`<b>📷 ${esc(n.node || n.node_ip)}</b><br><span class="muted">${esc(n.place || '')}${n.grid ? ' · ' + esc(n.grid) : ''}</span>` +
         list.map(c => `<div style="margin-top:6px;padding-top:4px;border-top:1px solid var(--border)"><b>${esc(c.name || 'Camera')}</b> ${camPill(c)}
           ${camWhat(c) ? `<br>${esc(camWhat(c))}` : ''}${camView(c) ? `<br>View with: ${esc(camView(c))}` : ''}
-          <br><span class="mono muted">${esc(c.scheme)}:${c.port || ''}</span> ${camLink(c)}
+          <br><span class="mono muted">${esc(c.scheme)}:${c.port || ''}</span> ${camLink(c)}${streamLinks(c) ? '<br>' + streamLinks(c) : ''}
           ${(c.open_ports || []).length ? `<br><span class="muted">Also open: ${c.open_ports.join(', ')}</span>` : ''}</div>`).join('') +
         `<div class="muted" style="margin-top:6px">${checkedBy(n) || `Checked ${ago(d.generated_at)}`}</div>`,
         {maxWidth: 340, maxHeight: 380})
@@ -471,9 +505,10 @@ function camerasTable(d) {
   const body = document.querySelector('#t-cam tbody'), q = document.getElementById('q-cam');
   const sm = (d.summary || {}).status || {};
   const unplaced = rows.filter(c => c.lat == null).length;
+  const streamOnly = rows.filter(c => c.status !== 'open' && camOpen(c)).length;
   document.getElementById('cam-note').textContent = rows.length
     ? `${rows.length} cameras advertised on the mesh · ${sm.open || 0} open, ${sm.password || 0} need a password, ` +
-      `${(sm.closed || 0) + (sm.no_reply || 0) + (sm.error || 0)} didn't answer · checked ${ago(d.generated_at)}` +
+      `${(sm.closed || 0) + (sm.no_reply || 0) + (sm.error || 0)} didn't answer${streamOnly ? ` · ${streamOnly} with a login page but an RTSP stream that needs no password` : ''} · checked ${ago(d.generated_at)}` +
       (unplaced ? ` · ${unplaced} not on the map (their node has no location)` : '') + '. Links work from a computer on the mesh.'
     : (d.running ? 'The first camera check is running; reload in a few minutes.' : 'No camera check yet' + (d.error ? ` (${d.error})` : '') + '.');
   rows.sort((a, b) => (CAM_RANK[a.status] ?? 9) - (CAM_RANK[b.status] ?? 9) || (a.node || '').localeCompare(b.node || ''));
@@ -484,7 +519,7 @@ function camerasTable(d) {
       <td>${esc(c.node || c.node_ip)}${c.place ? `<div class="muted">${esc(c.place)}</div>` : ''}</td>
       <td>${camPill(c)}${c.ms != null ? `<div class="muted mono">${c.ms} ms</div>` : ''}</td>
       <td>${esc(c.what)}${(c.open_ports || []).length ? `<div class="muted">also open: ${c.open_ports.join(', ')}</div>` : ''}</td>
-      <td class="hide-sm">${esc(c.view)}</td><td class="mono" style="font-size:11px">${camLink(c)}</td></tr>`).join('');
+      <td class="hide-sm">${esc(c.view)}</td><td class="mono" style="font-size:11px">${camLink(c)}${streamLinks(c) ? `<div style="font-family:inherit;margin-top:3px">${streamLinks(c)}</div>` : ''}</td></tr>`).join('');
   };
   q.oninput = render;
   sortable(document.getElementById('t-cam'), rows, render, (c, k) => k === 'status' ? (CAM_RANK[c.status] ?? 9) : k === 'kind' ? c.what : c[k] || '');
