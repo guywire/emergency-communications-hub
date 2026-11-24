@@ -113,6 +113,13 @@ def link_target(link: str, hosts: list[dict]) -> tuple[str, str, int]:
     return scheme, "", port
 
 
+# Camera / NVR software whose web page always asks for a login. Their pages are
+# script apps that draw the login form in the browser, so the HTML we fetch has
+# no password field: the software's name is the evidence instead.
+_LOGIN_ALWAYS = {"Reolink", "Hikvision", "Dahua", "Amcrest", "UniFi Protect", "Foscam"}
+_LOGIN_TITLE = re.compile(r"<title>[^<]*\b(log ?in|sign ?in)\b", re.I)
+
+
 def software_from(text: str) -> tuple[str, str]:
     for pat, sw, view in _SOFTWARE:
         if re.search(pat, text or "", re.I):
@@ -133,7 +140,8 @@ def classify_http(status: int, ctype: str, body: str, headers_text: str, url: st
             return {"status": "open", "kind": "snapshot", "software": sw, "view": "browser (still image)"}
         if "multipart/x-mixed-replace" in ctype:
             return {"status": "open", "kind": "mjpeg", "software": sw, "view": "browser (live MJPEG)"}
-        if re.search(r"<input[^>]+type=[\"']?password", body, re.I):
+        if (re.search(r"<input[^>]+type=[\"']?password", body, re.I) or sw in _LOGIN_ALWAYS
+                or _LOGIN_TITLE.search(body[:20000])):
             return {"status": "password", "kind": "login", "software": sw, "view": view or "browser (with the password)"}
         if re.search(r"<video|<img|webrtc|hls|\.m3u8|mjpe?g", body, re.I) or sw:
             return {"status": "open", "kind": "page", "software": sw, "view": view or "browser"}

@@ -35,6 +35,11 @@ def test_classify_http():
     assert r["status"] == "password" and r["software"] == "motionEye"
     r = ac.classify_http(200, "text/html", "<script src='/doc/page/login.asp'>", "", "http://x/")
     assert r["software"] == "Hikvision" and "Hik-Connect" in r["view"]
+    # Reolink's page is a script app that draws its login form in the browser
+    r = ac.classify_http(200, "text/html", "<title></title><script src='js/reolink.min.js'></script>", "", "https://cam/")
+    assert (r["status"], r["software"]) == ("password", "Reolink")
+    assert ac.classify_http(200, "text/html", "<title>Camera Login</title><div id=app>", "", "http://x/")["status"] == "password"
+    assert ac.classify_http(200, "text/html", "<title>Live view</title><video>", "", "http://x/")["status"] == "open"
     assert ac.classify_http(500, "text/html", "", "", "http://x/")["status"] == "error"
     assert ac.classify_http(302, "", "", "location: /login.html", "http://x/")["status"] == "password"
     assert ac.classify_http(302, "", "", "location: /live/", "http://x/")["status"] == "open"

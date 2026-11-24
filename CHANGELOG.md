@@ -8,6 +8,18 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.140 (2026-11-24)
+
+- Mesh map (/meshphone/, /aredn/, /cameras/): the map key shows only the parts
+  for layers that are on (MeshPhone PBXs and trunks, cameras), and the MeshPhone
+  figures above the map show only with the MeshPhone layer, in four short items.
+- Less text about how often things are checked: popups say "Checked 3 h ago"
+  (and by which station if shared); the per-region list on Services is gone.
+- About page rewritten short; it no longer singles out the directory's maintainer.
+- Cameras: Reolink, Hikvision, Dahua, Amcrest, UniFi Protect and Foscam web pages
+  are "password needed", not "open" (their login form is drawn by script, so the
+  page had no password field to find); so is any page titled Login / Sign in.
+
 ## v1.1.139 (2026-11-24)
 
 - **AREDN services checked by region and shared between stations.** The mesh is

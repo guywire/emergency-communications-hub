@@ -105,7 +105,6 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
   <input type="search" id="q-svc" placeholder="Search services: name, node, place, link…">
   <select id="c-svc" style="padding:7px 8px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--text);font:inherit;margin:0 0 10px 6px"></select>
   <div class="note" id="svc-note"></div>
-  <div class="note" id="svc-regions" style="margin:6px 0 10px"></div>
   <div class="tbl"><table id="t-svc"><thead><tr>
     <th data-k="category">Kind</th><th data-k="name">Service</th><th data-k="node">Node / place</th>
     <th data-k="status">Checked</th><th data-k="link">Link</th>
@@ -113,57 +112,18 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
 </div></section>
 
 <section class="view" id="v-about"><div class="wrap note" style="font-size:13.5px;color:var(--text)">
-  <h3>What this map shows</h3>
-  <p>The WT0F MeshPhone Database (<span class="mono">wt0f-meshphone.local.mesh</span>) is used as a guide: office
-  names, codes, number patterns and trunk lists. The facts are polled from the mesh once a day by the PBX
-  named at the top of the page: whether each PBX answers, from the PBXs themselves, and where it is, from the
-  AREDN node it sits behind (its published coordinates and grid square). PBXs that look like a phone system by
-  host name or advertised service but aren't in the directory are added too.</p>
-  <ul>
-    <li><b>PBX up</b>: the PBX answered an IAX2 POKE with a PONG. Asterisk answers this before any login, so it
-      proves the PBX is running and reachable over the mesh. The time is the round trip from the measuring PBX.</li>
-    <li><b>Moved</b>: the directory's IP address didn't answer, but a PBX-named mesh host of the same admin callsign
-      did (found in the AREDN mesh-wide host list). The directory entry is probably out of date.</li>
-    <li><b>No answer</b>: none of the addresses tried answered. The PBX may be off, off the mesh, or firewalled
-      against IAX from unknown addresses.</li>
-    <li><b>No address</b>: the directory has no IP and no PBX-like host was found for the admin's callsign.</li>
-  </ul>
-  <p>Trunks (lines), best evidence first:</p>
-  <ul>
-    <li><b>Our trunk (verified)</b>: a trunk of the measuring PBX itself, qualified by its Asterisk, with latency.</li>
-    <li><b>Reported</b>: PBXs running the MeshPhone generator scripts report their own trunks' Asterisk qualify
-      result (latency or DOWN) when they check in to the WT0F database. Each direction is shown separately with
-      the date of that PBX's last check-in; the line colour is the average latency. Up one way and DOWN the other
-      usually means the trunk is only configured on one side.</li>
-    <li><b>Not reported</b>: neither PBX reports this trunk. All that can be checked from here is whether both
-      PBXs answer IAX (dotted blue), one doesn't (dotted red), or one has no address (dotted grey).</li>
-  </ul>
-  <p>The white pages come from the last copy of the MeshPhone WhitePages served on the mesh.</p>
-  <h3>Cameras</h3>
-  <p>Every camera or video stream advertised as a service anywhere on the mesh (tagged camera or video by its
-  owner, or named like one), placed at the AREDN node that advertises it. Once a day each one gets the same single
-  request a viewer would make: a web page or snapshot fetch, or an RTSP DESCRIBE. <b>Open</b> means it answered
-  without a password (beyond any the owner put in the advertised link), <b>password needed</b> means it asked for a
-  login. A camera host that isn't the node itself is also checked for the ports camera apps use (RTSP 554/8554,
-  Hikvision 8000, Dahua 37777, Reolink 9000, XMEye 34567), so the table can say which app views it.
-  Passwords in advertised links are masked in the text; the link itself is the owner's, unchanged.
-  <span class="mono">/cameras/</span> opens this page on the cameras.</p>
-  <h3>Services</h3>
-  <p>Everything else advertised on the mesh, by kind: ADS-B and AIS receivers, satellite receivers, packet / BBS,
-  Winlink, APRS, TAK, Meshtastic / MeshCore gateways, radio / SDR / AllStar, chat, weather, time servers, mail,
-  internet gateways, power / solar, maps and wikis (phones are on the MeshPhone layers). Each gets one request a
-  day: a page fetch for web links, a TCP connect for others. ADS-B and AIS receivers are also checked for a public
-  data file (aircraft.json / ships.json). <span class="mono">/aredn/</span> opens this page on the services.</p>
-  <h3>Regions and sharing</h3>
-  <p>Cameras and services are checked a quarter of the mesh at a time, by the second number of the advertising
-  node's address (10.0-63, 10.64-127, 10.128-191, 10.192-255; amateur 44-net addresses the same way), one quarter
-  every 6 hours, so each is checked once a day and the traffic is spread out. Other copies of this map on the mesh
-  (AREDN Services Map) share their results: if one checked a quarter in the last 4 hours, its result is used instead
-  of checking again. It is used only if it is signed by the copy that made it, covers the services this station's
-  own node lists there and nothing else, and a random sample checked again from here agrees.</p>
-  <h3>Map tiles</h3>
-  <p>The map's tiles come from this station: from its cache, from the internet when it has it, or from other copies
-  of this map on the mesh. So the map works for anyone on the mesh, with or without internet.</p>
+  <h3>About this map</h3>
+  <p>What is advertised on the AREDN mesh, placed at the node that advertises it, and whether it answers when
+  checked from this station.</p>
+  <h3>MeshPhone</h3>
+  <p>Offices, trunks and people come from the MeshPhone directory and white pages served on the mesh.
+  <b>PBX up</b> means the PBX answered an IAX2 poke from here. Trunk colours show latency where the PBXs report it.</p>
+  <h3>Cameras and services</h3>
+  <p>Each gets the one request a viewer would make. <b>Open</b> answered without a password, <b>password needed</b>
+  asked for one; no passwords are tried. Links work from a computer on the mesh.</p>
+  <h3>Shared over the mesh</h3>
+  <p>Copies of this map share their results and map tiles, so the mesh is checked less and the map works without
+  internet. A shared result is used only if it is signed and a sample checked again from here agrees.</p>
 </div></section>
 
 <script src="../static/leaflet/leaflet.js"></script>
@@ -272,7 +232,31 @@ function initMap() {
     return d;
   };
   c.addTo(map);
+  const lg = L.control({position: 'bottomleft'});
+  lg.onAdd = () => {
+    const d = L.DomUtil.create('div', 'legend');
+    d.id = 'legend';
+    d.innerHTML = '<div id="lg-phone"></div><div id="lg-cam"><b>Cameras</b>' + ['open', 'password', 'closed'].map(k =>
+      `<div class="row"><span class="pill" style="color:${CAM_ST[k][0]};border-color:${CAM_ST[k][0]}">📷</span>${CAM_ST[k][1]}</div>`).join('') + '</div>';
+    L.DomEvent.disableClickPropagation(d);
+    return d;
+  };
+  lg.addTo(map);
   layersRender();
+  legendRender();
+}
+
+// The legend and the MeshPhone figures above the map show only while their layers are on.
+function legendRender() {
+  const d = document.getElementById('legend');
+  if (!d) return;
+  const p = document.getElementById('lg-phone'), c = document.getElementById('lg-cam');
+  const ph = map.hasLayer(phoneLayer), cam = map.hasLayer(camLayer), phShow = ph && p.innerHTML !== '';
+  p.style.display = phShow ? '' : 'none';
+  c.style.display = cam ? '' : 'none';
+  c.style.marginTop = phShow && cam ? '6px' : '0';
+  d.style.display = phShow || cam ? '' : 'none';
+  document.getElementById('stats').style.display = ph ? '' : 'none';
 }
 
 function layersRender() {
@@ -291,6 +275,7 @@ function layersRender() {
     if (k === '_phone' || k === 'camera') {
       const layer = k === '_phone' ? phoneLayer : camLayer;
       if (on) layer.addTo(map); else map.removeLayer(layer);
+      legendRender();
       return;
     }
     if (!svcOn) svcOn = new Set();
@@ -357,21 +342,14 @@ function drawMap(m) {
       .bindTooltip(o.name, {direction: 'top', offset: [0, -size / 2]})
       .bindPopup(officePopup(o), {maxWidth: 320}).addTo(phoneLayer);
   });
-  const lg = L.control({position: 'bottomleft'});
-  lg.onAdd = () => {
-    const d = L.DomUtil.create('div', 'legend');
-    const dot = (v, l, fill) => `<div class="row">${phoneSvg(css(v), {size: 16, opacity: fill ? 1 : 0.4})}${l}</div>`;
-    const ln = k => `<div class="row"><span class="sw-line" style="border-top-color:var(${LINK[k].col});border-top-style:${LINK[k].dash ? (LINK[k].w < 2 ? 'dotted' : 'dashed') : 'solid'}"></span>${LINK[k].label}</div>`;
-    d.innerHTML = `<b>PBX (measured)</b>${dot('--up', 'Answers IAX', true)}${dot('--down', 'No answer', false)}${dot('--self', 'Measuring PBX', true)}
-      <div class="row">${phoneSvg(css('--up'), {size: 16, outline: css('--accent'), ow: 2})}Found on the mesh, not in the directory</div>
-      <b style="display:block;margin-top:4px">Trunk latency</b>${LAT.map(([, v, t]) => `<div class="row"><span class="sw-line" style="border-top-color:var(${v})"></span>${t}</div>`).join('')}
-      ${['reported_mixed', 'reported_down'].map(ln).join('')}
-      <b style="display:block;margin-top:4px">No status reported</b>${['both_up', 'end_down', 'unknown'].map(ln).join('')}
-      <b style="display:block;margin-top:4px">Cameras (checked daily)</b>${['open', 'password', 'closed'].map(k => `<div class="row"><span class="pill" style="color:${CAM_ST[k][0]};border-color:${CAM_ST[k][0]}">📷</span>${CAM_ST[k][1]}</div>`).join('')}`;
-    L.DomEvent.disableClickPropagation(d);
-    return d;
-  };
-  lg.addTo(map);
+  const dot = (v, l, fill) => `<div class="row">${phoneSvg(css(v), {size: 16, opacity: fill ? 1 : 0.4})}${l}</div>`;
+  const ln = k => `<div class="row"><span class="sw-line" style="border-top-color:var(${LINK[k].col});border-top-style:${LINK[k].dash ? (LINK[k].w < 2 ? 'dotted' : 'dashed') : 'solid'}"></span>${LINK[k].label}</div>`;
+  document.getElementById('lg-phone').innerHTML = `<b>PBX</b>${dot('--up', 'Answers IAX', true)}${dot('--down', 'No answer', false)}${dot('--self', 'Measuring PBX', true)}
+    <div class="row">${phoneSvg(css('--up'), {size: 16, outline: css('--accent'), ow: 2})}Not in the directory</div>
+    <b style="display:block;margin-top:4px">Trunk latency</b>${LAT.map(([, v, t]) => `<div class="row"><span class="sw-line" style="border-top-color:var(${v})"></span>${t}</div>`).join('')}
+    ${['reported_mixed', 'reported_down'].map(ln).join('')}
+    <b style="display:block;margin-top:4px">No status reported</b>${['both_up', 'end_down', 'unknown'].map(ln).join('')}`;
+  legendRender();
 }
 
 function sortable(tbl, rows, render, keyFn) {
@@ -448,7 +426,7 @@ function people(list, created) {
   q.oninput = render; sortable(document.getElementById('t-ppl'), rows, render, (p, k) => p[k] || ''); render();
 }
 
-// ── cameras advertised on the mesh (cameras.json, checked once a day) ──
+// ── cameras advertised on the mesh (cameras.json) ──
 const CAM_ST = {open: ['#3fb950', 'open'], password: ['#e3b341', 'password needed'], blocked: ['#e3b341', 'forbidden'],
   no_reply: ['#f85149', 'no reply'], closed: ['#f85149', 'not answering'], unreachable: ['#8b949e', 'host not on the mesh'],
   error: ['#f85149', 'error']};
@@ -482,7 +460,7 @@ function drawCameras(d) {
           ${camWhat(c) ? `<br>${esc(camWhat(c))}` : ''}${camView(c) ? `<br>View with: ${esc(camView(c))}` : ''}
           <br><span class="mono muted">${esc(c.scheme)}:${c.port || ''}</span> ${camLink(c)}
           ${(c.open_ports || []).length ? `<br><span class="muted">Also open: ${c.open_ports.join(', ')}</span>` : ''}</div>`).join('') +
-        `<div class="muted" style="margin-top:6px">${checkedBy(n) || `Checked ${ago(d.generated_at)}, once a day.`}</div>`,
+        `<div class="muted" style="margin-top:6px">${checkedBy(n) || `Checked ${ago(d.generated_at)}`}</div>`,
         {maxWidth: 340, maxHeight: 380})
       .addTo(camLayer);
   });
@@ -513,7 +491,7 @@ function camerasTable(d) {
   render();
 }
 
-// ── every other service advertised on the mesh (services.json, checked once a day) ──
+// ── every other service advertised on the mesh (services.json) ──
 let SVC = null, svcOn = null;
 try { const v = JSON.parse(localStorage.getItem('mp.svcCats') || 'null'); if (Array.isArray(v) && v.length) svcOn = new Set(v); } catch (e) { /* per session */ }
 const svcCats = () => Object.fromEntries(((SVC || {}).categories || []).map((c, i) => [c.key, {...c, i}]));
@@ -551,37 +529,25 @@ function drawServices() {
       .bindPopup(`<b>${esc(f.node || f.node_ip)}</b><br><span class="muted">${esc(f.place || '')}${f.grid ? ' · ' + esc(f.grid) : ''}</span>` +
         list.map(s => `<div style="margin-top:6px;padding-top:4px;border-top:1px solid var(--border)">${(cats[s.category] || {}).icon || ''} <b>${esc(s.name)}</b> ${svcPill(s)}
           ${s.software ? `<br>${esc(s.software)}` : ''}${svcFeed(s)}<br>${svcLink(s)}</div>`).join('') +
-        `<div class="muted" style="margin-top:6px">${checkedBy(f) || `Checked ${ago(SVC.generated_at)}, once a day.`}</div>`, {maxWidth: 340, maxHeight: 380})
+        `<div class="muted" style="margin-top:6px">${checkedBy(f) || `Checked ${ago(SVC.generated_at)}`}</div>`, {maxWidth: 340, maxHeight: 380})
       .addTo(svcLayer);
   });
 }
-// The mesh is checked a quarter at a time (by the address's second octet), one
-// quarter every 6 h; a quarter another copy checked lately may come from it.
+// The region of the mesh a service is in (by the address's second octet).
 const regionOf = ip => { const o = String(ip || '').split('.'); return o.length === 4 ? Math.floor(+o[1] * 4 / 256) : -1; };
 function checkedBy(s) {
   const r = (((SVC || {}).regions) || [])[regionOf(s.node_ip)];
   if (!r || !r.scanned_at) return '';
-  return `Checked ${ago(r.scanned_at)} ` + (r.own ? 'from here' : `by ${esc(r.station)} (shared, spot-checked here)`) +
-    ` · region ${r.region} of 4, once a day.`;
-}
-function regionsNote() {
-  const rs = (SVC || {}).regions || [];
-  document.getElementById('svc-regions').innerHTML = rs.map(r =>
-    `<div><b>Region ${r.region}</b> <span class="mono">${esc(r.range)}</span>: ` +
-    (r.running ? 'being checked now' : r.scanned_at
-      ? `${r.count} services, checked ${ago(r.scanned_at)} ${r.own ? 'from here' : `by <b>${esc(r.station)}</b>`}` +
-        (r.own ? '' : ` <span title="${esc(r.note)}">(shared, verified)</span>`)
-      : 'not checked yet (its turn comes within the day)') + '</div>').join('');
+  return `Checked ${ago(r.scanned_at)}` + (r.own ? '' : ` by ${esc(r.station)}`);
 }
 function servicesTable() {
-  regionsNote();
   const cats = svcCats(), sel = document.getElementById('c-svc');
   const rows = ((SVC || {}).services || []).slice();
   sel.innerHTML = `<option value="">All kinds (${rows.length})</option>` + ((SVC || {}).categories || []).filter(c => c.count)
     .map(c => `<option value="${c.key}">${c.icon} ${esc(c.label)} (${c.count})</option>`).join('');
   const sm = (SVC || {}).summary || {}, st = sm.status || {};
   document.getElementById('svc-note').textContent = rows.length
-    ? `${rows.length} services advertised on the mesh (phones are on the MeshPhone layers) · ${st.open || 0} open, ${st.password || 0} need a password` +
+    ? `${rows.length} services advertised on the mesh · ${st.open || 0} open, ${st.password || 0} need a password` +
       `${sm.feeds ? ` · ${sm.feeds} ADS-B / AIS receivers publish a data feed` : ''}. Links work from a computer on the mesh.`
     : (SVC && SVC.running ? 'The first services check is running; reload in a few minutes.' : 'No services check yet.');
   rows.sort((a, b) => (cats[a.category] || {i: 99}).i - (cats[b.category] || {i: 99}).i || (CAM_RANK[a.status] ?? 9) - (CAM_RANK[b.status] ?? 9));
@@ -604,7 +570,7 @@ function servicesTable() {
 initMap();
 if (CAM_MODE) { document.querySelector('header h1').textContent = 'AREDN Camera Map'; document.title = 'AREDN Camera Map'; }
 if (SVC_MODE) { document.querySelector('header h1').textContent = 'AREDN Services Map'; document.title = 'AREDN Services Map'; }
-fetch('services.json', {cache: 'no-store'}).then(r => r.json()).then(d => { SVC = d; svcControl(); drawServices(); servicesTable(); })
+fetch('services.json', {cache: 'no-store'}).then(r => r.json()).then(d => { SVC = d; if (SVC_MODE || CAM_MODE) document.getElementById('sub').textContent = 'What is advertised on the AREDN mesh'; svcControl(); drawServices(); servicesTable(); })
   .catch(e => { document.getElementById('svc-note').textContent = 'Could not load services: ' + e; });
 fetch('cameras.json', {cache: 'no-store'}).then(r => r.json()).then(d => { drawCameras(d); camerasTable(d); })
   .catch(e => { document.getElementById('cam-note').textContent = 'Could not load cameras: ' + e; });
@@ -618,16 +584,13 @@ fetch('map.json', {cache: 'no-store'}).then(r => r.json()).then(d => {
     return;
   }
   const s = m.summary, os = s.office_states || {}, ls = s.link_states || {};
-  document.getElementById('sub').textContent = `Measured from ${m.measured_from || 'this PBX'} · ${ago(m.generated_at)}`;
+  if (!SVC_MODE && !CAM_MODE)
+    document.getElementById('sub').textContent = `Measured from ${m.measured_from || 'this PBX'} · ${ago(m.generated_at)}`;
   document.getElementById('stats').innerHTML = [
-    `<span><b>${s.offices}</b> offices</span>`,
-    `<span class="st-up"><b>${(os.up || 0) + (os.self || 0)}</b> answer IAX</span>`,
-    `<span><b>${s.moved}</b> moved address</span>`,
-    `<span><b>${s.mesh_only || 0}</b> found only on the mesh</span>`,
-    `<span><b>${s.node_located || 0}</b> located by their AREDN node${s.location_off ? ` (${s.location_off} differ from the directory)` : ''}${s.hosted ? `, ${s.hosted} hosted offices` : ''}</span>`,
-    `<span class="st-no_answer"><b>${os.no_answer || 0}</b> no answer</span>`,
-    `<span><b>${os.no_address || 0}</b> no address</span>`,
-    `<span>&middot; <b>${s.links}</b> trunks: <b>${(ls.verified || 0) + (ls.reported_up || 0)}</b> up with latency, ${ls.reported_mixed || 0} one-way, ${(ls.reported_down || 0) + (ls.down || 0)} DOWN, ${(ls.both_up || 0) + (ls.end_down || 0) + (ls.unknown || 0)} not reported</span>`,
+    `<span><b>${s.offices}</b> MeshPhone offices</span>`,
+    `<span class="st-up"><b>${(os.up || 0) + (os.self || 0)}</b> answer</span>`,
+    `<span class="st-no_answer"><b>${(os.no_answer || 0) + (os.no_address || 0)}</b> don't</span>`,
+    `<span>&middot; <b>${s.links}</b> trunks, <b>${(ls.verified || 0) + (ls.reported_up || 0)}</b> up</span>`,
   ].join('');
   drawMap(m); offices(m); people(d.people || [], d.people_created);
 }).catch(e => { document.getElementById('sub').textContent = 'Could not load map data: ' + e; });
