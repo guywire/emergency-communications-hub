@@ -269,6 +269,9 @@ class ArednServices:
         self._node_name = ""
         self.share = {"enabled": True, "max_age_s": sharing.MAX_AGE_S, "peers": []}
         self.peer_log: list[dict] = []
+        self.peer_seen: dict[str, dict] = {}          # Host -> last contact with that copy
+        self._self_hosts: set[str] = set()            # targets that turned out to be us
+        self._peer_status_path: str | None = None
         self.peer_targets: list[tuple[str, str]] = []   # other copies found on the mesh (tiles use them too)
         self._targets_path: str | None = None
         self._last_pass = 0.0
@@ -327,6 +330,14 @@ class ArednServices:
                 self.peer_targets = [tuple(t) for t in json.load(f) if isinstance(t, list) and len(t) == 2]
         except (OSError, ValueError, TypeError):
             self.peer_targets = []
+        self._peer_status_path = self._targets_path.replace("peer_targets", "peer_status")
+        try:
+            with open(self._peer_status_path, encoding="utf-8") as f:
+                d = json.load(f)
+            self.peer_seen = {str(h): v for h, v in (d.get("peers") or {}).items() if isinstance(v, dict)}
+            self._self_hosts = {str(h) for h in d.get("self") or []}
+        except (OSError, ValueError, TypeError, AttributeError):
+            self.peer_seen, self._self_hosts = {}, set()
 
     def _hosts_url(self) -> str:
         rd = self._config.get("radio_directory") or {}
@@ -550,6 +561,63 @@ class ArednServices:
             except OSError:
                 pass
 
+    @staticmethod
+    def _own_ips() -> set[str]:
+        """This box's addresses: a target at one of them is us."""
+        import socket
+        ips = {"127.0.0.1"}
+        try:
+            import psutil
+            ips |= {a.address for v in psutil.net_if_addrs().values() for a in v if a.family == socket.AF_INET}
+        except Exception:
+            try:
+                ips |= {i[4][0] for i in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)}
+            except OSError:
+                pass
+        return ips
+
+    def _others(self) -> list[str]:
+        """Hosts of the targets that aren't this box."""
+        from urllib.parse import urlsplit
+        own = self._own_ips()
+        return [h for b, h in self.peer_targets if h not in self._self_hosts and urlsplit(b).hostname not in own]
+
+    def _record_peers(self, targets, infos, now: float) -> None:
+        """Remember which other copies answered, for the About page."""
+        for (b, h), info in zip(targets, infos):
+            if isinstance(info, dict) and info.get("key") == self.identity.key:
+                self._self_hosts.add(h)                      # our own node advertises us
+                self.peer_seen.pop(h, None)
+                continue
+            prev = self.peer_seen.get(h) or {}
+            ok = isinstance(info, dict) and info.get("app") == sharing.APP
+            self.peer_seen[h] = {"at": now, "answered": ok,
+                                 "station": str(info.get("station") or "")[:63] if ok else prev.get("station", ""),
+                                 "version": str(info.get("version") or "")[:20] if ok else prev.get("version", ""),
+                                 "last_answer": now if ok else prev.get("last_answer")}
+        live = {h for _, h in targets}
+        self.peer_seen = {h: v for h, v in self.peer_seen.items() if h in live}
+        if self._peer_status_path:
+            try:
+                with open(self._peer_status_path + ".tmp", "w", encoding="utf-8") as f:
+                    json.dump({"peers": self.peer_seen, "self": sorted(self._self_hosts)}, f)
+                os.replace(self._peer_status_path + ".tmp", self._peer_status_path)
+            except OSError:
+                pass
+
+    def sharing_meta(self) -> dict:
+        """This station, the next check, and the other copies it works with."""
+        k, due = self.next_region()
+        others = self._others()
+        copies = [h for h in others if (self.peer_seen.get(h) or {}).get("last_answer")]
+        used = sorted(({"station": v.get("station", ""), "at": v.get("at")}
+                       for v in ((self.trust.seen if self.trust else {}) or {}).values() if isinstance(v, dict)),
+                      key=lambda x: -(x["at"] or 0))
+        return {"station": self.station_name(), "enabled": bool(self.share.get("enabled", True)),
+                "next": {"region": k + 1, "at": due}, "found": len(copies), "candidates": len(others),
+                "peers": [{"host": h, **self.peer_seen[h]} for h in copies],
+                "used": used[:10]}
+
     def _note(self, k: int, peer: str, msg: str) -> None:
         self.peer_log = (self.peer_log + [{"at": time.time(), "region": k + 1, "peer": peer, "note": msg}])[-50:]
         log.info("AREDN services, region %d: %s: %s", k + 1, peer, msg)
@@ -566,6 +634,7 @@ class ArednServices:
             return None
         infos = await asyncio.gather(*(sharing.get_json(client, b, h, sharing.INFO_PATH, sharing.MAX_INFO_BYTES)
                                        for b, h in targets))
+        self._record_peers(targets, infos, now)
         cands = []
         for (b, h), info in zip(targets, infos):
             if (not isinstance(info, dict) or info.get("app") != sharing.APP or info.get("proto") != sharing.PROTO

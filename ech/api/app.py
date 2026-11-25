@@ -2313,8 +2313,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         d = svc.data or {}
         return {"services": d.get("services", []), "categories": d.get("categories", []),
                 "generated_at": d.get("generated_at"), "summary": d.get("summary", {}),
-                "regions": svc.regions_meta(), "error": svc.last_error, "running": svc.running,
-                "enabled": svc.enabled}
+                "regions": svc.regions_meta(), "sharing": svc.sharing_meta(), "error": svc.last_error,
+                "running": svc.running, "enabled": svc.enabled}
 
     @app.get("/api/aredn/services")
     async def aredn_services_api():

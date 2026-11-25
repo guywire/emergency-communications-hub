@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.146 (2026-11-24)
+
+- Mesh map About page: a Status section. When each part of the mesh was last
+  checked and by which station, when the next check is due, and the other
+  copies of this map found on the mesh (whether each answered, and when),
+  plus whose results were used. services.json carries it as "sharing".
+
 ## v1.1.145 (2026-11-24)
 
 Fixes from a review of v1.1.142-144:

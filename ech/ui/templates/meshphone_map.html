@@ -121,6 +121,8 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
   <h3>Cameras and services</h3>
   <p>Each gets the one request a viewer would make. <b>Open</b> answered without a password, <b>password needed</b>
   asked for one; no passwords are tried. Links work from a computer on the mesh.</p>
+  <h3>Status</h3>
+  <div id="about-status"><p class="muted">Loading…</p></div>
   <h3>Shared over the mesh</h3>
   <p>Copies of this map share their results and map tiles, so the mesh is checked less and the map works without
   internet. A shared result is used only if it is signed and a sample checked again from here agrees.</p>
@@ -607,6 +609,32 @@ function checkedBy(s) {
   if (!r || !r.scanned_at) return '';
   return `Checked ${ago(r.scanned_at)}` + (r.own ? '' : ` by ${esc(r.station)}`);
 }
+// The About page's status: when each part of the mesh was checked and by whom,
+// the next check, and the other copies of this map this station works with.
+const until = t => { const m = Math.round((t - Date.now() / 1000) / 60);
+  return m <= 1 ? 'now' : m < 90 ? `in about ${m} min` : `in about ${Math.round(m / 60)} h`; };
+function aboutStatus() {
+  const el = document.getElementById('about-status');
+  if (!el || !SVC) return;
+  const sh = SVC.sharing || {}, rs = SVC.regions || [], me = sh.station || 'this station';
+  const part = r => `${esc(r.range.split(' / ')[0])}`;
+  const rows = rs.map(r => `<li><b>Part ${r.region}</b> <span class="mono muted">${part(r)}</span>: ` +
+    (r.running ? 'being checked now' : r.scanned_at
+      ? `${r.count} services, checked ${ago(r.scanned_at)} ${r.own ? 'here' : `by <b>${esc(r.station)}</b> (shared, spot-checked here)`}`
+      : 'not checked yet on the daily schedule (shown from the last full check)') + '</li>').join('');
+  const nx = sh.next ? `<p>Next check: part ${sh.next.region}, ${until(sh.next.at)}.</p>` : '';
+  const peers = sh.peers || [];
+  const plist = peers.map(p => `<li><b>${esc(p.station || p.host)}</b>${p.version ? ` <span class="muted">v${esc(p.version)}</span>` : ''}: ` +
+    (p.answered ? `answered ${ago(p.at)}` : `didn't answer ${ago(p.at)}${p.last_answer ? `, last answered ${ago(p.last_answer)}` : ''}`) + '</li>').join('');
+  const used = (sh.used || []).filter(u => u.station);
+  const copies = !sh.enabled ? '<p>Sharing with other copies is turned off here.</p>'
+    : sh.found ? `<p>Other copies of this map on the mesh: <b>${sh.found}</b>.</p><ul>${plist}</ul>`
+    : `<p>No other copies of this map have answered yet${sh.candidates ? ` (${sh.candidates} advertised link${sh.candidates > 1 ? 's' : ''} asked at each check)` : ''}. ` +
+      'Copies find each other through a service named AREDN Services Map advertised on their nodes.</p>';
+  el.innerHTML = `<p>This station: <b>${esc(me)}</b>. The mesh is checked a quarter at a time, each part once a day.</p>` +
+    `<ul>${rows}</ul>${nx}${copies}` +
+    (used.length ? `<p>Results used from: ${used.map(u => `<b>${esc(u.station)}</b> (${ago(u.at)})`).join(', ')}.</p>` : '');
+}
 function servicesTable() {
   const cats = svcCats(), sel = document.getElementById('c-svc');
   const rows = ((SVC || {}).services || []).slice();
@@ -639,7 +667,7 @@ function servicesTable() {
 initMap();
 if (CAM_MODE) { document.querySelector('header h1').textContent = 'AREDN Camera Map'; document.title = 'AREDN Camera Map'; }
 if (SVC_MODE) { document.querySelector('header h1').textContent = 'AREDN Services Map'; document.title = 'AREDN Services Map'; }
-fetch('services.json', {cache: 'no-store'}).then(r => r.json()).then(d => { SVC = d; if (SVC_MODE || CAM_MODE) document.getElementById('sub').textContent = 'What is advertised on the AREDN mesh'; svcControl(); drawServices(); servicesTable(); })
+fetch('services.json', {cache: 'no-store'}).then(r => r.json()).then(d => { SVC = d; aboutStatus(); if (SVC_MODE || CAM_MODE) document.getElementById('sub').textContent = 'What is advertised on the AREDN mesh'; svcControl(); drawServices(); servicesTable(); })
   .catch(e => { document.getElementById('svc-note').textContent = 'Could not load services: ' + e; });
 fetch('cameras.json', {cache: 'no-store'}).then(r => r.json()).then(d => { drawCameras(d); camerasTable(d); })
   .catch(e => { document.getElementById('cam-note').textContent = 'Could not load cameras: ' + e; });

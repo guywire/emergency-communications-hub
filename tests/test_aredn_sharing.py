@@ -385,3 +385,37 @@ def test_stream_must_be_a_known_rtsp_path_on_a_camera():
         assert sharing.clean_measured({**m, "stream": bad}, base) is None, bad
     other = asv.base_record(s, HOSTS, "other")
     assert sharing.clean_measured({**m, "id": other["id"]}, other) is None   # only cameras have streams
+
+
+def test_status_lists_the_other_copies_and_survives_a_restart(tmp_path):
+    def fresh():
+        s = asv.ArednServices()
+        s.configure({"database": {"path": str(tmp_path / "x.db")}})
+        return s
+    s = fresh()
+    targets = [("http://10.1.0.9:8766", "copy-a:8766"), ("http://10.2.0.9:8088", "copy-b:8088"),
+               ("http://10.3.0.9:8766", "us:8766")]
+    infos = [{"app": sharing.APP, "station": "Copy A/123abc", "version": "0.3.1", "key": "k1"},
+             None,                                                      # didn't answer
+             {"app": sharing.APP, "station": "us", "key": s.identity.key}]  # our own node's advert
+    s.peer_targets = targets
+    s._record_peers(targets, infos, 1000.0)
+    m = s.sharing_meta()
+    # copy-b never answered as a copy (another site's page): asked, but not counted
+    assert (m["found"], m["candidates"]) == (1, 2) and m["station"] and m["next"]["region"] in (1, 2, 3, 4)
+    assert [(p["host"], p["answered"]) for p in m["peers"]] == [("copy-a:8766", True)]
+    s2 = fresh()                                                         # after a restart
+    s2.peer_targets = targets
+    assert s2.sharing_meta()["found"] == 1
+    s2._record_peers(targets[:1], [None], 2000.0)                         # a copy that stops answering keeps its name
+    p = s2.sharing_meta()["peers"]
+    assert p[0]["station"] == "Copy A/123abc" and p[0]["answered"] is False and p[0]["last_answer"] == 1000.0
+
+
+
+def test_a_target_at_our_own_address_is_us(tmp_path, monkeypatch):
+    s = asv.ArednServices()
+    s.configure({"database": {"path": str(tmp_path / "x.db")}})
+    monkeypatch.setattr(asv.ArednServices, "_own_ips", staticmethod(lambda: {"127.0.0.1", "10.13.53.44"}))
+    s.peer_targets = [("http://10.13.53.44:8766", "kn0o-pbx-ech:8766"), ("http://10.4.236.70:80", "other-map")]
+    assert s.sharing_meta()["candidates"] == 1
