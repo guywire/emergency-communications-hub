@@ -8,6 +8,17 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.156 (2026-11-25)
+
+- MeshPhone map: a published trunk page that names its office code finds that directory office when its listed
+  address is stale (e.g. a moved PBX), and its trunks match offices by office code first (one PBX can host
+  several offices).
+
+## v1.1.155 (2026-11-25)
+
+- MeshPhone: `/meshphone/trunks.json` publishes this PBX's mesh trunks and their live Asterisk status (mesh and
+  LAN only, internet trunks left out) for other copies of the map; advertise it on the node as "PBX Trunk Status".
+
 ## v1.1.154 (2026-11-25)
 
 - MeshPhone: the directory copy now follows the map's `map_refresh_hours` (fetched an hour before each map),

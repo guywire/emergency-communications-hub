@@ -614,6 +614,31 @@ def parse_published_trunks(text: str) -> dict:
     return {"code": m.group(1) if m else "", "peers": peers}
 
 
+def published_candidates(offices: list[dict], published: list[dict], hosts: list[dict]) -> dict[str, list[str]]:
+    """More addresses to try for directory offices, from published trunk pages:
+    the page's own PBX for the office whose code the page names, and a trunk's
+    host for the office with that code (by address, or by the directory's own
+    host name for it). Fixes an office whose listed address is stale."""
+    by_code = {str(c): o for o in offices for c in o.get("office_codes") or []}
+    ip_of = {str(h.get("name") or "").lower(): str(h.get("ip") or "") for h in hosts}
+    out: dict[str, list[str]] = {}
+
+    def add(o, ip):
+        if o and ip and _mesh_ip(ip) and ip not in out.setdefault(o["name"], []):
+            out[o["name"]].append(ip)
+    for pg in published or []:
+        add(by_code.get(str(pg.get("code") or "")), pg.get("ip", ""))
+        for p in pg.get("peers", []):
+            o, h = by_code.get(str(p.get("code") or "")), str(p.get("host") or "").lower()
+            if not o or not h:
+                continue
+            if _IP_RE.match(h):
+                add(o, h)
+            elif h.removesuffix(".local.mesh") == (o.get("hostname") or "").split(".")[0].lower():
+                add(o, ip_of.get(h.removesuffix(".local.mesh"), ""))
+    return out
+
+
 # ── the map ──────────────────────────────────────────────────────────────────
 
 def build_map(offices: list[dict], hosts: list[dict], services: list[dict],
@@ -765,15 +790,15 @@ def build_map(offices: list[dict], hosts: list[dict], services: list[dict],
     def office_of(ip: str = "", host: str = "", code: str = "", name: str = "") -> str | None:
         host = host.lower().removesuffix(".local.mesh")
         for e in out:
+            if code and code in e["office_codes"]:
+                return e["name"]
+        for e in out:
             if ip and (ip == e["answering_ip"] or ip in e["tried"]):
                 return e["name"]
         for h in (host, name.lower()):
             for e in out:
                 if h and h in (x.lower() for x in e["hostnames"]):
                     return e["name"]
-        for e in out:
-            if code and code in e["office_codes"]:
-                return e["name"]
         for e in out:
             if name and name.upper() in (e["name"].upper(), (e["admin_callsign"] or "").upper()):
                 return e["name"]
@@ -944,6 +969,7 @@ class MeshPhoneMap:
         self.enabled = True
         self._config: dict = {}
         self._router = None
+        self._trunks_cache: tuple[float, dict] | None = None
         self._task: asyncio.Task | None = None
         self.cache_path: str | None = None
         self.places_path: str | None = None
@@ -1130,6 +1156,24 @@ class MeshPhoneMap:
                     pass
         return []
 
+    async def trunk_status(self) -> dict:
+        """This PBX's own mesh trunks, live from Asterisk (cached a minute), in
+        the form other copies of the map read from a published trunk page.
+        Internet trunks are left out: only mesh addresses and their status."""
+        now = time.time()
+        if self._trunks_cache and now - self._trunks_cache[0] < 60:
+            return self._trunks_cache[1]
+        from ech.core.directory_status import status as live
+        office = self._cfg()["own_office"]
+        o = next((x for x in live.mp_offices if x.get("name") == office), {})
+        trunks = [{"name": p["name"][:63], "host": p["host"], "status": p["status"][:20],
+                   "latency_ms": p["ms"] if p["ok"] else None}
+                  for p in await self._own_peers() if _mesh_ip(p.get("host") or "")]
+        d = {"office": office, "office_code": (o.get("office_codes") or [""])[0], "at": round(now),
+             "trunks": trunks}
+        self._trunks_cache = (now, d)
+        return d
+
     async def _own_peers(self) -> list[dict]:
         if not self._router:
             return []
@@ -1148,7 +1192,10 @@ class MeshPhoneMap:
         cfg = self._cfg()
         async with httpx.AsyncClient(follow_redirects=True) as client:
             hosts, svcs = await self._sysinfo(client)
+            published = await self._published(client, hosts, svcs)
             cands = {o["name"]: office_candidates(o, hosts) for o in offices}
+            for name, ips in published_candidates(offices, published, hosts).items():
+                cands[name] = cands.get(name, []) + [ip for ip in ips if ip not in cands.get(name, [])]
             mesh = mesh_candidates(hosts, svcs)
             probe_ips = set(mesh) | {ip for ips in cands.values() for ip in ips}
             own_ips = {ip for ip in probe_ips if is_local_ip(ip)}
@@ -1214,7 +1261,6 @@ class MeshPhoneMap:
             except Exception as exc:
                 log.info("MeshPhone map: trunk reports unavailable (%s)", exc)
                 reports = []
-            published = await self._published(client, hosts, svcs)
         own = next((o for o in offices if o["name"] == cfg["own_office"]), {})
         registered = own_numbers(self._own_endpoints(), (own.get("office_codes") or [""])[0])
         data = build_map(offices, hosts, svcs, cands, mesh, answers, nodes, own_ips,

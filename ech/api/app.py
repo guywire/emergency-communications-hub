@@ -265,7 +265,8 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
                     "/ca.crt", "/tls-setup", "/phonebook.xml",
                     "/phonebook-meshphone.xml", "/phonebook-streams.xml",
                     "/meshphone", "/meshphone/", "/meshphone/map.json", "/meshphone/cameras.json",
-                    "/cameras", "/cameras/", "/meshphone/services.json", "/aredn", "/aredn/"}
+                    "/cameras", "/cameras/", "/meshphone/services.json", "/aredn", "/aredn/",
+                    "/meshphone/trunks.json"}
 
     def _is_loopback(request) -> bool:
         try:
@@ -5132,6 +5133,15 @@ def create_app(router, db, anomaly_engine=None, wx_service=None, aq_service=None
         if not await _meshphone_ok(request):
             raise HTTPException(status_code=401, detail="Log in to ECH, or open this on the mesh / local network")
         return _services_payload()
+
+    @app.get("/meshphone/trunks.json")
+    async def meshphone_trunks_json(request: Request):
+        """This PBX's mesh trunks and their live status, for other copies of the
+        MeshPhone map (advertise it on the node as "PBX Trunk Status")."""
+        if not await _meshphone_ok(request):
+            raise HTTPException(status_code=401, detail="Log in to ECH, or open this on the mesh / local network")
+        from ech.core.meshphone_map import service as mp_map
+        return await mp_map.trunk_status()
 
     @app.get("/meshphone/cameras.json")
     async def meshphone_cameras_json(request: Request):
