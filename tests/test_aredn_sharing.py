@@ -419,3 +419,44 @@ def test_a_target_at_our_own_address_is_us(tmp_path, monkeypatch):
     monkeypatch.setattr(asv.ArednServices, "_own_ips", staticmethod(lambda: {"127.0.0.1", "10.13.53.44"}))
     s.peer_targets = [("http://10.13.53.44:8766", "kn0o-pbx-ech:8766"), ("http://10.4.236.70:80", "other-map")]
     assert s.sharing_meta()["candidates"] == 1
+
+
+
+def test_a_shared_region_comes_due_after_the_copy_that_checked_it():
+    s = asv.ArednServices()
+    now = 1_000_000.0
+    s.regions = {k: {"scanned_at": now, "done_at": now} for k in range(4)}
+    s.regions[2] = {"scanned_at": now - 3600, "done_at": now, "own": False}         # taken from another copy
+    assert s.next_region() == (2, now - 3600 + s.refresh_s)      # without the delay: due with the other copy
+    s.regions[2]["defer_s"] = 7200
+    k, due = s.next_region()
+    assert k != 2 and s.regions[2]["scanned_at"] + s.refresh_s + 7200 > due
+    lo, hi = asv.ADOPTED_DEFER_S
+    assert 0 < lo <= hi < asv.sharing.MAX_AGE_S                  # the original's result is still fresh enough then
+
+def test_find_peers_records_who_answers(tmp_path, monkeypatch):
+    import asyncio
+    s = asv.ArednServices()
+    s.configure({"database": {"path": str(tmp_path / "x.db")},
+                 "radio_directory": {"aredn_services": {"hosts_url": "http://node/a/sysinfo"}}})
+    monkeypatch.setattr(asv.ArednServices, "_own_ips", staticmethod(lambda: {"127.0.0.1"}))
+    monkeypatch.setattr(sharing, "peer_targets", lambda svcs, hosts, extra: [("http://10.5.0.9:8088", "copy-c:8088")])
+
+    async def fake_get_json(client, base, host, path, limit):
+        return {"app": sharing.APP, "station": "Copy C/abc123", "version": "0.3.1", "key": "kc"}
+    monkeypatch.setattr(sharing, "get_json", fake_get_json)
+
+    class Resp:
+        def json(self):
+            return {"hosts": [{"name": "copy-c", "ip": "10.5.0.9"}], "services": [{"name": "AREDN Services Map"}]}
+
+    class Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, timeout=None): return Resp()
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+    assert asyncio.run(s.find_peers()) == 1
+    m = s.sharing_meta()
+    assert m["found"] == 1 and m["peers"][0]["station"] == "Copy C/abc123"

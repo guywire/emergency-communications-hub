@@ -45,6 +45,11 @@ log = logging.getLogger(__name__)
 REFRESH_S = 24 * 3600
 FIRST_DELAY_S = 300
 RETRY_S = 1800
+# A region taken from another copy comes due again this much later than the
+# original copy's (random in this range), so that copy checks first and the
+# others take its fresh result instead of all checking at the same moment.
+ADOPTED_DEFER_S = (3600, 3 * 3600)
+PEER_POLL_S = 3600          # look for new copies (and whether the known ones answer) this often
 MAX_SERVICES = 2500
 # The name other copies see when `station` isn't set (plus a key fingerprint,
 # so two copies reading the same node never share a name). "" = the node's name.
@@ -256,6 +261,7 @@ class ArednServices:
         self.enabled = True
         self._config: dict = {}
         self._task: asyncio.Task | None = None
+        self._peer_task: asyncio.Task | None = None
         self.cache_path: str | None = None
         self.region_dir: str | None = None
         self.refresh_s = REFRESH_S
@@ -349,6 +355,43 @@ class ArednServices:
         self.configure(config)
         if self.enabled and self._task is None:
             self._task = asyncio.create_task(self._loop())
+            self._peer_task = asyncio.create_task(self._peer_loop())
+
+    async def _peer_loop(self) -> None:
+        await asyncio.sleep(FIRST_DELAY_S + 60)
+        while True:
+            try:
+                await self.find_peers()
+            except Exception as exc:
+                log.debug("AREDN services: looking for other copies failed: %s", exc)
+            await asyncio.sleep(PEER_POLL_S)
+
+    async def find_peers(self) -> int:
+        """Look for other copies of this map: the mesh's service list (one
+        request to the node) and a small info request to each copy. Nothing is
+        checked; a region still takes a shared result only when it comes due.
+        Returns how many other copies answered."""
+        import httpx
+        url = self._hosts_url()
+        if not url or not self.share.get("enabled", True) or not self.identity:
+            return 0
+        for q in ("hosts=1", "services=1"):
+            if q not in url:
+                url += ("&" if "?" in url else "?") + q
+        async with httpx.AsyncClient(follow_redirects=True, verify=False,
+                                     headers={"User-Agent": "SignalMatrix"}) as client:
+            j = (await client.get(url, timeout=60)).json()
+            hosts = [h for h in j.get("hosts") or [] if isinstance(h, dict)]
+            mesh_services = [s for s in j.get("services") or [] if isinstance(s, dict)]
+            if hosts and mesh_services:
+                self._set_targets(sharing.peer_targets(mesh_services, hosts, self.share["peers"]))
+            targets = list(self.peer_targets)
+            if not targets:
+                return 0
+            infos = await asyncio.gather(*(sharing.get_json(client, b, h, sharing.INFO_PATH, sharing.MAX_INFO_BYTES)
+                                           for b, h in targets))
+        self._record_peers(targets, infos, time.time())
+        return sum(1 for h in self._others() if (self.peer_seen.get(h) or {}).get("answered"))
 
     # ── schedule: one region at a time, spread over the day ─────────────────
     def next_region(self) -> tuple[int, float]:
@@ -357,7 +400,8 @@ class ArednServices:
         best = None
         for k in range(sharing.REGIONS):
             st = self.regions.get(k) or {}
-            due = max(float(st.get("scanned_at") or 0) + self.refresh_s, self._fail_until.get(k, 0.0))
+            due = max(float(st.get("scanned_at") or 0) + self.refresh_s + float(st.get("defer_s") or 0),
+                      self._fail_until.get(k, 0.0))
             if best is None or due < best[1]:
                 best = (k, due)
         k, due = best
@@ -677,7 +721,9 @@ class ArednServices:
                     f"spot checks agree" + (f", {len(missing)} checked here" if missing else ""))
             self.trust.accept(st, key, now, note)
             self._note(k, b, note)
-            return recs, {"doc": doc, "scanned_at": p["scanned_at"], "station": st, "own": False, "note": note}
+            import random
+            return recs, {"doc": doc, "scanned_at": p["scanned_at"], "station": st, "own": False, "note": note,
+                          "defer_s": random.randint(*ADOPTED_DEFER_S)}
         return None
 
     async def refresh(self) -> dict | None:

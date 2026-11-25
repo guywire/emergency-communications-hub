@@ -628,8 +628,8 @@ function aboutStatus() {
     (p.answered ? `answered ${ago(p.at)}` : `didn't answer ${ago(p.at)}${p.last_answer ? `, last answered ${ago(p.last_answer)}` : ''}`) + '</li>').join('');
   const used = (sh.used || []).filter(u => u.station);
   const copies = !sh.enabled ? '<p>Sharing with other copies is turned off here.</p>'
-    : sh.found ? `<p>Other copies of this map on the mesh: <b>${sh.found}</b>.</p><ul>${plist}</ul>`
-    : `<p>No other copies of this map have answered yet${sh.candidates ? ` (${sh.candidates} advertised link${sh.candidates > 1 ? 's' : ''} asked at each check)` : ''}. ` +
+    : sh.found ? `<p>Other copies of this map on the mesh: <b>${sh.found}</b> (looked for every hour).</p><ul>${plist}</ul>`
+    : `<p>No other copies of this map have answered yet${sh.candidates ? ` (${sh.candidates} advertised link${sh.candidates > 1 ? 's' : ''} asked every hour)` : ''}. ` +
       'Copies find each other through a service named AREDN Services Map advertised on their nodes.</p>';
   el.innerHTML = `<p>This station: <b>${esc(me)}</b>. The mesh is checked a quarter at a time, each part once a day.</p>` +
     `<ul>${rows}</ul>${nx}${copies}` +

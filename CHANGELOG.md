@@ -8,6 +8,15 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.147 (2026-11-24)
+
+- AREDN sharing: a part of the mesh taken from another copy comes due again
+  1-3 h (random) after that copy's own check, so the original checks first and
+  the others take its fresh result, instead of all checking at the same moment.
+- Other copies are looked for every hour (one request to the node for the
+  service list, a small info request to each copy); the About page's Status
+  shows them as soon as they answer. Full checks stay once a day per part.
+
 ## v1.1.146 (2026-11-24)
 
 - Mesh map About page: a Status section. When each part of the mesh was last
