@@ -222,8 +222,10 @@ async def ntp_check(ip: str, port: int = 123, timeout: float = 3.0, tries: int =
             return {"status": "closed", "kind": "ntp"}
         try:
             t0 = time.monotonic()
+            cams.note_traffic(1, 48)
             transport.sendto(b"\x1b" + 47 * b"\0")          # LI 0, version 3, mode 3 (client)
             data = await asyncio.wait_for(proto.fut, timeout)
+            cams.note_traffic(0, len(data))
             stratum = data[1]
             return {"status": "open" if 0 < stratum < 16 else "error", "kind": "ntp",
                     "software": f"NTP stratum {stratum}" if 0 < stratum < 16 else "NTP: not synchronised",
@@ -543,8 +545,10 @@ class ArednServices:
                 url += ("&" if "?" in url else "?") + q
         self.running = cams.service.running = True
         self.running_region = k
+        traffic = {"requests": 0, "bytes": 0}             # what this check moved, for the About page
+        tok = cams.TRAFFIC.set(traffic)
         try:
-            async with httpx.AsyncClient(follow_redirects=True, verify=False,
+            async with httpx.AsyncClient(transport=cams.counting_transport(), follow_redirects=True,
                                          headers={"User-Agent": "SignalMatrix"}) as client:
                 j = (await client.get(url, timeout=60)).json()
                 hosts = [h for h in j.get("hosts") or [] if isinstance(h, dict)]
@@ -569,9 +573,10 @@ class ArednServices:
                     state = {"doc": sharing.make_doc(self.identity, station, k, now, recs), "scanned_at": now,
                              "station": station, "own": True, "note": f"checked here: {len(recs)} services"}
         finally:
+            cams.TRAFFIC.reset(tok)
             self.running = cams.service.running = False
             self.running_region = None
-        state.update(region=k, services=recs, count=len(recs), done_at=time.time())
+        state.update(region=k, services=recs, count=len(recs), done_at=time.time(), traffic=traffic)
         self.regions[k] = state
         self._last_pass = state["done_at"]
         if self.region_dir:
@@ -739,7 +744,8 @@ class ArednServices:
             st = self.regions.get(k) or {}
             out.append({"region": k + 1, "range": sharing.region_label(k), "scanned_at": st.get("scanned_at"),
                         "station": st.get("station", ""), "own": st.get("own"), "note": st.get("note", ""),
-                        "count": st.get("count", 0), "running": self.running_region == k})
+                        "count": st.get("count", 0), "running": self.running_region == k,
+                        "traffic": st.get("traffic")})
         return out
 
     def _rebuild(self) -> None:

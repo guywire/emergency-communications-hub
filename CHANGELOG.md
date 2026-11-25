@@ -8,6 +8,11 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.148 (2026-11-25)
+
+- AREDN Services Map About page: links to the GitHub repos (this map on its own, and SignalMatrix), and each
+  part of the mesh in Status shows how many requests and MB its last check made from here.
+
 ## v1.1.147 (2026-11-24)
 
 - AREDN sharing: a part of the mesh taken from another copy comes due again

@@ -29,6 +29,7 @@ Config (radio_directory.aredn_cameras, all optional):
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
@@ -181,13 +182,59 @@ def describe_request(link: str) -> bytes:
             "User-Agent: SignalMatrix\r\n\r\n").encode()
 
 
+
+# Network use of the check in progress ({"requests", "bytes"}), for the About
+# page. Set by the region check; every probe below adds to it.
+TRAFFIC: contextvars.ContextVar = contextvars.ContextVar("aredn_traffic", default=None)
+
+
+def note_traffic(requests: int = 1, nbytes: int = 0) -> None:
+    t = TRAFFIC.get()
+    if t is not None:
+        t["requests"] += requests
+        t["bytes"] += nbytes
+
+
+def counting_transport():
+    """An httpx transport (certificates not checked, as on the mesh they are
+    self-signed) that adds each request and the bytes it moved to TRAFFIC."""
+    import httpx
+
+    def hsize(headers) -> int:
+        return sum(len(k) + len(v) + 4 for k, v in headers.raw)
+
+    class _Body(httpx.AsyncByteStream):
+        def __init__(self, inner):
+            self._inner = inner
+
+        async def __aiter__(self):
+            async for chunk in self._inner:
+                note_traffic(0, len(chunk))
+                yield chunk
+
+        async def aclose(self):
+            await self._inner.aclose()
+
+    class _Transport(httpx.AsyncHTTPTransport):
+        async def handle_async_request(self, request):
+            note_traffic(1, len(request.method) + len(str(request.url)) + hsize(request.headers)
+                         + int(request.headers.get("content-length") or 0))
+            resp = await super().handle_async_request(request)
+            note_traffic(0, 16 + hsize(resp.headers))
+            return httpx.Response(resp.status_code, headers=resp.headers, stream=_Body(resp.stream),
+                                  extensions=resp.extensions, request=request)
+    return _Transport(verify=False)
+
+
 async def rtsp_check(ip: str, port: int, link: str, timeout: float = 6.0) -> dict:
     t0 = time.monotonic()
     try:
         r, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout)
     except (OSError, asyncio.TimeoutError):
+        note_traffic(1, 0)
         return {"status": "closed", "kind": "rtsp", "view": "VLC or any RTSP player"}
     try:
+        note_traffic(1, len(describe_request(link)))
         w.write(describe_request(link))
         await w.drain()
         line = await asyncio.wait_for(r.readline(), timeout)
@@ -195,6 +242,7 @@ async def rtsp_check(ip: str, port: int, link: str, timeout: float = 6.0) -> dic
         line = b""
     finally:
         w.close()
+    note_traffic(0, len(line or b""))
     ms = round((time.monotonic() - t0) * 1000)
     m = re.match(rb"RTSP/1\.\d (\d{3})", line or b"")
     code = int(m.group(1)) if m else 0
@@ -227,6 +275,7 @@ async def rtsp_probe(ip: str, port: int, software: str) -> dict | None:
 
 
 async def port_open(ip: str, port: int, timeout: float = 3.0) -> bool:
+    note_traffic(1, 0)
     try:
         _, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout)
     except (OSError, asyncio.TimeoutError):

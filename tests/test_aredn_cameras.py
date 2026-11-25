@@ -144,3 +144,30 @@ def test_rtsp_probe_reports_a_password_and_tries_at_most_three_paths():
         return found, len(n)
     found, tries = asyncio.run(run())
     assert found["status"] == "password" and found["path"] == "/" and tries == ac.MAX_RTSP_TRIES
+
+
+
+def test_a_region_check_counts_its_requests_and_bytes(monkeypatch):
+    import asyncio
+    import httpx
+    body = b"x" * 5000
+
+    async def handle(self, request):
+        return httpx.Response(200, headers={"content-type": "text/plain"}, stream=httpx.ByteStream(body))
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", handle)
+
+    async def run():
+        t = {"requests": 0, "bytes": 0}
+        tok = ac.TRAFFIC.set(t)
+        try:
+            async with httpx.AsyncClient(transport=ac.counting_transport()) as c:
+                for _ in range(3):
+                    r = await c.get("http://10.1.2.3/")
+                    assert r.content == body
+            ac.note_traffic(1, 48)                     # e.g. an NTP request
+        finally:
+            ac.TRAFFIC.reset(tok)
+        ac.note_traffic(5, 999)                        # no check running: not counted
+        return t
+    t = asyncio.run(run())
+    assert t["requests"] == 4 and 3 * 5000 + 48 < t["bytes"] < 3 * 5000 + 48 + 3 * 400
