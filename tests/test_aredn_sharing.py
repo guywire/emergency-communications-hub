@@ -460,3 +460,36 @@ def test_find_peers_records_who_answers(tmp_path, monkeypatch):
     assert asyncio.run(s.find_peers()) == 1
     m = s.sharing_meta()
     assert m["found"] == 1 and m["peers"][0]["station"] == "Copy C/abc123"
+
+
+
+def test_find_peers_reuses_the_last_checks_list(tmp_path, monkeypatch):
+    import asyncio
+    import httpx
+    s = asv.ArednServices()
+    s.configure({"database": {"path": str(tmp_path / "x.db")},
+                 "radio_directory": {"aredn_services": {"hosts_url": "http://node/a/sysinfo"}}})
+    monkeypatch.setattr(asv.ArednServices, "_own_ips", staticmethod(lambda: {"127.0.0.1"}))
+    fetched = []
+
+    async def fake_get_json(client, base, host, path, limit):
+        return {"app": sharing.APP, "station": "Copy C/abc123", "version": "0.3.3", "key": "kc"}
+    monkeypatch.setattr(sharing, "get_json", fake_get_json)
+
+    class Resp:
+        def json(self):
+            return {"hosts": [{"name": "copy-c", "ip": "10.5.0.9"}], "services": [{"name": "AREDN Services Map"}]}
+
+    class Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, timeout=None):
+            fetched.append(url)
+            return Resp()
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+    s._set_targets([("http://10.5.0.9:8088", "copy-c:8088")])          # as a region check just did
+    assert asyncio.run(s.find_peers()) == 1 and fetched == []            # the info request only
+    s._targets_at -= asv.TARGETS_REUSE_S + 1                             # list too old: fetched again
+    monkeypatch.setattr(sharing, "peer_targets", lambda svcs, hosts, extra: [("http://10.5.0.9:8088", "copy-c:8088")])
+    assert asyncio.run(s.find_peers()) == 1 and len(fetched) == 1

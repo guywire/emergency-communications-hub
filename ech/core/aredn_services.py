@@ -50,6 +50,9 @@ RETRY_S = 1800
 # others take its fresh result instead of all checking at the same moment.
 ADOPTED_DEFER_S = (3600, 3 * 3600)
 PEER_POLL_S = 3600          # look for new copies (and whether the known ones answer) this often
+# the mesh's service list from the last region check is reused for that this long
+# (checks come every 6 h), so the hourly look doesn't fetch the whole list again
+TARGETS_REUSE_S = 6.5 * 3600
 MAX_SERVICES = 2500
 # The name other copies see when `station` isn't set (plus a key fingerprint,
 # so two copies reading the same node never share a name). "" = the node's name.
@@ -286,6 +289,7 @@ class ArednServices:
         self._config: dict = {}
         self._task: asyncio.Task | None = None
         self._peer_task: asyncio.Task | None = None
+        self._targets_at = 0.0          # when peer_targets came from the mesh's list
         self.cache_path: str | None = None
         self.region_dir: str | None = None
         self.refresh_s = REFRESH_S
@@ -402,13 +406,15 @@ class ArednServices:
         for q in ("hosts=1", "services=1"):
             if q not in url:
                 url += ("&" if "?" in url else "?") + q
+        fresh = time.time() - self._targets_at < TARGETS_REUSE_S
         async with httpx.AsyncClient(follow_redirects=True, verify=False,
                                      headers={"User-Agent": "SignalMatrix"}) as client:
-            j = (await client.get(url, timeout=60)).json()
-            hosts = [h for h in j.get("hosts") or [] if isinstance(h, dict)]
-            mesh_services = [s for s in j.get("services") or [] if isinstance(s, dict)]
-            if hosts and mesh_services:
-                self._set_targets(sharing.peer_targets(mesh_services, hosts, self.share["peers"]))
+            if not fresh:                                  # else the last region check's list
+                j = (await client.get(url, timeout=60)).json()
+                hosts = [h for h in j.get("hosts") or [] if isinstance(h, dict)]
+                mesh_services = [s for s in j.get("services") or [] if isinstance(s, dict)]
+                if hosts and mesh_services:
+                    self._set_targets(sharing.peer_targets(mesh_services, hosts, self.share["peers"]))
             targets = list(self.peer_targets)
             if not targets:
                 return 0
@@ -625,6 +631,7 @@ class ArednServices:
 
     def _set_targets(self, targets: list[tuple[str, str]]) -> None:
         self.peer_targets = targets
+        self._targets_at = time.time()
         if self._targets_path:
             try:
                 with open(self._targets_path, "w", encoding="utf-8") as f:

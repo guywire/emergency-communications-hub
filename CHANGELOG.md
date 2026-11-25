@@ -8,6 +8,11 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.152 (2026-11-25)
+
+- AREDN Services Map: the hourly look for other copies reuses the mesh's service list from the last region
+  check (every 6 h) instead of fetching the whole list from the node each hour (about 24 to 4 fetches a day).
+
 ## v1.1.151 (2026-11-25)
 
 - AREDN Services Map: DAPNET / POCSAG paging has its own kind (was Mail). Listings that are only an address
