@@ -51,35 +51,39 @@ MAX_SERVICES = 2500
 DEFAULT_STATION = "SignalMatrix"
 
 # (key, label, icon). Order = precedence when a service matches several.
+# (key, label, icon, group): the checklist shows them in this order, under
+# their group's heading. MeshPhone offices & trunks (the measured directory,
+# not a service kind) sits at the top of Phones on the page.
+GROUPS = ["Phones", "Emergency & coordination", "Messaging", "Radio", "Cameras & sensors", "Network"]
 CATEGORIES = [
-    ("adsb", "ADS-B receivers", "✈"),
-    ("ais", "AIS receivers", "⚓"),
-    ("satellite", "Satellite receivers", "🛰"),
-    ("camera", "Cameras", "📷"),
-    ("packet", "Packet / BBS", "📟"),
-    ("winlink", "Winlink", "📧"),
-    ("aprs", "APRS", "📍"),
-    ("tak", "TAK", "🎯"),
-    ("meshradio", "Meshtastic / MeshCore", "📡"),
-    ("radio", "Radio / SDR / AllStar", "📻"),
-    ("chat", "Chat", "💬"),
-    ("weather", "Weather", "🌦"),
-    ("time", "Time servers", "🕒"),
-    ("mail", "Mail", "✉"),
-    ("internet", "Internet gateways", "🌐"),
-    ("power", "Power / solar", "🔋"),
-    ("map", "Maps", "🗺"),
-    ("wiki", "Wikis / info", "📖"),
-    ("dispatch", "CAD / dispatch", "🚨"),
-    ("eoc", "EOC / agencies", "🏛"),
-    ("files", "File sharing", "📁"),
-    ("voip", "Phones / PBXs", "📞"),
-    ("collab", "Collaboration", "📝"),
-    ("hamtools", "Ham tools / logging", "🎚"),
-    ("status", "Mesh status / monitoring", "📊"),
-    ("speedtest", "Network tests", "⏱"),
-    ("infra", "Network gear", "🔧"),
-    ("other", "Other", "•"),
+    ("voip", "Other phones & PBXs", "📞", "Phones"),
+    ("dispatch", "CAD / dispatch", "🚨", "Emergency & coordination"),
+    ("eoc", "EOC / agencies", "🏛", "Emergency & coordination"),
+    ("tak", "TAK", "🎯", "Emergency & coordination"),
+    ("collab", "Collaboration", "📝", "Emergency & coordination"),
+    ("files", "File sharing", "📁", "Emergency & coordination"),
+    ("map", "Maps", "🗺", "Emergency & coordination"),
+    ("wiki", "Wikis / info", "📖", "Emergency & coordination"),
+    ("chat", "Chat", "💬", "Messaging"),
+    ("mail", "Mail", "✉", "Messaging"),
+    ("winlink", "Winlink", "📧", "Messaging"),
+    ("packet", "Packet / BBS", "📟", "Messaging"),
+    ("aprs", "APRS", "📍", "Radio"),
+    ("meshradio", "Meshtastic / MeshCore", "📡", "Radio"),
+    ("radio", "Radio / SDR / AllStar", "📻", "Radio"),
+    ("hamtools", "Ham tools / logging", "🎚", "Radio"),
+    ("camera", "Cameras", "📷", "Cameras & sensors"),
+    ("weather", "Weather", "🌦", "Cameras & sensors"),
+    ("adsb", "ADS-B receivers", "✈", "Cameras & sensors"),
+    ("ais", "AIS receivers", "⚓", "Cameras & sensors"),
+    ("satellite", "Satellite receivers", "🛰", "Cameras & sensors"),
+    ("power", "Power / solar", "🔋", "Cameras & sensors"),
+    ("internet", "Internet gateways", "🌐", "Network"),
+    ("time", "Time servers", "🕒", "Network"),
+    ("status", "Mesh status / monitoring", "📊", "Network"),
+    ("speedtest", "Network tests", "⏱", "Network"),
+    ("infra", "Network gear", "🔧", "Network"),
+    ("other", "Other", "•", "Network"),
 ]
 CATEGORY_KEYS = [c[0] for c in CATEGORIES]
 # kinds broken out of "other" (v1.1.142 / 0.3.0): results saved as "other"
@@ -637,7 +641,8 @@ class ArednServices:
         times = [st["scanned_at"] for st in self.regions.values() if st.get("scanned_at")]
         now = max(times) if times else time.time()
         data = {"generated_at": now, "services": out, "regions": self.regions_meta(),
-                "categories": [{"key": k, "label": l, "icon": i, "count": by_cat[k]} for k, l, i in CATEGORIES],
+                "categories": [{"key": k, "label": l, "icon": i, "group": g, "count": by_cat[k]}
+                               for k, l, i, g in CATEGORIES],
                 "summary": {**summary(out), "services": len(out),
                             "feeds": sum(1 for c in out if c.get("feed"))}}
         self.data = data

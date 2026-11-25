@@ -273,11 +273,15 @@ function layersRender() {
   const open = d.querySelector('details') ? d.querySelector('details').open : window.innerWidth > 640;
   const row = (k, checked, icon, label, count) =>
     `<label class="row" style="cursor:pointer"><input type="checkbox" data-k="${k}"${checked ? ' checked' : ''}> ${icon} ${esc(label)}${count != null ? ` <span class="muted">${count}</span>` : ''}</label>`;
-  // One flat list of service kinds: MeshPhone offices and cameras are kinds too
-  // (they keep their own richer markers), the rest from services.json in its order.
-  const kinds = [{key: '_phone', icon: '☎', label: 'MeshPhone offices & trunks', count: null},
+  // Service kinds under their group's heading, in services.json's order.
+  // MeshPhone offices & trunks heads Phones; cameras are a kind too (both keep
+  // their own richer markers). A heading ticks or clears its whole group.
+  const kinds = [{key: '_phone', icon: '☎', label: 'MeshPhone offices & trunks', count: null, group: 'Phones'},
     ...((SVC || {}).categories || []).filter(c => c.count || c.key === 'camera')];
-  if (!kinds.some(k => k.key === 'camera')) kinds.splice(1, 0, {key: 'camera', icon: '📷', label: 'Cameras', count: null});
+  if (!kinds.some(k => k.key === 'camera')) kinds.push({key: 'camera', icon: '📷', label: 'Cameras', count: null, group: 'Cameras & sensors'});
+  const groups = [];
+  kinds.forEach(k => { const g = k.group || 'Other'; let e = groups.find(x => x.name === g);
+    if (!e) groups.push(e = {name: g, kinds: []}); e.kinds.push(k); });
   const shown = k => k === '_phone' ? map.hasLayer(phoneLayer) : k === 'camera' ? map.hasLayer(camLayer) : !!(svcOn && svcOn.has(k));
   const set = (k, on) => {
     if (k === '_phone' || k === 'camera') {
@@ -291,9 +295,16 @@ function layersRender() {
   };
   const save = () => { try { localStorage.setItem('mp.svcCats', JSON.stringify([...(svcOn || [])])); } catch (e) { /* per session */ } };
   d.innerHTML = `<details${open ? ' open' : ''}><summary style="cursor:pointer"><b>Services</b></summary>` +
-    kinds.map(k => row(k.key, shown(k.key), k.icon, k.label, k.count)).join('') +
-    `<div style="display:flex;gap:6px;margin-top:4px"><a href="#" data-all="1">all</a><a href="#" data-all="0">none</a></div></details>`;
+    groups.map((g, gi) => `<a href="#" data-g="${gi}" title="Tick or clear the whole group" style="display:block;margin:${gi ? 7 : 3}px 0 1px;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);text-decoration:none">${esc(g.name)}</a>` +
+      g.kinds.map(k => row(k.key, shown(k.key), k.icon, k.label, k.count)).join('')).join('') +
+    `<div style="display:flex;gap:6px;margin-top:6px"><a href="#" data-all="1">all</a><a href="#" data-all="0">none</a></div></details>`;
   d.querySelectorAll('input').forEach(i => i.onchange = () => { set(i.dataset.k, i.checked); save(); drawServices(); });
+  d.querySelectorAll('a[data-g]').forEach(a => a.onclick = e => {
+    e.preventDefault();
+    const g = groups[+a.dataset.g], on = !g.kinds.every(k => shown(k.key));
+    g.kinds.forEach(k => set(k.key, on));
+    save(); drawServices(); layersRender();
+  });
   d.querySelectorAll('a[data-all]').forEach(a => a.onclick = e => {
     e.preventDefault();
     kinds.forEach(k => set(k.key, a.dataset.all === '1' && !HIDDEN_KINDS.includes(k.key)));
@@ -587,8 +598,10 @@ function checkedBy(s) {
 function servicesTable() {
   const cats = svcCats(), sel = document.getElementById('c-svc');
   const rows = ((SVC || {}).services || []).slice();
-  sel.innerHTML = `<option value="">All kinds (${rows.length})</option>` + ((SVC || {}).categories || []).filter(c => c.count)
-    .map(c => `<option value="${c.key}">${c.icon} ${esc(c.label)} (${c.count})</option>`).join('');
+  const opts = ((SVC || {}).categories || []).filter(c => c.count), gnames = [...new Set(opts.map(c => c.group || 'Other'))];
+  sel.innerHTML = `<option value="">All kinds (${rows.length})</option>` + gnames.map(g => `<optgroup label="${esc(g)}">` +
+    opts.filter(c => (c.group || 'Other') === g).map(c => `<option value="${c.key}">${c.icon} ${esc(c.label)} (${c.count})</option>`).join('') +
+    '</optgroup>').join('');
   const sm = (SVC || {}).summary || {}, st = sm.status || {};
   document.getElementById('svc-note').textContent = rows.length
     ? `${rows.length} services advertised on the mesh · ${st.open || 0} open, ${st.password || 0} need a password` +

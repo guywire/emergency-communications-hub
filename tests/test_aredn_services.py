@@ -178,3 +178,13 @@ def test_saved_other_results_move_to_the_new_kinds():
                                     {"name": "Some server", "link": "http://x/", "node_ip": "10.1.0.3", "category": "other"}]}}
     svc._rebuild()
     assert [c["category"] for c in svc.data["services"]] == ["dispatch", "eoc", "other"]
+
+
+def test_every_kind_is_in_a_known_group_and_listed_once():
+    keys = [c[0] for c in asv.CATEGORIES]
+    assert len(keys) == len(set(keys)) and set(asv.OTHER_SPLIT) <= set(keys)
+    assert all(c[3] in asv.GROUPS for c in asv.CATEGORIES)
+    assert [g for g in asv.GROUPS if any(c[3] == g for c in asv.CATEGORIES)] == asv.GROUPS
+    # the checklist shows groups in GROUPS order, so kinds must be listed group by group
+    order = [asv.GROUPS.index(c[3]) for c in asv.CATEGORIES]
+    assert order == sorted(order)

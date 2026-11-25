@@ -8,6 +8,13 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.144 (2026-11-24)
+
+- Mesh map: the Services checklist is grouped: Phones (MeshPhone offices &
+  trunks, then other phones & PBXs), Emergency & coordination, Messaging,
+  Radio, Cameras & sensors, Network. Clicking a group's heading ticks or
+  clears the whole group; the Services tab's kind filter uses the same groups.
+
 ## v1.1.143 (2026-11-24)
 
 - Mesh map: the Services checklist and the map key scroll when they're taller
