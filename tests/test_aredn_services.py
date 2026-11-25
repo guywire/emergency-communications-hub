@@ -27,6 +27,19 @@ def svc(name, link="", ip="10.1.0.1"):
     (svc("MeshChat [chat]", "http://x:8080/meshchat"), "chat"),
     (svc("Wiki [wiki]", "http://x/"), "wiki"),
     (svc("Gateway [internet]", "http://x/"), "internet"),
+    (svc("Tickets CAD", "http://x/tickets/"), "dispatch"),
+    (svc("Linn County EOC", "http://x/"), "eoc"),
+    (svc("KC6EOC-EOC-FileBrowser", "http://x/"), "files"),          # the more specific kind wins
+    (svc("NextCloud", "http://x/"), "files"),
+    (svc("Asterisk PBX", "http://x/"), "voip"),
+    (svc("MCS7-Etherpad", "http://x/"), "collab"),
+    (svc("N2KGC Hamclock", "http://x/"), "hamtools"),
+    (svc("Uptime Kuma", "http://x:3001/"), "status"),
+    (svc("KD6WXC MeshMap", "http://x/"), "status"),
+    (svc("IPERF & IPERF3", "http://x/"), "speedtest"),
+    (svc("Orcutt Hill West Edgeswitch", "http://x/"), "infra"),
+    (svc("Files [weather]", "http://x/"), "weather"),                # the owner's tag wins
+    (svc("Shack server [cad]", "http://x/"), "dispatch"),
     (svc("Some server [server]", "http://x/"), "other"),
 ])
 def test_categorize(s, cat):
@@ -125,6 +138,7 @@ async def test_services_json_and_aredn_alias():
             assert r.status_code == 302 and r.headers["location"] == "/meshphone/?show=services"
     finally:
         asv.service.data = None
+        await db.close()
 
 
 def test_time_servers_get_an_ntp_query():
@@ -154,3 +168,13 @@ def test_time_servers_get_an_ntp_query():
     ok, unsynced, silent = asyncio.run(run())
     assert ok["status"] == "open" and ok["software"] == "NTP stratum 2" and ok["kind"] == "ntp"
     assert unsynced["status"] == "error" and silent["status"] == "no_reply"
+
+
+def test_saved_other_results_move_to_the_new_kinds():
+    svc = asv.ArednServices()
+    svc.regions = {0: {"region": 0, "scanned_at": 1.0, "done_at": 1.0, "station": "", "own": True, "count": 3,
+                       "services": [{"name": "Tickets CAD", "link": "http://x/", "node_ip": "10.1.0.1", "category": "other"},
+                                    {"name": "Shack", "tag": "eoc", "link": "http://x/", "node_ip": "10.1.0.2", "category": "other"},
+                                    {"name": "Some server", "link": "http://x/", "node_ip": "10.1.0.3", "category": "other"}]}}
+    svc._rebuild()
+    assert [c["category"] for c in svc.data["services"]] == ["dispatch", "eoc", "other"]

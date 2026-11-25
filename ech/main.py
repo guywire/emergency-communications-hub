@@ -463,7 +463,8 @@ async def run(config: dict, config_path: str = "config.yaml") -> None:
         from ech.core.tls import ensure_ca, ensure_server_cert, start_mdns
         _data_dir = Path(tls_cfg.get("data_dir", "."))
         _ca_cert_pem, _ca_key_pem = ensure_ca(_data_dir)
-        _crt_path, _key_path = ensure_server_cert(_data_dir, _ca_cert_pem, _ca_key_pem)
+        _crt_path, _key_path = ensure_server_cert(_data_dir, _ca_cert_pem, _ca_key_pem,
+                                                  tls_cfg.get("extra_names") or [])
         _tls_port = int(tls_cfg.get("https_port", 8766))
         secure_cookies = True  # HTTPS means secure cookies are safe
         mdns_handle = start_mdns(_tls_port)

@@ -2,7 +2,10 @@
 import pytest
 
 
-async def _app():
+@pytest.fixture
+async def app_auth():
+    """The app and its auth, with the database closed afterwards (its worker
+    thread would otherwise keep pytest from exiting)."""
     from ech.core.database import Database
     from ech.core.router import Router
     from ech.core.anomaly import AnomalyEngine
@@ -13,7 +16,8 @@ async def _app():
     auth = AuthManager(db)
     await auth.create_user("op", "pw-123456", "operator")
     await auth.create_user("view", "pw-123456", "viewer")
-    return create_app(Router(db, anomaly_engine=AnomalyEngine({})), db, auth=auth), auth
+    yield create_app(Router(db, anomaly_engine=AnomalyEngine({})), db, auth=auth), auth
+    await db.close()
 
 
 async def _client(app, auth, user):
@@ -24,8 +28,8 @@ async def _client(app, auth, user):
 
 
 @pytest.mark.asyncio
-async def test_mutes_are_saved_per_user():
-    app, auth = await _app()
+async def test_mutes_are_saved_per_user(app_auth):
+    app, auth = app_auth
     async with await _client(app, auth, "op") as op, await _client(app, auth, "view") as view:
         assert (await op.get("/api/user/muted")).json() == {"adapters": [], "channels": [], "saved": False}
         r = await op.put("/api/user/muted", json={"adapters": ["aprs-internet"],
@@ -45,8 +49,8 @@ async def test_mutes_are_saved_per_user():
 
 
 @pytest.mark.asyncio
-async def test_bad_mutes_are_refused():
-    app, auth = await _app()
+async def test_bad_mutes_are_refused(app_auth):
+    app, auth = app_auth
     async with await _client(app, auth, "op") as op:
         assert (await op.put("/api/user/muted", json={"channels": ["no-separator"]})).status_code == 400
         assert (await op.put("/api/user/muted", json={"adapters": "aprs"})).status_code == 400

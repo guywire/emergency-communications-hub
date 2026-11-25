@@ -70,9 +70,21 @@ CATEGORIES = [
     ("power", "Power / solar", "🔋"),
     ("map", "Maps", "🗺"),
     ("wiki", "Wikis / info", "📖"),
+    ("dispatch", "CAD / dispatch", "🚨"),
+    ("eoc", "EOC / agencies", "🏛"),
+    ("files", "File sharing", "📁"),
+    ("voip", "Phones / PBXs", "📞"),
+    ("collab", "Collaboration", "📝"),
+    ("hamtools", "Ham tools / logging", "🎚"),
+    ("status", "Mesh status / monitoring", "📊"),
+    ("speedtest", "Network tests", "⏱"),
+    ("infra", "Network gear", "🔧"),
     ("other", "Other", "•"),
 ]
 CATEGORY_KEYS = [c[0] for c in CATEGORIES]
+# kinds broken out of "other" (v1.1.142 / 0.3.0): results saved as "other"
+# move to them without a new check, as they were checked the same way
+OTHER_SPLIT = {"dispatch", "eoc", "files", "voip", "collab", "hamtools", "status", "speedtest", "infra"}
 
 _RX = {
     "adsb": r"ads-?b|piaware|flightaware|tar1090|dump1090|readsb|skyaware|fr24|flightradar|planefinder|adsbexchange|\bplanes?\b|aircraft",
@@ -90,10 +102,22 @@ _RX = {
     "mail": r"webmail|\bsmtp\b|\bimap\b|citadel|\bmail\b",
     "power": r"solar|battery|\bups\b|power|victron|generator",
     "wiki": r"wiki|kiwix|library|\bdocs?\b",
+    # kinds broken out of "other": checked after the ones above, in this order
+    "dispatch": r"\bcad\b|dispatch|\btickets?\b|incident|\bics[- ]?\d{0,3}\b|net ?logger|net ?control|check-?in|sahana|\bd4h\b",
+    "files": r"nextcloud|owncloud|seafile|file ?browser|file ?server|\bfiles?\b|\bs?ftp\b|\bnas\b|samba|\bsmb\b|syncthing|\bmirror\b|downloads?\b|\brepo\b",
+    "voip": r"\bpbx\b|freepbx|raspbx|asterisk|\bvoip\b|\bsip\b|ip ?phone|hamsoverip|meshphone|dialing",
+    "collab": r"etherpad|ethercalc|mattermost|rocket\.?chat|cryptpad|hedgedoc|discourse|\bforum\b",
+    "hamtools": r"ham ?clock|hamdash|ham ?dashboard|dx ?cluster|dxspider|pskreporter|cloudlog|wavelog|logbook|log ?server|\bqrz\b|contest",
+    "status": r"mesh ?map|mesh ?stats|nodographer|grafana|uptime ?kuma|zabbix|librenms|smokeping|prometheus|portainer|arednstatus|\bstatus\b|dashboard|monitor",
+    "speedtest": r"iperf|speed ?test|librespeed|openspeedtest",
+    "infra": r"edge ?switch|\bswitch\b|\brouter\b|cambium|mikrotik|ubiquiti|\buisp\b|\bhap\b|\bsector\b|\bptm?p\b|openwrt|pfsense|opnsense|firewall|\bvpn\b|tunnel|wireguard|proxmox",
+    "eoc": r"\beoc\b|emergency op|county|city ?hall|\bfire\b|sheriff|police|hospital|red ?cross|\bares\b|\braces\b|\bcert\b|salvation army",
 }
 _TAG_CAT = {"camera": "camera", "video": "camera", "chat": "chat", "weather": "weather", "time": "time",
             "mail": "mail", "internet": "internet", "power": "power", "solar": "power", "battery": "power",
-            "map": "map", "wiki": "wiki", "winlink": "winlink"}
+            "map": "map", "wiki": "wiki", "winlink": "winlink", "cad": "dispatch", "dispatch": "dispatch",
+            "eoc": "eoc", "files": "files", "file": "files", "nas": "files", "pbx": "voip", "voip": "voip",
+            "status": "status", "monitor": "status", "speedtest": "speedtest", "network": "infra"}
 _TAG_RE = re.compile(r"\[(\w+)\]\s*$")
 # untagged services that are just a MeshPhone number or extension: "503-4409", "x6225"
 _PHONE_NAME_RE = re.compile(r"(?<![\d.])(\(?\d{3}\)?[- ])?\d{2,3}-\d{4}(?![\d.])|\bx\d{3,5}\b|^\W*\d{5,7}\W*$", re.I)
@@ -125,7 +149,8 @@ def categorize(service: dict) -> str | None:
         return None
     if tag in _TAG_CAT:
         return _TAG_CAT[tag]
-    for key in ("chat", "weather", "time", "mail", "power", "wiki"):
+    for key in ("chat", "weather", "time", "mail", "power", "wiki", "dispatch", "voip", "files", "collab",
+                "hamtools", "status", "speedtest", "infra", "eoc"):
         if re.search(_RX[key], text, re.I):
             return key
     return "other"
@@ -276,6 +301,11 @@ class ArednServices:
             except (OSError, ValueError):
                 pass
         self._last_pass = max([float(st.get("done_at") or 0) for st in self.regions.values()] or [0.0])
+        if self.regions or self.data:
+            try:
+                self._rebuild()                 # saved results under today's kinds
+            except Exception as exc:
+                log.debug("AREDN services: rebuild at start failed: %s", exc)
         self.identity = sharing.Identity(os.path.join(base, "aredn_identity.key"))
         self.trust = sharing.Trust(os.path.join(base, "aredn_peers.json"))
         self._targets_path = os.path.join(base, "aredn_peer_targets.json")
@@ -591,6 +621,12 @@ class ArednServices:
         # until every region has had its turn, keep the last full pass for the rest
         out += [c for c in (self.data or {}).get("services", [])
                 if sharing.region_of(c.get("node_ip")) not in self.regions]
+        for c in out:
+            if c.get("category") == "other":                # saved before a kind was broken out of "other"
+                cat = categorize({"name": c.get("name", "") + (f" [{c['tag']}]" if c.get("tag") else ""),
+                                  "link": c.get("link", "")})
+                if cat in OTHER_SPLIT:
+                    c["category"] = cat
 
         def summary(items):
             st: dict[str, int] = {}

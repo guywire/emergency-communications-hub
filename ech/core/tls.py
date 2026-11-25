@@ -44,6 +44,15 @@ def _local_ips() -> list[str]:
                 pass
     except Exception:
         pass
+    # Every interface's address (the hostname lookup above misses e.g. a mesh VLAN)
+    try:
+        import psutil
+        for addrs in psutil.net_if_addrs().values():
+            for a in addrs:
+                if a.family == socket.AF_INET and a.address not in ips and not a.address.startswith("169.254."):
+                    ips.append(a.address)
+    except Exception:
+        pass
     # Default outbound interface
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -125,10 +134,32 @@ def ensure_ca(data_dir: Path) -> Tuple[bytes, bytes]:
 # Server cert
 # ---------------------------------------------------------------------------
 
+def san_names(extra) -> list[str]:
+    """Configured extra SAN names, cleaned: lower case, a .local.mesh name
+    with its short form too, anything that isn't a host name or IP dropped."""
+    import re
+    out: list[str] = []
+    for raw in extra or []:
+        n = str(raw or "").strip().lower().rstrip(".")
+        if not n:
+            continue
+        try:
+            ipaddress.ip_address(n)
+        except ValueError:
+            if not re.fullmatch(r"[a-z0-9*]([a-z0-9-]{0,62})(\.[a-z0-9]([a-z0-9-]{0,62}))*", n):
+                log.warning("TLS: ignoring extra name %r (not a host name or IP)", raw)
+                continue
+        for v in (n, n[: -len(".local.mesh")] if n.endswith(".local.mesh") else None):
+            if v and v not in out:
+                out.append(v)
+    return out
+
+
 def ensure_server_cert(
     data_dir: Path,
     ca_cert_pem: bytes,
     ca_key_pem: bytes,
+    extra_names: list[str] | tuple[str, ...] = (),
 ) -> Tuple[Path, Path]:
     """Generate a server cert signed by the ECH CA.
 
@@ -136,6 +167,10 @@ def ensure_server_cert(
     ``ech.local`` so the cert is valid regardless of which IP the operator
     uses to reach the server.  Regenerated on every startup so the SAN list
     stays current.
+
+    extra_names (config tls.extra_names): more host names or IPs, e.g. the
+    name the AREDN node gives this box ("kn0o-pbx-ech.local.mesh"); a
+    .local.mesh name also gets its short form, as mesh users type either.
 
     Returns (cert_path, key_path) suitable for uvicorn ssl_certfile/ssl_keyfile.
     """
@@ -164,8 +199,15 @@ def ensure_server_cert(
         sans.append(x509.DNSName(socket.gethostname()))
     except Exception:
         pass
+    for name in san_names(extra_names):
+        try:
+            gn = x509.IPAddress(ipaddress.ip_address(name))
+        except ValueError:
+            gn = x509.DNSName(name)
+        if gn not in sans:
+            sans.append(gn)
 
-    log.info("TLS: generating server cert with SANs: %s + localhost/ech.local", ips)
+    log.info("TLS: generating server cert with SANs: %s + localhost/ech.local %s", ips, list(extra_names or []))
 
     server_key = ec.generate_private_key(ec.SECP256R1())
     now = datetime.datetime.utcnow()

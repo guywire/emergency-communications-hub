@@ -8,6 +8,20 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.142 (2026-11-24)
+
+- Mesh map: more service kinds broken out of "Other": CAD / dispatch, EOC /
+  agencies, file sharing, phones / PBXs, collaboration, ham tools / logging,
+  mesh status / monitoring, network tests, and network gear (switches, routers,
+  sector links; off by default like Other). Owners' tags ([cad], [files],
+  [pbx], [eoc], [status] ...) pick the kind exactly.
+  Services saved as Other move to the new kinds at once, without a new check.
+- HTTPS certificate: every interface's address is in it (the mesh VLAN was
+  missing), and tls.extra_names adds names such as the box's AREDN name
+  (a .local.mesh name gets its short form too).
+- Tests: the full run exits by itself again (two tests left a database open);
+  plain `pytest` only looks in tests/.
+
 ## v1.1.141 (2026-11-24)
 
 - Cameras: a camera host whose RTSP port is open gets up to three RTSP DESCRIBEs

@@ -288,7 +288,7 @@ function layersRender() {
   d.querySelectorAll('input').forEach(i => i.onchange = () => { set(i.dataset.k, i.checked); save(); drawServices(); });
   d.querySelectorAll('a[data-all]').forEach(a => a.onclick = e => {
     e.preventDefault();
-    kinds.forEach(k => set(k.key, a.dataset.all === '1' && k.key !== 'other'));
+    kinds.forEach(k => set(k.key, a.dataset.all === '1' && !HIDDEN_KINDS.includes(k.key)));
     save(); drawServices(); layersRender();
   });
 }
@@ -528,6 +528,7 @@ function camerasTable(d) {
 
 // ── every other service advertised on the mesh (services.json) ──
 let SVC = null, svcOn = null;
+const HIDDEN_KINDS = ['other', 'infra'];      // off until ticked: mostly admin pages
 try { const v = JSON.parse(localStorage.getItem('mp.svcCats') || 'null'); if (Array.isArray(v) && v.length) svcOn = new Set(v); } catch (e) { /* per session */ }
 const svcCats = () => Object.fromEntries(((SVC || {}).categories || []).map((c, i) => [c.key, {...c, i}]));
 const svcPill = s => { const st = CAM_ST[s.status] || (s.status === 'listed' ? ['#8b949e', 'listed'] : ['#8b949e', s.status || '?']);
@@ -536,12 +537,12 @@ const svcLink = s => s.href ? `<a href="${esc(s.href)}" target="_blank" rel="noo
   : `<span class="mono" style="word-break:break-all">${esc(s.link || '')}</span>`;
 const svcFeed = s => s.feed ? `<div style="color:var(--up)">data feed: ${s.feed.count} ${s.category === 'ais' ? 'ships' : 'aircraft'} now</div>` : '';
 // The services' kinds join the "Services" checklist once services.json arrives.
-// /aredn/ starts with every kind but "other"; /cameras/ with none; the plain
+// /aredn/ starts with every kind but "other" and network gear; /cameras/ with none; the plain
 // page with what you last chose (none at first).
 function svcControl() {
   const cats = ((SVC || {}).categories || []).filter(c => c.count && c.key !== 'camera');
   if (CAM_MODE) svcOn = new Set();
-  else if (SVC_MODE && !svcOn) svcOn = new Set(cats.map(c => c.key).filter(k => k !== 'other'));
+  else if (SVC_MODE && !svcOn) svcOn = new Set(cats.map(c => c.key).filter(k => !HIDDEN_KINDS.includes(k)));
   else if (!svcOn) svcOn = new Set();
   layersRender();
 }

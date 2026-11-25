@@ -59,6 +59,9 @@ retention:
 #   enabled: false
 #   https_port: 8443        # HTTPS port alongside HTTP on 8765 (NOT 8766 — sim uses that)
 #   data_dir: "."           # where ech-ca.crt/key and ech-server.crt/key live
+#   extra_names:            # more names (or IPs) for the certificate, besides this
+#     - mynode-ech.local.mesh   # box's own addresses: e.g. the name its AREDN node
+#                               # gives it (the short form is added too)
 
 # ── System GPS (optional) ─────────────────────────────────────────────────────
 # Reads NMEA sentences from a serial GPS receiver (e.g. ublox) and feeds
