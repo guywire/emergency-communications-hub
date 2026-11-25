@@ -19,3 +19,15 @@ def test_server_cert_carries_the_extra_names(tmp_path):
     dns = san.get_values_for_type(x509.DNSName)
     assert "kn0o-pbx-ech.local.mesh" in dns and "kn0o-pbx-ech" in dns and "localhost" in dns
     assert ipaddress.ip_address("10.13.53.44") in san.get_values_for_type(x509.IPAddress)
+
+
+def test_wildcards_and_bad_labels():
+    assert tls.san_names(["*.local.mesh", "*foo.mesh", "bad-.mesh", "*"]) == ["*.local.mesh"]
+
+
+def test_mdns_addresses_leave_out_other_interfaces(monkeypatch):
+    import types, sys, socket
+    fake = types.SimpleNamespace(net_if_addrs=lambda: {"mesh": [types.SimpleNamespace(family=socket.AF_INET, address="10.13.53.44")]})
+    monkeypatch.setitem(sys.modules, "psutil", fake)
+    assert "10.13.53.44" in tls._local_ips(all_interfaces=True)
+    assert "10.13.53.44" not in tls._local_ips()

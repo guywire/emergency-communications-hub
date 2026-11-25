@@ -293,7 +293,8 @@ function layersRender() {
     if (!svcOn) svcOn = new Set();
     if (on) svcOn.add(k); else svcOn.delete(k);
   };
-  const save = () => { try { localStorage.setItem('mp.svcCats', JSON.stringify([...(svcOn || [])])); } catch (e) { /* per session */ } };
+  const save = () => { try { localStorage.setItem('mp.svcCats', JSON.stringify({on: [...(svcOn || [])],
+    known: ((SVC || {}).categories || []).map(c => c.key)})); } catch (e) { /* per session */ } };
   d.innerHTML = `<details${open ? ' open' : ''}><summary style="cursor:pointer"><b>Services</b></summary>` +
     groups.map((g, gi) => `<a href="#" data-g="${gi}" title="Tick or clear the whole group" style="display:block;margin:${gi ? 7 : 3}px 0 1px;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);text-decoration:none">${esc(g.name)}</a>` +
       g.kinds.map(k => row(k.key, shown(k.key), k.icon, k.label, k.count)).join('')).join('') +
@@ -546,9 +547,16 @@ function camerasTable(d) {
 }
 
 // ── every other service advertised on the mesh (services.json) ──
-let SVC = null, svcOn = null;
+let SVC = null, svcOn = null, svcKnown = null;
 const HIDDEN_KINDS = ['other', 'infra'];      // off until ticked: mostly admin pages
-try { const v = JSON.parse(localStorage.getItem('mp.svcCats') || 'null'); if (Array.isArray(v) && v.length) svcOn = new Set(v); } catch (e) { /* per session */ }
+// The kinds there were before v1.1.142 / 0.3.0: a choice saved then never saw the newer ones.
+const OLD_KINDS = ['adsb', 'ais', 'satellite', 'camera', 'packet', 'winlink', 'aprs', 'tak', 'meshradio', 'radio',
+  'chat', 'weather', 'time', 'mail', 'internet', 'power', 'map', 'wiki', 'other'];
+try {
+  const v = JSON.parse(localStorage.getItem('mp.svcCats') || 'null');
+  if (Array.isArray(v) && v.length) { svcOn = new Set(v); svcKnown = new Set(OLD_KINDS); }
+  else if (v && Array.isArray(v.on)) { svcOn = new Set(v.on); svcKnown = new Set(v.known || []); }
+} catch (e) { /* per session */ }
 const svcCats = () => Object.fromEntries(((SVC || {}).categories || []).map((c, i) => [c.key, {...c, i}]));
 const svcPill = s => { const st = CAM_ST[s.status] || (s.status === 'listed' ? ['#8b949e', 'listed'] : ['#8b949e', s.status || '?']);
   return `<span class="pill" style="color:${st[0]};border-color:${st[0]}">${esc(st[1])}</span>`; };
@@ -563,6 +571,10 @@ function svcControl() {
   if (CAM_MODE) svcOn = new Set();
   else if (SVC_MODE && !svcOn) svcOn = new Set(cats.map(c => c.key).filter(k => !HIDDEN_KINDS.includes(k)));
   else if (!svcOn) svcOn = new Set();
+  // kinds new since the saved choice: shown if their services were (they were in
+  // "other"), and on /aredn/, which shows every kind
+  if (!CAM_MODE && svcKnown && (SVC_MODE || svcOn.has('other')))
+    cats.forEach(c => { if (!svcKnown.has(c.key) && !HIDDEN_KINDS.includes(c.key)) svcOn.add(c.key); });
   layersRender();
 }
 function drawServices() {

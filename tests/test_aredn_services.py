@@ -170,7 +170,9 @@ def test_time_servers_get_an_ntp_query():
     assert unsynced["status"] == "error" and silent["status"] == "no_reply"
 
 
-def test_saved_other_results_move_to_the_new_kinds():
+def test_saved_other_results_move_to_the_new_kinds(monkeypatch):
+    monkeypatch.setattr(asv.cams.service, "data", None)          # _rebuild also sets the camera layer
+    monkeypatch.setattr(asv.cams.service, "cache_path", None)
     svc = asv.ArednServices()
     svc.regions = {0: {"region": 0, "scanned_at": 1.0, "done_at": 1.0, "station": "", "own": True, "count": 3,
                        "services": [{"name": "Tickets CAD", "link": "http://x/", "node_ip": "10.1.0.1", "category": "other"},
@@ -188,3 +190,21 @@ def test_every_kind_is_in_a_known_group_and_listed_once():
     # the checklist shows groups in GROUPS order, so kinds must be listed group by group
     order = [asv.GROUPS.index(c[3]) for c in asv.CATEGORIES]
     assert order == sorted(order)
+
+
+def test_newer_kinds_ignore_the_host_name():
+    assert asv.categorize({"name": "Shack server", "link": "http://kn0o-hap.local.mesh:8000/"}) == "other"
+    assert asv.categorize({"name": "Club page", "link": "http://xx-fire-station.local.mesh/"}) == "other"
+    assert asv.categorize({"name": "Calendar", "link": "http://x/calendar.ics"}) == "other"
+    assert asv.categorize({"name": "Forms", "link": "http://x/ics-213/"}) == "dispatch"
+    assert asv.categorize({"name": "Admin", "link": "http://x/router/"}) == "infra"     # a path still counts
+
+
+def test_a_rebuild_keeps_the_saved_time_when_nothing_was_checked(monkeypatch):
+    monkeypatch.setattr(asv.cams.service, "data", None)
+    monkeypatch.setattr(asv.cams.service, "cache_path", None)
+    svc = asv.ArednServices()
+    svc.data = {"generated_at": 1234.0, "services": [{"name": "Tickets CAD", "link": "http://x/", "node_ip": "10.1.0.1",
+                                                      "category": "other"}]}
+    svc._rebuild()
+    assert svc.data["generated_at"] == 1234.0 and svc.data["services"][0]["category"] == "dispatch"

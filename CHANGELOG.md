@@ -8,6 +8,20 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.145 (2026-11-24)
+
+Fixes from a review of v1.1.142-144:
+- mDNS (ech.local) offers only this box's main addresses again; the mesh VLAN
+  and other interface addresses go only into the certificate.
+- The newer service kinds look at a service's name and link path, not its host
+  name (mesh host names like "-hap" or "-fire-" no longer decide the kind);
+  "ics" alone (calendar files) is no longer CAD.
+- A checklist saved before the new kinds now shows them where their services
+  were shown before (in Other) and on /aredn/.
+- A restart no longer stamps old saved results with the current time.
+- Certificate extra names: a wildcard no longer adds a bare "*"; the log shows
+  the cleaned names.
+
 ## v1.1.144 (2026-11-24)
 
 - Mesh map: the Services checklist is grouped: Phones (MeshPhone offices &

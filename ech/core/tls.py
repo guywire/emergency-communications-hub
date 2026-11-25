@@ -30,8 +30,10 @@ log = logging.getLogger(__name__)
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _local_ips() -> list[str]:
-    """Return all non-loopback IPv4 addresses plus loopback."""
+def _local_ips(all_interfaces: bool = False) -> list[str]:
+    """Return this box's IPv4 addresses plus loopback. all_interfaces: every
+    interface's address too (for the certificate only; mDNS must not offer LAN
+    clients a mesh VLAN, docker or VPN address they can't reach)."""
     ips: list[str] = ["127.0.0.1"]
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None):
@@ -45,14 +47,15 @@ def _local_ips() -> list[str]:
     except Exception:
         pass
     # Every interface's address (the hostname lookup above misses e.g. a mesh VLAN)
-    try:
-        import psutil
-        for addrs in psutil.net_if_addrs().values():
-            for a in addrs:
-                if a.family == socket.AF_INET and a.address not in ips and not a.address.startswith("169.254."):
-                    ips.append(a.address)
-    except Exception:
-        pass
+    if all_interfaces:
+        try:
+            import psutil
+            for addrs in psutil.net_if_addrs().values():
+                for a in addrs:
+                    if a.family == socket.AF_INET and a.address not in ips and not a.address.startswith("169.254."):
+                        ips.append(a.address)
+        except Exception:
+            pass
     # Default outbound interface
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -146,11 +149,12 @@ def san_names(extra) -> list[str]:
         try:
             ipaddress.ip_address(n)
         except ValueError:
-            if not re.fullmatch(r"[a-z0-9*]([a-z0-9-]{0,62})(\.[a-z0-9]([a-z0-9-]{0,62}))*", n):
+            label = r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+            if not re.fullmatch(rf"(\*|{label})(\.{label})*", n) or n == "*":
                 log.warning("TLS: ignoring extra name %r (not a host name or IP)", raw)
                 continue
         for v in (n, n[: -len(".local.mesh")] if n.endswith(".local.mesh") else None):
-            if v and v not in out:
+            if v and v != "*" and v not in out:
                 out.append(v)
     return out
 
@@ -187,7 +191,7 @@ def ensure_server_cert(
     ca_key  = load_pem_private_key(ca_key_pem, password=None)
 
     sans: list[x509.GeneralName] = []
-    ips = _local_ips()
+    ips = _local_ips(all_interfaces=True)
     for ip_str in ips:
         try:
             sans.append(x509.IPAddress(ipaddress.IPv4Address(ip_str)))
@@ -207,7 +211,7 @@ def ensure_server_cert(
         if gn not in sans:
             sans.append(gn)
 
-    log.info("TLS: generating server cert with SANs: %s + localhost/ech.local %s", ips, list(extra_names or []))
+    log.info("TLS: generating server cert with SANs: %s + localhost/ech.local %s", ips, san_names(extra_names))
 
     server_key = ec.generate_private_key(ec.SECP256R1())
     now = datetime.datetime.utcnow()

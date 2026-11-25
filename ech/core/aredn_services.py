@@ -107,7 +107,7 @@ _RX = {
     "power": r"solar|battery|\bups\b|power|victron|generator",
     "wiki": r"wiki|kiwix|library|\bdocs?\b",
     # kinds broken out of "other": checked after the ones above, in this order
-    "dispatch": r"\bcad\b|dispatch|\btickets?\b|incident|\bics[- ]?\d{0,3}\b|net ?logger|net ?control|check-?in|sahana|\bd4h\b",
+    "dispatch": r"\bcad\b|dispatch|\btickets?\b|incident|\bics[- ]?\d{3}\b|net ?logger|net ?control|check-?in|sahana|\bd4h\b",
     "files": r"nextcloud|owncloud|seafile|file ?browser|file ?server|\bfiles?\b|\bs?ftp\b|\bnas\b|samba|\bsmb\b|syncthing|\bmirror\b|downloads?\b|\brepo\b",
     "voip": r"\bpbx\b|freepbx|raspbx|asterisk|\bvoip\b|\bsip\b|ip ?phone|hamsoverip|meshphone|dialing",
     "collab": r"etherpad|ethercalc|mattermost|rocket\.?chat|cryptpad|hedgedoc|discourse|\bforum\b",
@@ -153,8 +153,17 @@ def categorize(service: dict) -> str | None:
         return None
     if tag in _TAG_CAT:
         return _TAG_CAT[tag]
-    for key in ("chat", "weather", "time", "mail", "power", "wiki", "dispatch", "voip", "files", "collab",
-                "hamtools", "status", "speedtest", "infra", "eoc"):
+    for key in ("chat", "weather", "time", "mail", "power", "wiki"):
+        if re.search(_RX[key], text, re.I):
+            return key
+    # the newer kinds look at the name and the link's path, not its host name:
+    # mesh host names carry words like hap, router, fire or county for any service
+    try:
+        where = urlsplit(link).path if "://" in link else link
+    except ValueError:
+        where = ""
+    text = f"{name} {where}"
+    for key in ("dispatch", "voip", "files", "collab", "hamtools", "status", "speedtest", "infra", "eoc"):
         if re.search(_RX[key], text, re.I):
             return key
     return "other"
@@ -639,7 +648,7 @@ class ArednServices:
             return {"status": st, "located": sum(1 for c in items if c.get("lat") is not None)}
         by_cat = {k: sum(1 for c in out if c.get("category") == k) for k in CATEGORY_KEYS}
         times = [st["scanned_at"] for st in self.regions.values() if st.get("scanned_at")]
-        now = max(times) if times else time.time()
+        now = max(times) if times else float((self.data or {}).get("generated_at") or time.time())
         data = {"generated_at": now, "services": out, "regions": self.regions_meta(),
                 "categories": [{"key": k, "label": l, "icon": i, "group": g, "count": by_cat[k]}
                                for k, l, i, g in CATEGORIES],
