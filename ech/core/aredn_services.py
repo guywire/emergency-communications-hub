@@ -71,6 +71,8 @@ CATEGORIES = [
     ("wiki", "Wikis / info", "📖", "Emergency & coordination"),
     ("chat", "Chat", "💬", "Messaging"),
     ("mail", "Mail", "✉", "Messaging"),
+    ("paging", "Paging (DAPNET / POCSAG)", "🔔", "Messaging"),
+    ("contact", "Contact addresses", "@", "Messaging"),
     ("winlink", "Winlink", "📧", "Messaging"),
     ("packet", "Packet / BBS", "📟", "Messaging"),
     ("aprs", "APRS", "📍", "Radio"),
@@ -94,6 +96,8 @@ CATEGORY_KEYS = [c[0] for c in CATEGORIES]
 # kinds broken out of "other" (v1.1.142 / 0.3.0): results saved as "other"
 # move to them without a new check, as they were checked the same way
 OTHER_SPLIT = {"dispatch", "eoc", "files", "voip", "collab", "hamtools", "status", "speedtest", "infra"}
+# ...and (v1.1.151 / 0.3.3) pagers, and addresses with no service behind them, out of any kind
+MAIL_SPLIT = {"paging", "contact"}
 
 _RX = {
     "adsb": r"ads-?b|piaware|flightaware|tar1090|dump1090|readsb|skyaware|fr24|flightradar|planefinder|adsbexchange|\bplanes?\b|aircraft",
@@ -108,6 +112,10 @@ _RX = {
     "chat": r"meshchat|teamtalk|mumble|jitsi|\bmatrix\b|element|\birc\b|chat",
     "weather": r"weewx|cumulus|weather|\bpws\b|\bwx\b",
     "time": r"\bntp\b|chrony|time ?server|gps ?time",
+    "paging": r"dapnet|unipager|pocsag|\bpagers?\b|\bpaging\b",
+    # a listing that is only an address (e-mail, or a packet BBS home address like
+    # K1ABC.#WPA.PA.USA.NOAM), with no link to a service behind it
+    "contact": r"[\w.+-]+@[\w-]+(\.[\w-]+)+|mailto:|^\W*[a-z0-9]{3,7}(-\d+)?\.#[a-z0-9]+(\.[a-z0-9#]+)+\W*$",
     "mail": r"webmail|\bsmtp\b|\bimap\b|citadel|\bmail\b",
     "power": r"solar|battery|\bups\b|power|victron|generator",
     "wiki": r"wiki|kiwix|library|\bdocs?\b",
@@ -151,6 +159,11 @@ def categorize(service: dict) -> str | None:
             return key
     if cams.is_camera(service) and tag not in ("phone",):
         return "camera"
+    if re.search(_RX["paging"], text, re.I):
+        return "paging"
+    bare = _TAG_RE.sub("", name).strip()
+    if not link and re.search(_RX["contact"], bare, re.I) and not re.match(r"sips?:", bare, re.I):
+        return "contact"                               # (a sip: address is a phone to dial)
     for key in ("radio", "winlink", "packet", "aprs", "tak", "meshradio"):
         if re.search(_RX[key], text, re.I):
             return key
@@ -765,10 +778,10 @@ class ArednServices:
         out += [c for c in (self.data or {}).get("services", [])
                 if sharing.region_of(c.get("node_ip")) not in self.regions]
         for c in out:
-            if c.get("category") == "other":                # saved before a kind was broken out of "other"
+            if c.get("category") not in ("camera", None):  # saved before a kind was broken out
                 cat = categorize({"name": c.get("name", "") + (f" [{c['tag']}]" if c.get("tag") else ""),
                                   "link": c.get("link", "")})
-                if cat in OTHER_SPLIT or cat == "map":
+                if cat in MAIL_SPLIT or (c["category"] == "other" and (cat in OTHER_SPLIT or cat == "map")):
                     c["category"] = cat
 
         def summary(items):

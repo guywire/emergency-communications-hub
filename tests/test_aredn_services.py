@@ -223,3 +223,29 @@ def test_mesh_phones_and_pbx_host_names_are_phones():
     assert asv.categorize({"name": "AREDN Services Map", "link": "http://KN0O-pbx-ech:8766/aredn"}) == "map"
     assert asv.categorize({"name": "Mesh status", "link": "http://k1abc-pbx:80/"}) == "status"   # the name decides first
     assert asv.categorize({"name": "Headphone test", "link": "http://k1abc-hap:80/"}) == "other"
+
+
+
+def test_paging_and_bare_addresses_are_not_mail():
+    c = asv.categorize
+    assert c({"name": "DAPnet Paging Terminal [mail]", "link": "http://n3fud-server0:5000/"}) == "paging"
+    assert c({"name": "UniPager", "link": "http://n1wbv-x:8073//"}) == "paging"
+    for n in ("k1abc@example.com", "mailto:k1abc@example.net", "contact: k1abc@example.org",
+              "MeshMail: k1abc@k1abc-mailhub.local.mesh", "K1ABC.#EMA.MA.USA.NOAM"):
+        assert c({"name": n + " [mail]", "link": ""}) == "contact", n
+    assert c({"name": "Mesh Mail [mail]", "link": "http://kn4ydl-mail:80/roundcube/"}) == "mail"
+    assert c({"name": "ButtevilleMail [mail]", "link": ""}) == "mail"          # a server's name, not an address
+    assert c({"name": "Webmail for k1abc@example.net", "link": "http://x-mail/"}) == "mail"   # has a service
+    assert c({"name": "sip:k1abc@k1abc-phone.local.mesh:5060", "link": ""}) != "contact"
+    assert c({"name": "K1ABC@winlink.org [winlink]", "link": ""}) == "contact"
+
+
+def test_saved_mail_moves_to_paging_and_contact():
+    s = asv.ArednServices()
+    recs = [{"name": "DAPnet Paging Terminal", "tag": "mail", "link": "http://n3fud-server0:5000/", "category": "mail",
+             "node_ip": "10.1.1.1"},
+            {"name": "k1abc@example.com", "tag": "mail", "link": "", "category": "mail", "node_ip": "10.1.1.2"},
+            {"name": "Webmail", "tag": "mail", "link": "http://bam-mail:80/", "category": "mail", "node_ip": "10.1.1.3"}]
+    s.data = {"services": recs}
+    s._rebuild()
+    assert [r["category"] for r in s.data["services"]] == ["paging", "contact", "mail"]

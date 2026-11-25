@@ -558,7 +558,7 @@ function camerasTable(d) {
 
 // ── every other service advertised on the mesh (services.json) ──
 let SVC = null, svcOn = null, svcKnown = null;
-const HIDDEN_KINDS = ['other', 'infra'];      // off until ticked: mostly admin pages
+const HIDDEN_KINDS = ['other', 'infra', 'contact'];   // off until ticked: admin pages, bare addresses
 // The kinds there were before v1.1.142 / 0.3.0: a choice saved then never saw the newer ones.
 const OLD_KINDS = ['adsb', 'ais', 'satellite', 'camera', 'packet', 'winlink', 'aprs', 'tak', 'meshradio', 'radio',
   'chat', 'weather', 'time', 'mail', 'internet', 'power', 'map', 'wiki', 'other'];

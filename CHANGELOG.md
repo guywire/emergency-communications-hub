@@ -8,6 +8,11 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.151 (2026-11-25)
+
+- AREDN Services Map: DAPNET / POCSAG paging has its own kind (was Mail). Listings that are only an address
+  (e-mail, Winlink, packet BBS) with no service behind them are under Contact addresses, off until ticked.
+
 ## v1.1.150 (2026-11-25)
 
 - AREDN Services Map: names like "EmmePBX" or "Shack phone" are under Other phones & PBXs; a host name with
