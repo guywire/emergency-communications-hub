@@ -339,3 +339,54 @@ def test_sip_ping_against_a_local_responder():
         return ms, got
     ms, got = asyncio.run(run())
     assert ms is not None and got[0].startswith(b"OPTIONS sip:127.0.0.1 SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:")
+
+
+
+TRUNK_TABLE = """<html><body><pre>Trunk report for MeshPhone Office 55501
+Office CODEC County City Sysop Host Status Rating Ping
+-----------------------------------------------------
+ 55502 g711 Bay Harbor Ann W1XYZ w1xyz-pbx OK Excellent 33 ms
+ 55503 g711 Kent Bay Bob KX6AAA kx6aaa-raspbx UNREACHABLE Down
+</pre></body></html>"""
+
+
+def test_parse_published_trunks_in_all_three_forms():
+    j = mm.parse_published_trunks('{"ok": true, "data": [{"trunk_name": "w1xyz", "host": "10.30.0.57", "status": "OK", '
+                                  '"latency_ms": 23}, {"trunk_name": "hoip", "host": "192.0.2.10", "status": "UNREACHABLE", '
+                                  '"latency_ms": null}, {"trunk_name": "x", "host": "", "status": "UNKNOWN"}]}')
+    assert [(p["host"], p["ok"], p["ms"]) for p in j["peers"]] == [("10.30.0.57", True, 23), ("192.0.2.10", False, None)]
+    a = mm.parse_published_trunks("<pre>" + PEERS + "</pre>")
+    assert ("10.20.0.2", True, 145) in [(p["host"], p["ok"], p["ms"]) for p in a["peers"]]
+    assert not any(p["name"] == "lab-pi" for p in a["peers"])             # UNKNOWN: not monitored
+    t = mm.parse_published_trunks(TRUNK_TABLE)
+    assert t["code"] == "55501"
+    assert [(p["code"], p["host"], p["ok"], p["ms"]) for p in t["peers"]] == [
+        ("55502", "w1xyz-pbx", True, 33), ("55503", "kx6aaa-raspbx", False, None)]
+
+
+def test_trunk_pages_found_by_name_or_path():
+    svcs = [{"name": "PBX Trunk Status", "link": "http://k1aaa-pbx:80/iax_peers.txt"},
+            {"name": "APISON PBX Trunk Status", "link": "http://k1aaa-pbx:80/iax/iax2_status_ami.php"},
+            {"name": "PBX Line Report", "link": "http://k1aaa-pbx:80/cgi-bin/sip_peers"},      # handsets, not trunks
+            {"name": "Trunk Report", "link": "http://192.0.2.5/x"},                            # not on the mesh
+            {"name": "Club page", "link": "http://k1aaa-pbx:80/"}]
+    pages = mm.trunk_pages(svcs, HOSTS)
+    assert [p["url"] for p in pages] == ["http://10.50.0.7/iax_peers.txt", "http://10.50.0.7/iax/iax2_status_ami.php?json=1"]
+
+
+def test_published_trunks_on_the_map():
+    pg = {"ip": "10.50.0.7", "host": "k1aaa-pbx", "code": "", "at": "2026-11-25T12:00:00Z",
+          "peers": [{"name": "", "host": "10.30.0.57", "code": "", "ok": True, "ms": 33},     # MILLTOWN -> HARBOR
+                    {"name": "", "host": "kx6aaa-raspbx", "code": "", "ok": False, "ms": None},  # -> BAYTOWN
+                    {"name": "hoip", "host": "192.0.2.10", "code": "", "ok": True, "ms": 70}]}
+    reports = [{"by": "MILLTOWN", "to": "HARBOR", "ms": 400, "down": False}]                   # older directory report
+    cands = {o["name"]: mm.office_candidates(o, HOSTS) for o in OFFICES}
+    m = mm.build_map(OFFICES, HOSTS, SERVICES, cands, mm.mesh_candidates(HOSTS, SERVICES),
+                     {"10.30.0.57": 120.0, "10.50.0.7": 117.0}, NODES, {"10.9.9.44"}, "HOMETOWN",
+                     [], [], reports, generated_at=1.0, published=[pg])
+    links = {frozenset((l["a"], l["b"])): l for l in m["links"]}
+    hm = links[frozenset(("HARBOR", "MILLTOWN"))]
+    assert hm["state"] == "reported_up" and hm["rtt_ms"] == 33                 # the live page wins
+    assert hm["reports"][0]["source"] == "published" and len(hm["reports"]) == 1
+    assert links[frozenset(("BAYTOWN", "MILLTOWN"))]["state"] == "reported_down"   # a trunk the directory lacks
+    assert m["summary"]["trunk_pages"] == 1 and m["summary"]["published_reports"] == 2

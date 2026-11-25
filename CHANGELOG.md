@@ -8,6 +8,14 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.153 (2026-11-25)
+
+- MeshPhone map: trunks PBXs publish themselves (an advertised "PBX Trunk Status/Report" page: JSON, Asterisk's
+  `iax2 show peers` text, or a trunk table) are read once a day and shown live from that PBX, replacing the
+  directory's report for that trunk and adding trunks the directory lacks.
+- About page: how to publish your PBX's trunks from Asterisk/FreePBX (qualify, a cron'd `iax2 show peers` file,
+  the AREDN service name), without opening AMI.
+
 ## v1.1.152 (2026-11-25)
 
 - AREDN Services Map: the hourly look for other copies reuses the mesh's service list from the last region

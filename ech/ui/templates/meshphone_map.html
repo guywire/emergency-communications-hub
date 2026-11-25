@@ -118,6 +118,24 @@ td.mono, .mono { font-family: var(--mono); font-size: 12px; }
   <h3>MeshPhone</h3>
   <p>Offices, trunks and people come from the MeshPhone directory and white pages served on the mesh.
   <b>PBX up</b> means the PBX answered an IAX2 poke from here. Trunk colours show latency where the PBXs report it.</p>
+  <h3>Sharing your PBX's trunks</h3>
+  <p>Trunks come from the MeshPhone directory and from pages PBXs publish about their own trunks; a published page
+  is read once a day and shows the trunk live from that PBX. To publish yours from Asterisk or FreePBX:</p>
+  <ol>
+    <li><b>Qualify each IAX trunk</b>, so Asterisk measures it: <span class="mono">qualify=yes</span> in the trunk's
+    peer details (FreePBX: Connectivity &rsaquo; Trunks &rsaquo; the trunk &rsaquo; PEER Details).
+    <span class="mono">iax2 show peers</span> then shows <span class="mono">OK (23 ms)</span> or
+    <span class="mono">UNREACHABLE</span> for it.</li>
+    <li><b>Publish that status</b> as a plain file the PBX's web server serves, refreshed by root's cron, e.g.<br>
+    <span class="mono">*/5 * * * * asterisk -rx "iax2 show peers" &gt; /var/www/html/iax_peers.txt</span></li>
+    <li><b>Advertise it</b> on your AREDN node as a service named like <span class="mono">PBX Trunk Status</span>
+    with the link <span class="mono">http://your-pbx/iax_peers.txt</span>. This map finds it by that name.</li>
+    <li>Keep the MeshPhone directory check-in running, and name the PBX's host with your callsign
+    (<span class="mono">k1abc-pbx</span>) so the map can tell it's yours.</li>
+  </ol>
+  <p class="muted">Publish only the status: don't open the Asterisk manager (AMI, port 5038) to the mesh. The file
+  holds trunk names, addresses and status, no passwords. JSON works too:
+  <span class="mono">{"office_code": "12345", "trunks": [{"name": "...", "host": "10.x.x.x", "status": "OK", "latency_ms": 23}]}</span>.</p>
   <h3>Cameras and services</h3>
   <p>Each gets the one request a viewer would make. <b>Open</b> answered without a password, <b>password needed</b>
   asked for one; no passwords are tried. Links work from a computer on the mesh.</p>
@@ -168,7 +186,8 @@ const linkCol = l => { const st = LINK[l.state] || LINK.unknown;
   return st.col ? st.col : (l.rtt_ms != null ? latCol(l.rtt_ms) : '--both'); };
 function repText(l) {
   return (l.reports || []).map(x => `${esc(x.by)} &rarr; ${esc(x.to)}: <b>${x.down ? 'DOWN' : x.ms + ' ms'}</b>` +
-    `<span class="muted"> &middot; reported ${x.at ? esc(x.at.slice(0, 10)) : '(date unknown)'}</span>`).join('<br>');
+    `<span class="muted"> &middot; ${x.source === 'published' ? "from its PBX's trunk page" : 'reported'} ` +
+    `${x.at ? esc(x.at.slice(0, 10)) : '(date unknown)'}</span>`).join('<br>');
 }
 let DATA = null, map = null;
 

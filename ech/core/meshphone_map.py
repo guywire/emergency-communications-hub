@@ -527,6 +527,93 @@ def parse_trunk_reports(html: str) -> list[dict]:
     return out
 
 
+# ── trunk status a PBX publishes itself ──────────────────────────────────────
+# Some PBXs advertise a page with their own trunks ("PBX Trunk Report", "IAX2
+# Trunk Status"). Three forms are read: JSON (a list of trunks with host, status
+# and latency), Asterisk's own `iax2 show peers` text, and a text table with one
+# trunk per line (office code ... host STATUS ... N ms). Live from that PBX, so
+# it replaces the directory's report for the same trunk and direction.
+_TRUNK_PAGE_NAME_RE = re.compile(r"trunk\s*(report|status)|iax2?\s*(peers|status)", re.I)
+_TRUNK_PAGE_PATH_RE = re.compile(r"iax2?_(peers|status)|trunks?(\.json|\.txt|_status)", re.I)
+_TABLE_ROW = re.compile(r"^[ \t]*(\d{5})[ \t]+.*?[ \t]([A-Za-z0-9][\w.-]*)[ \t]+(OK|UNREACHABLE|LAGGED|DOWN|UNKNOWN)\b"
+                        r"(?:[^\n]*?(\d+)[ \t]*ms)?", re.M)
+MAX_TRUNK_PAGES = 30
+MAX_TRUNK_PAGE_BYTES = 200_000
+
+
+def trunk_pages(services: list[dict], hosts: list[dict]) -> list[dict]:
+    """The trunk-status pages advertised on the mesh: [{"url", "host", "ip", "name", "link"}]."""
+    from urllib.parse import urlsplit
+    names = {str(h.get("name") or "").lower(): str(h.get("ip") or "") for h in hosts}
+    out, seen = [], set()
+    for s in services:
+        link, name = str(s.get("link") or ""), str(s.get("name") or "")
+        if not link.lower().startswith("http"):
+            continue
+        try:
+            u = urlsplit(link)
+            port = u.port
+        except ValueError:
+            continue
+        if not (_TRUNK_PAGE_NAME_RE.search(name) or _TRUNK_PAGE_PATH_RE.search(u.path)):
+            continue
+        host = (u.hostname or "").lower().removesuffix(".local.mesh")
+        ip = host if _IP_RE.match(host) else names.get(host, "")
+        if not ip or not _mesh_ip(ip):
+            continue
+        q = u.query
+        if u.path.endswith("iax2_status_ami.php") and "json=1" not in q:
+            q = (q + "&" if q else "") + "json=1"          # that page's data, not its script
+        url = f"http://{ip}{f':{port}' if port and port != 80 else ''}{u.path or '/'}{'?' + q if q else ''}"
+        if url not in seen:
+            seen.add(url)
+            out.append({"url": url, "host": host, "ip": ip, "name": name[:80], "link": link[:300]})
+    return out[:MAX_TRUNK_PAGES]
+
+
+def parse_published_trunks(text: str) -> dict:
+    """{"code": the page's own office code or "", "peers": [{"name", "host",
+    "code", "ok", "ms"}]}; trunks Asterisk doesn't monitor are left out."""
+    import html as _html
+    text = text or ""
+    peers: list[dict] = []
+    s = text.lstrip()
+    if s[:1] in ("{", "["):
+        try:
+            j = json.loads(s)
+        except ValueError:
+            j = None
+        rows = j if isinstance(j, list) else next(
+            (j[k] for k in ("data", "trunks", "peers") if isinstance(j, dict) and isinstance(j.get(k), list)), [])
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            st = str(r.get("status") or "").upper()
+            if not st or st.startswith(("UNKNOWN", "UNMONITORED")):
+                continue
+            ms = r.get("latency_ms", r.get("ms"))
+            ok = st.startswith(("OK", "LAGGED", "UP"))
+            peers.append({"name": str(r.get("trunk_name") or r.get("name") or "")[:63],
+                          "host": str(r.get("host") or "")[:63], "code": str(r.get("office_code") or "")[:10],
+                          "ok": ok, "ms": int(ms) if ok and isinstance(ms, (int, float)) else None})
+        return {"code": str(j.get("office_code") or "")[:10] if isinstance(j, dict) else "", "peers": peers}
+    plain = _html.unescape(re.sub(r"<[^>]+>", "", text))
+    for p in parse_iax_peers(plain):
+        if p["status"].startswith(("UNKNOWN", "Unmonitored")):
+            continue
+        ok = p["ok"] or p["status"].startswith("LAGGED")
+        peers.append({"name": p["name"], "host": p["host"], "code": "", "ok": ok, "ms": p["ms"] if ok else None})
+    if not peers:
+        for m in _TABLE_ROW.finditer(plain):
+            code, host, st, ms = m.groups()
+            if st == "UNKNOWN":
+                continue
+            ok = st in ("OK", "LAGGED")
+            peers.append({"name": "", "host": host, "code": code, "ok": ok, "ms": int(ms) if ok and ms else None})
+    m = re.search(r"\boffice\s+(\d{5})\b", plain, re.I)
+    return {"code": m.group(1) if m else "", "peers": peers}
+
+
 # ── the map ──────────────────────────────────────────────────────────────────
 
 def build_map(offices: list[dict], hosts: list[dict], services: list[dict],
@@ -536,7 +623,8 @@ def build_map(offices: list[dict], hosts: list[dict], services: list[dict],
               people: list[dict] | None = None, reports: list[dict] | None = None,
               generated_at: float | None = None, node_for: dict[str, str] | None = None,
               own_registered: dict[str, bool] | None = None,
-              sip_answers: dict[str, float] | None = None) -> dict:
+              sip_answers: dict[str, float] | None = None,
+              published: list[dict] | None = None) -> dict:
     """offices: directory offices (the guide); cands: office -> addresses to try;
     mesh_cands: ip -> names of other PBX-looking mesh hosts; answers: ip -> POKE
     ms (answered only); nodes: node ip -> {"name","lat","lon","grid","place"};
@@ -544,7 +632,8 @@ def build_map(offices: list[dict], hosts: list[dict], services: list[dict],
     report about their own trunks; node_for: PBX ip -> its node's address
     found by traceroute (used when the host list's grouping is unverified);
     own_registered: this PBX's MeshPhone numbers -> whether that phone is registered;
-    sip_answers: phone ip -> SIP OPTIONS ms (answered only)."""
+    sip_answers: phone ip -> SIP OPTIONS ms (answered only); published: trunk
+    pages PBXs publish themselves (trunk_pages + parse_published_trunks)."""
     node_for = node_for or {}
     own_registered = own_registered or {}
     sip_answers = sip_answers or {}
@@ -672,6 +761,41 @@ def build_map(offices: list[dict], hosts: list[dict], services: list[dict],
     by_name = {e["name"]: e for e in out}
     gone = set(dropped)
 
+    # trunks PBXs publish themselves: live from that PBX, so they replace its directory report
+    def office_of(ip: str = "", host: str = "", code: str = "", name: str = "") -> str | None:
+        host = host.lower().removesuffix(".local.mesh")
+        for e in out:
+            if ip and (ip == e["answering_ip"] or ip in e["tried"]):
+                return e["name"]
+        for h in (host, name.lower()):
+            for e in out:
+                if h and h in (x.lower() for x in e["hostnames"]):
+                    return e["name"]
+        for e in out:
+            if code and code in e["office_codes"]:
+                return e["name"]
+        for e in out:
+            if name and name.upper() in (e["name"].upper(), (e["admin_callsign"] or "").upper()):
+                return e["name"]
+        return None
+    pub: dict[tuple[str, str], dict] = {}
+    for pg in published or []:
+        by = office_of(ip=pg.get("ip", ""), host=pg.get("host", ""), code=pg.get("code", ""))
+        if not by:
+            continue
+        for p in pg.get("peers", []):
+            h = str(p.get("host") or "")
+            is_ip = bool(_IP_RE.match(h))
+            if is_ip and not _mesh_ip(h):
+                continue                       # an internet trunk (e.g. HOIP)
+            to = office_of(ip=h if is_ip else "", host="" if is_ip else h, code=p.get("code", ""),
+                           name=p.get("name", ""))
+            if to and to != by and to not in gone:
+                pub[(by, to)] = {"by": by, "to": to, "ms": p.get("ms") if p.get("ok") else None,
+                                 "down": not p.get("ok"), "at": pg.get("at", ""), "source": "published"}
+    if pub:
+        reports = [r for r in reports if (r["by"], r["to"]) not in pub] + list(pub.values())
+
     # trunks: directory lists + reports + our own
     pairs: dict[tuple[str, str], dict] = {}
     for o in offices:
@@ -696,7 +820,7 @@ def build_map(offices: list[dict], hosts: list[dict], services: list[dict],
     for r in reports:
         key = tuple(sorted((r["by"], r["to"])))
         pairs.setdefault(key, {"a": key[0], "b": key[1], "listed_by": []})
-        by_pair.setdefault(key, []).append({**r, "at": checkin.get(r["by"], "")})
+        by_pair.setdefault(key, []).append({**r, "at": r.get("at") or checkin.get(r["by"], "")})
     links = []
     for key, p in sorted(pairs.items()):
         if p["a"] in gone or p["b"] in gone:
@@ -803,6 +927,7 @@ def build_map(offices: list[dict], hosts: list[dict], services: list[dict],
                     "location_off": sum(1 for e in out if e["loc_off_km"] and not e["hosted"]),
                     "hosted": sum(1 for e in out if e["hosted"]),
                     "dropped": sorted(dropped),
+                    "trunk_pages": len(published or []), "published_reports": len(pub),
                     "people": len(out_people),
                     "people_online": sum(1 for x in out_people if x["status"] == "online"),
                     "people_on_mesh": sum(1 for x in out_people if x["status"] == "on_mesh"),
@@ -966,6 +1091,28 @@ class MeshPhoneMap:
         self.people_created = live.mp_people_created
         return list(live.mp_people)
 
+    async def _published(self, client, hosts: list[dict], services: list[dict]) -> list[dict]:
+        """Trunk pages PBXs advertise on the mesh, read (one request each)."""
+        pages = trunk_pages(services, hosts)
+        sem = asyncio.Semaphore(6)
+
+        async def one(pg):
+            async with sem:
+                try:
+                    hdr = {} if _IP_RE.match(pg["host"]) else {"Host": pg["host"] + ".local.mesh"}
+                    r = await client.get(pg["url"], headers=hdr, timeout=10)
+                    if r.status_code != 200 or len(r.content) > MAX_TRUNK_PAGE_BYTES:
+                        return None
+                    got = parse_published_trunks(r.text)
+                except Exception:
+                    return None
+            if not got["peers"]:
+                return None
+            return {**pg, **got, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        res = [x for x in await asyncio.gather(*(one(p) for p in pages)) if x]
+        log.info("MeshPhone map: %d of %d published trunk pages read", len(res), len(pages))
+        return res
+
     async def _reports(self, client) -> list[dict]:
         from ech.core import meshphone_directory as mpd
         cfg = self._cfg()
@@ -1067,11 +1214,12 @@ class MeshPhoneMap:
             except Exception as exc:
                 log.info("MeshPhone map: trunk reports unavailable (%s)", exc)
                 reports = []
+            published = await self._published(client, hosts, svcs)
         own = next((o for o in offices if o["name"] == cfg["own_office"]), {})
         registered = own_numbers(self._own_endpoints(), (own.get("office_codes") or [""])[0])
         data = build_map(offices, hosts, svcs, cands, mesh, answers, nodes, own_ips,
                          cfg["own_office"], peers, people, reports, node_for=node_for,
-                         own_registered=registered, sip_answers=sip_answers)
+                         own_registered=registered, sip_answers=sip_answers, published=published)
         data["people_created"] = self.people_created
         self.data, self.last_error = data, None
         for path, obj in ((self.cache_path, data), (self.places_path, self._places)):
