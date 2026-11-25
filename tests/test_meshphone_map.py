@@ -390,3 +390,12 @@ def test_published_trunks_on_the_map():
     assert hm["reports"][0]["source"] == "published" and len(hm["reports"]) == 1
     assert links[frozenset(("BAYTOWN", "MILLTOWN"))]["state"] == "reported_down"   # a trunk the directory lacks
     assert m["summary"]["trunk_pages"] == 1 and m["summary"]["published_reports"] == 2
+
+
+
+def test_directory_follows_the_map_refresh():
+    from ech.core.meshphone_directory import directory_refresh_s
+    assert directory_refresh_s({}) == 23 * 3600
+    assert directory_refresh_s({"radio_directory": {"meshphone": {"map_refresh_hours": 12}}}) == 11 * 3600
+    assert directory_refresh_s({"radio_directory": {"meshphone": {"map_refresh_hours": 0.5}}}) == 3600
+    assert directory_refresh_s({"radio_directory": {"meshphone": {"map_refresh_hours": "x"}}}) == 23 * 3600

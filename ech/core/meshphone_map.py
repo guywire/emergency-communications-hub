@@ -5,7 +5,7 @@ A MeshPhone network map where the WT0F MeshPhone database is only the guide
 (which offices and trunks to look for) and the facts are polled from the mesh:
 the PBXs themselves and the AREDN nodes they sit behind.
 
-Once a day (map_refresh_hours, default 24):
+Once a day by default (map_refresh_hours; the directory copy follows it):
 
   1. Mesh host list. The local AREDN node's sysinfo (hosts=1&services=1)
      lists every host on the mesh, grouped by the node it sits behind, and

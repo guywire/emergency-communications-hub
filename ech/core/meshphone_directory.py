@@ -65,6 +65,18 @@ _NUMBER_RE = re.compile(r"^\d{7}$")
 DNS_PORT = 53
 
 
+def directory_refresh_s(config: dict) -> int:
+    """How often to fetch the directory: with the MeshPhone map
+    (map_refresh_hours, default 24), an hour sooner, so each map is built
+    from a fresh copy of the directory."""
+    cfg = (((config or {}).get("radio_directory") or {}).get("meshphone") or {})
+    try:
+        h = float(cfg.get("map_refresh_hours", 24))
+    except (TypeError, ValueError):
+        h = 24.0
+    return max(3600, int(h * 3600) - 3600)
+
+
 def settings(config: dict) -> dict:
     cfg = ((config.get("radio_directory") or {}).get("meshphone") or {})
     urls = cfg.get("whitepages_urls")

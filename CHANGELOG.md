@@ -8,6 +8,11 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.154 (2026-11-25)
+
+- MeshPhone: the directory copy now follows the map's `map_refresh_hours` (fetched an hour before each map),
+  so a map rebuilt more often isn't built from an old directory. This station: twice a day.
+
 ## v1.1.153 (2026-11-25)
 
 - MeshPhone map: trunks PBXs publish themselves (an advertised "PBX Trunk Status/Report" page: JSON, Asterisk's
