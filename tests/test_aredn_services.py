@@ -208,3 +208,18 @@ def test_a_rebuild_keeps_the_saved_time_when_nothing_was_checked(monkeypatch):
                                                       "category": "other"}]}
     svc._rebuild()
     assert svc.data["generated_at"] == 1234.0 and svc.data["services"][0]["category"] == "dispatch"
+
+
+
+def test_mesh_phones_and_pbx_host_names_are_phones():
+    assert asv.categorize({"name": "mesh phones", "link": "http://jocomoares-pbx:80/"}) == "voip"
+    assert asv.categorize({"name": "Mesh Phone directory", "link": "http://x-hap:80/"}) == "voip"
+    assert asv.categorize({"name": "Club page", "link": "http://k1abc-pbx2:80/"}) == "voip"
+    assert asv.categorize({"name": "Club page", "link": "http://k1abc-hap:80/"}) == "other"
+    assert asv.categorize({"name": "Club page", "link": "http://pbxsomething:80/"}) == "other"
+
+    assert asv.categorize({"name": "EmmePBX", "link": "http://EmmePBX:9999/"}) == "voip"
+    assert asv.categorize({"name": "MTV Phone", "link": "http://mtv-phone:80/"}) == "voip"
+    assert asv.categorize({"name": "AREDN Services Map", "link": "http://KN0O-pbx-ech:8766/aredn"}) == "map"
+    assert asv.categorize({"name": "Mesh status", "link": "http://k1abc-pbx:80/"}) == "status"   # the name decides first
+    assert asv.categorize({"name": "Headphone test", "link": "http://k1abc-hap:80/"}) == "other"

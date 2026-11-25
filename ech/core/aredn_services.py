@@ -114,7 +114,7 @@ _RX = {
     # kinds broken out of "other": checked after the ones above, in this order
     "dispatch": r"\bcad\b|dispatch|\btickets?\b|incident|\bics[- ]?\d{3}\b|net ?logger|net ?control|check-?in|sahana|\bd4h\b",
     "files": r"nextcloud|owncloud|seafile|file ?browser|file ?server|\bfiles?\b|\bs?ftp\b|\bnas\b|samba|\bsmb\b|syncthing|\bmirror\b|downloads?\b|\brepo\b",
-    "voip": r"\bpbx\b|freepbx|raspbx|asterisk|\bvoip\b|\bsip\b|ip ?phone|hamsoverip|meshphone|dialing",
+    "voip": r"pbx(\b|\d|_)|freepbx|raspbx|asterisk|\bvoip\b|\bsip\b|ip ?phone|hamsoverip|mesh[ -]?phones?|\bphones?\b|dialing",
     "collab": r"etherpad|ethercalc|mattermost|rocket\.?chat|cryptpad|hedgedoc|discourse|\bforum\b",
     "hamtools": r"ham ?clock|hamdash|ham ?dashboard|dx ?cluster|dxspider|pskreporter|cloudlog|wavelog|logbook|log ?server|\bqrz\b|contest",
     "status": r"mesh ?map|mesh ?stats|nodographer|grafana|uptime ?kuma|zabbix|librenms|smokeping|prometheus|portainer|arednstatus|\bstatus\b|dashboard|monitor",
@@ -168,9 +168,18 @@ def categorize(service: dict) -> str | None:
     except ValueError:
         where = ""
     text = f"{name} {where}"
+    if re.search(r"\bservices? map\b", name, re.I):
+        return "map"                                   # a copy of this map
     for key in ("dispatch", "voip", "files", "collab", "hamtools", "status", "speedtest", "infra", "eoc"):
         if re.search(_RX[key], text, re.I):
             return key
+    # nothing in the name: a PBX's host name is a safe sign (unlike hap, router or fire)
+    try:
+        host = (urlsplit(link).hostname or "") if "://" in link else ""
+    except ValueError:
+        host = ""
+    if re.search(r"(^|[-_.])(pbx|asterisk|freepbx|raspbx)([-_.\d]|$)|pbx\d*$", host, re.I):
+        return "voip"
     return "other"
 
 
@@ -759,7 +768,7 @@ class ArednServices:
             if c.get("category") == "other":                # saved before a kind was broken out of "other"
                 cat = categorize({"name": c.get("name", "") + (f" [{c['tag']}]" if c.get("tag") else ""),
                                   "link": c.get("link", "")})
-                if cat in OTHER_SPLIT:
+                if cat in OTHER_SPLIT or cat == "map":
                     c["category"] = cat
 
         def summary(items):

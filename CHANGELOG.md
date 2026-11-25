@@ -8,6 +8,16 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.150 (2026-11-25)
+
+- AREDN Services Map: names like "EmmePBX" or "Shack phone" are under Other phones & PBXs; a host name with
+  "pbx" counts only when the name says nothing else; copies of this map are under Maps.
+
+## v1.1.149 (2026-11-25)
+
+- AREDN Services Map: a service named "mesh phone(s)", or at a host named like "...-pbx", is now under
+  Other phones & PBXs instead of Other.
+
 ## v1.1.148 (2026-11-25)
 
 - AREDN Services Map About page: links to the GitHub repos (this map on its own, and SignalMatrix), and each
