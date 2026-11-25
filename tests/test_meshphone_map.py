@@ -431,3 +431,56 @@ def test_a_published_page_finds_an_office_whose_listed_address_is_stale():
                         {"host": "freepbx", "code": "55503", "ok": True, "ms": 1}]}]    # not its host name: ignored
     extra = mm.published_candidates(offices, pages, hosts)
     assert extra == {"EASTLANE": ["10.77.0.5"], "JACKSON": ["10.77.0.6"], "HARBOR": ["10.30.0.57"]}
+
+
+
+def test_checkin_reports_listed_trunks_like_the_directory_script():
+    peers = mm.parse_iax_peers(PEERS)
+    names = {"10.20.0.2": "BAYTOWN", "10.30.0.44": "HARBOR", "10.40.0.5": "STORMTOWN", "192.0.2.10": "HOIP"}
+    t = mm.checkin_trunks(peers, ["HARBOR", "STORMTOWN", "HOIP"], lambda p: names.get(p["host"]))
+    # BAYTOWN isn't listed as our trunk; HOIP is over the internet; lab-pi is unmonitored
+    assert t == [{"pbx_name": "HARBOR", "latency": "194"}, {"pbx_name": "STORMTOWN", "latency": "Unreachable"}]
+    f = mm.checkin_form({"pbx_name": "HOMETOWN", "hostname": "n0call-pbx", "ip_address": "10.9.9.44",
+                         "pbx_type": "Allstar", "gen_script_name": "SignalMatrix", "gen_script_version": "1.2.3",
+                         "network": None, "trunks": t})
+    assert f == {"pbx_name": "HOMETOWN", "hostname": "n0call-pbx", "ip_address": "10.9.9.44", "pbx_type": "Allstar",
+                 "gen_script_name": "SignalMatrix", "gen_script_version": "1.2.3",
+                 "trunks[0][pbx_name]": "HARBOR", "trunks[0][latency]": "194",
+                 "trunks[1][pbx_name]": "STORMTOWN", "trunks[1][latency]": "Unreachable"}
+
+
+def test_checkin_data_and_post(monkeypatch):
+    import httpx
+    from ech.core.directory_status import status as live
+    s = type(mm.service)()
+    s._config = {"radio_directory": {"meshphone": {"own_office": "HOMETOWN", "checkin": True,
+                                                   "checkin_ip": "10.9.9.44", "dns_server": "none"}}}
+    monkeypatch.setattr(live, "mp_offices", [dict(_off("HOMETOWN", "N0CALL", trunks=["HARBOR"]), hostname="n0call-pbx.local.mesh"),
+                                             _off("HARBOR", "W1XYZ", ip="10.30.0.44")])
+
+    async def peers():
+        return mm.parse_iax_peers(PEERS)
+    monkeypatch.setattr(s, "_own_peers", peers)
+    sent = {}
+
+    class Resp:
+        status_code = 200
+
+    class Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, data=None, headers=None, timeout=None):
+            sent.update(url=url, data=data)
+            return Resp()
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+    from ech.core import meshphone_directory as mpd
+    monkeypatch.setattr(mpd, "resolve_url", lambda url, dns: (url, {}))
+    r = asyncio.run(s.checkin())
+    assert r["ok"] and r["trunks"] == ["HARBOR"]
+    assert sent["url"].endswith("/api/checkin")
+    d = sent["data"]
+    assert (d["pbx_name"], d["hostname"], d["ip_address"], d["gen_script_name"]) == \
+        ("HOMETOWN", "n0call-pbx", "10.9.9.44", "SignalMatrix")
+    assert d["trunks[0][pbx_name]"] == "HARBOR" and d["trunks[0][latency]"] == "194"
+    assert not any("secret" in k.lower() or "pass" in k.lower() for k in d)

@@ -8,6 +8,12 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.157 (2026-11-25)
+
+- MeshPhone: optional hourly check-in to the MeshPhone directory (`radio_directory.meshphone.checkin`), the same
+  form the directory's generator script sends, from ECH itself (no PHP, no dialplan changes): PBX name, host name,
+  mesh address, type, and latency of each trunk the directory lists for this PBX.
+
 ## v1.1.156 (2026-11-25)
 
 - MeshPhone map: a published trunk page that names its office code finds that directory office when its listed

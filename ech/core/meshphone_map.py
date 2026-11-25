@@ -41,6 +41,13 @@ Config (radio_directory.meshphone in config.yaml):
   trunk_reports_url  str    WT0F map page (default wt0f-meshphone.local.mesh/network_map.html)
   geocode            bool   node coordinates -> place names via OpenStreetMap
                             Nominatim (default true, cached)
+  checkin            bool   check in to the MeshPhone directory hourly, as the
+                            directory's own script does (default false): this
+                            PBX's name, host name, mesh address, type, and the
+                            latency of each trunk the directory lists for it
+  checkin_url        str    default wt0f-meshphone.local.mesh/api/checkin
+  checkin_hostname   str    default: the directory's host name for this PBX
+  checkin_ip         str    default: this machine's mesh (10.x) address
 """
 
 from __future__ import annotations
@@ -639,6 +646,66 @@ def published_candidates(offices: list[dict], published: list[dict], hosts: list
     return out
 
 
+# ── check-in to the MeshPhone directory ──────────────────────────────────────
+# The same form POST the directory's own generator script sends each hour, so
+# the directory shows this PBX Active at its address with its trunks' latency.
+DEFAULT_CHECKIN_URL = "http://wt0f-meshphone.local.mesh/api/checkin"
+CHECKIN_S = 3600
+
+
+def checkin_trunks(peers: list[dict], listed: list[str], office_of) -> list[dict]:
+    """[{"pbx_name", "latency"}] for this PBX's mesh trunks to the PBXs the
+    directory lists as its trunks (as the directory's script reports them):
+    latency in ms, or "Unreachable". office_of(peer) -> directory PBX name."""
+    out, seen = [], set()
+    for p in peers:
+        if not _mesh_ip(p.get("host") or "") or p.get("status", "").startswith(("UNKNOWN", "Unmonitored")):
+            continue
+        name = office_of(p)
+        if not name or name not in listed or name in seen:
+            continue
+        if p.get("ok") and p.get("ms") is not None:
+            out.append({"pbx_name": name, "latency": str(p["ms"])})
+        elif p.get("status", "").startswith("UNREACHABLE"):
+            out.append({"pbx_name": name, "latency": "Unreachable"})
+        else:
+            continue
+        seen.add(name)
+    return out
+
+
+def checkin_form(data: dict) -> dict[str, str]:
+    """The check-in as form fields, trunks in PHP's nested form
+    (trunks[0][pbx_name]=...), which is what the directory reads."""
+    out = {k: str(v) for k, v in data.items() if k != "trunks" and v not in (None, "")}
+    for i, t in enumerate(data.get("trunks") or []):
+        out[f"trunks[{i}][pbx_name]"] = str(t["pbx_name"])
+        out[f"trunks[{i}][latency]"] = str(t["latency"])
+    return out
+
+
+def pbx_type() -> str:
+    """What the directory calls this PBX (its script's own test)."""
+    if os.path.exists("/etc/asterisk/rpt.conf"):
+        return "Allstar"
+    if os.path.exists("/etc/amportal.conf"):
+        return "FreePBX"
+    return "Asterisk"
+
+
+def mesh_address() -> str:
+    """This machine's mesh (10.x) address, "" if none."""
+    try:
+        import psutil
+        for addrs in psutil.net_if_addrs().values():
+            for a in addrs:
+                if a.family == socket.AF_INET and _mesh_ip(a.address):
+                    return a.address
+    except Exception:
+        pass
+    return ""
+
+
 # ── the map ──────────────────────────────────────────────────────────────────
 
 def build_map(offices: list[dict], hosts: list[dict], services: list[dict],
@@ -970,6 +1037,8 @@ class MeshPhoneMap:
         self._config: dict = {}
         self._router = None
         self._trunks_cache: tuple[float, dict] | None = None
+        self._checkin_task: asyncio.Task | None = None
+        self.last_checkin: dict | None = None
         self._task: asyncio.Task | None = None
         self.cache_path: str | None = None
         self.places_path: str | None = None
@@ -1011,12 +1080,69 @@ class MeshPhoneMap:
                 "hosts_url": str(mp.get("hosts_url") or disc.get("sysinfo_url") or ""),
                 "reports_url": str(mp.get("trunk_reports_url") or DEFAULT_REPORTS_URL),
                 "dns_server": str(mp.get("dns_server") or "auto"),
-                "geocode": bool(mp.get("geocode", True))}
+                "geocode": bool(mp.get("geocode", True)),
+                "checkin": bool(mp.get("checkin", False)),
+                "checkin_url": str(mp.get("checkin_url") or DEFAULT_CHECKIN_URL),
+                "checkin_hostname": str(mp.get("checkin_hostname") or ""),
+                "checkin_ip": str(mp.get("checkin_ip") or "")}
 
     async def start(self, config: dict, router=None) -> None:
         self.configure(config, router)
         if self.enabled and self._task is None:
             self._task = asyncio.create_task(self._loop())
+        if self._cfg()["checkin"] and self._checkin_task is None and self._router:
+            self._checkin_task = asyncio.create_task(self._checkin_loop())
+
+    async def _checkin_loop(self) -> None:
+        await asyncio.sleep(FIRST_DELAY_S + 30)
+        while True:
+            try:
+                await self.checkin()
+            except Exception as exc:
+                self.last_checkin = {"at": time.time(), "ok": False, "error": f"{exc.__class__.__name__}: {exc}"}
+                log.info("MeshPhone check-in failed: %s", exc)
+            await asyncio.sleep(CHECKIN_S)
+
+    async def checkin_data(self) -> dict | None:
+        """What the check-in sends; None without an own_office or a mesh address."""
+        from ech import __version__
+        from ech.core.directory_status import status as live
+        cfg = self._cfg()
+        office = cfg["own_office"]
+        ip = cfg["checkin_ip"] or mesh_address()
+        if not office or not ip:
+            return None
+        offices = list(live.mp_offices)
+        own = next((o for o in offices if o.get("name") == office), {})
+        listed = [t for t in own.get("trunks") or [] if t != office]
+        seen = {e.get("answering_ip"): e["name"] for e in (self.data or {}).get("offices", [])
+                if e.get("answering_ip") and e.get("in_directory")}
+        cands = {o["name"]: office_candidates(o, []) for o in offices}
+
+        def office_of(p):
+            return seen.get(p.get("host")) or match_peer(p, offices, cands)
+        hostname = cfg["checkin_hostname"] or (own.get("hostname") or "").split(".")[0] or socket.gethostname()
+        return {"pbx_name": office, "hostname": hostname, "ip_address": ip, "pbx_type": pbx_type(),
+                "gen_script_name": "SignalMatrix", "gen_script_version": __version__,
+                "trunks": checkin_trunks(await self._own_peers(), listed, office_of)}
+
+    async def checkin(self) -> dict:
+        """One check-in to the MeshPhone directory."""
+        import httpx
+        from ech.core import meshphone_directory as mpd
+        data = await self.checkin_data()
+        if not data:
+            self.last_checkin = {"at": time.time(), "ok": False, "error": "no own_office or mesh address"}
+            return self.last_checkin
+        cfg = self._cfg()
+        url, hdrs = await asyncio.to_thread(mpd.resolve_url, cfg["checkin_url"], cfg["dns_server"])
+        async with httpx.AsyncClient(headers={"User-Agent": "SignalMatrix-ECH/1 (MeshPhone check-in)"}) as client:
+            r = await client.post(url, data=checkin_form(data), headers=hdrs, timeout=20)
+        self.last_checkin = {"at": time.time(), "ok": r.status_code < 400, "status": r.status_code,
+                             "trunks": [t["pbx_name"] for t in data["trunks"]]}
+        log.info("MeshPhone check-in as %s (%s, %s): HTTP %s, %d trunk(s) reported",
+                 data["pbx_name"], data["hostname"], data["ip_address"], r.status_code, len(data["trunks"]))
+        return self.last_checkin
 
     async def _loop(self) -> None:
         age = time.time() - float((self.data or {}).get("generated_at") or 0)

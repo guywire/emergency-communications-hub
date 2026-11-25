@@ -908,6 +908,13 @@ mesh_bot:
 #         - http://WT0F-freepbx.local.mesh/whitepages.xml
 #         - http://ka4ema-pbx-cha.local.mesh/whitepages.xml
 #       dns_server: auto
+#       map_refresh_hours: 24     # MeshPhone map rebuild; the directory copy follows it
+#       # Check in to the MeshPhone directory hourly, as its own generator script
+#       # does: this PBX's name, host name, mesh address, type, and the latency of
+#       # each trunk the directory lists for it (no passwords). Off by default.
+#       checkin: false
+#       # checkin_hostname: n0call-pbx    # default: the directory's host name for this PBX
+#       # checkin_ip: 10.x.x.x            # default: this machine's mesh (10.x) address
 #
 # radio_directory:
 #   hamvoip_entries:
