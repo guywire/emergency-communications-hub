@@ -236,6 +236,7 @@ function initMap() {
   lg.onAdd = () => {
     const d = L.DomUtil.create('div', 'legend');
     d.id = 'legend';
+    L.DomEvent.disableScrollPropagation(d);
     d.innerHTML = '<div id="lg-phone"></div><div id="lg-cam"><b>Cameras</b>' + ['open', 'password', 'closed'].map(k =>
       `<div class="row"><span class="pill" style="color:${CAM_ST[k][0]};border-color:${CAM_ST[k][0]}">📷</span>${CAM_ST[k][1]}</div>`).join('') + '</div>';
     L.DomEvent.disableClickPropagation(d);
@@ -244,6 +245,13 @@ function initMap() {
   lg.addTo(map);
   layersRender();
   legendRender();
+  // the checklist and the key never grow past the map: they scroll instead
+  const fit = () => ['layers-ctl', 'legend'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.maxHeight = Math.max(120, map.getSize().y - 24) + 'px'; el.style.overflowY = 'auto'; }
+  });
+  map.on('resize', fit);
+  fit();
 }
 
 // The legend and the MeshPhone figures above the map show only while their layers are on.

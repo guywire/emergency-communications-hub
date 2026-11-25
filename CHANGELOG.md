@@ -8,6 +8,11 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.143 (2026-11-24)
+
+- Mesh map: the Services checklist and the map key scroll when they're taller
+  than the map, so every service kind can be reached on a small screen.
+
 ## v1.1.142 (2026-11-24)
 
 - Mesh map: more service kinds broken out of "Other": CAD / dispatch, EOC /
