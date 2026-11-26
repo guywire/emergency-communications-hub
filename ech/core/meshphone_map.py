@@ -44,7 +44,7 @@ Config (radio_directory.meshphone in config.yaml):
   checkin            bool   check in to the MeshPhone directory hourly, as the
                             directory's own script does (default false): this
                             PBX's name, host name, mesh address, type, and the
-                            latency of each trunk the directory lists for it
+                            latency of each of its mesh trunks to a directory PBX
   checkin_url        str    default wt0f-meshphone.local.mesh/api/checkin
   checkin_hostname   str    default: the directory's host name for this PBX
   checkin_ip         str    default: this machine's mesh (10.x) address
@@ -653,16 +653,17 @@ DEFAULT_CHECKIN_URL = "http://wt0f-meshphone.local.mesh/api/checkin"
 CHECKIN_S = 3600
 
 
-def checkin_trunks(peers: list[dict], listed: list[str], office_of) -> list[dict]:
-    """[{"pbx_name", "latency"}] for this PBX's mesh trunks to the PBXs the
-    directory lists as its trunks (as the directory's script reports them):
-    latency in ms, or "Unreachable". office_of(peer) -> directory PBX name."""
+def checkin_trunks(peers: list[dict], listed: list[str] | None, office_of) -> list[dict]:
+    """[{"pbx_name", "latency"}] for this PBX's mesh trunks: latency in ms, or
+    "Unreachable". office_of(peer) -> directory PBX name. listed: only those
+    PBXs (the directory's script reports only trunks it already lists, so a new
+    PBX never gets any); None: every trunk to a directory PBX."""
     out, seen = [], set()
     for p in peers:
         if not _mesh_ip(p.get("host") or "") or p.get("status", "").startswith(("UNKNOWN", "Unmonitored")):
             continue
         name = office_of(p)
-        if not name or name not in listed or name in seen:
+        if not name or (listed is not None and name not in listed) or name in seen:
             continue
         if p.get("ok") and p.get("ms") is not None:
             out.append({"pbx_name": name, "latency": str(p["ms"])})
@@ -1114,7 +1115,6 @@ class MeshPhoneMap:
             return None
         offices = list(live.mp_offices)
         own = next((o for o in offices if o.get("name") == office), {})
-        listed = [t for t in own.get("trunks") or [] if t != office]
         seen = {e.get("answering_ip"): e["name"] for e in (self.data or {}).get("offices", [])
                 if e.get("answering_ip") and e.get("in_directory")}
         cands = {o["name"]: office_candidates(o, []) for o in offices}
@@ -1124,7 +1124,8 @@ class MeshPhoneMap:
         hostname = cfg["checkin_hostname"] or (own.get("hostname") or "").split(".")[0] or socket.gethostname()
         return {"pbx_name": office, "hostname": hostname, "ip_address": ip, "pbx_type": pbx_type(),
                 "gen_script_name": "SignalMatrix", "gen_script_version": __version__,
-                "trunks": checkin_trunks(await self._own_peers(), listed, office_of)}
+                "trunks": [t for t in checkin_trunks(await self._own_peers(), None, office_of)
+                           if t["pbx_name"] != office]}
 
     async def checkin(self) -> dict:
         """One check-in to the MeshPhone directory."""

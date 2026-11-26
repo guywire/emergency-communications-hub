@@ -455,8 +455,8 @@ def test_checkin_data_and_post(monkeypatch):
     s = type(mm.service)()
     s._config = {"radio_directory": {"meshphone": {"own_office": "HOMETOWN", "checkin": True,
                                                    "checkin_ip": "10.9.9.44", "dns_server": "none"}}}
-    monkeypatch.setattr(live, "mp_offices", [dict(_off("HOMETOWN", "N0CALL", trunks=["HARBOR"]), hostname="n0call-pbx.local.mesh"),
-                                             _off("HARBOR", "W1XYZ", ip="10.30.0.44")])
+    monkeypatch.setattr(live, "mp_offices", [dict(_off("HOMETOWN", "N0CALL"), hostname="n0call-pbx.local.mesh"),
+                                             _off("HARBOR", "W1XYZ", ip="10.30.0.44")])    # no trunks listed yet
 
     async def peers():
         return mm.parse_iax_peers(PEERS)
@@ -484,3 +484,11 @@ def test_checkin_data_and_post(monkeypatch):
         ("HOMETOWN", "n0call-pbx", "10.9.9.44", "SignalMatrix")
     assert d["trunks[0][pbx_name]"] == "HARBOR" and d["trunks[0][latency]"] == "194"
     assert not any("secret" in k.lower() or "pass" in k.lower() for k in d)
+
+
+
+def test_checkin_trunks_unlisted():
+    peers = mm.parse_iax_peers(PEERS)
+    names = {"10.20.0.2": "BAYTOWN", "10.30.0.44": "HARBOR"}
+    assert mm.checkin_trunks(peers, None, lambda p: names.get(p["host"])) == [
+        {"pbx_name": "BAYTOWN", "latency": "145"}, {"pbx_name": "HARBOR", "latency": "194"}]

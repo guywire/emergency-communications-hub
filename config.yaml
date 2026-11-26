@@ -424,7 +424,7 @@ adapters:
 #   - type: aprs_is
 #     name: aprs-internet
 #     callsign: N0CALL-9
-#     passcode: 12345            # -1 for receive-only
+#     passcode: <your passcode>  # -1 for receive-only
 #     server: rotate.aprs2.net
 #     filter: "r/44.1/-69.1/60"   # radius in km — keep this tight; a wide radius (e.g. 250km)
 #                                  # pulls in the whole region's ship-AIS/digipeater/beacon
@@ -911,7 +911,7 @@ mesh_bot:
 #       map_refresh_hours: 24     # MeshPhone map rebuild; the directory copy follows it
 #       # Check in to the MeshPhone directory hourly, as its own generator script
 #       # does: this PBX's name, host name, mesh address, type, and the latency of
-#       # each trunk the directory lists for it (no passwords). Off by default.
+#       # each of its mesh trunks (no passwords). Off by default.
 #       checkin: false
 #       # checkin_hostname: n0call-pbx    # default: the directory's host name for this PBX
 #       # checkin_ip: 10.x.x.x            # default: this machine's mesh (10.x) address
@@ -919,7 +919,7 @@ mesh_bot:
 # radio_directory:
 #   hamvoip_entries:
 #     - name: "Local ARES net hub"
-#       destination: "12345"
+#       destination: "5551000"
 #       category: group
 #       description: "Our county ARES Tuesday net control hub"
 #   aredn_entries:

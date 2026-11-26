@@ -8,6 +8,12 @@ notes) lives in `ECH_REQUIREMENTS_AND_PROGRESS.md`; `git log` has the
 complete commit history. This file is the user-facing summary, starting
 from v1.0.0-rc198 — earlier history predates this file.
 
+## v1.1.158 (2026-11-25)
+
+- MeshPhone check-in reports every mesh trunk to a directory PBX, not only those the directory already lists
+  (a new PBX's list starts empty, so it never got any).
+- Example numbers in the About page and config.yaml changed (one matched a common default password).
+
 ## v1.1.157 (2026-11-25)
 
 - MeshPhone: optional hourly check-in to the MeshPhone directory (`radio_directory.meshphone.checkin`), the same
